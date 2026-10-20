@@ -21,7 +21,7 @@
 use ca72::light::Light;
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::resample::{Decimator, Interpolator};
-use ca72::voice::{Jacks, LINE_UP, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
+use ca72::voice::{Jacks, LINE_UP, Panel, Priority, Quality, RETRIGGER_GAP, Voice, audio_taper};
 
 use crate::character::{Character, Placement};
 use crate::drive::{AVERAGE, Calibration, Curve, HEARD, HELD, KEYS, KWeighted, STEPS};
@@ -157,6 +157,45 @@ pub struct Controls {
     /// QUALITY at ULTRA: the circuit's model with no compromises (`Quality::NoCompromises`),
     /// not at its real-time setting (decisions.md R48). Switched while it plays.
     pub ultra: bool,
+    /// How far each voice's own pressure and timbre move it (decisions.md R-MPE): all 0, not
+    /// at all, the circuit as before to the bit.
+    pub reach: Reach,
+}
+
+/// How far a voice's note's pressure and timbre (each 0..1) move it (decisions.md R-MPE): its
+/// MODULATION wheel's MIDI share, as a keyboard's wheel moves it (-1..1, 1 adding a wheel
+/// pushed fully forward at full pressure), and its filter's cutoff, octaves at full.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Reach {
+    pub pressure_mod: f64,
+    pub pressure_filter: f64,
+    pub timbre_mod: f64,
+    pub timbre_filter: f64,
+}
+
+impl Reach {
+    /// Whether it moves the voices' MODULATION wheels.
+    fn moves_wheel(&self) -> bool {
+        self.pressure_mod != 0.0 || self.timbre_mod != 0.0
+    }
+}
+
+/// A note's own expression, as MPE or a host's note expressions give it (decisions.md R-MPE):
+/// its pressure and timbre, 0..1, and its own pitch bend, semitones (on top of the PITCH
+/// wheel's, which every voice shares).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Expression {
+    pub pressure: f32,
+    pub timbre: f32,
+    pub bend: f32,
+}
+
+impl Expression {
+    pub const NONE: Expression = Expression {
+        pressure: 0.0,
+        timbre: 0.0,
+        bend: 0.0,
+    };
 }
 
 impl Default for Controls {
@@ -182,6 +221,7 @@ impl Default for Controls {
             lock: false,
             potato: false,
             ultra: false,
+            reach: Reach::default(),
         }
     }
 }
@@ -205,6 +245,16 @@ pub enum Event {
     /// All Sound Off (control change 120): every key released and the sound gone at once, the
     /// output faded out over [`HUSH_FADE`] and every voice put to rest (decisions.md R18).
     AllSoundOff,
+    /// A key's own expression from now (decisions.md R-MPE): the voice playing it while it is
+    /// held, and the next note on it. Sent before the key's note, its note starts with it.
+    NoteExpression {
+        key: u8,
+        expression: Expression,
+    },
+    /// The pressure and timbre (0..1) every voice shares, ordinary MIDI's channel pressure and
+    /// control change 74 (decisions.md R-MPE): a voice takes the larger of its own and these.
+    ChannelPressure(f32),
+    Timbre(f32),
 }
 
 /// The control change of a keyboard's modulation wheel.
@@ -475,6 +525,10 @@ struct Slot {
     pending: usize,
     /// To be put to rest once All Sound Off has faded the output out.
     rest: bool,
+    /// Its note's own expression (decisions.md R-MPE), and whether the voice takes it at once
+    /// (a new note on it), not gliding there from the last note's.
+    expression: Expression,
+    fresh: bool,
 }
 
 impl Slot {
@@ -588,6 +642,89 @@ pub struct Playing {
     scratch: Option<Box<Scratch>>,
     /// Runs it has played split, for the tests and measurements.
     split_runs: u64,
+    /// Its note's expression as it plays it (decisions.md R-MPE).
+    expressed: Expressed,
+}
+
+/// The most a note's own bend goes either way, semitones (an MPE member channel's bend range
+/// at its widest, 96: decisions.md R-MPE).
+pub const BEND_MOST: f32 = 96.0;
+
+/// How long a voice's expression takes to follow its note's, s (the time constant of its
+/// glide): a controller's steps, a few milliseconds apart, are not heard as steps.
+pub const EXPRESSION_GLIDE: f64 = 0.004;
+
+/// A voice's expression as it plays (decisions.md R-MPE): its note's pressure, timbre and bend
+/// (semitones) as the engine hands them, where they have glided to, and whether to take them at
+/// once; the MODULATION wheel's panel position and MIDI share (0..1) as the engine's panel
+/// has them, and whether this voice's wheel is moved from there now.
+#[derive(Debug, Clone, Copy, Default)]
+struct Expressed {
+    to: [f64; 3],
+    at: [f64; 3],
+    fresh: bool,
+    wheel: f64,
+    midi: f64,
+    moved: bool,
+}
+
+impl Expressed {
+    /// The share a sample of the way the expression glides, at `rate` Hz.
+    fn share(rate: f64) -> f64 {
+        1.0 - (-1.0 / (EXPRESSION_GLIDE * rate)).exp()
+    }
+
+    /// A sample on, gliding by `share`: what the sample's jacks take, the oscillators' cents
+    /// and the cutoff's octaves under `reach`; None while there is no expression at all (the
+    /// jacks then as they were, to the bit).
+    fn step(&mut self, share: f64, reach: &Reach) -> Option<(f64, f64)> {
+        if self.fresh {
+            self.fresh = false;
+            self.at = self.to;
+        }
+        if self.at == [0.0; 3] && self.to == [0.0; 3] {
+            return None;
+        }
+        for (at, to) in self.at.iter_mut().zip(self.to) {
+            *at += (to - *at) * share;
+            if (to - *at).abs() < 1e-9 {
+                *at = to;
+            }
+        }
+        let [pressure, timbre, bend] = self.at;
+        Some((
+            bend * 100.0,
+            reach.pressure_filter * pressure + reach.timbre_filter * timbre,
+        ))
+    }
+
+    /// The MODULATION wheel this voice plays at with `reach`, its own pressure and timbre
+    /// moving the wheel's MIDI share as a keyboard's wheel moves it (the panel's position the
+    /// least, as ever): with none, the engine's panel's to the bit.
+    fn wheel(&self, reach: &Reach) -> f64 {
+        let [pressure, timbre, _] = self.at;
+        let midi = self.midi + reach.pressure_mod * pressure + reach.timbre_mod * timbre;
+        self.wheel
+            .max(ca72::modulation::midi_wheel(midi.clamp(0.0, 1.0)))
+    }
+}
+
+/// The expression's cents and octaves (`e`, [`Expressed::step`]) added to jacks `j`: the bend
+/// to oscillators 1 and 2, and to 3 with OSC. 3 CONTROL on (the bend's bus reaches it only
+/// then), the octaves to the cutoff.
+fn express(j: &mut Jacks, e: Option<(f64, f64)>, osc3: bool) {
+    if let Some((cents, octaves)) = e {
+        if cents != 0.0 {
+            j.detune[0] += cents;
+            j.detune[1] += cents;
+            if osc3 {
+                j.detune[2] += cents;
+            }
+        }
+        if octaves != 0.0 {
+            j.cutoff += octaves;
+        }
+    }
 }
 
 /// The most notes a split run carries for a voice (a key's change at most twice a sample).
@@ -648,6 +785,8 @@ struct Lane {
     gr: f64,
     peak: f64,
     note: i32,
+    /// The expression's glide a sample ([`Expressed::share`]).
+    glide: f64,
 }
 
 impl Playing {
@@ -662,6 +801,7 @@ impl Playing {
     /// As [`Playing::play`], for as many samples as `ext` has, its place gliding by `share`
     /// a sample ([`glide_share`] at `rate`).
     fn play_from(&mut self, ext: &[f64], rate: f64, m: &Mix, share: f64) {
+        self.express_wheel(m);
         if self.potato {
             self.play_light_from(ext, rate, m, share);
             return;
@@ -685,6 +825,7 @@ impl Playing {
         let (mut hl, mut hr) = self.twin.pan.unwrap_or(p.twin);
         let (mut peak, mut twin_peak) = (0.0f64, 0.0f64);
         let note = i32::from(self.note);
+        let (glide, osc3) = (Expressed::share(rate), self.voice.panel.osc3_control);
         for (k, &x) in ext.iter().enumerate() {
             let gate = if self.drop {
                 self.drop = false;
@@ -709,10 +850,12 @@ impl Playing {
                 // filter, the pair, and each on from it.
                 let voice = &mut self.voice;
                 self.key.step(gate, note, |k, on| voice.note(k, on));
+                let e = self.expressed.step(glide, &m.reach);
                 let mut j = jacks(&mut self.character, x, rate, m);
                 if p.doubled {
                     j.detune = j.detune.map(|d| d - p.half);
                 }
+                express(&mut j, e, osc3);
                 let t = &mut self.twin;
                 let twin = &mut t.voice;
                 t.key
@@ -721,6 +864,7 @@ impl Playing {
                 if p.doubled {
                     jt.detune = jt.detune.map(|d| d + p.half);
                 }
+                express(&mut jt, e, osc3);
                 let hv = self.voice.before_filter(&j);
                 let ht = self.twin.voice.before_filter(&jt);
                 let (fv, ft) = Voice::filter_pair(&mut self.voice, &hv, &mut self.twin.voice, &ht);
@@ -747,10 +891,12 @@ impl Playing {
             }
             let voice = &mut self.voice;
             self.key.step(gate, note, |k, on| voice.note(k, on));
+            let e = self.expressed.step(glide, &m.reach);
             let mut j = jacks(&mut self.character, x, rate, m);
             if p.doubled {
                 j.detune = j.detune.map(|d| d - p.half);
             }
+            express(&mut j, e, osc3);
             let mut y = self.voice.tick_jacks(&j);
             if !y.is_finite() {
                 self.broken = true;
@@ -768,6 +914,7 @@ impl Playing {
                 if p.doubled {
                     j.detune = j.detune.map(|d| d + p.half);
                 }
+                express(&mut j, e, osc3);
                 let mut z = t.voice.tick_jacks(&j);
                 if !z.is_finite() {
                     self.broken = true;
@@ -814,7 +961,7 @@ impl Playing {
             b.play_from(ext, rate, m, share);
             return;
         }
-        let (mut la, mut lb) = (a.lane(m), b.lane(m));
+        let (mut la, mut lb) = (a.lane(m, rate), b.lane(m, rate));
         for (k, &x) in ext.iter().enumerate() {
             let ja = a.lane_in(&mut la, k, x, rate, m, share);
             let jb = b.lane_in(&mut lb, k, x, rate, m, share);
@@ -844,7 +991,8 @@ impl Playing {
     }
 
     /// [`Playing::play_from`]'s start without a twin sounding: its places, DRIVE and pan.
-    fn lane(&mut self, m: &Mix) -> Lane {
+    fn lane(&mut self, m: &Mix, rate: f64) -> Lane {
+        self.express_wheel(m);
         let p = self.places(m);
         self.voice.set_drive(m.drive);
         self.twin.voice.set_drive(m.drive);
@@ -855,6 +1003,7 @@ impl Playing {
             gr,
             peak: 0.0,
             note: i32::from(self.note),
+            glide: Expressed::share(rate),
         }
     }
 
@@ -883,10 +1032,12 @@ impl Playing {
         }
         let voice = &mut self.voice;
         self.key.step(gate, l.note, |k, on| voice.note(k, on));
+        let e = self.expressed.step(l.glide, &m.reach);
         let mut j = jacks(&mut self.character, x, rate, m);
         if l.p.doubled {
             j.detune = j.detune.map(|d| d - l.p.half);
         }
+        express(&mut j, e, self.voice.panel.osc3_control);
         Some(j)
     }
 
@@ -940,6 +1091,7 @@ impl Playing {
         self.voice.set_drive(m.drive);
         self.twin.voice.set_drive(m.drive);
         let note = i32::from(self.note);
+        let (glide, osc3) = (Expressed::share(rate), self.voice.panel.osc3_control);
         s.count = [0; 2];
         for (k, &x) in ext.iter().enumerate() {
             let gate = if self.drop {
@@ -955,10 +1107,12 @@ impl Playing {
                     *count += 1;
                 }
             });
+            let e = self.expressed.step(glide, &m.reach);
             let mut j = jacks(&mut self.character, x, rate, m);
             if p.doubled {
                 j.detune = j.detune.map(|d| d - p.half);
             }
+            express(&mut j, e, osc3);
             s.jacks[0][k] = j;
             if p.twin_on {
                 let t = &mut *self.twin;
@@ -973,6 +1127,7 @@ impl Playing {
                 if p.doubled {
                     j.detune = j.detune.map(|d| d + p.half);
                 }
+                express(&mut j, e, osc3);
                 s.jacks[1][k] = j;
             }
         }
@@ -1070,6 +1225,7 @@ impl Playing {
         let (mut hl, mut hr) = self.twin.pan.unwrap_or(p.twin);
         let (mut peak, mut twin_peak) = (0.0f64, 0.0f64);
         let note = i32::from(self.note);
+        let (glide, osc3) = (Expressed::share(rate), self.voice.panel.osc3_control);
         for (k, &x) in ext.iter().enumerate() {
             let gate = if self.drop {
                 self.drop = false;
@@ -1089,13 +1245,13 @@ impl Playing {
             }
             let light = &mut self.light;
             self.key.step(gate, note, |k, on| light.note(k, on));
-            let j = jacks(&mut self.character, x, rate, m);
-            let detune = if p.doubled {
-                j.detune.map(|d| d - p.half)
-            } else {
-                j.detune
-            };
-            self.light.set_offsets(detune, j.cutoff);
+            let e = self.expressed.step(glide, &m.reach);
+            let mut j = jacks(&mut self.character, x, rate, m);
+            if p.doubled {
+                j.detune = j.detune.map(|d| d - p.half);
+            }
+            express(&mut j, e, osc3);
+            self.light.set_offsets(j.detune, j.cutoff);
             let mut y = self.light.tick(x);
             if !y.is_finite() {
                 self.broken = true;
@@ -1108,13 +1264,12 @@ impl Playing {
                 let light = &mut t.light;
                 t.key
                     .step(gate && p.doubled, note, |k, on| light.note(k, on));
-                let j = jacks(&mut t.character, x, rate, m);
-                let detune = if p.doubled {
-                    j.detune.map(|d| d + p.half)
-                } else {
-                    j.detune
-                };
-                t.light.set_offsets(detune, j.cutoff);
+                let mut j = jacks(&mut t.character, x, rate, m);
+                if p.doubled {
+                    j.detune = j.detune.map(|d| d + p.half);
+                }
+                express(&mut j, e, osc3);
+                t.light.set_offsets(j.detune, j.cutoff);
                 let mut z = t.light.tick(x);
                 if !z.is_finite() {
                     self.broken = true;
@@ -1190,6 +1345,36 @@ impl Playing {
             p.voice = self.scattered(m);
         }
         self.closed = closed;
+    }
+
+    /// A run's start: a new note's expression taken at once, and the MODULATION wheel, its
+    /// twin's too, where the voice's own pressure and timbre move it under `m`'s reach
+    /// (decisions.md R-MPE); back at the engine's panel's once they no longer move it, and
+    /// untouched while they never have.
+    fn express_wheel(&mut self, m: &Mix) {
+        let x = &mut self.expressed;
+        if std::mem::take(&mut x.fresh) {
+            x.at = x.to;
+        }
+        let moves = m.reach.moves_wheel();
+        if !moves && !x.moved {
+            return;
+        }
+        x.moved = moves;
+        let w = x.wheel(&m.reach);
+        let potato = self.potato;
+        let t = &mut *self.twin;
+        for (voice, light) in [
+            (&mut self.voice, &mut self.light),
+            (&mut t.voice, &mut t.light),
+        ] {
+            if voice.panel.mod_wheel != w {
+                voice.panel.mod_wheel = w;
+                if potato {
+                    light.set_panel(&voice.panel);
+                }
+            }
+        }
     }
 
     /// A key pressed or released on the voice's keyboard (the one instrument's, or UNISON's),
@@ -1324,6 +1509,15 @@ pub struct Engine {
     counter: u64,
     bend: f32,
     modulation: f32,
+    /// The notes' expression (decisions.md R-MPE): each key's own as last told, the pressure
+    /// and timbre every voice shares, when each key was last pressed (NOTE PRIORITY's LAST)
+    /// and the key the instruments sound (POLY off, UNISON), whose expression they take.
+    keys: [Expression; 128],
+    pressure: f32,
+    timbre: f32,
+    pressed: [u64; 128],
+    presses: u64,
+    sounding: Option<u8>,
     lamp: f32,
     /// A voice's place's glide a sample at the voices' rate ([`glide_share`]), and the one
     /// instrument's while it scatters ([`TURN_GLIDE`]).
@@ -1414,6 +1608,12 @@ impl Engine {
             counter: 0,
             bend: 0.0,
             modulation: 0.0,
+            keys: [Expression::NONE; 128],
+            pressure: 0.0,
+            timbre: 0.0,
+            pressed: [0; 128],
+            presses: 0,
+            sounding: None,
             lamp: 0.0,
             glide: 1.0,
             turn_glide: 1.0,
@@ -1567,6 +1767,7 @@ impl Engine {
                     split_now: false,
                     scratch: Some(Scratch::new()),
                     split_runs: 0,
+                    expressed: Expressed::default(),
                 })),
                 note: 0,
                 gate: false,
@@ -1579,6 +1780,8 @@ impl Engine {
                 notes: [(0, false); 32],
                 pending: 0,
                 rest: false,
+                expression: Expression::NONE,
+                fresh: false,
             })
             .collect();
         // (Each voice's lock taken once here, off the audio thread: on macOS the standard
@@ -1809,18 +2012,48 @@ impl Engine {
     }
 
     pub fn event(&mut self, e: Event) {
+        // (Expression alone never wakes the instrument: asleep, no key is down to hear it.)
+        match e {
+            Event::NoteExpression { key, expression } => {
+                return self.note_expression(key, expression);
+            }
+            Event::ChannelPressure(v) => {
+                self.pressure = if v.is_finite() {
+                    v.clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                return;
+            }
+            Event::Timbre(v) => {
+                self.timbre = if v.is_finite() {
+                    v.clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                return;
+            }
+            _ => {}
+        }
         self.rest.wake();
         match e {
             Event::Note { key, on } => {
-                let Some(h) = self.held.get_mut(usize::from(key)) else {
+                if usize::from(key) >= self.held.len() {
                     return;
-                };
-                *h = on;
+                }
+                // (A key pressed with none held starts a phrase: its expression at once.)
+                let phrase = on && !self.held.contains(&true);
+                self.held[usize::from(key)] = on;
+                if on {
+                    self.presses += 1;
+                    self.pressed[usize::from(key)] = self.presses;
+                }
                 if self.slots.is_empty() {
                     return;
                 }
                 if self.controls.unison || !self.controls.poly {
                     self.one_note(i32::from(key), on);
+                    self.follow_sounding(phrase);
                 } else if on {
                     self.poly_on(key);
                 } else {
@@ -1841,11 +2074,102 @@ impl Engine {
             }
             Event::ResetControllers => {
                 (self.bend, self.modulation) = (0.0, 0.0);
+                // (Pressure and bend at rest; timbre, a sound controller, as it was: MIDI's
+                // RP-015.)
+                self.pressure = 0.0;
+                let rest = |e: &mut Expression| (e.pressure, e.bend) = (0.0, 0.0);
+                self.keys.iter_mut().for_each(rest);
+                self.slots.iter_mut().for_each(|s| rest(&mut s.expression));
                 self.apply();
             }
             Event::AllNotesOff => self.release_all(),
             Event::AllSoundOff => self.all_sound_off(),
+            Event::NoteExpression { .. } | Event::ChannelPressure(_) | Event::Timbre(_) => {}
         }
+    }
+
+    /// Key `key`'s own expression from now (decisions.md R-MPE): POLY's voice playing it while
+    /// it is held (one let go keeps what it had), the instruments' while it is the key they
+    /// sound, and its next note's.
+    fn note_expression(&mut self, key: u8, e: Expression) {
+        let Some(k) = self.keys.get_mut(usize::from(key)) else {
+            return;
+        };
+        let finite = |x: f32| if x.is_finite() { x } else { 0.0 };
+        *k = Expression {
+            pressure: finite(e.pressure).clamp(0.0, 1.0),
+            timbre: finite(e.timbre).clamp(0.0, 1.0),
+            bend: finite(e.bend).clamp(-BEND_MOST, BEND_MOST),
+        };
+        let e = *k;
+        if self.instruments() > 0 {
+            if self.sounding == Some(key) && self.held[usize::from(key)] {
+                for k in 0..self.instruments() {
+                    self.slots[k].expression = e;
+                }
+            }
+        } else {
+            for s in &mut self.slots {
+                if s.gate && s.note == key {
+                    s.expression = e;
+                }
+            }
+        }
+    }
+
+    /// The key the instruments sound (POLY off, UNISON) as NOTE PRIORITY chooses among those
+    /// held, its expression theirs (decisions.md R-MPE): at once for a key pressed with none
+    /// held, gliding there from the last as the keys change under a phrase. With none held,
+    /// the last one's stays, its release playing out with it.
+    fn follow_sounding(&mut self, phrase: bool) {
+        let held = || (0..128u8).filter(|&k| self.held[usize::from(k)]);
+        let key = match self.controls.panel.priority {
+            Priority::Low => held().min(),
+            Priority::High => held().max(),
+            Priority::Last => held().max_by_key(|&k| self.pressed[usize::from(k)]),
+        };
+        let Some(key) = key else {
+            return;
+        };
+        let fresh = phrase || self.sounding.is_none();
+        let e = self.keys[usize::from(key)];
+        self.sounding = Some(key);
+        for k in 0..self.instruments() {
+            let s = &mut self.slots[k];
+            s.expression = e;
+            s.fresh |= fresh;
+        }
+    }
+
+    /// Key `key`'s own expression as last told (for the plug-in's tests).
+    #[cfg(test)]
+    pub(crate) fn key_expression(&self, key: u8) -> Expression {
+        self.keys[usize::from(key)]
+    }
+
+    /// The MODULATION wheel the voice in slot `k` plays at, if it is sounding (for the plug-in's
+    /// tests).
+    #[cfg(test)]
+    pub(crate) fn voice_wheel(&self, k: usize) -> Option<f64> {
+        let s = self.slots.get(k).filter(|s| s.active)?;
+        with_voice(s, |p| p.voice.panel.mod_wheel)
+    }
+
+    /// The pressure and timbre every voice shares (for the plug-in's tests).
+    #[cfg(test)]
+    pub(crate) fn shared_expression(&self) -> (f32, f32) {
+        (self.pressure, self.timbre)
+    }
+
+    /// A voice's expression as slot `k` hands it on: its note's own, its pressure and timbre at
+    /// least the shared ones.
+    fn handed(&self, k: usize) -> [f64; 3] {
+        let e = self.slots[k].expression;
+        [
+            f64::from(e.pressure.max(self.pressure)),
+            f64::from(e.timbre.max(self.timbre)),
+            f64::from(e.bend),
+        ]
     }
 
     /// All Sound Off (decisions.md R18): every key released and the output faded out over
@@ -1920,6 +2244,7 @@ impl Engine {
         }
         p.key.rest();
         p.twin.key.rest();
+        p.expressed.fresh = true;
         (p.twin.live, p.twin.quiet, p.twin.pan) = (false, 0, None);
         (p.broken, p.drop) = (false, false);
         let s = &mut self.slots[k];
@@ -1985,9 +2310,11 @@ impl Engine {
             .or_else(|| (0..n).min_by_key(|&k| self.slots[k].age))
             .unwrap_or(0);
         self.counter += 1;
+        let e = self.keys[usize::from(key)];
         let s = &mut self.slots[pick];
         s.drop = s.active && s.shown;
         (s.note, s.gate, s.age, s.active, s.peak) = (key, true, self.counter, true, 0.0);
+        (s.expression, s.fresh) = (e, true);
     }
 
     /// The voices POLY plays.
@@ -2368,7 +2695,9 @@ impl Engine {
         if k == 0 && std::mem::take(&mut self.restart) {
             p.turn = None;
         }
+        p.expressed.to = self.handed(k);
         let s = &mut self.slots[k];
+        p.expressed.fresh |= std::mem::take(&mut s.fresh);
         if std::mem::take(&mut s.lift) {
             p.lift();
         }
@@ -2676,6 +3005,8 @@ impl Engine {
         }
         v.double = self.controls.double > 0.0;
         v.panel_gen = self.panel_gen;
+        (v.expressed.wheel, v.expressed.midi) =
+            (self.controls.panel.mod_wheel, f64::from(self.modulation));
     }
 }
 
@@ -2831,10 +3162,12 @@ pub struct Mix {
     double: f64,
     drive: f64,
     scatter: bool,
+    /// How far the voices' own pressure and timbre move them (decisions.md R-MPE).
+    reach: Reach,
 }
 
 /// [`Mix`]'s values, as the workers are handed them.
-pub const MIX_LEN: usize = 10;
+pub const MIX_LEN: usize = 14;
 
 impl Mix {
     pub fn to_array(self) -> [f64; MIX_LEN] {
@@ -2849,6 +3182,10 @@ impl Mix {
             self.double,
             self.drive,
             f64::from(u8::from(self.scatter)),
+            self.reach.pressure_mod,
+            self.reach.pressure_filter,
+            self.reach.timbre_mod,
+            self.reach.timbre_filter,
         ]
     }
 
@@ -2864,6 +3201,10 @@ impl Mix {
             double,
             drive,
             scatter,
+            pressure_mod,
+            pressure_filter,
+            timbre_mod,
+            timbre_filter,
         ]: [f64; MIX_LEN],
     ) -> Mix {
         Mix {
@@ -2877,6 +3218,12 @@ impl Mix {
             double,
             drive,
             scatter: scatter > 0.0,
+            reach: Reach {
+                pressure_mod,
+                pressure_filter,
+                timbre_mod,
+                timbre_filter,
+            },
         }
     }
 }
@@ -3140,6 +3487,7 @@ fn mix_of(c: &Controls, voices: usize) -> Mix {
             1.0
         },
         scatter,
+        reach: c.reach,
     }
 }
 
@@ -3220,6 +3568,7 @@ impl Probe {
                     split_now: false,
                     scratch: None,
                     split_runs: 0,
+                    expressed: Expressed::default(),
                 }
             })
             .collect();
@@ -5405,5 +5754,480 @@ mod tests {
         assert!(contours < 5e-4, "the contours {contours:e} V apart");
         let db = 10.0 * (power[0] / power[1]).log10();
         assert!(db.abs() < 0.1, "levels {db:.3} dB apart");
+    }
+}
+
+/// Each note's own expression (decisions.md R-MPE): it reaches its own voice only, follows the
+/// note to its voice, is taken afresh by a new note and kept by one let go, and without any the
+/// voices play as before to the bit.
+#[cfg(test)]
+mod expression_tests {
+    use super::*;
+
+    const RATE: f64 = 48_000.0;
+
+    fn engine(c: &Controls) -> Engine {
+        let mut e = Engine::new();
+        e.set(c);
+        e.prepare(RATE, 5);
+        e
+    }
+
+    fn poly(voices: usize) -> Controls {
+        Controls {
+            poly: true,
+            voices,
+            ..Controls::default()
+        }
+    }
+
+    fn reach() -> Reach {
+        Reach {
+            pressure_mod: 1.0,
+            pressure_filter: 2.0,
+            timbre_mod: 0.5,
+            timbre_filter: -1.0,
+        }
+    }
+
+    fn x(pressure: f32, timbre: f32, bend: f32) -> Expression {
+        Expression {
+            pressure,
+            timbre,
+            bend,
+        }
+    }
+
+    fn on(e: &mut Engine, key: u8, expression: Expression) {
+        e.event(Event::NoteExpression { key, expression });
+        e.event(Event::Note { key, on: true });
+    }
+
+    fn off(e: &mut Engine, key: u8) {
+        e.event(Event::Note { key, on: false });
+    }
+
+    /// The slot playing `key` (held), if any.
+    fn slot_of(e: &Engine, key: u8) -> Option<usize> {
+        e.slots.iter().position(|s| s.gate && s.note == key)
+    }
+
+    fn block(e: &mut Engine) -> (Vec<f32>, Vec<f32>) {
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        e.render(&[], &mut l, &mut r);
+        e.end_block(256);
+        (l.to_vec(), r.to_vec())
+    }
+
+    /// The voice in slot `k`'s last run, left and right.
+    fn voice_out(e: &Engine, k: usize) -> Vec<u64> {
+        let p = e.slots[k].play.lock().unwrap();
+        p.out[0]
+            .iter()
+            .chain(&p.out[1])
+            .map(|x| x.to_bits())
+            .collect()
+    }
+
+    /// Two notes, one of them with pressure, timbre and its own bend: the other's voice plays
+    /// the same samples to the bit as with none, at LO, HI (whose voices' filters are solved in
+    /// pairs) and ULTRA; the expressive one's does not.
+    #[test]
+    fn simultaneous_notes_move_only_their_own_voices() {
+        for (potato, ultra) in [(true, false), (false, false), (false, true)] {
+            let c = Controls {
+                potato,
+                ultra,
+                reach: reach(),
+                ..poly(4)
+            };
+            let (mut plain, mut moved) = (engine(&c), engine(&c));
+            for e in [&mut plain, &mut moved] {
+                on(e, 48, Expression::NONE);
+                on(e, 55, Expression::NONE);
+            }
+            moved.event(Event::NoteExpression {
+                key: 48,
+                expression: x(0.9, 0.3, 2.0),
+            });
+            let (a, b) = (slot_of(&moved, 48).unwrap(), slot_of(&moved, 55).unwrap());
+            assert_eq!(
+                (slot_of(&plain, 48), slot_of(&plain, 55)),
+                (Some(a), Some(b))
+            );
+            let mut differs = false;
+            for i in 0..24 {
+                let (pl, _) = block(&mut plain);
+                let (ml, _) = block(&mut moved);
+                // (Runs of 128: the last run of each block is compared, every block.)
+                assert_eq!(
+                    voice_out(&plain, b),
+                    voice_out(&moved, b),
+                    "LO {potato} ULTRA {ultra}, block {i}"
+                );
+                differs |= voice_out(&plain, a) != voice_out(&moved, a);
+                assert!(ml.iter().all(|y| y.is_finite()) && pl.iter().all(|y| y.is_finite()));
+            }
+            assert!(
+                differs,
+                "the expressive note is moved (LO {potato}, ULTRA {ultra})"
+            );
+        }
+    }
+
+    /// With every reach at 0, pressure and timbre (each note's and the shared) change nothing:
+    /// the output to the bit as without them; and a reach with no expression likewise. Each
+    /// QUALITY mode, the one instrument and POLY.
+    #[test]
+    fn without_expression_or_reach_the_voices_play_as_before_to_the_bit() {
+        for (potato, ultra) in [(true, false), (false, false), (false, true)] {
+            for poly_on in [false, true] {
+                let base = Controls {
+                    potato,
+                    ultra,
+                    poly: poly_on,
+                    voices: 4,
+                    ..Controls::default()
+                };
+                let reached = Controls {
+                    reach: reach(),
+                    ..base
+                };
+                let mut before = engine(&base);
+                let mut unreached = engine(&base);
+                let mut untouched = engine(&reached);
+                for key in [48, 52, 55] {
+                    before.event(Event::Note { key, on: true });
+                    on(&mut unreached, key, x(1.0, 0.7, 0.0));
+                    untouched.event(Event::Note { key, on: true });
+                }
+                unreached.event(Event::ChannelPressure(0.8));
+                unreached.event(Event::Timbre(0.4));
+                for i in 0..12 {
+                    if i == 6 {
+                        for e in [&mut before, &mut unreached, &mut untouched] {
+                            off(e, 52);
+                        }
+                    }
+                    let want = block(&mut before);
+                    let bits = |v: &(Vec<f32>, Vec<f32>)| {
+                        v.0.iter()
+                            .chain(&v.1)
+                            .map(|y| y.to_bits())
+                            .collect::<Vec<_>>()
+                    };
+                    let tag = format!("LO {potato} ULTRA {ultra} POLY {poly_on} block {i}");
+                    assert_eq!(bits(&want), bits(&block(&mut unreached)), "{tag}");
+                    assert_eq!(bits(&want), bits(&block(&mut untouched)), "{tag}");
+                }
+            }
+        }
+    }
+
+    /// A note's expression sent before it reaches it at its attack, at once (not gliding from
+    /// the voice's last note's); a note let go keeps what it had while its key's next note
+    /// takes its own; the voice that last played a key, free, takes it again with the new.
+    #[test]
+    fn expression_follows_the_note_through_release_and_reuse() {
+        let mut e = engine(&Controls {
+            reach: reach(),
+            ..poly(4)
+        });
+        on(&mut e, 60, x(0.5, 0.2, 1.0));
+        let k = slot_of(&e, 60).unwrap();
+        assert_eq!(e.slots[k].expression, x(0.5, 0.2, 1.0));
+        block(&mut e);
+        assert_eq!(
+            e.slots[k].play.lock().unwrap().expressed.at,
+            [0.5, f64::from(0.2f32), 1.0]
+        );
+        off(&mut e, 60);
+        e.event(Event::NoteExpression {
+            key: 60,
+            expression: x(1.0, 1.0, -3.0),
+        });
+        assert_eq!(e.slots[k].expression, x(0.5, 0.2, 1.0), "let go, kept");
+        block(&mut e);
+        on(&mut e, 60, x(0.1, 0.0, 0.0));
+        assert_eq!(slot_of(&e, 60), Some(k), "its voice again");
+        assert_eq!(
+            e.slots[k].expression,
+            x(0.1, 0.0, 0.0),
+            "the new note's own"
+        );
+        block(&mut e);
+        let at = e.slots[k].play.lock().unwrap().expressed.at;
+        assert_eq!(at, [f64::from(0.1f32), 0.0, 0.0], "at once, not gliding");
+        // While held, a change glides there.
+        e.event(Event::NoteExpression {
+            key: 60,
+            expression: x(0.9, 0.0, 0.0),
+        });
+        let mut last = f64::from(0.1f32);
+        for _ in 0..3 {
+            let (l, _) = (block(&mut e), ());
+            assert!(l.0.iter().all(|y| y.is_finite()));
+            let now = e.slots[k].play.lock().unwrap().expressed.at[0];
+            assert!(now > last && now <= f64::from(0.9f32), "{now}");
+            last = now;
+        }
+        for _ in 0..20 {
+            block(&mut e);
+        }
+        assert_eq!(
+            e.slots[k].play.lock().unwrap().expressed.at[0],
+            f64::from(0.9f32)
+        );
+    }
+
+    /// A held voice stolen for a new note takes the new note's expression; the stolen note's
+    /// later expression reaches no voice; the order notes are let go in changes nothing of the
+    /// others'.
+    #[test]
+    fn a_stolen_voice_takes_the_new_notes_expression() {
+        let mut e = engine(&Controls {
+            reach: reach(),
+            ..poly(2)
+        });
+        on(&mut e, 60, x(0.1, 0.0, 0.0));
+        on(&mut e, 62, x(0.2, 0.0, 0.0));
+        block(&mut e);
+        let (a, b) = (slot_of(&e, 60).unwrap(), slot_of(&e, 62).unwrap());
+        on(&mut e, 64, x(0.3, 0.0, 5.0));
+        assert_eq!(slot_of(&e, 64), Some(a), "the oldest held");
+        assert_eq!(slot_of(&e, 60), None);
+        assert_eq!(e.slots[a].expression, x(0.3, 0.0, 5.0));
+        e.event(Event::NoteExpression {
+            key: 60,
+            expression: x(1.0, 1.0, 1.0),
+        });
+        assert_eq!(e.slots[a].expression, x(0.3, 0.0, 5.0));
+        assert_eq!(e.slots[b].expression, x(0.2, 0.0, 0.0));
+        block(&mut e);
+        assert_eq!(
+            e.slots[a].play.lock().unwrap().expressed.at,
+            [f64::from(0.3f32), 0.0, 5.0]
+        );
+        // Let go in either order: each keeps its own.
+        off(&mut e, 64);
+        e.event(Event::NoteExpression {
+            key: 62,
+            expression: x(0.6, 0.0, 0.0),
+        });
+        assert_eq!(e.slots[b].expression, x(0.6, 0.0, 0.0));
+        assert_eq!(e.slots[a].expression, x(0.3, 0.0, 5.0));
+        off(&mut e, 62);
+        e.event(Event::NoteExpression {
+            key: 64,
+            expression: x(0.9, 0.0, 0.0),
+        });
+        assert_eq!(e.slots[a].expression, x(0.3, 0.0, 5.0));
+    }
+
+    /// The one instrument and UNISON's voices take the expression of the key NOTE PRIORITY
+    /// sounds: LOW the lowest held, HIGH the highest, LAST the last pressed; back to a key
+    /// still held as the sounding one is let go; the last kept once none is held.
+    #[test]
+    fn mono_and_unison_take_the_sounding_notes_expression() {
+        for (unison, priority) in [
+            (false, Priority::Low),
+            (false, Priority::High),
+            (false, Priority::Last),
+            (true, Priority::Low),
+        ] {
+            let mut c = Controls {
+                unison,
+                voices: 3,
+                reach: reach(),
+                ..Controls::default()
+            };
+            c.panel.priority = priority;
+            let mut e = engine(&c);
+            let (lo, mid, hi) = (x(0.1, 0.0, 0.0), x(0.2, 0.0, 0.0), x(0.3, 0.0, 0.0));
+            on(&mut e, 60, mid);
+            on(&mut e, 48, lo);
+            on(&mut e, 72, hi);
+            let want = match priority {
+                Priority::Low => lo,
+                Priority::High | Priority::Last => hi,
+            };
+            let n = e.instruments();
+            assert_eq!(n, if unison { 3 } else { 1 });
+            for k in 0..n {
+                assert_eq!(e.slots[k].expression, want, "{priority:?} UNISON {unison}");
+            }
+            // A change to a key not sounding reaches nothing; to the sounding one, every voice.
+            let other = if priority == Priority::Low { 72 } else { 48 };
+            e.event(Event::NoteExpression {
+                key: other,
+                expression: x(0.9, 0.9, 0.0),
+            });
+            assert_eq!(e.slots[0].expression, want);
+            let sounding = if priority == Priority::Low { 48 } else { 72 };
+            e.event(Event::NoteExpression {
+                key: sounding,
+                expression: x(0.5, 0.0, 0.0),
+            });
+            for k in 0..n {
+                assert_eq!(e.slots[k].expression, x(0.5, 0.0, 0.0));
+            }
+            block(&mut e);
+            off(&mut e, sounding);
+            assert_eq!(
+                e.slots[0].expression,
+                if priority == Priority::Low {
+                    mid
+                } else if priority == Priority::Last {
+                    // (LAST: the last pressed of those still held, 48, as changed above.)
+                    x(0.9, 0.9, 0.0)
+                } else {
+                    mid
+                },
+                "{priority:?}"
+            );
+            for key in [48, 60, 72] {
+                off(&mut e, key);
+            }
+            let kept = e.slots[0].expression;
+            e.event(Event::NoteExpression {
+                key: 60,
+                expression: x(1.0, 1.0, 1.0),
+            });
+            assert_eq!(e.slots[0].expression, kept, "none held: the last kept");
+        }
+    }
+
+    /// Ordinary MIDI's channel pressure and timbre reach every voice alike, a note's own the
+    /// larger where it is larger; Reset All Controllers rests the pressures and bends, not the
+    /// timbre (RP-015).
+    #[test]
+    fn shared_pressure_and_timbre_reach_every_voice() {
+        let mut e = engine(&Controls {
+            reach: reach(),
+            ..poly(4)
+        });
+        on(&mut e, 48, Expression::NONE);
+        on(&mut e, 55, x(0.9, 0.0, 2.0));
+        e.event(Event::ChannelPressure(0.6));
+        e.event(Event::Timbre(0.25));
+        let (a, b) = (slot_of(&e, 48).unwrap(), slot_of(&e, 55).unwrap());
+        let p6 = f64::from(0.6f32);
+        assert_eq!(e.handed(a), [p6, 0.25, 0.0]);
+        assert_eq!(e.handed(b), [f64::from(0.9f32), 0.25, 2.0]);
+        e.event(Event::ResetControllers);
+        assert_eq!(e.handed(a), [0.0, 0.25, 0.0]);
+        assert_eq!(e.handed(b), [0.0, 0.25, 0.0]);
+        assert_eq!(e.keys[55], x(0.0, 0.0, 0.0));
+    }
+
+    /// The pressure's reach on the MODULATION wheel moves its own voice's wheel only, as far
+    /// as a keyboard's wheel would at full; turned back to 0, the voice's wheel is the
+    /// panel's again.
+    #[test]
+    fn pressure_moves_its_own_voices_modulation_wheel() {
+        let mut c = Controls {
+            reach: Reach {
+                pressure_mod: 1.0,
+                ..Reach::default()
+            },
+            ..poly(4)
+        };
+        let mut e = engine(&c);
+        on(&mut e, 48, x(1.0, 0.0, 0.0));
+        on(&mut e, 55, Expression::NONE);
+        block(&mut e);
+        let (a, b) = (slot_of(&e, 48).unwrap(), slot_of(&e, 55).unwrap());
+        let wheel = |e: &Engine, k: usize| e.slots[k].play.lock().unwrap().voice.panel.mod_wheel;
+        assert_eq!(wheel(&e, a), 1.0);
+        assert_eq!(wheel(&e, b), 0.0);
+        // With the keyboard's wheel half up, half pressure adds to it.
+        e.event(Event::Modulation(0.25));
+        e.event(Event::NoteExpression {
+            key: 48,
+            expression: x(0.25, 0.0, 0.0),
+        });
+        for _ in 0..30 {
+            block(&mut e);
+        }
+        assert_eq!(
+            wheel(&e, a),
+            ca72::modulation::midi_wheel(0.25 + f64::from(0.25f32))
+        );
+        assert_eq!(wheel(&e, b), ca72::modulation::midi_wheel(0.25));
+        c.reach = Reach::default();
+        e.set(&c);
+        block(&mut e);
+        assert_eq!(wheel(&e, a), ca72::modulation::midi_wheel(0.25));
+    }
+
+    /// A note's own bend moves its own voice's pitch, by its semitones (an octave up doubles
+    /// it), at LO and HI; the PITCH wheel's bus, and so the bend, reaches oscillator 3 only with
+    /// OSC. 3 CONTROL on.
+    #[test]
+    fn a_notes_own_bend_moves_its_voice_by_its_semitones() {
+        let crossings = |potato: bool, bend: f32| {
+            let mut c = Controls { potato, ..poly(2) };
+            c.panel.osc[0].waveform = ca72::voice::Waveform::Sawtooth;
+            c.panel.loudness_contour.sustain = 1.0;
+            c.panel.cutoff = 1.0;
+            let mut e = engine(&c);
+            on(&mut e, 57, x(0.0, 0.0, bend));
+            let k = slot_of(&e, 57).unwrap();
+            // (Blocks of one run each: the voice's every sample.)
+            let (mut l, mut r) = ([0.0f32; CHUNK], [0.0f32; CHUNK]);
+            let mut v = Vec::new();
+            for i in 0..400 {
+                e.render(&[], &mut l, &mut r);
+                e.end_block(CHUNK);
+                if i >= 25 {
+                    let p = e.slots[k].play.lock().unwrap();
+                    v.extend_from_slice(&p.out[0]);
+                }
+            }
+            let mean = v.iter().sum::<f64>() / v.len() as f64;
+            v.windows(2).filter(|w| w[0] < mean && w[1] >= mean).count() as f64
+        };
+        for potato in [true, false] {
+            let (plain, up) = (crossings(potato, 0.0), crossings(potato, 12.0));
+            assert!((up / plain - 2.0).abs() < 0.05, "LO {potato}: {plain} {up}");
+        }
+        let mut j = Jacks::default();
+        express(&mut j, Some((150.0, 0.0)), false);
+        assert_eq!(j.detune, [150.0, 150.0, 0.0]);
+        express(&mut j, Some((-150.0, 1.5)), true);
+        assert_eq!(j.detune, [0.0, 0.0, -150.0]);
+        assert_eq!(j.cutoff, 1.5);
+        express(&mut j, None, true);
+        assert_eq!((j.detune, j.cutoff), ([0.0, 0.0, -150.0], 1.5));
+    }
+
+    /// The expression itself never wakes the one instrument asleep (it has no key down to be
+    /// heard), and values out of range or not finite are kept in range.
+    #[test]
+    fn expression_is_kept_in_range_and_does_not_wake_a_sleeping_instrument() {
+        let mut c = Controls::default();
+        c.panel.decay = false;
+        let mut e = engine(&c);
+        on(&mut e, 60, Expression::NONE);
+        block(&mut e);
+        off(&mut e, 60);
+        let mut asleep = false;
+        for _ in 0..400 {
+            block(&mut e);
+            if e.asleep() {
+                asleep = true;
+                break;
+            }
+        }
+        assert!(asleep);
+        e.event(Event::NoteExpression {
+            key: 60,
+            expression: x(f32::NAN, 7.0, 1e9),
+        });
+        e.event(Event::ChannelPressure(f32::INFINITY));
+        e.event(Event::Timbre(-2.0));
+        assert!(e.asleep());
+        assert_eq!(e.keys[60], x(0.0, 1.0, BEND_MOST));
+        assert_eq!((e.pressure, e.timbre), (0.0, 0.0));
     }
 }

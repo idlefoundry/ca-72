@@ -9,6 +9,7 @@ pub mod compat;
 pub mod drive;
 pub mod editor;
 pub mod engine;
+pub mod expression;
 #[cfg(feature = "fx-host")]
 pub mod fx;
 pub mod fx_view;
@@ -79,6 +80,8 @@ pub struct Ca72 {
     preset_held: [bool; 4096],
     preset_notes: [bool; 2048],
     wheel: mod_wheel::Wheel,
+    /// Each note's own expression, and the pressure the wheel reads (decisions.md R-MPE).
+    expressions: Box<expression::Expressions>,
     /// The standalone application's effects after the synth (`fx.rs`, docs/fx-host.md):
     /// none in the plug-ins.
     #[cfg(feature = "fx-host")]
@@ -139,6 +142,7 @@ impl Ca72 {
             preset_held: [false; 4096],
             preset_notes: [false; 2048],
             wheel: mod_wheel::Wheel::default(),
+            expressions: Box::default(),
             #[cfg(feature = "fx-host")]
             fx: crate::fx::take_runner(),
             arp: Arp::default(),
@@ -253,7 +257,8 @@ impl Ca72 {
                     if self.note_sources.physical(channel, note, false) {
                         self.play(note, false);
                     }
-                    if let Some(value) = self.wheel.event(e) {
+                    self.expressions.event(e, &mut |x| self.engine.event(x));
+                    if let Some(value) = self.wheel.event(e, &self.expressions) {
                         self.engine.event(Event::Modulation(value));
                     }
                 }
@@ -261,8 +266,15 @@ impl Ca72 {
                 return false;
             }
         }
-        if let Some(value) = self.wheel.event(e) {
+        // A note's own expression (decisions.md R-MPE), to the engine before the note; a member
+        // channel's bend, pressure or timbre is its note's alone and goes no further.
+        let engine = &mut self.engine;
+        let member = self.expressions.event(e, &mut |x| engine.event(x));
+        if let Some(value) = self.wheel.event(e, &self.expressions) {
             self.engine.event(Event::Modulation(value));
+        }
+        if member {
+            return false;
         }
         if let NoteEvent::MidiCC {
             timing,
@@ -374,6 +386,7 @@ impl Ca72 {
 
     fn clear_note_sources(&mut self) {
         self.wheel.release();
+        self.expressions.release();
         if self.wheel.source == mod_wheel::Source::PolyPressure {
             self.engine.event(Event::Modulation(0.0));
         }
@@ -410,9 +423,11 @@ impl Ca72 {
             }
             self.note_sources.clear();
             self.wheel.release();
+            self.expressions.release();
             self.local_generation = self.local_notes.generation();
             self.local_notes.publish([0, 0]);
             self.arp.clear();
+            self.expressions.reset_controllers();
             self.engine.event(Event::AllSoundOff);
             self.engine.event(Event::ResetControllers);
             if !self.local_notes.standalone_panic_pending() {
@@ -652,6 +667,19 @@ impl Plugin for Ca72 {
                 .params
                 .insert("retrigger".to_owned(), ParamValue::Bool(false));
         }
+        // And before each note's own expression: none of it reaches the voices, whatever the
+        // instance had (decisions.md R-MPE).
+        for id in [
+            "pressure_mod",
+            "pressure_filter",
+            "timbre_mod",
+            "timbre_filter",
+        ] {
+            state
+                .params
+                .entry(id.to_owned())
+                .or_insert(ParamValue::F32(0.0));
+        }
         let offered = |id: &str| params::Scatter::ids().is_some_and(|ids| ids.contains(&id));
         if matches!(state.params.get("placement"), Some(ParamValue::String(id)) if !offered(id)) {
             let even = Ca72Params::default().placement.default_plain_value();
@@ -690,6 +718,7 @@ impl Plugin for Ca72 {
             self.params
                 .midi_map
                 .set_wheel_source(settings.mod_wheel_source);
+            self.params.set_mpe_mode(settings.mpe);
             self.params.set_tempo(f64::from(settings.tempo));
         }
         self.engine.set(&self.params.controls());
@@ -745,6 +774,7 @@ impl Plugin for Ca72 {
         self.preset_notes.fill(false);
         self.engine.set(&self.params.controls());
         self.engine.release_all();
+        self.expressions.reset_controllers();
         self.engine.event(Event::ResetControllers);
     }
 
@@ -776,6 +806,9 @@ impl Plugin for Ca72 {
         }
         self.engine.set(&self.controls());
         self.follow_wheel_source();
+        let engine = &mut self.engine;
+        self.expressions
+            .set_mode(self.params.mpe_mode(), &mut |x| engine.event(x));
         let len = buffer.samples();
         // The arpeggiator's settings and the host's transport, as the block begins (ON or LATCH
         // changed are taken at its first sample).
@@ -1434,6 +1467,27 @@ mod tests {
                 eprintln!("legacy {old:.17} %, new {new:.17} %, recovered {recovered:.17} %");
             }
         }
+    }
+
+    /// A session saved before each note's own expression opens with none of it.
+    #[test]
+    fn a_session_saved_before_expression_opens_with_none_of_it() {
+        // (Decisions.md R-MPE: whatever the instance had; one saved since keeps its own.)
+        let mut s = PluginState {
+            version: "0.2.9".to_owned(),
+            params: [("timbre_filter".to_owned(), ParamValue::F32(-1.5))]
+                .into_iter()
+                .collect(),
+            fields: Default::default(),
+        };
+        Ca72::filter_state(&mut s);
+        for id in ["pressure_mod", "pressure_filter", "timbre_mod"] {
+            assert!(
+                matches!(s.params.get(id), Some(ParamValue::F32(v)) if *v == 0.0),
+                "{id}"
+            );
+        }
+        assert!(matches!(s.params.get("timbre_filter"), Some(ParamValue::F32(v)) if *v == -1.5));
     }
 
     /// A session saved before NOTE PRIORITY and RETRIGGER opens with LOW (its index, as nih-plug
@@ -2969,6 +3023,292 @@ mod tests {
     }
 
     /// A plug-in, POLY as `poly`, initialised as a host does at 48 kHz in blocks of 256.
+    fn bend(timing: u32, channel: u8, value: f32) -> NoteEvent<()> {
+        NoteEvent::MidiPitchBend {
+            timing,
+            channel,
+            value,
+        }
+    }
+
+    /// RPN `rpn` (its coarse and fine numbers) set to `value` on `channel`, as a controller
+    /// sends it: the number, then data entry's coarse value.
+    fn rpn(p: &mut Ca72, c: &mut TestProcessContext<Ca72>, channel: u8, rpn: u8, value: u8) {
+        c.push_event(cc(0, channel, 101, 0));
+        c.push_event(cc(0, channel, 100, rpn));
+        c.push_event(cc(0, channel, 6, value));
+        block(p, c, 64);
+    }
+
+    fn send(p: &mut Ca72, c: &mut TestProcessContext<Ca72>, events: &[NoteEvent<()>]) {
+        for &e in events {
+            c.push_event(e);
+        }
+        block(p, c, 64);
+    }
+
+    fn mpe_x(pressure: f32, timbre: f32, bend: f32) -> crate::engine::Expression {
+        crate::engine::Expression {
+            pressure,
+            timbre,
+            bend,
+        }
+    }
+
+    /// The MPE Configuration Message makes a lower zone (decisions.md R-MPE): each member
+    /// channel's bend (48 semitones by default, RPN 0 changing it), pressure and timbre are its
+    /// note's alone, neither the PITCH wheel's nor learned; the master channel's are every
+    /// voice's; the zone gone, every channel is ordinary again.
+    #[test]
+    fn a_configured_zone_makes_each_member_channels_messages_its_notes_own() {
+        let mut p = initialised(true);
+        let mut c = hostless(&p);
+        p.params.midi_map.assign(learnable("cutoff"), on(1, 74));
+        let cutoff = p.params.cutoff.value();
+        rpn(&mut p, &mut c, 0, 6, 15);
+        assert_eq!(p.expressions.zones(), [15, 0]);
+        // MPE's order: the member channel's bend and timbre, then the note.
+        send(
+            &mut p,
+            &mut c,
+            &[bend(0, 1, 1.0), cc(0, 1, 74, 127), note(0, 1, 60, true)],
+        );
+        send(&mut p, &mut c, &[note(0, 2, 64, true), cc(0, 2, 74, 0)]);
+        assert_eq!(p.engine.key_expression(60), mpe_x(0.0, 1.0, 48.0));
+        assert_eq!(p.engine.key_expression(64), crate::engine::Expression::NONE);
+        assert_eq!(p.engine.midi_wheels().0, 0.5, "the PITCH wheel untouched");
+        assert_eq!(
+            p.params.cutoff.value(),
+            cutoff,
+            "CC 74 on a member channel is not learned"
+        );
+        send(&mut p, &mut c, &[pressure(2, None, 0.5)]);
+        assert_eq!(p.engine.key_expression(64), mpe_x(0.5, 0.0, 0.0));
+        assert_eq!(p.engine.shared_expression(), (0.0, 0.0));
+        // A member's bend range, every member's.
+        rpn(&mut p, &mut c, 2, 0, 12);
+        assert_eq!(p.engine.key_expression(60), mpe_x(0.0, 1.0, 12.0));
+        send(&mut p, &mut c, &[bend(0, 1, 0.25)]);
+        assert_eq!(p.engine.key_expression(60), mpe_x(0.0, 1.0, -6.0));
+        // The master channel is every voice's.
+        send(
+            &mut p,
+            &mut c,
+            &[bend(0, 0, 1.0), pressure(0, None, 0.25), cc(0, 0, 74, 127)],
+        );
+        assert!(
+            p.engine.midi_wheels().0 > 0.5,
+            "the master's bend is the PITCH wheel's"
+        );
+        assert_eq!(p.engine.shared_expression(), (0.25, 1.0));
+        // A note let go keeps its voice's expression; the next on its channel takes the
+        // channel's as it stands.
+        send(&mut p, &mut c, &[note(0, 1, 60, false), bend(0, 1, 0.5)]);
+        assert_eq!(p.engine.key_expression(60), mpe_x(0.0, 1.0, -6.0));
+        send(&mut p, &mut c, &[note(0, 1, 62, true)]);
+        assert_eq!(p.engine.key_expression(62), mpe_x(0.0, 1.0, 0.0));
+        // The zone gone: channel 2's bend the PITCH wheel's again, and its CC 74 learned.
+        rpn(&mut p, &mut c, 0, 6, 0);
+        assert_eq!(p.expressions.zones(), [0, 0]);
+        send(&mut p, &mut c, &[bend(0, 1, 0.5), bend(0, 2, 0.75)]);
+        assert!(p.engine.midi_wheels().0 > 0.5);
+        send(&mut p, &mut c, &[cc(0, 1, 74, 0)]);
+        assert_ne!(p.params.cutoff.value(), cutoff, "learned again");
+    }
+
+    /// An upper zone takes the channels from 15 down; a lower zone configured over it pushes it
+    /// back to what is left (MPE's rule); the computer's setting makes a lower zone of fifteen
+    /// without the message, or none whatever the controller says.
+    #[test]
+    fn zones_share_the_channels_and_the_setting_overrides_the_message() {
+        let mut p = initialised(true);
+        let mut c = hostless(&p);
+        rpn(&mut p, &mut c, 15, 6, 5);
+        assert_eq!(p.expressions.zones(), [0, 5]);
+        assert!((10..=14).all(|ch| p.expressions.is_member(ch)));
+        assert!(!p.expressions.is_member(9) && !p.expressions.is_member(15));
+        rpn(&mut p, &mut c, 0, 6, 12);
+        assert_eq!(p.expressions.zones(), [12, 2]);
+        assert!(p.expressions.is_member(12) && p.expressions.is_member(13));
+        p.params.set_mpe_mode(expression::Mode::Off);
+        block(&mut p, &mut c, 64);
+        assert_eq!(p.expressions.zones(), [0, 0]);
+        send(&mut p, &mut c, &[note(0, 3, 60, true), bend(0, 3, 1.0)]);
+        assert_eq!(p.engine.key_expression(60), crate::engine::Expression::NONE);
+        p.params.set_mpe_mode(expression::Mode::Lower);
+        block(&mut p, &mut c, 64);
+        assert_eq!(p.expressions.zones(), [15, 0]);
+        // (Its bend, sent while the channel was ordinary, was the PITCH wheel's; from now the
+        // channel's is its note's.)
+        assert_eq!(p.engine.key_expression(60), crate::engine::Expression::NONE);
+        send(&mut p, &mut c, &[bend(0, 3, 1.0)]);
+        assert_eq!(p.engine.key_expression(60), mpe_x(0.0, 0.0, 48.0));
+    }
+
+    /// Without MPE, channel pressure and control change 74 move every voice alike, and
+    /// polyphonic aftertouch and a host's note expressions (CLAP's and VST3's pressure, tuning
+    /// and brightness) their own note's only, from its attack; a new note starts from none.
+    #[test]
+    fn ordinary_midi_and_host_note_expressions() {
+        let mut p = initialised(true);
+        let mut c = hostless(&p);
+        send(
+            &mut p,
+            &mut c,
+            &[note(0, 0, 60, true), note(0, 0, 64, true)],
+        );
+        send(&mut p, &mut c, &[pressure(3, None, 0.75), cc(0, 9, 74, 64)]);
+        assert_eq!(p.engine.shared_expression(), (0.75, 64.0 / 127.0));
+        assert_eq!(p.engine.key_expression(60), crate::engine::Expression::NONE);
+        let tuning = NoteEvent::PolyTuning {
+            timing: 0,
+            voice_id: None,
+            channel: 0,
+            note: 60,
+            tuning: -2.5,
+        };
+        let brightness = NoteEvent::PolyBrightness {
+            timing: 0,
+            voice_id: None,
+            channel: 0,
+            note: 60,
+            brightness: 0.25,
+        };
+        send(
+            &mut p,
+            &mut c,
+            &[pressure(0, Some(60), 0.5), tuning, brightness],
+        );
+        assert_eq!(p.engine.key_expression(60), mpe_x(0.5, 0.25, -2.5));
+        assert_eq!(p.engine.key_expression(64), crate::engine::Expression::NONE);
+        // Not held: nothing.
+        send(&mut p, &mut c, &[pressure(0, Some(67), 1.0)]);
+        assert_eq!(p.engine.key_expression(67), crate::engine::Expression::NONE);
+        send(
+            &mut p,
+            &mut c,
+            &[note(0, 0, 60, false), note(0, 0, 60, true)],
+        );
+        assert_eq!(p.engine.key_expression(60), crate::engine::Expression::NONE);
+        // Reset All Controllers: pressure and bend at rest, the timbre (RP-015) as it was.
+        send(&mut p, &mut c, &[tuning, brightness, cc(0, 4, 121, 0)]);
+        assert_eq!(p.engine.key_expression(60), mpe_x(0.0, 0.25, 0.0));
+        assert_eq!(p.engine.shared_expression(), (0.0, 64.0 / 127.0));
+    }
+
+    /// The MOD wheel's aftertouch (R-MODWHEEL-SOURCE) and each voice's pressure read one record
+    /// (R-MPE). Channel aftertouch is outside a zone's members: the master's moves the wheel
+    /// and every voice alike, a member's only its note. Polyphonic aftertouch is every note's
+    /// own pressure, a member channel's included. One reset rests both.
+    #[test]
+    fn the_wheels_aftertouch_and_each_voices_pressure_share_one_record() {
+        use mod_wheel::Source;
+        let mut p = initialised(true);
+        let mut c = hostless(&p);
+        p.params.midi_map.set_wheel_source(Source::ChannelPressure);
+        rpn(&mut p, &mut c, 0, 6, 15);
+        send(
+            &mut p,
+            &mut c,
+            &[note(0, 1, 60, true), note(0, 2, 64, true)],
+        );
+        send(&mut p, &mut c, &[pressure(1, None, 0.75)]);
+        assert_eq!(
+            p.engine.midi_wheels().1,
+            0.0,
+            "a member's pressure is its note's"
+        );
+        assert_eq!(p.engine.key_expression(60).pressure, 0.75);
+        send(&mut p, &mut c, &[pressure(0, None, 0.5)]);
+        let half = ca72::modulation::midi_wheel(0.5) as f32;
+        assert_eq!(p.engine.midi_wheels().1, half);
+        assert_eq!(p.engine.shared_expression().0, 0.5);
+        p.params.midi_map.set_wheel_source(Source::PolyPressure);
+        block(&mut p, &mut c, 64);
+        assert_eq!(p.engine.midi_wheels().1, 0.0, "source changed");
+        // (Channel 2's note's pressure since the source changed; channel 1's from before not.)
+        send(&mut p, &mut c, &[pressure(2, None, 0.25)]);
+        let wheel = |v: f32| ca72::modulation::midi_wheel(f64::from(v)) as f32;
+        assert_eq!(p.engine.midi_wheels().1, wheel(0.25));
+        send(&mut p, &mut c, &[pressure(1, None, 0.75)]);
+        assert_eq!(
+            p.engine.midi_wheels().1,
+            wheel(0.75),
+            "the highest held note's"
+        );
+        assert_eq!(p.engine.key_expression(64).pressure, 0.25);
+        send(&mut p, &mut c, &[cc(0, 0, 121, 0)]);
+        assert_eq!(p.engine.midi_wheels().1, 0.0);
+        assert_eq!(p.engine.key_expression(60).pressure, 0.0);
+        assert_eq!(p.engine.key_expression(64).pressure, 0.0);
+        assert_eq!(p.engine.shared_expression().0, 0.0);
+    }
+
+    /// With the wheel on channel aftertouch and PRESSURE's reach on MODULATION, ordinary
+    /// MIDI's pressure moves the wheel and adds as much again to each voice through its own
+    /// reach (the two add, R-MPE): a voice's wheel the larger, up to its end.
+    #[test]
+    fn channel_aftertouch_on_the_wheel_and_pressures_reach_add() {
+        use mod_wheel::Source;
+        let mut p = initialised(true);
+        let mut c = hostless(&p);
+        p.params.midi_map.set_wheel_source(Source::ChannelPressure);
+        c.automate(p.params.pressure_mod.as_ptr(), 0.75);
+        send(&mut p, &mut c, &[note(0, 0, 60, true)]);
+        send(&mut p, &mut c, &[pressure(0, None, 0.25)]);
+        for _ in 0..20 {
+            block(&mut p, &mut c, 256);
+        }
+        assert_eq!(
+            p.engine.midi_wheels().1,
+            ca72::modulation::midi_wheel(0.25) as f32
+        );
+        // (Reach 50 %: 0.25 more of the wheel's MIDI share at a quarter's pressure.)
+        assert_eq!(p.params.pressure_mod.value(), 50.0);
+        let k = (0..10)
+            .find(|&k| p.engine.voice_wheel(k).is_some())
+            .expect("a voice");
+        let want = ca72::modulation::midi_wheel(0.25 + 0.5 * f64::from(0.25f32));
+        assert!((p.engine.voice_wheel(k).unwrap() - want).abs() < 1e-12);
+    }
+
+    /// Ordinary MIDI's pressure, timbre and polyphonic aftertouch, with every reach at 0, leave
+    /// the plug-in's output as it was to the bit, the one instrument and POLY.
+    #[test]
+    fn expression_without_reach_leaves_the_output_as_it_was() {
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for poly in [false, true] {
+            let mut was = initialised_with_seed(poly, Some(81));
+            let mut now = initialised_with_seed(poly, Some(81));
+            let (mut cw, mut cn) = (hostless(&was), hostless(&now));
+            let mut heard = 0.0;
+            for b in 0..10u8 {
+                if b == 0 {
+                    for c in [&mut cw, &mut cn] {
+                        c.push_event(note(0, 0, 57, true));
+                        c.push_event(note(0, 0, 64, true));
+                    }
+                }
+                cn.push_event(pressure(0, None, f32::from(b) / 10.0));
+                cn.push_event(pressure(0, Some(57), f32::from(9 - b) / 10.0));
+                cn.push_event(cc(50, 0, 74, b * 12));
+                let a = stereo_block(&mut was, &mut cw, 256);
+                let n = stereo_block(&mut now, &mut cn, 256);
+                assert!(
+                    a.0.iter()
+                        .chain(&a.1)
+                        .zip(n.0.iter().chain(&n.1))
+                        .all(|(x, y)| x.to_bits() == y.to_bits()),
+                    "POLY {poly}, block {b}"
+                );
+                heard += a.0.iter().map(|x| f64::from(x.abs())).sum::<f64>();
+            }
+            assert!(heard > 0.1);
+        }
+    }
+
     fn initialised(poly: bool) -> Ca72 {
         initialised_with_seed(poly, None)
     }

@@ -60,6 +60,10 @@ pub struct Settings {
     /// decisions.md R-MCP): off unless the player turns it on (SETTINGS: AGENTS). Kept as
     /// `agents`, true or false.
     pub agents: bool,
+    /// Where MPE's zones come from (decisions.md R-MPE): the controller's MPE Configuration
+    /// Message unless set. Kept as `mpe`, "auto", "lower" (a lower zone of fifteen channels
+    /// always, for hosts that do not pass the message on) or "off"; not yet in the menu.
+    pub mpe: crate::expression::Mode,
 }
 
 /// A skin pack's id, as its manifest gives it (lower-case letters, digits, `-` and `.`, at
@@ -176,6 +180,7 @@ impl Default for Settings {
             mod_wheel_source: Source::DEFAULT,
             tempo: crate::params::DEFAULT_TEMPO as u16,
             agents: false,
+            mpe: crate::expression::Mode::Auto,
         }
     }
 }
@@ -249,6 +254,11 @@ impl Settings {
                 Some("hardware") => Law::Hardware,
                 _ => d.frequency,
             },
+            mpe: t
+                .get("mpe")
+                .and_then(toml::Value::as_str)
+                .and_then(crate::expression::Mode::of_word)
+                .unwrap_or(d.mpe),
             mod_wheel_source: match t.get("mod_wheel_source").and_then(toml::Value::as_str) {
                 Some("channel_aftertouch") => Source::ChannelPressure,
                 Some("poly_aftertouch") => Source::PolyPressure,
@@ -614,6 +624,27 @@ mod tests {
         assert_eq!(c.wheel_source(), Source::DEFAULT);
     }
 
+    /// MPE's zones come from the controller unless `mpe` says "lower" or "off"; anything else
+    /// reads as the default (R-MPE).
+    #[test]
+    fn the_mpe_setting_reads_its_three_words_and_else_auto() {
+        use crate::expression::Mode;
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("CA-72/settings.toml");
+        assert_eq!(Settings::read(&path).mpe, Mode::Auto);
+        std::fs::create_dir_all(path.parent().expect("folder")).expect("folder made");
+        for (value, mode) in [
+            ("'auto'", Mode::Auto),
+            ("'lower'", Mode::Lower),
+            ("'off'", Mode::Off),
+            ("'upper'", Mode::Auto),
+            ("1", Mode::Auto),
+        ] {
+            std::fs::write(&path, format!("mpe = {value}\n")).expect("file");
+            assert_eq!(Settings::read(&path).mpe, mode, "{value}");
+        }
+    }
+
     #[test]
     fn mod_wheel_sources_roundtrip_and_invalid_or_missing_sources_use_cc1() {
         let dir = tempfile::tempdir().expect("settings folder");
@@ -954,6 +985,7 @@ mod tests {
             mod_wheel_source: Source::DEFAULT,
             tempo: 120,
             agents: true,
+            mpe: crate::expression::Mode::Auto,
         };
         assert_eq!(Settings::read(&path), s);
         assert!(
@@ -1047,6 +1079,7 @@ mod tests {
                 mod_wheel_source: Source::DEFAULT,
                 tempo: 120,
                 agents: false,
+                mpe: crate::expression::Mode::Auto,
             }
         );
         let left: Vec<_> = std::fs::read_dir(path.parent().expect("its folder"))

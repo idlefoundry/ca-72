@@ -1,8 +1,10 @@
 //! The computer's MOD wheel source (decisions.md R-MODWHEEL-SOURCE). Every source feeds the
 //! engine's existing MIDI modulation path; the wheel's parameter and presets stay as they are.
+//! Its aftertouch reads the pressure each voice's expression reads (R-MPE).
 
 use nih_plug::prelude::NoteEvent;
 
+use crate::expression::Expressions;
 use crate::learn::reserved;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,14 +52,16 @@ impl Source {
     }
 }
 
-/// Fixed storage, indexed by MIDI channel and key. Pressure from a released key cannot keep
-/// the wheel up, nor can an old source's value return when the player switches back to it.
+/// The wheel's source and what it has heard. The pressures themselves are the notes' own
+/// record (`expression.rs`, shared with each voice's expression: decisions.md R-MPE); the wheel
+/// keeps only which keys' pressure arrived since its source was chosen, so that pressure from a
+/// released key cannot keep the wheel up, nor can an old source's value return when the player
+/// switches back to it.
 #[derive(Debug)]
 pub struct Wheel {
     pub seen: u64,
     pub source: Source,
-    held: [u128; 16],
-    pressure: [[f32; 128]; 16],
+    fresh: [u128; 16],
 }
 
 impl Default for Wheel {
@@ -65,62 +69,53 @@ impl Default for Wheel {
         Self {
             seen: u64::from(Source::DEFAULT.code()),
             source: Source::DEFAULT,
-            held: [0; 16],
-            pressure: [[0.0; 128]; 16],
+            fresh: [0; 16],
         }
     }
 }
 
 impl Wheel {
     pub fn reset_pressure(&mut self) {
-        self.pressure = [[0.0; 128]; 16];
+        self.fresh = [0; 16];
     }
 
     pub fn release(&mut self) {
-        self.held = [0; 16];
         self.reset_pressure();
     }
 
-    fn maximum(&self) -> f32 {
-        self.pressure.iter().flatten().copied().fold(0.0, f32::max)
-    }
-
-    /// The modulation value, if this event moves it. Note ownership is followed even with
-    /// another source chosen, so aftertouch also works on keys already held when selected.
-    pub fn event(&mut self, event: NoteEvent<()>) -> Option<f32> {
+    /// The modulation value, if this event moves it, read from `notes` as the event has left
+    /// them. Note ownership is followed even with another source chosen, so aftertouch also
+    /// works on keys already held when selected. An MPE member channel's pressure is its note's
+    /// own, polyphonic aftertouch's; outside a zone channel pressure is channel aftertouch.
+    pub fn event(&mut self, event: NoteEvent<()>, notes: &Expressions) -> Option<f32> {
+        let poly = self.source == Source::PolyPressure;
         match event {
-            NoteEvent::NoteOn { channel, note, .. } if channel < 16 && note < 128 => {
-                self.held[channel as usize] |= 1 << note;
-                self.pressure[channel as usize][note as usize] = 0.0;
-                (self.source == Source::PolyPressure).then(|| self.maximum())
-            }
-            NoteEvent::NoteOff { channel, note, .. } | NoteEvent::Choke { channel, note, .. }
+            NoteEvent::NoteOn { channel, note, .. }
+            | NoteEvent::NoteOff { channel, note, .. }
+            | NoteEvent::Choke { channel, note, .. }
                 if channel < 16 && note < 128 =>
             {
-                self.held[channel as usize] &= !(1 << note);
-                self.pressure[channel as usize][note as usize] = 0.0;
-                (self.source == Source::PolyPressure).then(|| self.maximum())
+                self.fresh[channel as usize] &= !(1 << note);
+                poly.then(|| notes.most_pressure(&self.fresh))
             }
-            NoteEvent::PolyPressure {
-                channel,
-                note,
-                pressure,
-                ..
-            } if self.source == Source::PolyPressure && channel < 16 && note < 128 => {
-                if self.held[channel as usize] & (1 << note) == 0 {
+            NoteEvent::PolyPressure { channel, note, .. } if poly && channel < 16 && note < 128 => {
+                if !notes.held(channel, note) {
                     return None;
                 }
-                self.pressure[channel as usize][note as usize] = if pressure.is_finite() {
-                    pressure.clamp(0.0, 1.0)
-                } else {
-                    0.0
-                };
-                Some(self.maximum())
+                self.fresh[channel as usize] |= 1 << note;
+                Some(notes.most_pressure(&self.fresh))
             }
-            NoteEvent::MidiChannelPressure { pressure, .. }
-                if self.source == Source::ChannelPressure =>
-            {
-                Some(pressure)
+            NoteEvent::MidiChannelPressure {
+                channel, pressure, ..
+            } if channel < 16 => {
+                if notes.is_member(channel) {
+                    poly.then(|| {
+                        self.fresh[channel as usize] |= notes.held_on(channel);
+                        notes.most_pressure(&self.fresh)
+                    })
+                } else {
+                    (self.source == Source::ChannelPressure).then_some(pressure)
+                }
             }
             _ => None,
         }

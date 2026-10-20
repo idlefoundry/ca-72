@@ -11282,3 +11282,83 @@ polyphonic patches") may be the same.
 **Not done:** an Intel Mac, macOS's scheduling of time-constraint workers, Windows, or a host.
 To ask the reporter: whether DOUBLE at WIDTH 0 crackles (expected: yes) and LO does not; which
 MacBook Pro and buffer size.
+
+## R-MPE. Each note's own pressure, timbre and bend: per-voice expression (issue 81), the engine and MIDI
+
+**Owner decision, 2026-10-19** (issue 81, "Owner decision, 2026-10-19: per voice"): a user asked
+to use aftertouch and an MPE controller's timbre as modulation sources, "even if only as one
+value for all voices". The owner: "implement it **per voice**. Each note's pressure and timbre
+move that note's voice only", each "assignable to that voice's modulation (the MODULATION
+wheel's amount, at least, and per-note filter amount)"; "with ordinary MIDI, the same sources
+come from channel pressure and the timbre controller and move every voice alike"; "a voice shared
+by several notes takes the playing note's expression"; and issue 109's wheel source and this
+"should share the same pressure handling, not duplicate it". That night's instruction: "Engine +
+mock-ups": the engine and MIDI half with tests, and two or three mock-ups of where the
+assignment goes. The panel's controls wait for the owner's choice of mock-up
+(`ca72-night/mpe-mockups/`); until then the amounts are parameters only (a host's, the MCP's).
+
+**Built.**
+- **MIDI** (`expression.rs`, one record on the audio thread, fixed storage). The MPE
+  Configuration Message (RPN 6 on channel 1 or 16) makes a lower or upper zone of member
+  channels; a later zone takes channels from the other, as MPE says. A member channel's pitch
+  bend (over its zone's bend range, RPN 0 on any member, 48 semitones by default, at most 96),
+  channel pressure and control change 74 are its note's alone: not the PITCH wheel's, not
+  learned, not the wheel's channel aftertouch. The master channel and every channel outside a
+  zone are ordinary MIDI: their bend is the PITCH wheel's (MIDI BEND RANGE, as before), their
+  channel pressure and CC 74 every voice's alike. Polyphonic aftertouch and a host's note
+  expressions (CLAP's and VST3's pressure, tuning and brightness) are their note's own, zone
+  or not. A note's expression goes to the engine as its key's before the note, and whenever it
+  changes while the note is held; each value only as it changes.
+- **The wheel's aftertouch reads the same record** (R-MODWHEEL-SOURCE). The wheel keeps only
+  which held keys' pressure arrived since its source was chosen; the pressures are the
+  record's. Its channel aftertouch is channel pressure outside a zone's members (the master's
+  included); its polyphonic aftertouch is every held note's own pressure, an MPE member
+  channel's included.
+- **The engine.** Each key's expression as last told, and the shared pressure and timbre. A
+  POLY voice takes its note's at the attack, at once (not gliding from its last note's), and
+  its changes while the key is held; a voice let go keeps what it had; a stolen voice takes the
+  new note's. The one instrument and UNISON's voices take the expression of the key NOTE PRIORITY
+  sounds (LOW the lowest held, HIGH the highest, LAST the last pressed), at once for a key
+  pressed with none held, gliding as the keys change under a phrase; with none held the last
+  is kept for the release. A voice's pressure and timbre are the larger of its note's and the
+  shared ones. Each voice glides to its expression over a 4 ms time constant.
+- **What it moves** (four sound parameters, the last of all: `pressure_mod`, `pressure_filter`,
+  `timbre_mod`, `timbre_filter`, 0 by default). A note's own bend detunes its voice's
+  oscillators 1 and 2, and 3 with OSC. 3 CONTROL on (the PITCH wheel's bus reaches it only
+  then), by its semitones, as ENTROPY's offsets are applied. PRESSURE and TIMBRE TO FILTER
+  (-4 to 4 octaves at full) move the voice's cutoff, as ENTROPY's cutoff offset (volts at
+  R51). PRESSURE and TIMBRE TO MODULATION (-100 to 100 %) move the voice's MODULATION wheel's
+  MIDI share as a keyboard's wheel moves it: at 100 %, full pressure is the wheel pushed fully
+  forward; it adds to the keyboard's wheel (whatever moves it, R-MODWHEEL-SOURCE), the panel's
+  wheel the least as ever. The wheel is set once a run (at most 128 samples), the cutoff and
+  bend every sample.
+- **Off is the instrument as before, to the bit.** With no expression, or every reach at 0 and
+  no bend, the jacks and the wheel are not touched at all. The reaches are a preset's (saved
+  with the sound; a preset or a session saved before reads them 0) and in the MCP's table.
+- **A per-computer setting, `mpe` in `settings.toml`**: `auto` (the default: the controller's
+  configuration message), `lower` (a lower zone of fifteen always, for hosts that do not pass
+  the message on) or `off`. Not yet in the settings menu.
+- **nih-plug's change 16:** its VST3 wrapper turned the host's brightness into an expression
+  event and its expression into brightness; each now maps to its own (`PATCHES.md`).
+
+**Agent decisions, 2026-10-19** (not separately approved):
+- Pressure and timbre run 0 to 1 from rest (MPE's CC 74 often rests near 64: a positive reach
+  then moves a held note by about half). A centred timbre is an option for the owner.
+- Reset All Controllers rests every pressure and bend, not the timbre (a sound controller,
+  MIDI's RP-015). All Notes Off, All Sound Off, panic and the host's reset let go of every note's
+  record; the voices letting go keep theirs.
+- The expression never wakes the sleeping one instrument (R68): asleep, no key is down.
+- A note's expression is by key in the engine, as its notes are: two notes on one key from two
+  channels share it, the later's. The arpeggiator's notes take their key's (a transposed one
+  usually none).
+- The wheel's channel aftertouch and PRESSURE TO MODULATION add for ordinary MIDI (the wheel
+  moves every voice, the reach each voice again); the owner may prefer one to replace the
+  other.
+- The master channel's RPN 0 is not followed: MIDI BEND RANGE stays the player's.
+
+**Hosts and formats.** CLAP: note expressions (pressure, tuning, brightness) and raw MPE through
+its MIDI dialect, the same samples (`tests/clap_host.rs`). VST3: polyphonic pressure, and tuning
+and brightness note expressions through nih-plug's controller (change 16 tested in the vendored
+crate); raw MPE only where a host passes channel messages through VST3's MIDI mapping. AU: the
+clap-wrapper's MIDI, so raw MPE. Standalone: raw MPE from the MIDI input
+(`tests/standalone_adapter.rs`). None was tried in a real host or with a controller.

@@ -323,6 +323,18 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   The source follows any MIDI channel and stays on this computer, outside presets and
   projects. Changing it clears the old MIDI value. All sound off,
   reset all controllers and all notes off (CC 120, 121 and 123) are followed.
+- **Each note's own expression (MPE):** with an MPE controller, each note's pressure, timbre
+  (CC 74, the slide) and its own pitch bend move only that note's voice. The controller's MPE
+  Configuration Message sets the zone, and each member channel's bend follows its bend range
+  (48 semitones unless the controller sends RPN 0). Where a host does not pass that message
+  on, `mpe = "lower"` in `settings.toml` makes a lower zone of fifteen channels; `mpe = "off"`
+  ignores it. CLAP and VST3 note expressions (pressure, tuning, brightness) and polyphonic
+  aftertouch are each note's own too; ordinary channel pressure and CC 74 move every voice
+  alike. Four parameters set how far pressure and timbre move each voice's MODULATION
+  wheel (-100 to 100 %) and filter cutoff (-4 to 4 octaves); all are 0 by default, so nothing
+  changes until you set them. They are host parameters for now (the panel's controls will
+  follow) and are saved with presets and projects. In mono and UNISON the voice takes the
+  expression of the note it plays.
 - **External input:** the host's side chain is the panel's EXTERNAL INPUT, through its
   MIXER switch and VOLUME.
 - **Output:** stereo, the same on both channels unless SPREAD places the voices or DOUBLE's
