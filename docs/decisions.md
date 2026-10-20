@@ -12345,12 +12345,14 @@ before. TIMED and DIVISION keep their values throughout; the host, MIDI and agen
 two kinds of key come and go alike; `Editing::off_panel`.)
 
 **OSC. 3 CONTROL inert while oscillator 3 is timed (the owner, 2026-10-20).** Timed, oscillator 3
-follows its clock, never the keys, so OSC. 3 CONTROL does nothing then. The owner first asked
-whether it should be switched off automatically (his question, paraphrased: his words were not
-kept). The recommendation put to him was to dim it instead, for three reasons: switching it off
-would lose the player's setting; it would make hosts record automation the player didn't make,
-with a second undo step; and the panel already dims the controls that do nothing. He accepted:
-"Okay, that's fine. Do it that way." While oscillator 3's key is on and its RANGE at LO, OSC. 3
+follows its clock, never the keys, so OSC. 3 CONTROL does nothing then. The owner first asked:
+"if we're going to do the timed version of this, then oscillator 3 control needs to be off,
+right? And we can do that for the user automatically by just turning it off when the user turns
+on the timed mode. I think should be fine. It just makes no sense to have both on at the same
+time." The recommendation put to them was to dim it instead, for three reasons: switching it
+off would lose the player's setting; it would make hosts record automation the player didn't
+make, with a second undo step; and the panel already dims the controls that do nothing. The
+owner accepted: "Okay, that's fine. Do it that way." While oscillator 3's key is on and its RANGE at LO, OSC. 3
 CONTROL is dimmed (half opacity in the drawn skin; shaded over its whole picture in the worn,
 as the knobs are) and inert: clicks, a press while MIDI Learn listens, and the wheel do nothing.
 It keeps its stored value, on or off, and is never switched by the plug-in. The host's
