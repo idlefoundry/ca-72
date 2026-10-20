@@ -11769,7 +11769,7 @@ kind), and passes with the fix. In a release build making an instance needed 640
 the thread's stack (a Windows thread has 1 MB unless its maker asks otherwise); with the fix the
 whole life fits 256 KB.
 
-## R-OSC3-TIMED. Oscillator 3 timed: at LO, its cycle a note value of the host's tempo
+## R-OSC-TIMED. The oscillators timed: at LO, each one's cycle a note value of the host's tempo
 
 **Owner, 2026-10-20** (the brief for the night of 20 October):
 - **What:** "when the user puts oscillator 3 into low mode, then a small button appears. And it's
@@ -11788,23 +11788,39 @@ whole life fits 256 KB.
 
 **Its place (the owner, 2026-10-20),** after seeing it under OSC. 3 CONTROL ("It just looks
 crowded sitting there. Right beside the vertical line."): "what I meant was beneath the octave
-selector. Switch." The key directly beneath oscillator 3's RANGE, its legend TIMED beside it, not
-over it.
+selector. Switch." Then: "But I like it under the oscillator range selector the best. So I
+think we'll leave it there." The key directly beneath the RANGE selector, final.
 
-**Not decided yet (the owner's):** whether the key is there at every RANGE. The mock-ups (drawn by
-the panel's renderer on a throwaway copy, the worn skin, at the opening size and at 1.0; not in
-this repository: the night's folder `osc3-timed-mockups`) show it beneath RANGE with the legend
-beside, over and under it, and both rules: A, the key only at LO; B (recommended), always there,
-dimmed and inert away from LO as VOICES is (R64). Until the owner chooses, TIMED and DIVISION are
-host parameters (and MIDI Learn's, and the agents'), not on the panel.
+**All three oscillators (the owner, the same day):** "and since all 3 oscillators offer a "LO"
+option, we might as well put it below all 3." Each oscillator has its own key beneath its own
+RANGE, its own TIMED and DIVISION, applying only while that oscillator's RANGE is at LO. (This
+record was R-OSC3-TIMED until then.)
+
+**A note, not a word (the owner, the same day):** "maybe instead of saying timed, what if we just
+put a musical note there to keep that the text very minimal? I just don't want a word there. I
+think people will understand what it means. With just like a note, so I would choose an eighth
+note and let's see how that looks." The legend is an eighth note (U+266A, which the panel's
+typeface, URW Gothic Demi, has: set as the panel's legends are, at about 1.4 times their size so
+that it stands as tall as their capitals), beside the key; the mock-ups show it on the cap too.
+
+**Not decided yet (the owner's):** whether each key is there at every RANGE; where oscillator 1's
+DIVISION is chosen on the panel (it has no FREQUENCY knob to turn into the note values). The
+mock-ups (drawn by the panel's renderer on a throwaway copy, the worn skin and the drawn, at the
+opening size and at 1.0; not in this repository: the night's folder `osc3-timed-mockups`) show
+the keys beneath each RANGE with the note beside them or on their caps, and both rules: A, a key
+only at LO; B (recommended), always there, dimmed and inert away from LO as VOICES is (R64). Until
+the owner chooses, TIMED and DIVISION are host parameters (and MIDI Learn's, and the agents'),
+not on the panel.
 
 **Agent decisions, 2026-10-20** (not separately approved):
-- **Two parameters of its own**, after the arpeggiator's so that none before them moves:
-  `osc3_timed` (TIMED, off) and `osc3_division` (DIVISION, a quarter note). DIVISION is not
-  FREQUENCY's knob read another way: FREQUENCY keeps its own place, so TIMED off (or RANGE away
-  from LO) gives it back as it was; a host's automation and a preset name a division, never a
-  place between two, whatever the dials' law (R54); and FREQUENCY's knob glides (R-KNOB-GLIDE)
-  where a division must step. DIVISION does not glide (stepped, as RATE).
+- **Two parameters an oscillator**, after the arpeggiator's so that none before them moves:
+  `osc1_timed`, `osc2_timed`, `osc3_timed` (TIMED, off) and `osc1_division`, `osc2_division`,
+  `osc3_division` (DIVISION, a quarter note; one list, `params::Division`). DIVISION is not
+  FREQUENCY's knob read another way: oscillators 2's and 3's FREQUENCY keep their own places, so
+  TIMED off (or RANGE away from LO) gives them back as they were; a host's automation and a
+  preset name a division, never a place between two, whatever the dials' law (R54); and
+  FREQUENCY's knob glides (R-KNOB-GLIDE) where a division must step. DIVISION does not glide
+  (stepped, as RATE).
 - **The divisions**, slow to fast, as RATE's order (R-ARP): 4 bars, 2 bars, 1 bar, then each
   straight value with its dotted and its triplet between it and the next, the dotted the longer:
   1/2 dotted, 1/1 triplet, 1/2, 1/4 dotted, 1/2 triplet, 1/4, 1/8 dotted, 1/4 triplet, 1/8,
@@ -11813,13 +11829,17 @@ host parameters (and MIDI Learn's, and the agents'), not on the panel.
   1.89 Hz at its centre: the list brackets it with a little under an octave each way, and the
   default, a quarter note, is LO's centre at 120 BPM. No dotted or triplet values among the bars
   (rarely asked for; the dial's left side kept clear for its BARS caption).
-- **Where it applies:** TIMED on and oscillator 3's RANGE at LO. At any other RANGE it does
-  nothing at all: the samples are those with it off, to the bit (tested at HI and LO). Its own
-  pitch inputs have no part in it while it is timed: the keyboard (OSC. 3 CONTROL on or off), the
-  PITCH wheel, GLIDE, TUNE, OSCILLATOR MODULATION reaching oscillator 3 itself, the converter,
-  and ENTROPY's drift and mismatch on its rate. Its waveform, VOLUME and switches, and what it
-  feeds (the mixer, MODULATION MIX), are as ever: it can be heard as a source at the tempo's rate
-  (up to 133 Hz, a thirty-second at 1000 BPM).
+- **Where it applies:** an oscillator's TIMED on and its RANGE at LO. At any other RANGE it does
+  nothing at all: the samples are those with it off, to the bit (tested for each oscillator at
+  HI and LO). The oscillator's own pitch inputs have no part in it while it is timed: the
+  keyboard (oscillators 1 and 2 always follow it; 3 with OSC. 3 CONTROL on), the PITCH wheel,
+  GLIDE, TUNE, OSCILLATOR MODULATION, the converter, and ENTROPY's drift and mismatch on its rate;
+  DOUBLE's detune too, so a note's two voices play a timed oscillator in step. It overrides the
+  timed oscillator alone: the others play as ever. The circuit has no oscillator sync, so there is
+  none to meet. Its waveform, VOLUME and switches, and what it feeds, are as ever. Oscillators 1
+  and 2 at LO reach the mixer only (slow pulses, rhythmic clicks); oscillator 3 also feeds the
+  modulation (MODULATION MIX). Each can be heard as a source at the tempo's rate (up to 133 Hz, a
+  thirty-second at 1000 BPM).
 - **The clock** is the arpeggiator's (`Arp::position`), so the two always agree: while the host
   plays and says where it is, its place in quarter notes as each block begins, taken afresh every
   block, and the block's samples counted from it at its tempo (the place a sample is at is worked
@@ -11865,37 +11885,42 @@ host parameters (and MIDI Learn's, and the agents'), not on the panel.
   LO; it could be led by that much if the owner wants (not done).
 - **Restarting with each note** (a later option, not built): the phase taken from each voice's
   attack instead of the clock, in `timed.rs`'s `Position::cycle` or in the voice's jacks.
-- **Not covered:** AUTO GAIN's measurement of a sound with DRIVE (R45, `drive.rs`) plays oscillator
-  3 free; its level as a source is the same, so the curve is.
+- **The engine:** the voices' jacks carry each oscillator's place on the clock (`Jacks::timed`),
+  as do the workers' runs (`Mix`) and ULTRA's split crews; the light voice steps each of its
+  three oscillators onto its clock (`Light::timed_tick`).
+- **Not covered:** AUTO GAIN's measurement of a sound with DRIVE (R45, `drive.rs`) plays the
+  oscillators free; their levels as sources are the same, so the curve is.
 - **Found on the way, fixed apart:** an instance made at LO first read the machine's cores (which
   ULTRA's split crews are sized by) at ULTRA's first block, on the audio thread, a file read and
   memory taken there once a process; they are read as the voices are built now
-  (`Engine::prepare`). Oscillator 3 timed's no-allocation test, which switches QUALITY to ULTRA,
-  found it.
+  (`Engine::prepare`). The timed oscillators' no-allocation test, which switches QUALITY to
+  ULTRA, found it.
 
-**Saved:** TIMED and DIVISION are a preset's and a session's, as any sound parameter; a preset or
-a session saved before reads TIMED off and DIVISION a quarter note (`Ca72::filter_state`,
-`presets::targets`). Preset files stay format 1.
+**Saved:** each TIMED and DIVISION is a preset's and a session's, as any sound parameter; a preset
+or a session saved before reads every TIMED off and every DIVISION a quarter note
+(`Ca72::filter_state`, `presets::targets`). Preset files stay format 1.
 
 **Evidence (omarchy, 2026-10-20):**
 - `crates/ca72/tests/timed.rs`: the Early ratio against the converter; resets on the clock at 30,
   97.3, 123.7, 180, 240, 300 and 1000 BPM, a thirty-second to four bars, 44.1 to 96 kHz (circuit
   within 1e-3 samples, light within 0.1, none skipped or doubled); tempo changes mid-cycle and a
   block-by-block ramp; a jump back of 0.62 of a cycle taken at once, the outputs within the
-  circuit's swing.
-- `crates/ca72-plugin/src/timed.rs` (the plug-in as a host plays it): ten minutes at 123.7 BPM,
-  an eighth triplet, two bars and a dotted quarter, the clock the host's within 1e-9 of a cycle at
+  circuit's swing; the light voice's oscillators 1 and 2 on their clocks.
+- `crates/ca72-plugin/src/timed.rs` (the plug-in as a host plays it): ten minutes at 123.7 BPM, an
+  eighth triplet, two bars and a dotted quarter, the clock the host's within 1e-9 of a cycle at
   every block's first and last sample to the end; ten minutes stopped, on the tempo's count within
-  1e-6; every division counted from an odd place in 3/4; resets on the host's grid at LO, HI and
-  ULTRA with ENTROPY at its default; the transport playing, stopped (running on), started
-  elsewhere and looped; a tempo change while a note plays; RANGE at 32', 8' and 2' the same to the
-  bit as TIMED off; the key (36 to 84), OSC. 3 CONTROL and the PITCH wheel moving no reset; 96 and
-  44.1 kHz; offline the same samples as in real time; no tempo (120 BPM); 1000 BPM and 1 BPM.
-- `tests/realtime.rs`, `oscillator_3_timed_neither_allocates_nor_frees`: TIMED, RANGE, DIVISION
-  and QUALITY (LO, HI, ULTRA) automated, the transport playing, looping, changing tempo and
-  stopping, in the plug-in's process: no allocation, no free.
-- Presets and sessions: `oscillator_3_timed_is_part_of_a_preset_and_off_in_one_that_does_not_name_it`,
-  `an_old_session_opens_with_oscillator_3_free`. MIDI Learn: OSC. 3 TIMED a switch, OSC. 3
-  DIVISION stepped. The agents: `osc3_timed`, `osc3_division` (docs/mcp.md).
+  1e-6; every division counted from an odd place in 3/4; each oscillator's resets on the host's
+  grid at LO, HI and ULTRA with ENTROPY at its default; the transport playing, stopped (running
+  on), started elsewhere and looped; a tempo change while a note plays; each oscillator's RANGE at
+  32', 8' and 2' the same to the bit as its TIMED off; the key (36 to 84), OSC. 3 CONTROL and the
+  PITCH wheel moving no oscillator's reset; 96 and 44.1 kHz; offline the same samples as in real
+  time; no tempo (120 BPM); 1000 BPM and 1 BPM.
+- `tests/realtime.rs`, `the_oscillators_timed_neither_allocate_nor_free`: each TIMED, RANGE and
+  DIVISION, and QUALITY (LO, HI, ULTRA), automated, the transport playing, looping, changing tempo
+  and stopping, in the plug-in's process: no allocation, no free.
+- Presets and sessions:
+  `oscillator_3_timed_is_part_of_a_preset_and_off_in_one_that_does_not_name_it` (all three),
+  `an_old_session_opens_with_the_oscillators_free`. MIDI Learn: OSC. 1, 2 and 3 TIMED switches,
+  their DIVISION stepped. The agents: `osc1_timed` to `osc3_division` (docs/mcp.md).
 - Off, the sound is the code's before to the bit: `preset_render`, the 19 factory presets with
   POLY's ten voices, at HI, LO and ULTRA against 47a987f.

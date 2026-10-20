@@ -771,9 +771,9 @@ pub struct Contacts {
 ///
 /// With them, the plug-in's ENTROPY (decisions.md; not the instrument's): each oscillator off its
 /// calibration by `detune` cents and the filter's cutoff off its by `cutoff` octaves, both
-/// 0 for the circuit as drawn (the samples then the same to the bit). And oscillator 3 timed
-/// (decisions.md R-OSC3-TIMED; the plug-in's too): where its cycle stands on the host's clock,
-/// at RANGE's LO; none, the circuit's own.
+/// 0 for the circuit as drawn (the samples then the same to the bit). And each oscillator timed
+/// (decisions.md R-OSC-TIMED; the plug-in's too): where its cycle stands on the host's clock, at
+/// its RANGE's LO; none, the circuit's own.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Jacks {
     pub ext: f64,
@@ -783,7 +783,7 @@ pub struct Jacks {
     pub s_trig: bool,
     pub detune: [f64; 3],
     pub cutoff: f64,
-    pub timed: Option<Timed>,
+    pub timed: [Option<Timed>; 3],
 }
 
 /// The volts an octave at a 100K input to the filter's control node, as R51 (the FILTER
@@ -1310,10 +1310,10 @@ impl Voice {
         (self.audio.last.0, self.audio.front.last_i)
     }
 
-    /// Oscillator 3's latest reset: how long before the latest sample, exact, and how many it
-    /// has made (a probe of oscillator 3 timed: decisions.md R-OSC3-TIMED).
-    pub fn probe_osc3_reset(&self) -> (f64, u64) {
-        self.audio.front.vcos[2].reset_ago()
+    /// Oscillator `n`'s (0, 1, 2) latest reset: how long before the latest sample, exact, and
+    /// how many it has made (a probe of the oscillators timed: decisions.md R-OSC-TIMED).
+    pub fn probe_reset_ago(&self, n: usize) -> (f64, u64) {
+        self.audio.front.vcos[n].reset_ago()
     }
 
     /// Oscillator `n`'s (0, 1, 2) latest reset: its time in samples and how many it has
@@ -2108,12 +2108,10 @@ impl FrontPart {
             self.vcos[n].set_oversample(oversampling(p.quality).0);
             self.vcos[n].table_on = p.quality == Quality::Potato;
             self.vcos[n].set_outputs(outputs_of(op.waveform, n));
-            let o = match j.timed {
-                // Oscillator 3 timed at LO (the plug-in's: decisions.md R-OSC3-TIMED): its
+            let o = match j.timed[n] {
+                // An oscillator timed at LO (the plug-in's: decisions.md R-OSC-TIMED): its
                 // resets on the host's clock, none of its pitch inputs or ENTROPY in it.
-                Some(t) if n == 2 && op.range == Range::Lo => {
-                    self.vcos[n].tick_timed(t, op.waveform.width())
-                }
+                Some(t) if op.range == Range::Lo => self.vcos[n].tick_timed(t, op.waveform.width()),
                 _ => {
                     let osc = match n {
                         0 => Osc::One,

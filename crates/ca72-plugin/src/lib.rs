@@ -89,7 +89,7 @@ pub struct Ca72 {
     /// The arpeggiator (decisions.md R-ARP): every key the note sources pass goes through it, to
     /// the engine as played while it is off; and the sample of the block the events are at.
     arp: Arp,
-    /// Oscillator 3 timed's bars between blocks (decisions.md R-OSC3-TIMED).
+    /// Oscillator 3 timed's bars between blocks (decisions.md R-OSC-TIMED).
     timed_clock: crate::timed::Clock,
     now: usize,
 }
@@ -650,16 +650,18 @@ impl Plugin for Ca72 {
         ] {
             state.params.entry(id.to_owned()).or_insert(v);
         }
-        // And before oscillator 3 timed: off, its DIVISION at its default, whatever the
-        // instance had (decisions.md R-OSC3-TIMED).
-        for (id, v) in [
-            ("osc3_timed", ParamValue::Bool(false)),
-            (
-                "osc3_division",
-                ParamValue::I32(d.osc3_division.default_plain_value().to_index() as i32),
-            ),
-        ] {
-            state.params.entry(id.to_owned()).or_insert(v);
+        // And before the oscillators timed: each off, its DIVISION at its default, whatever the
+        // instance had (decisions.md R-OSC-TIMED).
+        let quarter = d.osc3_division.default_plain_value().to_index() as i32;
+        for n in 1..=3 {
+            state
+                .params
+                .entry(format!("osc{n}_timed"))
+                .or_insert(ParamValue::Bool(false));
+            state
+                .params
+                .entry(format!("osc{n}_division"))
+                .or_insert(ParamValue::I32(quarter));
         }
         // And before RETRIGGER: off, single triggering, the instrument's own.
         if !state.params.contains_key("retrigger") {
@@ -807,7 +809,7 @@ impl Plugin for Ca72 {
             });
         // Oscillator 3 timed keeps the arpeggiator's clock, so that the two agree: the host's
         // place every block while it plays, else run on at the tempo (decisions.md
-        // R-OSC3-TIMED).
+        // R-OSC-TIMED).
         let (beats, per) = self.arp.position();
         let at = self.timed_clock.begin(context.transport(), beats, per, len);
         self.engine.set_position(at);
@@ -1562,10 +1564,10 @@ mod tests {
         assert!(matches!(new.get("arp_rate"), Some(ParamValue::String(s)) if s == "1/8t"));
     }
 
-    /// A session saved before oscillator 3 timed opens with it off and DIVISION at a quarter
-    /// note, not as the instance had them (R-OSC3-TIMED); one saved since keeps its own.
+    /// A session saved before the oscillators timed opens with each off and its DIVISION at a
+    /// quarter note, not as the instance had them (R-OSC-TIMED); one saved since keeps its own.
     #[test]
-    fn an_old_session_opens_with_oscillator_3_free() {
+    fn an_old_session_opens_with_the_oscillators_free() {
         let filtered = |params: Vec<(String, ParamValue)>| {
             let mut s = PluginState {
                 version: "0.2.8".to_owned(),
@@ -1579,24 +1581,32 @@ mod tests {
             "osc3_range".to_owned(),
             ParamValue::String("lo".into()),
         )]);
-        assert!(matches!(
-            old.get("osc3_timed"),
-            Some(ParamValue::Bool(false))
-        ));
-        let quarter = params::Osc3Division::Quarter.to_index() as i32;
-        assert!(matches!(old.get("osc3_division"), Some(ParamValue::I32(i)) if *i == quarter));
+        let quarter = params::Division::Quarter.to_index() as i32;
+        for n in 1..=3 {
+            let timed = old.get(&format!("osc{n}_timed"));
+            assert!(matches!(timed, Some(ParamValue::Bool(false))), "{n}");
+            let division = old.get(&format!("osc{n}_division"));
+            assert!(
+                matches!(division, Some(ParamValue::I32(i)) if *i == quarter),
+                "{n}"
+            );
+        }
         let new = filtered(vec![
-            ("osc3_timed".to_owned(), ParamValue::Bool(true)),
+            ("osc1_timed".to_owned(), ParamValue::Bool(true)),
             (
-                "osc3_division".to_owned(),
+                "osc1_division".to_owned(),
                 ParamValue::String("1/16t".to_owned()),
             ),
         ]);
         assert!(matches!(
-            new.get("osc3_timed"),
+            new.get("osc1_timed"),
             Some(ParamValue::Bool(true))
         ));
-        assert!(matches!(new.get("osc3_division"), Some(ParamValue::String(s)) if s == "1/16t"));
+        assert!(matches!(new.get("osc1_division"), Some(ParamValue::String(s)) if s == "1/16t"));
+        assert!(matches!(
+            new.get("osc2_timed"),
+            Some(ParamValue::Bool(false))
+        ));
     }
 
     /// `n` blocks of `len` with the host's transport playing from beat `from` at `tempo` (4/4),

@@ -159,9 +159,10 @@ pub struct Controls {
     /// QUALITY at ULTRA: the circuit's model with no compromises (`Quality::NoCompromises`),
     /// not at its real-time setting (decisions.md R48). Switched while it plays.
     pub ultra: bool,
-    /// Oscillator 3 timed (decisions.md R-OSC3-TIMED): its cycle's length on the host's clock
-    /// ([`Engine::set_position`]) while RANGE is at LO; none, or at any other RANGE, its own.
-    pub osc3_timed: Option<Length>,
+    /// Each oscillator timed (decisions.md R-OSC-TIMED): its cycle's length on the host's
+    /// clock ([`Engine::set_position`]) while its RANGE is at LO; none, or at any other RANGE,
+    /// its own.
+    pub timed: [Option<Length>; 3],
 }
 
 impl Default for Controls {
@@ -187,7 +188,7 @@ impl Default for Controls {
             lock: false,
             potato: false,
             ultra: false,
-            osc3_timed: None,
+            timed: [None; 3],
         }
     }
 }
@@ -1398,7 +1399,7 @@ pub struct Engine {
     /// How often the workers were started (for the tests).
     #[cfg(test)]
     pool_starts: u64,
-    /// The clock oscillator 3 timed keeps (decisions.md R-OSC3-TIMED): where the music was as
+    /// The clock oscillator 3 timed keeps (decisions.md R-OSC-TIMED): where the music was as
     /// the block began ([`Engine::set_position`]; until told, 120 BPM from the start), the host
     /// samples played since, and the host sample the voices are at now, from it.
     position: Position,
@@ -1752,45 +1753,48 @@ impl Engine {
     /// then is silent for the run, not waited for (None: waited for). The plug-in sets it at
     /// each block's start, when POLY's workers also follow POLY ([`Engine::follow_poly`]).
     /// Where the music is as a block begins, for oscillator 3 timed (decisions.md
-    /// R-OSC3-TIMED): its samples' places on the clock are counted from here, each from this,
+    /// R-OSC-TIMED): its samples' places on the clock are counted from here, each from this,
     /// never added up from the blocks before.
     pub fn set_position(&mut self, p: Position) {
         self.position = p;
         (self.since, self.cursor) = (0.0, 0.0);
     }
 
-    /// Oscillator 3's place on the clock `at` host samples after the block's start, and its
-    /// cycles a voice's sample, if it is timed and RANGE is at LO (at any other RANGE timed
+    /// Each oscillator's place on the clock `at` host samples after the block's start, and its
+    /// cycles a voice's sample, if it is timed and its RANGE is at LO (at any other RANGE timed
     /// mode does nothing).
-    fn timed_at(&self, at: f64) -> Option<Timed> {
-        let length = self.controls.osc3_timed?;
-        if self.controls.panel.osc[2].range != ca72::tuning::Range::Lo {
-            return None;
-        }
-        let (phase, per) = self.position.cycle(length);
+    fn timed_at(&self, at: f64) -> [Option<Timed>; 3] {
         let factor = self.over.as_ref().map_or(1, |o| o.factor) as f64;
-        let now = phase + at * per;
-        Some(Timed {
-            phase: now - now.floor(),
-            per: per / factor,
+        std::array::from_fn(|n| {
+            let length = self.controls.timed[n]?;
+            if self.controls.panel.osc[n].range != ca72::tuning::Range::Lo {
+                return None;
+            }
+            let (phase, per) = self.position.cycle(length);
+            let now = phase + at * per;
+            Some(Timed {
+                phase: now - now.floor(),
+                per: per / factor,
+            })
         })
     }
 
     /// [`Engine::timed_at`], for the tests.
     #[cfg(test)]
-    pub(crate) fn timed_probe(&self, at: f64) -> Option<Timed> {
+    pub(crate) fn timed_probe(&self, at: f64) -> [Option<Timed>; 3] {
         self.timed_at(at)
     }
 
-    /// The one instrument's oscillator 3's latest reset, how long before its latest sample and
-    /// how many it has made (the model QUALITY plays), for the tests.
+    /// The one instrument's oscillator `n`'s latest reset, how long before its latest sample and
+    /// how many it has made (the model QUALITY plays; the light voice's while it is timed), for
+    /// the tests.
     #[cfg(test)]
-    pub(crate) fn osc3_reset(&self) -> Option<(f64, u64)> {
+    pub(crate) fn osc_reset(&self, n: usize) -> Option<(f64, u64)> {
         let p = self.slots.first()?.play.try_lock().ok()?;
         Some(if p.potato {
-            p.light.probe_osc3_reset()
+            p.light.probe_timed_reset(n)
         } else {
-            p.voice.probe_osc3_reset()
+            p.voice.probe_reset_ago(n)
         })
     }
 
@@ -2287,7 +2291,7 @@ impl Engine {
         let mut start = 0;
         while start < len {
             self.settle();
-            // (Oscillator 3 timed: the run's first sample's place on the clock.)
+            // (The oscillators timed: the run's first sample's places on the clock.)
             mix.timed = self.timed_at(from + start as f64);
             let mut n = (len - start).min(CHUNK);
             // The samples the voices play: all of them, unless POWER is off, when they rest
@@ -3127,13 +3131,13 @@ pub struct Mix {
     double: f64,
     drive: f64,
     scatter: bool,
-    /// Oscillator 3 timed (decisions.md R-OSC3-TIMED): where its cycle stands at the run's
+    /// Each oscillator timed (decisions.md R-OSC-TIMED): where its cycle stands at the run's
     /// first sample, and its cycles a sample (the voices'); none unless it is timed at LO.
-    timed: Option<Timed>,
+    timed: [Option<Timed>; 3],
 }
 
 /// [`Mix`]'s values, as the workers are handed them.
-pub const MIX_LEN: usize = 12;
+pub const MIX_LEN: usize = 16;
 
 impl Mix {
     pub fn to_array(self) -> [f64; MIX_LEN] {
@@ -3148,8 +3152,12 @@ impl Mix {
             self.double,
             self.drive,
             f64::from(u8::from(self.scatter)),
-            self.timed.map_or(-1.0, |t| t.phase),
-            self.timed.map_or(0.0, |t| t.per),
+            self.timed[0].map_or(-1.0, |t| t.phase),
+            self.timed[0].map_or(0.0, |t| t.per),
+            self.timed[1].map_or(-1.0, |t| t.phase),
+            self.timed[1].map_or(0.0, |t| t.per),
+            self.timed[2].map_or(-1.0, |t| t.phase),
+            self.timed[2].map_or(0.0, |t| t.per),
         ]
     }
 
@@ -3165,8 +3173,12 @@ impl Mix {
             double,
             drive,
             scatter,
-            phase,
-            per,
+            phase1,
+            per1,
+            phase2,
+            per2,
+            phase3,
+            per3,
         ]: [f64; MIX_LEN],
     ) -> Mix {
         Mix {
@@ -3180,22 +3192,25 @@ impl Mix {
             double,
             drive,
             scatter: scatter > 0.0,
-            timed: (phase >= 0.0).then_some(Timed { phase, per }),
+            timed: [(phase1, per1), (phase2, per2), (phase3, per3)]
+                .map(|(phase, per)| (phase >= 0.0).then_some(Timed { phase, per })),
         }
     }
 }
 
 /// A voice's jacks for its next sample, the run's `k`th: `ext` at EXTERNAL INPUT, its
-/// character's offsets (a sample on), and oscillator 3's place on the clock if it is timed.
+/// character's offsets (a sample on), and each oscillator's place on the clock if it is timed.
 fn jacks(c: &mut Character, ext: f64, rate: f64, m: &Mix, k: usize) -> Jacks {
     let mut j = Jacks {
         ext,
         timed: m.timed.map(|t| {
-            let at = t.phase + k as f64 * t.per;
-            Timed {
-                phase: at - at.floor(),
-                per: t.per,
-            }
+            t.map(|t| {
+                let at = t.phase + k as f64 * t.per;
+                Timed {
+                    phase: at - at.floor(),
+                    per: t.per,
+                }
+            })
         }),
         ..Jacks::default()
     };
@@ -3451,7 +3466,7 @@ fn mix_of(c: &Controls, voices: usize) -> Mix {
             1.0
         },
         scatter,
-        timed: None,
+        timed: [None; 3],
     }
 }
 
@@ -3624,17 +3639,19 @@ mod tests {
     use crate::pool::Budget;
     use ca72::voice::Priority;
 
-    /// The workers are handed oscillator 3 timed's place with the run's other values
-    /// (decisions.md R-OSC3-TIMED), and none where it is not timed.
+    /// The workers are handed each timed oscillator's place with the run's other values
+    /// (decisions.md R-OSC-TIMED), and none where it is not timed.
     #[test]
-    fn the_workers_mix_carries_oscillator_3_timed() {
+    fn the_workers_mix_carries_the_oscillators_timed() {
         let mut m = mix_of(&Controls::default(), 4);
-        assert_eq!(Mix::from_array(m.to_array()).timed, None);
-        m.timed = Some(Timed {
-            phase: 0.123,
-            per: 1e-4,
-        });
-        assert_eq!(Mix::from_array(m.to_array()).timed, m.timed);
+        assert_eq!(Mix::from_array(m.to_array()).timed, [None; 3]);
+        for n in 0..3 {
+            m.timed[n] = Some(Timed {
+                phase: 0.123 + 0.1 * n as f64,
+                per: 1e-4 * (n + 1) as f64,
+            });
+            assert_eq!(Mix::from_array(m.to_array()).timed, m.timed);
+        }
     }
 
     #[test]

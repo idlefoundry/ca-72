@@ -212,7 +212,7 @@ pub struct VcoOut {
     pub rect: f64,
 }
 
-/// Where a timed oscillator's cycle stands (decisions.md R-OSC3-TIMED): its phase at the
+/// Where a timed oscillator's cycle stands (decisions.md R-OSC-TIMED): its phase at the
 /// sample (as the sample is given, the end of the time it covers), 0 where its ramp resets and
 /// 1 at the next reset, and the cycles a sample takes. The
 /// host's clock gives both, so that its resets fall on the clock's grid whatever the circuit
@@ -521,7 +521,7 @@ impl Vco {
         self.tick_net(i0 - self.core.i_leak, b, width)
     }
 
-    /// One output sample of the oscillator held to a clock (decisions.md R-OSC3-TIMED): its
+    /// One output sample of the oscillator held to a clock (decisions.md R-OSC-TIMED): its
     /// ramp's slope chosen each sample so that it reaches the threshold, and resets after the
     /// comparator's delay, as the clock's next cycle starts (`t.phase` reaching 1); the slope
     /// bent by the converter's Early effect as the circuit's is ([`TIMED_EARLY`]). The

@@ -1,4 +1,4 @@
-//! Oscillator 3 timed (decisions.md R-OSC3-TIMED), the oscillators themselves: the circuit's
+//! Oscillator 3 timed (decisions.md R-OSC-TIMED), the oscillators themselves: the circuit's
 //! (HI and ULTRA) and the light voice's (LO) reset where their clock's cycles start, to a
 //! small part of a sample, at any tempo, and follow a tempo changed or a jump of the clock.
 
@@ -53,27 +53,48 @@ fn vco_resets(rate: f64, samples: u64, phase: impl Fn(u64) -> Timed) -> Vec<f64>
     out
 }
 
-/// The light voice's oscillator 3 (LO) at `rate`, a sawtooth at RANGE's LO, on a clock.
-fn light_resets(rate: f64, samples: u64, phase: impl Fn(u64) -> Timed) -> Vec<f64> {
+/// The light voice's (LO) oscillator `n` at `rate`, a sawtooth at RANGE's LO, on a clock.
+fn light_osc_resets(rate: f64, samples: u64, n: usize, phase: impl Fn(u64) -> Timed) -> Vec<f64> {
     let mut l = Light::new(rate);
     let mut p = Panel::default();
-    p.osc[2].on = true;
-    p.osc[2].range = Range::Lo;
-    p.osc[2].waveform = Waveform::Sawtooth;
+    p.osc[n].on = true;
+    p.osc[n].range = Range::Lo;
+    p.osc[n].waveform = Waveform::Sawtooth;
     l.set_panel(&p);
     l.start_oscillators_at(0.3);
     let mut out = Vec::new();
     let mut seen = 0;
     for s in 0..samples {
-        l.set_timed(Some(phase(s)));
+        let mut timed = [None; 3];
+        timed[n] = Some(phase(s));
+        l.set_timed(timed);
         assert!(l.tick(0.0).is_finite());
-        let (ago, count) = l.probe_osc3_reset();
+        let (ago, count) = l.probe_timed_reset(n);
         if count > seen {
             seen = count;
             out.push(s as f64 - ago);
         }
     }
     out
+}
+
+/// The light voice's oscillator 3.
+fn light_resets(rate: f64, samples: u64, phase: impl Fn(u64) -> Timed) -> Vec<f64> {
+    light_osc_resets(rate, samples, 2, phase)
+}
+
+/// The light voice's oscillators 1 and 2 timed as its 3 is: on the clock.
+#[test]
+fn the_light_voices_oscillators_1_and_2_reset_on_their_clocks() {
+    let (rate, per) = (48_000.0, 123.7 / 60.0 / 48_000.0 / 0.25);
+    for n in [0, 1] {
+        let resets = light_osc_resets(rate, 60_000, n, |s| clock(0.37, per, s));
+        assert_eq!(resets.len(), ((0.37 + 59_999.0 * per) as usize), "{n}");
+        for &r in &resets {
+            let m = (0.37 + r * per).round();
+            assert!((r - (m - 0.37) / per).abs() < 0.1, "{n}: {r}");
+        }
+    }
 }
 
 /// At several tempos, divisions and sample rates, each reset is where its cycle starts: the
@@ -254,14 +275,14 @@ fn the_oscillators_take_a_jump_of_their_clock_at_once() {
             o.saw.abs() < 6.0 && o.tri.abs() < 6.0 && o.rect.abs() < 6.0,
             "{s}: {o:?}"
         );
-        l.set_timed(Some(phase(s)));
+        l.set_timed([None, None, Some(phase(s))]);
         assert!(l.tick(0.0).abs() < 4.0);
         let (ago, count) = v.reset_ago();
         if count > seen {
             seen = count;
             resets.push(s as f64 - ago);
         }
-        let (ago, count) = l.probe_osc3_reset();
+        let (ago, count) = l.probe_timed_reset(2);
         if count > lseen {
             lseen = count;
             lresets.push(s as f64 - ago);

@@ -287,12 +287,12 @@ pub enum ArpRate {
     ThirtySecond,
 }
 
-/// Oscillator 3's DIVISION, timed (decisions.md R-OSC3-TIMED): its cycle a note value, slow to
+/// An oscillator's DIVISION, timed (decisions.md R-OSC-TIMED): its cycle a note value, slow to
 /// fast as its dial turns, 4, 2 and 1 bars, then each straight value's dotted and triplet ones
 /// between it and the next (`crate::timed::DIVISIONS`, in the same order); its ids the
 /// arpeggiator's RATE's form.
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Osc3Division {
+pub enum Division {
     #[id = "4bars"]
     #[name = "4 bars"]
     FourBars,
@@ -624,20 +624,27 @@ pub struct Ca72Params {
     #[id = "arp_swing"]
     pub arp_swing: FloatParam,
 
-    // Oscillator 3 timed (decisions.md R-OSC3-TIMED), the plug-in's own, after the
+    // The oscillators timed (decisions.md R-OSC-TIMED), the plug-in's own, after the
     // arpeggiator's, so that no parameter before them moves. A preset's, as any sound
-    // parameter: a preset or a session saved before reads it off (`Ca72::filter_state`,
+    // parameter: a preset or a session saved before reads them off (`Ca72::filter_state`,
     // `presets::targets`).
-    /// TIMED: at RANGE's LO, oscillator 3's cycle DIVISION of the host's tempo, its resets on
-    /// the host's beats and bars, FREQUENCY's own place kept for when it is off; at any other
-    /// RANGE, nothing.
+    /// Each oscillator's TIMED: at its RANGE's LO, its cycle its DIVISION of the host's tempo,
+    /// its resets on the host's beats and bars (oscillators 2's and 3's FREQUENCY keeping their
+    /// own places for when it is off); at any other RANGE, nothing. DIVISION: the cycle's note
+    /// value, a parameter of its own (not FREQUENCY's knob read otherwise): stepped, so that
+    /// automation and presets name a value, never a place between two.
+    #[id = "osc1_timed"]
+    pub osc1_timed: BoolParam,
+    #[id = "osc1_division"]
+    pub osc1_division: EnumParam<Division>,
+    #[id = "osc2_timed"]
+    pub osc2_timed: BoolParam,
+    #[id = "osc2_division"]
+    pub osc2_division: EnumParam<Division>,
     #[id = "osc3_timed"]
     pub osc3_timed: BoolParam,
-    /// DIVISION: the cycle's note value, a parameter of its own (not FREQUENCY's knob read
-    /// otherwise): stepped, so that automation and presets name a value, never a place
-    /// between two.
     #[id = "osc3_division"]
-    pub osc3_division: EnumParam<Osc3Division>,
+    pub osc3_division: EnumParam<Division>,
 }
 
 /// DOUBLE on at DETUNE's 0, as the engine is told it: a share of DETUNE's travel so small that
@@ -919,8 +926,12 @@ impl Default for Ca72Params {
             .with_unit(" %")
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
             arp_swing: percent("Arp Swing"),
+            osc1_timed: BoolParam::new("Osc 1 Timed", false),
+            osc1_division: EnumParam::new("Osc 1 Division", Division::Quarter),
+            osc2_timed: BoolParam::new("Osc 2 Timed", false),
+            osc2_division: EnumParam::new("Osc 2 Division", Division::Quarter),
             osc3_timed: BoolParam::new("Osc 3 Timed", false),
-            osc3_division: EnumParam::new("Osc 3 Division", Osc3Division::Quarter),
+            osc3_division: EnumParam::new("Osc 3 Division", Division::Quarter),
         }
     }
 }
@@ -972,18 +983,29 @@ impl Ca72Params {
         }
     }
 
-    /// Oscillator 3 timed's cycle (decisions.md R-OSC3-TIMED), if TIMED is on (whatever
-    /// RANGE is: the engine applies it at LO only).
-    pub fn osc3_timed(&self) -> Option<crate::timed::Length> {
-        self.osc3_timed
-            .value()
-            .then(|| crate::timed::DIVISIONS[self.osc3_division.value().to_index()].1)
+    /// Each oscillator's TIMED and DIVISION (decisions.md R-OSC-TIMED).
+    pub fn timed_params(&self) -> [(&BoolParam, &EnumParam<Division>, &EnumParam<Footage>); 3] {
+        [
+            (&self.osc1_timed, &self.osc1_division, &self.osc1_range),
+            (&self.osc2_timed, &self.osc2_division, &self.osc2_range),
+            (&self.osc3_timed, &self.osc3_division, &self.osc3_range),
+        ]
     }
 
-    /// Whether oscillator 3 is timed now: TIMED on and RANGE at LO (at any other RANGE it does
-    /// nothing).
-    pub fn osc3_timed_now(&self) -> bool {
-        self.osc3_timed.value() && self.osc3_range.value() == Footage::Lo
+    /// Each oscillator's timed cycle, if its TIMED is on (whatever its RANGE is: the engine
+    /// applies it at LO only).
+    pub fn timed(&self) -> [Option<crate::timed::Length>; 3] {
+        self.timed_params().map(|(on, division, _)| {
+            on.value()
+                .then(|| crate::timed::DIVISIONS[division.value().to_index()].1)
+        })
+    }
+
+    /// Whether oscillator `n` (0, 1, 2) is timed now: its TIMED on and its RANGE at LO (at any
+    /// other RANGE it does nothing).
+    pub fn timed_now(&self, n: usize) -> bool {
+        let (on, _, range) = self.timed_params()[n];
+        on.value() && range.value() == Footage::Lo
     }
 
     /// How the FREQUENCY knobs' dials read on this computer.
@@ -1105,7 +1127,7 @@ impl Ca72Params {
             lock: self.lock.value(),
             potato: self.quality.value() == QualityMode::Lo,
             ultra: self.quality.value() == QualityMode::Ultra,
-            osc3_timed: self.osc3_timed(),
+            timed: self.timed(),
         }
     }
 }

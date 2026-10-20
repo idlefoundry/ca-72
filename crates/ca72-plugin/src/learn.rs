@@ -93,7 +93,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 69] = [
+pub const LEARNABLE: [Learnable; 73] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -109,7 +109,11 @@ pub const LEARNABLE: [Learnable; 69] = [
     stepped("osc2_waveform", "OSCILLATOR-2 WAVEFORM"),
     stepped("osc3_waveform", "OSCILLATOR-3 WAVEFORM"),
     switch("osc3_control", "OSC. 3 CONTROL"),
-    // Oscillator 3 timed (R-OSC3-TIMED): DIVISION's steps as RATE's.
+    // The oscillators timed (R-OSC-TIMED): DIVISION's steps as RATE's.
+    switch("osc1_timed", "OSC. 1 TIMED"),
+    stepped("osc1_division", "OSC. 1 DIVISION"),
+    switch("osc2_timed", "OSC. 2 TIMED"),
+    stepped("osc2_division", "OSC. 2 DIVISION"),
     switch("osc3_timed", "OSC. 3 TIMED"),
     stepped("osc3_division", "OSC. 3 DIVISION"),
     // MIXER.
@@ -942,6 +946,10 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "osc2_waveform" => &p.osc2_waveform,
         "osc3_waveform" => &p.osc3_waveform,
         "osc3_control" => &p.osc3_control,
+        "osc1_timed" => &p.osc1_timed,
+        "osc1_division" => &p.osc1_division,
+        "osc2_timed" => &p.osc2_timed,
+        "osc2_division" => &p.osc2_division,
         "osc3_timed" => &p.osc3_timed,
         "osc3_division" => &p.osc3_division,
         "osc1_volume" => &p.osc1_volume,
@@ -1164,8 +1172,8 @@ mod tests {
                 counts(Kind::Switch)
             ),
             // (The arpeggiator's: GATE and SWING knobs, DIRECTION, RATE and OCTAVES selectors,
-            // ON and HOLD switches; oscillator 3 timed's DIVISION and TIMED.)
-            (29, 12, 26)
+            // ON and HOLD switches; each oscillator's timed DIVISION and TIMED.)
+            (29, 14, 28)
         );
     }
 

@@ -1,4 +1,4 @@
-//! Oscillator 3 timed (decisions.md R-OSC3-TIMED): at RANGE's LO, its cycle a note value of the
+//! Oscillator 3 timed (decisions.md R-OSC-TIMED): at RANGE's LO, its cycle a note value of the
 //! host's tempo (the standalone's TEMPO), counted from the host's place while its transport
 //! plays, so that it never drifts from the host (the owner, 2026-10-20: "it can't drift. It
 //! has to stay synced to the host").
@@ -214,22 +214,59 @@ mod tests {
 mod played {
     use super::*;
     use crate::Ca72;
-    use crate::params::{Ca72Params, Footage, Osc3Division, QualityMode};
+    use crate::params::{Ca72Params, Division, Footage, QualityMode};
     use crate::tests::{block, initialised_with};
     use nih_plug::context::process::TestProcessContext;
     use nih_plug::prelude::*;
     use std::sync::Arc;
 
-    /// Oscillator 3 timed at `division`, RANGE at LO, a sawtooth heard, at `quality`.
-    fn timed(division: Osc3Division, quality: QualityMode) -> Ca72Params {
-        Ca72Params {
-            osc3_timed: BoolParam::new("Osc 3 Timed", true),
-            osc3_division: EnumParam::new("Osc 3 Division", division),
-            osc3_range: EnumParam::new("Osc 3 Range", Footage::Lo),
-            osc3_on: BoolParam::new("Osc 3 On", true),
+    /// Oscillator `n` (0, 1, 2) heard, its TIMED `on` at `division`, its RANGE at `range`, at
+    /// `quality`.
+    fn timed_osc(
+        n: usize,
+        on: bool,
+        range: Footage,
+        division: Division,
+        quality: QualityMode,
+    ) -> Ca72Params {
+        let d = Ca72Params {
             quality: EnumParam::new("Quality", quality),
             ..Ca72Params::default()
+        };
+        let (t, dv, r, o) = (
+            BoolParam::new("Timed", on),
+            EnumParam::new("Division", division),
+            EnumParam::new("Range", range),
+            BoolParam::new("On", true),
+        );
+        match n {
+            0 => Ca72Params {
+                osc1_timed: t,
+                osc1_division: dv,
+                osc1_range: r,
+                osc1_on: o,
+                ..d
+            },
+            1 => Ca72Params {
+                osc2_timed: t,
+                osc2_division: dv,
+                osc2_range: r,
+                osc2_on: o,
+                ..d
+            },
+            _ => Ca72Params {
+                osc3_timed: t,
+                osc3_division: dv,
+                osc3_range: r,
+                osc3_on: o,
+                ..d
+            },
         }
+    }
+
+    /// Oscillator 3 timed at `division`, RANGE at LO, a sawtooth heard, at `quality`.
+    fn timed(division: Division, quality: QualityMode) -> Ca72Params {
+        timed_osc(2, true, Footage::Lo, division, quality)
     }
 
     fn context(p: &Ca72, rate: f32, mode: ProcessMode) -> TestProcessContext<Ca72> {
@@ -247,10 +284,22 @@ mod played {
         }
     }
 
-    /// `blocks` blocks of `len` with a key held from the first, `host(b, c)` setting the host's
-    /// transport for block `b`: each of oscillator 3's resets, host samples from the first
-    /// block's start (the probe read after each block: a block holds one at most here).
+    /// Oscillator 3's resets ([`resets_of`]).
     fn resets(
+        p: &mut Ca72,
+        c: &mut TestProcessContext<Ca72>,
+        len: usize,
+        blocks: usize,
+        host: impl Fn(usize, &mut TestProcessContext<Ca72>),
+    ) -> Vec<f64> {
+        resets_of(2, p, c, len, blocks, host)
+    }
+
+    /// `blocks` blocks of `len` with a key held from the first, `host(b, c)` setting the host's
+    /// transport for block `b`: each of oscillator `n`'s resets, host samples from the first
+    /// block's start (the probe read after each block: a block holds one at most here).
+    fn resets_of(
+        n: usize,
         p: &mut Ca72,
         c: &mut TestProcessContext<Ca72>,
         len: usize,
@@ -260,12 +309,12 @@ mod played {
         c.push_event(key(60));
         let mut out = Vec::new();
         // (Counted from here: the voices may have played before, as they are made.)
-        let mut seen = p.engine.osc3_reset().map_or(0, |r| r.1);
+        let mut seen = p.engine.osc_reset(n).map_or(0, |r| r.1);
         for b in 0..blocks {
             host(b, c);
             let y = block(p, c, len);
             assert!(y.iter().all(|v| v.is_finite()));
-            let (ago, count) = p.engine.osc3_reset().unwrap();
+            let (ago, count) = p.engine.osc_reset(n).unwrap();
             assert!(count <= seen + 1, "block {b}: two resets in a block");
             if count > seen {
                 seen = count;
@@ -310,9 +359,9 @@ mod played {
         const LEN: usize = 256;
         let blocks = (600.0 * 48_000.0 / LEN as f64) as usize;
         for division in [
-            Osc3Division::EighthTriplet,
-            Osc3Division::TwoBars,
-            Osc3Division::QuarterDotted,
+            Division::EighthTriplet,
+            Division::TwoBars,
+            Division::QuarterDotted,
         ] {
             let mut p = initialised_with(
                 timed(division, QualityMode::Lo),
@@ -340,7 +389,7 @@ mod played {
                 );
                 assert_eq!(block(&mut p, &mut c, LEN), silence);
                 for k in [0, LEN - 1] {
-                    let t = p.engine.timed_probe(k as f64).unwrap();
+                    let t = p.engine.timed_probe(k as f64)[2].unwrap();
                     let exact = count(s + k as f64);
                     let mut e = t.phase - (exact - exact.floor());
                     e -= e.round();
@@ -360,7 +409,7 @@ mod played {
                 block(&mut p, &mut c, LEN);
             }
             // (The last block's start.)
-            let t = p.engine.timed_probe(0.0).unwrap();
+            let t = p.engine.timed_probe(0.0)[2].unwrap();
             let exact = count(((blocks - 1) * LEN) as f64);
             let mut e = t.phase - (exact - exact.floor());
             e -= e.round();
@@ -373,7 +422,7 @@ mod played {
     #[test]
     fn every_division_counts_the_hosts_beats_or_bars() {
         for (i, (name, length)) in DIVISIONS.iter().enumerate() {
-            let division = Osc3Division::from_index(i);
+            let division = Division::from_index(i);
             let mut p = initialised_with(
                 timed(division, QualityMode::Lo),
                 48_000.0,
@@ -386,7 +435,7 @@ mod played {
                 let beats = host_beats(from, 97.0, s);
                 c.set_transport(true, Some(97.0), Some(beats), Some((3, 4)));
                 block(&mut p, &mut c, 256);
-                let t = p.engine.timed_probe(100.0).unwrap();
+                let t = p.engine.timed_probe(100.0)[2].unwrap();
                 let at = host_beats(from, 97.0, s + 100.0);
                 let (count, per) = match *length {
                     Length::Beats(q) => (at / q, 97.0 / 60.0 / 48_000.0 / q),
@@ -406,21 +455,23 @@ mod played {
         }
     }
 
-    /// At LO, HI and ULTRA, oscillator 3's resets fall where the host's cycles start (a
+    /// At LO, HI and ULTRA, each oscillator's resets fall where the host's cycles start (a
     /// thirty-second at 123.7 BPM, from an odd place), the circuit's within a thousandth of a
     /// sample and the light voice's within a tenth; ENTROPY (at its default) moves them not
     /// at all.
     #[test]
     fn its_resets_are_on_the_hosts_grid_at_every_quality() {
-        for quality in [QualityMode::Lo, QualityMode::Hi, QualityMode::Ultra] {
+        for (n, quality) in (0..3)
+            .flat_map(|n| [QualityMode::Lo, QualityMode::Hi, QualityMode::Ultra].map(|q| (n, q)))
+        {
             let mut p = initialised_with(
-                timed(Osc3Division::ThirtySecond, quality),
+                timed_osc(n, true, Footage::Lo, Division::ThirtySecond, quality),
                 48_000.0,
                 ProcessMode::Realtime,
             );
             let mut c = context(&p, 48_000.0, ProcessMode::Realtime);
             let beats = |s: f64| host_beats(5.3, 123.7, s);
-            let rs = resets(&mut p, &mut c, 128, 200, |b, c| {
+            let rs = resets_of(n, &mut p, &mut c, 128, 200, |b, c| {
                 c.set_transport(
                     true,
                     Some(123.7),
@@ -430,14 +481,14 @@ mod played {
             });
             // (The first is the oscillator taking its place on the clock.)
             let rs = &rs[1..];
-            assert!(rs.len() >= 7, "{quality:?}: {rs:?}");
+            assert!(rs.len() >= 7, "oscillator {}, {quality:?}: {rs:?}", n + 1);
             let limit = if quality == QualityMode::Lo {
                 0.1
             } else {
                 1e-3
             };
             let w = worst(rs, 0.125, beats);
-            assert!(w < limit, "{quality:?}: {w} samples");
+            assert!(w < limit, "oscillator {}, {quality:?}: {w} samples", n + 1);
         }
     }
 
@@ -449,7 +500,7 @@ mod played {
     fn it_runs_on_when_stopped_and_takes_the_hosts_place_again() {
         for quality in [QualityMode::Lo, QualityMode::Hi] {
             let mut p = initialised_with(
-                timed(Osc3Division::ThirtySecond, quality),
+                timed(Division::ThirtySecond, quality),
                 48_000.0,
                 ProcessMode::Realtime,
             );
@@ -502,7 +553,7 @@ mod played {
     #[test]
     fn a_tempo_change_mid_note_is_followed() {
         let mut p = initialised_with(
-            timed(Osc3Division::Sixteenth, QualityMode::Hi),
+            timed(Division::Sixteenth, QualityMode::Hi),
             48_000.0,
             ProcessMode::Realtime,
         );
@@ -526,82 +577,78 @@ mod played {
         assert!(w < 1e-3, "{w} samples");
     }
 
-    /// At any other RANGE, TIMED does nothing: the samples are those with it off, to the bit,
-    /// at HI and LO.
+    /// At any other RANGE, an oscillator's TIMED does nothing: the samples are those with it
+    /// off, to the bit, for each oscillator at HI and LO.
     #[test]
     fn at_any_other_range_timed_does_nothing() {
-        for quality in [QualityMode::Hi, QualityMode::Lo] {
-            for range in [Footage::R32, Footage::R8, Footage::R2] {
-                let render = |on: bool| {
-                    let params = Ca72Params {
-                        osc3_timed: BoolParam::new("Osc 3 Timed", on),
-                        osc3_range: EnumParam::new("Osc 3 Range", range),
-                        ..timed(Osc3Division::Sixteenth, quality)
+        for n in 0..3 {
+            for quality in [QualityMode::Hi, QualityMode::Lo] {
+                for range in [Footage::R32, Footage::R8, Footage::R2] {
+                    let render = |on: bool| {
+                        let params = timed_osc(n, on, range, Division::Sixteenth, quality);
+                        let mut p = initialised_with(params, 48_000.0, ProcessMode::Realtime);
+                        p.params
+                            .noise_seed
+                            .store(7, std::sync::atomic::Ordering::Relaxed);
+                        p.engine.prepare(48_000.0, p.params.seed());
+                        let mut c = context(&p, 48_000.0, ProcessMode::Realtime);
+                        c.push_event(key(57));
+                        (0..40)
+                            .flat_map(|b| {
+                                c.set_transport(true, Some(120.0), Some(b as f64 * 0.0053), None);
+                                block(&mut p, &mut c, 128)
+                            })
+                            .collect::<Vec<f32>>()
                     };
-                    let mut p = initialised_with(params, 48_000.0, ProcessMode::Realtime);
-                    p.params
-                        .noise_seed
-                        .store(7, std::sync::atomic::Ordering::Relaxed);
-                    p.engine.prepare(48_000.0, p.params.seed());
-                    let mut c = context(&p, 48_000.0, ProcessMode::Realtime);
-                    c.push_event(key(57));
-                    (0..40)
-                        .flat_map(|b| {
-                            c.set_transport(true, Some(120.0), Some(b as f64 * 0.0053), None);
-                            block(&mut p, &mut c, 128)
-                        })
-                        .collect::<Vec<f32>>()
-                };
-                assert!(render(true) == render(false), "{quality:?} {range:?}");
+                    assert!(render(true) == render(false), "{n} {quality:?} {range:?}");
+                }
             }
         }
     }
 
-    /// OSC. 3 CONTROL on, the key played and the PITCH wheel move timed oscillator 3 not at
-    /// all: its resets are the same wherever.
+    /// The key played (each oscillator follows the keys; oscillator 3 with OSC. 3 CONTROL on)
+    /// and the PITCH wheel move a timed oscillator not at all: its resets are the same wherever.
     #[test]
     fn the_keys_and_the_wheel_leave_it_on_its_clock() {
-        let render = |note: u8, bend: f32| {
-            let params = Ca72Params {
-                osc3_control: BoolParam::new("Osc 3 Control", true),
-                ..timed(Osc3Division::Sixteenth, QualityMode::Hi)
-            };
-            let mut p = initialised_with(params, 48_000.0, ProcessMode::Realtime);
-            let mut c = context(&p, 48_000.0, ProcessMode::Realtime);
-            c.push_event(NoteEvent::MidiPitchBend {
-                timing: 0,
-                channel: 0,
-                value: bend,
-            });
-            c.push_event(key(note));
-            let mut out = Vec::new();
-            let mut seen = 0;
-            for b in 0..200 {
-                c.set_transport(
-                    true,
-                    Some(133.0),
-                    Some(host_beats(1.1, 133.0, (b * 128) as f64)),
-                    None,
-                );
-                block(&mut p, &mut c, 128);
-                let (ago, count) = p.engine.osc3_reset().unwrap();
-                if count > seen {
-                    seen = count;
-                    out.push(((b + 1) * 128) as f64 - 1.0 - ago);
+        for n in 0..3 {
+            let render = |note: u8, bend: f32| {
+                let params = Ca72Params {
+                    osc3_control: BoolParam::new("Osc 3 Control", true),
+                    ..timed_osc(n, true, Footage::Lo, Division::Sixteenth, QualityMode::Hi)
+                };
+                let mut p = initialised_with(params, 48_000.0, ProcessMode::Realtime);
+                let mut c = context(&p, 48_000.0, ProcessMode::Realtime);
+                c.push_event(NoteEvent::MidiPitchBend {
+                    timing: 0,
+                    channel: 0,
+                    value: bend,
+                });
+                c.push_event(key(note));
+                let mut out = Vec::new();
+                let mut seen = p.engine.osc_reset(n).map_or(0, |r| r.1);
+                for b in 0..200 {
+                    let at = host_beats(1.1, 133.0, (b * 128) as f64);
+                    c.set_transport(true, Some(133.0), Some(at), None);
+                    block(&mut p, &mut c, 128);
+                    let (ago, count) = p.engine.osc_reset(n).unwrap();
+                    if count > seen {
+                        seen = count;
+                        out.push(((b + 1) * 128) as f64 - 1.0 - ago);
+                    }
                 }
-            }
-            out
-        };
-        let low = render(36, 0.5);
-        assert!(low.len() > 3);
-        for (note, bend) in [(84, 0.5), (60, 1.0), (60, 0.0)] {
-            let other = render(note, bend);
-            assert_eq!(other.len(), low.len());
-            for (a, b) in low.iter().zip(&other).skip(1) {
-                assert!(
-                    (a - b).abs() < 1e-6,
-                    "key {note}, bend {bend}: {a} against {b}"
-                );
+                out
+            };
+            let low = render(36, 0.5);
+            assert!(low.len() > 3, "{n}");
+            for (note, bend) in [(84, 0.5), (60, 1.0), (60, 0.0)] {
+                let other = render(note, bend);
+                assert_eq!(other.len(), low.len(), "{n}");
+                for (a, b) in low.iter().zip(&other).skip(1) {
+                    assert!(
+                        (a - b).abs() < 1e-6,
+                        "{n}: key {note}, bend {bend}: {a} against {b}"
+                    );
+                }
             }
         }
     }
@@ -613,7 +660,7 @@ mod played {
         // At 96 and 44.1 kHz, the host's place in its own samples.
         for rate in [96_000.0f32, 44_100.0] {
             let mut p = initialised_with(
-                timed(Osc3Division::ThirtySecond, QualityMode::Hi),
+                timed(Division::ThirtySecond, QualityMode::Hi),
                 rate,
                 ProcessMode::Realtime,
             );
@@ -634,7 +681,7 @@ mod played {
         // Offline: the same samples as in real time.
         let render = |mode: ProcessMode| {
             let mut p = initialised_with(
-                timed(Osc3Division::SixteenthTriplet, QualityMode::Lo),
+                timed(Division::SixteenthTriplet, QualityMode::Lo),
                 48_000.0,
                 mode,
             );
@@ -659,7 +706,7 @@ mod played {
         assert!(render(ProcessMode::Offline) == render(ProcessMode::Realtime));
         // No tempo, stopped: 120 BPM, a sixteenth 6000 samples.
         let mut p = initialised_with(
-            timed(Osc3Division::Sixteenth, QualityMode::Hi),
+            timed(Division::Sixteenth, QualityMode::Hi),
             48_000.0,
             ProcessMode::Realtime,
         );
@@ -673,7 +720,7 @@ mod played {
         // 1000 BPM (the most the clock takes), a thirty-second: 360 samples a cycle; and 1 BPM's
         // four bars, finite and quiet about it.
         let mut p = initialised_with(
-            timed(Osc3Division::ThirtySecond, QualityMode::Hi),
+            timed(Division::ThirtySecond, QualityMode::Hi),
             48_000.0,
             ProcessMode::Realtime,
         );
@@ -685,7 +732,7 @@ mod played {
         assert!(rs.len() > 10);
         assert!(worst(&rs[1..], 0.125, beats) < 1e-3);
         let mut p = initialised_with(
-            timed(Osc3Division::FourBars, QualityMode::Ultra),
+            timed(Division::FourBars, QualityMode::Ultra),
             48_000.0,
             ProcessMode::Realtime,
         );

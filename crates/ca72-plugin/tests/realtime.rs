@@ -881,12 +881,12 @@ fn the_arpeggiator_neither_allocates_nor_frees() {
     );
 }
 
-/// Oscillator 3 timed (decisions.md R-OSC3-TIMED) neither allocates nor frees while it plays:
-/// TIMED switched, RANGE moved to and from LO, DIVISION and QUALITY automated (LO, HI, ULTRA),
-/// oscillator 3 heard and on the modulation, the transport playing, jumping back (a loop),
+/// The oscillators timed (decisions.md R-OSC-TIMED) neither allocate nor free while they play:
+/// each TIMED switched, each RANGE moved to and from LO, each DIVISION and QUALITY automated
+/// (LO, HI, ULTRA), all three heard and oscillator 3 on the modulation, the transport playing, jumping back (a loop),
 /// changing tempo and stopping, keys pressed and let go, in the plug-in's own process.
 #[test]
-fn oscillator_3_timed_neither_allocates_nor_frees() {
+fn the_oscillators_timed_neither_allocate_nor_free() {
     use ca72_plugin::Ca72;
     use nih_plug::context::process::TestProcessContext;
     use nih_plug::prelude::*;
@@ -914,6 +914,9 @@ fn oscillator_3_timed_neither_allocates_nor_frees() {
     let a = p.parameters().clone();
     let mut c = TestProcessContext::<Ca72>::new(params, RATE as f32, ProcessMode::Realtime);
     for (q, v) in [
+        (a.osc1_timed.as_ptr(), 1.0),
+        (a.osc2_timed.as_ptr(), 1.0),
+        (a.osc2_on.as_ptr(), 1.0),
         (a.osc3_timed.as_ptr(), 1.0),
         (a.osc3_range.as_ptr(), 0.0),
         (a.osc3_on.as_ptr(), 1.0),
@@ -976,8 +979,13 @@ fn oscillator_3_timed_neither_allocates_nor_frees() {
         }
         let k = (b / 19) as f32;
         c.automate(a.osc3_division.as_ptr(), (k % 18.0) / 17.0);
+        c.automate(a.osc1_division.as_ptr(), ((k + 5.0) % 18.0) / 17.0);
+        c.automate(a.osc2_division.as_ptr(), ((k + 11.0) % 18.0) / 17.0);
         c.automate(a.osc3_timed.as_ptr(), if b % 170 < 150 { 1.0 } else { 0.0 });
+        c.automate(a.osc1_timed.as_ptr(), if b % 190 < 120 { 1.0 } else { 0.0 });
         c.automate(a.osc3_range.as_ptr(), if b % 130 < 100 { 0.0 } else { 0.6 });
+        c.automate(a.osc1_range.as_ptr(), if b % 110 < 70 { 0.0 } else { 0.6 });
+        c.automate(a.osc2_range.as_ptr(), if b % 150 < 90 { 0.0 } else { 0.2 });
         c.automate(a.quality.as_ptr(), (b / 300) as f32 / 2.0);
         ARMED.store(true, Ordering::SeqCst);
         p.process(&mut buffer, &mut aux, &mut c);
@@ -992,6 +1000,6 @@ fn oscillator_3_timed_neither_allocates_nor_frees() {
     assert_eq!(
         (allocs, frees),
         (0, 0),
-        "oscillator 3 timed allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
+        "the oscillators timed allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
     );
 }
