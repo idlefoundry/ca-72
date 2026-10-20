@@ -1991,6 +1991,10 @@ to controllers, Omni.
   host's automation, the editor and presets reach the voices as they always have: anything
   setting a gliding knob's parameter ends its glide there. nih-plug's smoothers are not used:
   none of the parameters has one, and giving them one would change automation's sound too.
+  **Since R-KNOB-GLIDE (2026-10-19):** every continuous knob glides, whatever sets it
+  (`smooth.rs`); a learned controller's value still over 10 ms; the host's automation or the
+  editor setting a gliding knob glides on from where it is instead of ending the glide.
+  `Dezip` and `DEZIP_STEP` became `smooth::Smooth` and `smooth::STEP`.
 - Nothing allocated or freed (`tests/realtime.rs`, the plug-in's own `process` with every kind
   of learned control, a capture, reserved controllers and automation ending a glide).
 
@@ -5985,7 +5989,11 @@ tested, and this follows it.
 - **What changes.** QUALITY's default is LO (Potato mode, R47), not HI, so a new instance
   (and the standalone's first session) plays the light voices: 2.1 to 3.8 % of a core for ten
   POLY voices against 78 to 107 % at HI (R47's measurement, three presets), so a first try
-  works on a slower computer. "New users" is taken as new instances: a parameter's default cannot tell a
+  works on a slower computer. (Corrected 2026-10-19, R-LO-WORKERS: since R71's filter, ten LO
+  voices cost 17.8 to 21.4 % of a Ryzen 7 7800X3D core on one thread, every factory preset's
+  sound, against 83 to 146 % at HI: a quarter to a seventh, not a thirtieth. LO's voices are
+  now shared with the workers: on the Ryzen under Linux that takes about half of it off the
+  host's thread with one worker and three quarters with four or more; on Windows less.) "New users" is taken as new instances: a parameter's default cannot tell a
   new user from an existing one, and the choice per computer that could (like LOOK) would hide
   the default from a host's own reset.
 - **What does not.** A project keeps the QUALITY it was saved with (every 0.2 session saves
@@ -11282,6 +11290,484 @@ polyphonic patches") may be the same.
 **Not done:** an Intel Mac, macOS's scheduling of time-constraint workers, Windows, or a host.
 To ask the reporter: whether DOUBLE at WIDTH 0 crackles (expected: yes) and LO does not; which
 MacBook Pro and buffer size.
+
+## R-FX-SAVE-ORDER. The effects' file follows the chain in step
+
+**Found on 2026-10-19** by CI on PR #125 (`release-0.3.0`, 17f1b5f): on Windows,
+`tests/safety.rs`'s `effects_that_crash_or_hang_as_they_load_never_hold_the_start_and_stay_off`
+read `effects.json` as soon as the effect hung at load read NOT RESPONDING, and found it not yet
+turned off there. Reproduced on the lab's Windows 11 computer (MSVC, as CI): 9 failures in 10
+runs. Traced, the hung effect's record was written 1.4 ms after the test had read the file: the
+chain showed the effect turned off as soon as its lock was let go, and saved it after, and on
+Windows a write with its flush takes 1 to 3 ms. The log's "the effects could not be saved ... The
+system cannot find the file specified" came after the failure: that late save, cut short by the
+test's folder being removed as it failed.
+- **A second fault of the same kind:** a save took the chain, then waited its turn to write, so
+  two saves at once (two effects failing together, a state saved as an effect is turned off) could
+  land out of order, an older chain written over a newer one. On Windows, a new test that changes
+  the chain from four threads at once found the file unlike the chain in 2 runs of 10.
+
+**Fixed:** a save takes the chain and writes it while holding the chain's lock (`Shared::save_in`),
+and an effect turned off (failing as it loads, as it is loaded again at a new rate, or given up on
+as it plays) is saved before the lock is let go. What anyone sees of the chain is on disk, and
+saves land in the order their chains were taken. Nothing on the audio thread takes this lock, and
+the drawer only tries it (`try_status`), so a write's milliseconds hold nothing the player hears or
+sees.
+- **The other files written this way** (`ca72_fx::write_atomically`'s temporary file and rename):
+  the scan's cache and the running marker are written whole from one thread's values, with no
+  chain to fall behind; `settings.toml` is changed under its lock file (R57), with a
+  temporary name for each write; a preset and an agent's record (`agent/discovery.rs`) have one
+  writer each. None needed the change.
+
+**Evidence (2026-10-19):** on Windows, the safety tests 20 runs in 20 (all six tests), where
+the same test had failed 9 in 10; `chain.rs`'s new
+`changes_made_at_once_are_saved_as_the_chain_shows` 10 in 10, with the rest of `chain.rs` (2
+failures in 10 before). On Linux both pass, before and after (a write to a temporary folder
+there is too quick to fall behind).
+
+
+## R-RELEASE-0.2.8. 0.2.8
+
+**Owner decisions, 2026-10-19.** After a level drop the owner first heard on 0.2.7 (and then on
+0.2.6 too), the owner set AUTO GAIN's rule and asked for a release: "This should only be
+remeasured when drive changes. I recommend, yes, all three of your recommendations, absolutely.
+Let's do it, and let's get it shipped out in 0.2.8 immediately." The release's contents, chosen by
+the owner: the AUTO GAIN fix (R-AUTO-GAIN-DRIVE), the device listing and microphone request
+(R-DEVICE-LISTING, #113 with plugin-kit #10) and the quit shortcuts (R-QUIT, #115). The
+coordinator was allowed to take it as far as a draft release, merging plugin-kit #10 as well. The
+owner tested the signed installer on their Mac, then: "okay, 0.2.8 seems good. Put it into
+production!"
+
+**Publication evidence, 2026-10-19.** [CA-72 0.2.8](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.8)
+is public and Latest, also to an anonymous request (which the update check makes). The picks were
+merged into one branch, `release-0.2.8`, with #114 (0.2.7's record). The merge kept every decisions
+record. `third_party/nih-plug/Cargo.toml` keeps #115's `keyboard-types` dependency and #113's kit
+pin, `bcc4d8f7706043dccdecfe8b115ba129f84ec39c`.
+- [PR #121](https://github.com/idlefoundry/ca-72/pull/121)'s first CI run failed on Linux in one
+  test. The What's New test used 0.2.8 as its example of a version with no catalogue entry, and
+  0.2.8 now has one; it uses 99.0.0 now. CI then
+  passed on Linux, Windows and macOS. Locally on Linux, the workspace tests with ngspice and the
+  standalone features passed (555, then the corrected What's New tests), as did clippy (all
+  features), fmt, notices, and the notices, window-identity and installer scripts. `main` is the
+  merge `7b8f0ee756f576377c273beabe46bc11f5a7f856`, which the annotated `v0.2.8` tag names. The
+  tag's CI ([39317221552](https://github.com/idlefoundry/ca-72/actions/runs/39317221552)) passed
+  in all four jobs and drafted the release.
+- The macOS installer was built on the Mac from a clean checkout of the tag, signed with Developer
+  ID inside the owner's session, notarised (submission `40fdec70-f2ad-4ace-8851-997e911dc27e`,
+  Accepted) and stapled. `pkgutil`, Gatekeeper ("Notarized Developer ID") and
+  `codesign --verify --deep --strict` passed for every bundle, every bundle is 0.2.8 and universal,
+  and the Audio Unit carries the signed CLAP byte for byte.
+- `CA-72-0.2.8-macOS.pkg` sha256 `0ab425fe29cb5dc8fdc7707053ac9cbd41a2315ee56b62bc792f86b958815dc1`,
+  91,845,384 bytes. After publication all six downloads were fetched again without a login and
+  checked against `SHA256SUMS.txt`: every one matched.
+- The owner installed the signed package on their Mac and tested it before publication. No other
+  host test of the installed package was made.
+- Issue #112 closed with the release. The release's scripts and logs are in
+  `~/lab/artifacts/ca-72/0.2.8/` on the Mac.
+
+## R-LO-WORKERS. LO's voices shared with the workers where that lightens the host's thread
+
+**Owner decision, 2026-10-19.** On R-POLY-CRACKLE's finding that LO plays every voice on the
+host's thread: "Low should use extra processor threads if that makes a positive difference to
+the amount of usage that it takes. It shouldn't require that. I would hope that we can keep it
+dynamic... We need to keep this working on older, like 4-core computers for sure. But if
+somebody has, you know, an 8 or a 16-core computer and we can make use of more threads, then
+let's do so."
+
+**Agent decisions, 2026-10-19** (placeholder id; not yet reviewed by the owner):
+- **LO shares its voices with POLY's workers** (and UNISON's), which an instance already holds at
+  LO (R21: the pool follows POLY and UNISON, not QUALITY), so the budget, the seats and each
+  machine's count of workers are as at HI: one worker on a computer of 3 or 4 hardware threads,
+  five on 4 cores with 8 threads, nine on the Ryzen. Nothing is required: with no workers, or
+  one voice, every voice plays on the host's thread as before.
+- **As many threads as pay** (`engine::lo_threads`): a thread a voice up to four voices, then a
+  thread for each two (five threads for ten voices), never more than the pool's workers and the
+  host's thread. "Pays" here: each thread added takes from the host's thread at least half the
+  processor time the workers spend for it, so the host's time falls by more than the computer's
+  total rises. The host's thread waits for the longest of the threads' shares, so the count is
+  the fewest threads for that share (four voices on three threads would be no shorter than on
+  two). DOUBLE's twins, played with their voices, do not change the count: measured, doubled
+  voices wanted the same. `Pool::play` takes the most threads to wake (`threads`; HI and ULTRA
+  pass `MAX`, as before).
+- **Workers park at the block's end** (`Pool::rest`, from `Engine::end_block`): they spun 50 us
+  (R-SPIN) after the block's last run for a run that comes only with the next block. Beside LO's
+  light voices (about 50 us a voice a run of 128 samples) that spin was most of a worker's time:
+  with all nine woken for ten voices, the workers took 42 % of a core for 19 % of voices' work.
+  With the rest, 30 %. A run offered clears it, so the spin between a block's runs is kept. It
+  applies at HI and ULTRA too, where it can only save the same spin.
+- **The break-even** (the Ryzen 7 7800X3D, ordinary threads, paced, 64 to 512 frames): with the
+  rest, sharing pays from two voices, the fewest that can be shared (two voices at 128 frames:
+  the host's thread 4.3 to 2.7 % of a core, the workers 2.5 %); without it, two voices were below
+  it (the workers 4.3 % for 1.8 saved). Past four voices a thread a voice does not pay: ten voices
+  from five threads to ten took 2.2 more points off the host's thread for 7.3 of the workers'
+  (doubled, 3.4 for 18.6).
+- **The samples do not change**: each voice is still played whole by one thread and summed in
+  order.
+
+**Evidence (2026-10-19):**
+- **The same to the bit** (`tests/lo_workers.rs`, `same`): 21 materials (changing chords on 1 to
+  10 voices, with and without DOUBLE, and Horn Bloom, Brass Choir, Warp Field, Cycle of Fifths and
+  Swarm Riser as set), 3 seconds each, against the host's thread alone in blocks of the same
+  size, with 3, 5 and 9 workers by the rule and on 4 and 10 threads whatever it: all 420 renders
+  the same to the bit, none of a voice's runs unheard, the workers' processor time 46 to 380 ms a
+  render. (Swarm Riser's render on the host's thread alone differs between block sizes, as it did
+  before this change: its host-only path is unchanged.) `preset_render`, every factory preset at
+  LO, ten voices, with DOUBLE at 0 and 50 %: with 3, 5 and 9 workers the same to the bit as with
+  none (the 9 workers' run took 4.5 s against 15.5 s, 17.4 s of processor time), and with none the
+  same to the bit as `poly-crackle` (the code before this change, built apart).
+- **The host's thread at LO, paced** (`tests/lo_workers.rs`, `paced`: 48 kHz, each block at its
+  time with the plug-in's deadline, 3 seconds after one unmeasured; fewer workers than the
+  machine's standing for smaller computers; the before is every voice on the host's thread, as
+  `poly-crackle` plays). The figures are the host's thread's time in the plug-in as a share of the
+  period, its mean (and 99th percentile), and the process's processor time in shares of a core.
+  - **Linux, Ryzen 7 7800X3D** (ordinary threads, as R-POLY-CRACKLE measured; two rounds, the
+    order swapped, averaged; 128 frames; the other block sizes alike within a few points):
+
+    | Sound | 1 worker | 2 | 3 | 4 | 9 (the machine's) |
+    |---|---|---|---|---|---|
+    | Ten voices | 22 → 12 (p99 26 → 14) | 22 → 9 | 22 → 7 | 22 → 5 | 21 → 6 (p99 25 → 7) |
+    | Horn Bloom as set | 42 → 23 (p99 51 → 30) | 42 → 17 | 43 → 14 | 43 → 10 | 43 → 10 (p99 51 → 13) |
+    | Brass Choir as set | 34 → 18 | 32 → 14 | 32 → 10 | 32 → 10 | 32 → 10 |
+    | Warp Field as set | 34 → 19 | 34 → 14 | 34 → 10 | 34 → 10 | 34 → 10 |
+    | Cycle of Fifths as set | 19 → 11 | 19 → 9 | 19 → 6 | 19 → 6 | 20 → 6 |
+    | Swarm Riser as set | 17 → 10 | 17 → 9 | 17 → 5 | 17 → 5 | 17 → 5 |
+
+    The process's processor time rose 1 to 14 points (ten voices 22 → 23 with one worker, 22 →
+    26 to 27 with more; Horn Bloom 42 → 46 and 50). Of 320 cases each way, the host's thread
+    alone had no block late and no voice's run unheard; shared, 2 blocks late and 3 runs unheard
+    (ordinary threads, which the system may preempt; the plug-in's workers are audio threads).
+  - **Windows 11, i5-13600K** (the Balanced power plan, as it is set; the measuring thread and
+    the workers in MMCSS's Pro Audio, as a host's and the plug-in's are; processor time from the
+    threads' cycle counts; 128 frames; 4 workers is the plug-in's own count there): ten voices 26
+    → 25 with one worker (p99 50 → 31), 28 → 24 with two, 27 → 20 with four (p99 49 → 27); Horn
+    Bloom 32 → 26, 33 → 26, 34 → 24 (p99 53 → 31). Of 96 cases each way, the host's thread alone
+    had 78 blocks late, shared none (4 runs unheard). But the process's processor time rose from
+    25 to 34 % to 48 to 57 % with one worker and 73 to 131 % with four. There a voice's run costs
+    about half again as much paced as flat out (`preset_cost` on Windows: ten voices 15 to 21 %,
+    as on the Ryzen; paced on the host's thread alone, 26 %): a core busy for a few hundred
+    microseconds a block is not brought up to speed, the more so the thinner the voices are
+    spread. Restricting the process to the performance cores changed nothing.
+  - **Idle** (POLY's ten voices, no note): the same before and after on both (the host's thread
+    0.0 to 0.1 % on Linux, 0.2 to 0.3 % on Windows; no run is offered with no voice sounding).
+- **LO's cost now** (`preset_cost`, one thread, ten POLY voices, each factory preset's sound
+  without DOUBLE, the Ryzen): 17.8 to 21.4 % of a core, against HI's 83 to 146 %: a quarter to a
+  seventh of HI's (about a sixth on average). Each preset as set: Horn Bloom 36 %, Brass Choir
+  28 %, Warp Field 30 %, Swarm Riser 15 %, Cycle of Fifths 17 %.
+- **Tests:** `lo_s_threads_follow_its_voices`; `a_pool_at_rest_shares_the_next_blocks_run` (a run
+  after the workers have parked at a block's end is shared still); the no-allocation test with
+  workers (`poly_with_workers_neither_allocates_nor_frees_while_it_plays`) now switches QUALITY to
+  LO for part of its run.
+
+**For the owner:** on Windows LO shared lightens the host's thread a little on average and
+much at its peaks, and costs the computer more processor time (two to four times the voices'
+own). Whether that is wanted there, and the Mac's figures, are open.
+
+**Not done:** the Mac (another session was signing a release on it): macOS's time-constraint
+workers and work intervals at LO are unmeasured, as is an Intel Mac. No host was tried. The
+Linux measurements used ordinary threads (real-time threads there were demoted by the
+plug-in's own watch, `ca72_rt::watch`, partway through a run on this busy desktop, so those
+figures were set aside).
+
+**Owner decision, 2026-10-19 (later).** Told the Windows trade and offered load-responsive
+sharing there: "okay, sounds like we should definitely do this on linux, and do the windows fix
+as you have suggested. Were there no gains to be had on Mac?" The suggestion: "make the sharing
+respond to load. LO stays on one thread while the audio thread has plenty of headroom, and
+spreads out only when it gets busy (above about half the block, or after a late block)."
+
+**Agent decisions, 2026-10-19 (later)** (not separately approved):
+- **Each system its way** (`engine::lo_sharing`, `LoSharing`): Linux always, as built; Windows
+  by load; macOS always, by the Mac's measurements below. Where sharing is by load and the load
+  is light, LO plays every voice on the host's thread, as 0.2.8 does.
+- **By load** (`engine::Busy`): the host's thread's time in the plug-in each block, from the
+  block's start (`set_deadline`) to its end (`end_block`), against the block's period,
+  smoothed with a time constant of 0.2 s. LO shares from a smoothed load of half the period,
+  and at once after a block late (longer than its period) or one with a voice's run not heard.
+  It stops once the load has stayed below 30 % for the hold: 2 s at first, doubled (to 30 s) each
+  time it is busy again within 10 s of stopping, back to 2 s after 10 s not busy. 30 % is well
+  below the half, and above the 24 to 28 % that a light load's sharing left on Windows, where it
+  hardly lowers the host's thread's time, so a light load made busy by one late block returns to
+  the host's thread. Two readings of the clock a block and plain arithmetic: nothing allocates
+  or waits. The samples are the same whichever way it goes.
+- **Evidence:** `lo_shares_while_the_host_s_thread_is_busy` (below half stays off, above shares,
+  a late block or a run not heard shares at once, the hold, its doubling and its return);
+  `tests/lo_workers.rs` `same`: 504 renders the same to the bit on Linux, 84 of them with the
+  sharing switched on and off every 37 blocks, and 72 on the Mac; in every paced run on the three
+  systems the render was the same to the bit as the host's thread's alone wherever no voice's run
+  went unheard (a voice that sits a run out is a run behind from then on).
+
+**The Mac** (M4 Pro, 10 performance and 4 efficiency cores; its own count is 8 workers; the
+workers on the plug-in's own path, time-constraint threads in their work interval, `ps -M`
+showing them at priority 97R; the measuring thread made one too, in a work interval of its own
+opened at each block's start and closed at its end, as a host's thread is in its device's
+workgroup; 48 kHz, 3 s a case, the Mac's background load as it was). The host's thread's mean /
+99th percentile in % of the period; CPU, the process's processor time in % of a core:
+
+| Sound | Workers | Block | host | always | load |
+|---|---|---|---|---|---|
+| Ten voices | 2 | 128 | 17 / 23; CPU 18; late 0, unheard 0 | 7 / 10; CPU 22; late 0, unheard 0 | 17 / 23; CPU 18; late 0, unheard 0, shared 0 % |
+| Ten voices | 2 | 256 | 24 / 28; CPU 25; late 0, unheard 0 | 6 / 11; CPU 18; late 0, unheard 0 | 20 / 27; CPU 20; late 0, unheard 0, shared 0 % |
+| Ten voices | 3 | 128 | 17 / 22; CPU 17; late 0, unheard 0 | 6 / 9; CPU 24; late 0, unheard 0 | 17 / 23; CPU 18; late 0, unheard 0, shared 0 % |
+| Ten voices | 3 | 256 | 14 / 24; CPU 14; late 0, unheard 0 | 7 / 9; CPU 28; late 0, unheard 0 | 23 / 28; CPU 24; late 0, unheard 0, shared 0 % |
+| Ten voices, DOUBLE | 2 | 128 | 28 / 36; CPU 29; late 0, unheard 0 | 16 / 65; CPU 42; late 4, unheard 0 | 16 / 42; CPU 42; late 2, unheard 2, shared 97 % |
+| Ten voices, DOUBLE | 2 | 256 | 107 / 172; CPU 85; late 323, unheard 0 | 15 / 48; CPU 39; late 0, unheard 0 | 21 / 56; CPU 53; late 0, unheard 0, shared 99 % |
+| Ten voices, DOUBLE | 3 | 128 | 112 / 240; CPU 94; late 542, unheard 0 | 12 / 20; CPU 42; late 1, unheard 0 | 13 / 42; CPU 43; late 4, unheard 0, shared 98 % |
+| Ten voices, DOUBLE | 3 | 256 | 120 / 180; CPU 104; late 431, unheard 0 | 9 / 16; CPU 34; late 0, unheard 0 | 23 / 42; CPU 33; late 0, unheard 0, shared 33 % |
+| Horn Bloom | 2 | 128 | 105 / 226; CPU 85; late 443, unheard 0 | 16 / 32; CPU 42; late 3, unheard 0 | 22 / 39; CPU 38; late 0, unheard 0, shared 59 % |
+| Horn Bloom | 2 | 256 | 107 / 181; CPU 85; late 309, unheard 0 | 15 / 32; CPU 40; late 0, unheard 0 | 21 / 57; CPU 53; late 0, unheard 0, shared 100 % |
+| Horn Bloom | 3 | 128 | 106 / 231; CPU 84; late 432, unheard 0 | 12 / 25; CPU 41; late 4, unheard 0 | 15 / 72; CPU 42; late 3, unheard 0, shared 88 % |
+| Horn Bloom | 3 | 256 | 115 / 204; CPU 99; late 369, unheard 0 | 10 / 19; CPU 38; late 0, unheard 0 | 11 / 56; CPU 37; late 1, unheard 0, shared 100 % |
+| Brass Choir | 2 | 128 | 47 / 191; CPU 42; late 99, unheard 0 | 11 / 14; CPU 32; late 0, unheard 0 | 26 / 35; CPU 27; late 0, unheard 0, shared 0 % |
+| Brass Choir | 2 | 256 | 22 / 37; CPU 22; late 0, unheard 0 | 9 / 16; CPU 27; late 0, unheard 0 | 31 / 38; CPU 31; late 0, unheard 0, shared 0 % |
+| Brass Choir | 3 | 128 | 26 / 35; CPU 27; late 0, unheard 0 | 8 / 10; CPU 30; late 0, unheard 0 | 27 / 35; CPU 28; late 0, unheard 0, shared 0 % |
+| Brass Choir | 3 | 256 | 22 / 37; CPU 22; late 0, unheard 0 | 10 / 12; CPU 40; late 0, unheard 0 | 27 / 37; CPU 27; late 0, unheard 0, shared 0 % |
+| Ten voices | 4 | 128 | 17 / 23; CPU 17; late 0, unheard 0 | 5 / 7; CPU 23; late 0, unheard 0 | 17 / 23; CPU 18; late 0, unheard 0, shared 0 % |
+| Ten voices | 4 | 256 | 23 / 28; CPU 23; late 0, unheard 0 | 4 / 6; CPU 20; late 0, unheard 0 | 15 / 27; CPU 15; late 0, unheard 0, shared 0 % |
+| Ten voices | 8 | 128 | 17 / 23; CPU 18; late 0, unheard 0 | 4 / 4; CPU 18; late 0, unheard 0 | 17 / 23; CPU 17; late 0, unheard 0, shared 0 % |
+| Ten voices | 8 | 256 | 14 / 18; CPU 14; late 0, unheard 0 | 5 / 6; CPU 26; late 0, unheard 0 | 14 / 26; CPU 14; late 0, unheard 0, shared 0 % |
+| Ten voices, DOUBLE | 4 | 128 | 30 / 39; CPU 31; late 0, unheard 0 | 11 / 40; CPU 44; late 3, unheard 0 | 24 / 33; CPU 36; late 0, unheard 0, shared 33 % |
+| Ten voices, DOUBLE | 4 | 256 | 106 / 181; CPU 92; late 314, unheard 0 | 9 / 25; CPU 40; late 0, unheard 0 | 23 / 35; CPU 38; late 0, unheard 0, shared 33 % |
+| Ten voices, DOUBLE | 8 | 128 | 51 / 155; CPU 49; late 107, unheard 0 | 9 / 25; CPU 38; late 0, unheard 0 | 17 / 36; CPU 37; late 0, unheard 0, shared 64 % |
+| Ten voices, DOUBLE | 8 | 256 | 104 / 163; CPU 90; late 305, unheard 0 | 9 / 11; CPU 43; late 0, unheard 0 | 24 / 32; CPU 38; late 0, unheard 0, shared 33 % |
+| Horn Bloom | 4 | 128 | 51 / 171; CPU 47; late 162, unheard 0 | 10 / 30; CPU 43; late 0, unheard 0 | 10 / 32; CPU 38; late 1, unheard 0, shared 95 % |
+| Horn Bloom | 4 | 256 | 108 / 184; CPU 95; late 321, unheard 0 | 7 / 9; CPU 33; late 0, unheard 0 | 16 / 42; CPU 53; late 0, unheard 1, shared 86 % |
+| Horn Bloom | 8 | 128 | 127 / 223; CPU 116; late 798, unheard 0 | 9 / 12; CPU 44; late 0, unheard 0 | 26 / 39; CPU 38; late 0, unheard 0, shared 34 % |
+| Horn Bloom | 8 | 256 | 105 / 175; CPU 89; late 292, unheard 0 | 10 / 29; CPU 42; late 0, unheard 0 | 19 / 35; CPU 50; late 1, unheard 0, shared 84 % |
+| Brass Choir | 4 | 128 | 45 / 149; CPU 42; late 85, unheard 0 | 8 / 10; CPU 31; late 0, unheard 0 | 25 / 34; CPU 25; late 0, unheard 0, shared 0 % |
+| Brass Choir | 4 | 256 | 24 / 34; CPU 24; late 0, unheard 0 | 9 / 11; CPU 36; late 0, unheard 0 | 23 / 29; CPU 23; late 0, unheard 0, shared 0 % |
+| Brass Choir | 8 | 128 | 25 / 32; CPU 26; late 0, unheard 0 | 7 / 10; CPU 30; late 0, unheard 0 | 25 / 34; CPU 26; late 0, unheard 0, shared 0 % |
+| Brass Choir | 8 | 256 | 34 / 38; CPU 34; late 0, unheard 0 | 6 / 11; CPU 25; late 0, unheard 0 | 36 / 42; CPU 36; late 0, unheard 0, shared 0 % |
+
+- Every voice on the host's thread, a heavy load ran away: the measuring thread, once past its
+  period, ran at a fraction of its speed (Horn Bloom's third of a core became 85 to 116 %), 5,332
+  blocks late in 32 cases; at 128 frames Horn Bloom was at times fine (28 %) and at times not.
+  A host's own thread, in its device's workgroup, may fare better; the light cases (ten voices,
+  Brass Choir, at 14 to 34 %) are the fair comparison.
+- Shared always: the host's thread at 4 to 16 % (a half to a sixth of its time alone), 15 blocks
+  late in 32 cases; where the host's thread alone kept up, the processor time from 9 points less
+  to 18 more (4 to 7 more in most cases). Shared by load: light loads stay on the host's thread as in 0.2.8, but heavy ones flapped
+  (shared 33 to 64 % of the blocks in seven cases), 12 blocks late and 3 runs not heard.
+- **So macOS shares always**: as on Linux, a worker costs little, and the host's thread alone is
+  the more fragile.
+
+**Windows again, by load** (the i5-13600K as before; light: 6 s a case; heavy: the measuring
+thread kept busy 40 % of each period first, `CA72_EXTRA`, a slower computer standing in):
+- Light: idle and ten voices (26 to 29 %) never shared, their processor time 0.2.8's. Horn
+  Bloom, Brass Choir and ten voices doubled (about a third of the period) have a few late blocks
+  every few seconds on this computer even alone (43 in 30 cases): each brought the sharing on
+  for a while (0 to 97 % of the blocks), the processor time 3 to 35 points more, late blocks 19.
+- Heavy (the host's thread alone at 56 to 73 %): shared throughout, the host's thread at 45 to
+  57 %; 108 blocks late alone against 1 (and 2 runs not heard); the processor time 1 to 10 points
+  more.
+
+**Not done (later):** a host on any system; an Intel Mac.
+
+
+## R-KNOB-GLIDE. Knob changes glide in the voices, from the editor, a trackpad and the host's automation (issue #107)
+
+**The owner, 2026-10-19.** Issue #107 records a user's report (macOS, 0.2.6): turning a knob
+by a drag or a two-finger trackpad scroll changes the sound in audible steps, plain with
+CUTOFF opened at strong EMPHASIS ("like an aliasing"); a hardware knob mapped with MIDI Learn
+is smooth. Told the measurement (below) and three choices with a recommendation for each, the
+owner: "I'm happy to follow your recommendations above regarding the 3 choices". So: a linear
+glide of about 30 ms, or the host's block if longer, starting again from where it is at each
+new value (10 ms is too short for a mouse's 17 ms between values and for 1024-frame blocks; a
+one-pole glide does not smooth the corners enough); offline renders of automation glide too (a
+bounce must sound like playback); choosing a preset, Init, or loading a session's or a
+project's state does not glide but lands at once, while the host's automation and the editor's
+moves glide. Selectors and switches stay stepped; only continuous knobs glide. With no knob
+moving nothing more runs and the renders stay the same to the bit; presets and automation land
+on the same final values.
+
+**The cause (measured 2026-10-19).** The editor's and the host's values reached the voices once
+a host block (the voices read the panel every sample, so CUTOFF stepped once a block); only a
+learned controller's knob glided (R34, 10 ms). A trackpad's points gathered to 40 before the knob
+moved a whole 2 % notch (`NOTCH`). At EMPHASIS 9 and 10 the resonance's pitch follows CUTOFF, in
+those steps. The figure below is how strongly the high band's loudness pulses at the rate new
+values come, against the voices told the sweep every sample (`tests/cutoff_steps.rs`'s figure,
+on the `poly-crackle` branch, here through the plug-in's own `process`).
+
+**What changed.**
+- **Every continuous knob glides in the voices** (`smooth.rs`: `Smooth`, R34's `Dezip`
+  generalised, in `process`): the 27 learnable knobs (`learn::knob_param`'s) and the panel's PITCH
+  and MODULATION wheels, whatever set them (a drag, a scroll, a double click, a typed value, the
+  host's automation in real time or offline, a learned controller). At each block's start, after
+  a learned controller's event and every 32 samples while one moves, each knob's parameter is
+  compared with the value the voices were last given; a new one glides there in a straight line
+  from where the voices have it, the voices' controls set every 32 samples (`smooth::STEP`); a
+  new value mid-glide starts again from there, and the glide ends on the parameter's value
+  exactly. At rest a block costs 29 comparisons and the voices have the parameters as before.
+  The parameters themselves (the host's, the editor's, the state's) are at their new values at
+  once, as before. The engine and the circuit model are unchanged.
+- **How long: 30 ms (`GLIDE`), or the time since the knob's previous value when that is longer
+  but no longer than the host's largest block, never past 0.2 s (`LONGEST`);** a value after a
+  longer rest (a typed value, a double click) 30 ms. Agent decision: "the host's block" taken as
+  the time between the knob's values, bounded by the largest block the host declares. The
+  wrappers split a block at each automation point (sample-accurate automation), so `process`
+  sees parts of the host's block, not the block; for automation that reaches the plug-in once a
+  block the time between values is the block (2048 frames at 48 kHz, 43 ms), and a slow drag's
+  longer gaps glide over the gap too. A host declaring very large blocks (8192 frames at 44.1 kHz,
+  186 ms) is covered up to `LONGEST`; beyond it the glide is 0.2 s and then holds.
+- **Presets, Init and sessions land at once.** The audio thread cannot tell a preset's
+  parameter changes from automation: both come through the host. So the presets' drawer marks
+  each knob value it is about to set (`Lands` on `Ca72Params`: a generation a preset, the plain
+  value's bits), and the audio thread lands a knob whose new value is the current generation's
+  mark, taking the mark (agent decision). Marks wait 0.5 s of processed audio after the audio
+  thread first sees the preset's generation (a host takes the editor's values at its next
+  block); a value of an earlier preset, or arriving later, glides. On a weakly ordered processor
+  the value can be seen before its mark: the glide begun then lands at the next 32-sample step.
+  Init marks its values alike. A session's or a project's state comes through `initialize` and
+  `reset` (nih-plug calls both after loading a state into a running instance), which land every
+  knob, as does the host's reset.
+- **A learned controller keeps R34's 10 ms** (agent decision). Its values come from a hand on
+  hardware at the controller's own rate, in 1/127 steps that R34 measured smooth at 10 ms, and
+  the reporter finds it smooth; 30 ms would only add lag between the hand and the sound. It now
+  goes through the same glides (`Smooth::learned`).
+- **The PITCH and MODULATION wheels glide too** (agent decision): continuous controls dragged by
+  the same mouse, whose steps a pitch takes as plainly as CUTOFF's. MIDI pitch bend and
+  modulation (the engine's own, from a keyboard's wheels) are unchanged, and MIDI BEND RANGE (a
+  setting) stays stepped, as do the selectors, the switches, VOICES, QUALITY and NOTE PRIORITY.
+- **A trackpad turns a knob as far as it travels** (`interact::turn`, `editor.rs`
+  `scroll_notches`). As baseview reports them: macOS gives a precise device's scroll (a
+  trackpad, a Magic Mouse) in points, a wheel's in lines; Windows gives lines, a wheel's notches
+  whole and a precision touchpad's (or a free-spinning wheel's) fractions of one; X11 gives only
+  whole lines (buttons 4 to 7). Points turn a continuous knob or a wheel in proportion, at the
+  old rate (40 points a notch of 2 %; a twentieth with SHIFT), and on Windows a fraction of a line
+  that fraction of a notch. A whole line is a notch, whatever its count, as before, and so is a
+  fraction of a line on macOS (a wheel turned slowly). A stepped control (VOICES, a selector, a
+  switch, a toggle) steps once a notch's travel has gathered. A Linux touchpad stays notched:
+  baseview's X11 has no smooth scrolling.
+- R34's own measurement (`a_controllers_steps`) keeps its unglided reference by preparing
+  one-sample glides.
+
+**Evidence (Linux x86, Rust 1.97.1, 2026-10-19).** `tests/knob_glide.rs`, by hand, the same
+file on v0.2.8 (7b8f0ee, before) and on this branch (after). `cutoff_sweep_through_process`:
+CUTOFF 25 to 75 % in 2 s, Brass Choir at HI, one voice, oscillator 1 alone, no contour, through
+`process` at 48 kHz; the high band's loudness at the values' rate and its harmonics against the
+continuous sweep's:
+
+| How CUTOFF's values arrive | EMPHASIS 9 before | after | EMPHASIS 10 before | after |
+|---|---|---|---|---|
+| A drag, 60 values a second at 256-frame blocks | +24.7 dB | -4.4 dB | +27.6 dB | +0.7 dB |
+| A trackpad: 0.2.8's 2 % notches; now 60 values a second in proportion | +37.8 dB | -4.4 dB | +37.1 dB | +0.7 dB |
+| Automation once a block of 32 frames | +4.5 dB | +0.8 dB | +2.1 dB | -0.6 dB |
+| 256 frames | +11.8 dB | -1.5 dB | +10.0 dB | -1.9 dB |
+| 512 frames | +20.2 dB | -3.7 dB | +23.7 dB | +2.4 dB |
+| 1024 frames | +31.6 dB | +2.4 dB | +32.5 dB | +1.2 dB |
+| 1024 frames, offline | +31.6 dB | +2.4 dB | +32.5 dB | +1.2 dB |
+| 2048 frames, offline | +37.1 dB | -2.3 dB | +37.7 dB | -1.7 dB |
+
+Every way's held tail (the last half second) within 0.002 dB of the others, before and after.
+`presets_through_process`: every factory preset played two seconds, the next chosen in the
+presets' drawer and played a second more, offline, the same to the bit as v0.2.8 (19 of 19).
+`preset_render` against v0.2.8: every factory preset the same to the bit. `glide_cost` (ten
+voices of Felt Bass, POLY, offline, the best of three; this machine shared with other work):
+at rest LO 179.0 and HI 149.8 ms a second of audio (v0.2.8: 176.8 and 148.3); CUTOFF gliding
+the whole time LO 197.9, HI 154.7 (v0.2.8 stepping: 180.9, 152.1): a moving knob costs about
+3 % at HI and 10 % at LO, whose light voices work their laws out again at each 32-sample step
+(as a learned knob's glide already did). New tests: `smooth.rs`' five (30 ms and the gap,
+presets' marks, the learned 10 ms, the knobs' list),
+`a_chosen_preset_lands_in_the_voices_at_once_and_a_turned_knob_glides` (the drawer's presets
+and Init through `process`), `a_trackpad_turns_a_knob_in_proportion_and_voices_by_steps`,
+`scrolls_read_as_notches_or_travel_as_each_system_reports_them`,
+`a_trackpad_turns_continuous_controls_in_proportion`; the learned-controller tests changed
+where automation now glides. Listening files outside the repository (the night's
+`smooth-out`). Untested here: macOS with a trackpad and a Magic Mouse, Windows with a precision
+touchpad and a wheel, automation in a host of each format, and the owner's listening.
+
+### In 0.3.0, with R-KNOB-RESOLUTION, the arpeggiator, the MIDI pads and agents (2026-10-19)
+
+**The owner, 2026-10-19:** "All into 0.3.0" (no 0.2.9). R-KNOB-RESOLUTION (#120) was already in
+0.3.0 and also made a trackpad turn knobs in proportion; the two are one mechanism now, with
+both records' behaviour on screen.
+- **Scrolling, R-KNOB-RESOLUTION's way:** `interact::scroll` and `Kind::is_continuous` (which
+  know the arpeggiator's RATE and OCTAVES are stepped, as VOICES is), a stepped control's travel
+  kept past a step and started afresh when the turn reverses. `interact::turn`,
+  `interact::continuous` and `scroll_notches` above are gone. Its drag (every fraction of a
+  pixel, no dead zone) is unchanged; R-KNOB-GLIDE did not touch drags.
+- **Lines, R-KNOB-GLIDE's reading by system** (`editor.rs` `scroll_travel`, `PRECISE_LINES`):
+  points as they come (40 to a notch); on Windows lines as far as they go; elsewhere a line event
+  a notch whatever its size. Agent decisions, for the owner to confirm: R-KNOB-RESOLUTION had
+  taken fractions of a line in proportion on every system, which would make a Mac's wheel turned
+  slowly (a fraction of a line an event) a tenth as fast as 0.2.8, so outside Windows a line is a
+  notch, as R-KNOB-GLIDE has it; on Windows several lines in one event (a fast wheel) count as
+  that many notches, as R-KNOB-RESOLUTION has it, where R-KNOB-GLIDE had taken them as one.
+  R-KNOB-RESOLUTION's tests of fractional lines read lines as Windows does
+  (`Editing::precise_lines`).
+- **The arpeggiator's GATE and SWING do not glide** (`smooth::TIMING`; agent decision, for the
+  owner to confirm). They are continuous knobs, but the arpeggiator takes them as a block begins
+  and each note as it is played: they set when notes start and stop, with no level to step, and a
+  glide would only make them late. Its RATE and OCTAVES stay stepped. The knobs' test now checks
+  every continuous control the editor turns glides but these two. The effects' drawer adds no
+  knob of the CA-72's (an effect's own controls are in its window, in its helper).
+- **Typed values (R-KNOB-ENTRY) and an agent's (R-MCP's `ca72_set`) glide** as a turn does:
+  both set the parameter through the editor's setter, unmarked. An agent's `ca72_preset_load`
+  and `ca72_preset_step` choose as the drawer does (`Browser::choose`), so their knobs land.
+- **A preset a MIDI pad or an arrow key chooses (R-PRESET-KEYS) lands at once.** Its values are
+  set on the audio thread (`PresetActions::apply`), where R34's glide used to be stopped; now
+  every knob lands there (`Smooth::land`).
+- **Presets with the arpeggiator's settings** land with them: its switches and selectors are
+  stepped and GATE and SWING never glide. A preset holds no effects chain in 0.3.0 (the chain is
+  the standalone's own, `effects.json`), so there is nothing of it to mark.
+
+**Evidence (omarchy, 2026-10-19, on the merge of #123, #127 and #124 into `release-0.3.0`):**
+`typed_and_agents_values_glide_and_an_agents_preset_lands` (an editor over a plug-in's
+parameters: a typed value and an agent's glide over 30 ms, an agent's preset with the
+arpeggiator on lands), `a_preset_a_pad_chooses_lands_at_once` (fails without `Smooth::land`),
+the knobs' test with `TIMING`, `scrolls_read_as_notches_or_travel_as_each_system_reports_them`
+(rewritten for `scroll_travel`, with a Mac's slow wheel a notch an event); R-KNOB-RESOLUTION's
+and this record's other tests pass. `preset_render` of the 19 factory presets against
+`release-0.3.0` before these merges (17f1b5f): the same to the bit at HI, at LO and with DOUBLE
+at 50 %. The factory AUTO GAIN curves measured again: each the same to the bit as the presets
+carry. `knob_glide.rs`'s sweep on 0.3.0's sound, at EMPHASIS 9 (the figure as above): a drag
++0.5 dB, a trackpad's values +0.5 dB (0.2.8's notches +31.9), automation every 32 to 2048 frames
+-0.9 to -4.6 dB, offline as in real time; every held tail within 0.001 dB. `glide_cost` (ten
+voices of Felt Bass, POLY, offline, best of three, this machine shared): LO 46.8 ms a second of
+audio at rest, 68.3 with CUTOFF moving; with LO's sharing off (R-LO-WORKERS' `Never`) 193.8 and
+215.9. A moving knob adds the same 21 to 22 ms a second to LO either way (a larger share of
+LO's smaller cost once it shares its voices); HI 247 to 300, moving or not, within this
+machine's noise.
+
+
+## R-HOST-STACK. An instance's whole life fits a host's thread of 256 KB
+
+**Found on 2026-10-19** while trying to reproduce issue #58 (a crash in FL Studio on Windows 11
+"when messing with glide", 0.2.4; not reproduced as such). GLIDE was moved as hard as a host can
+move it through the plug-in's own CLAP entry point in this process (`tests/clap_host.rs`,
+`glide_stress`): its knob set many times a block, at its ends, by a denormal's breadth, out of
+range and not a number; its switch flipped; keys legato and detached, the bend moving; NOTE
+PRIORITY, RETRIGGER, POLY, UNISON, VOICES and QUALITY changed; a saved state loaded while it
+glides; 44.1 to 192 kHz in blocks of 32 to 1024. In a debug build and a release build: no panic,
+no debug assertion, no sample not finite, the output's peak at most 2.04. With every call made on
+a thread of a given stack (`CA72_STACK`), though:
+- **Making an instance took 576 to 640 KB of the host's thread's stack** in a release build (over
+  1 MB in a debug build). `Engine::new` built `Spares`, the ten places' spare voices inline (a
+  voice is 43,960 bytes: `Spares` was 439,840 bytes), and `Arc::new` built it on the stack of
+  whatever thread made the engine: the host's, making the instance. The crew's plan held a voice
+  inline too (`Crew` 44,352 bytes), moved about the stack again when the workers are started
+  (`initialize`, a state loaded) and stopped (`deactivate`): 150 KB in one frame of `Crew::start`.
+- So a host that makes or starts an instance on a thread with less stack than that crashes at
+  once. The spares have been built so since 0.1.0, needing less while a voice was smaller (35 KB in
+  0.2.6; 44 KB with fidelity, R-PREPARE-STACK). A macOS secondary thread has 512 KB
+  (R-PREPARE-STACK too), and a Windows host may give its own threads less than a main thread's 1 MB.
+  Whether FL Studio does is not known; nothing ties the report to it.
+- Playing alone needs less than 128 KB.
+
+**Fixed:** each spare voice boxed, as its twin already was, and the crew's plan holding its voice
+boxed: `Spares` is 320 bytes and `Crew` 400. A spare is still put in place by swapping it, on the
+audio thread, without allocating. No sample changes.
+
+**Evidence (omarchy, 2026-10-19):**
+- `an_instance_lives_on_a_host_thread_of_256_kb` (debug): an instance made, activated, played at
+  each QUALITY in POLY with GLIDE moving, its state loaded, deactivated and destroyed on a thread
+  of 256 KB. It overflows the stack without the fix and passes with it.
+- `glide_stress` with `CA72_STACK`, release: the whole life fits 128 KB (it needed 576 to 640 KB);
+  debug: 256 KB (over 1 MB).
+
+**Evidence (Windows 11, MSVC, the same day):** the test fails as a host would, the process ended
+by `STATUS_STACK_OVERFLOW` (0xc00000fd: what Windows reports for a crash to the desktop of this
+kind), and passes with the fix. In a release build making an instance needed 640 to 768 KB of
+the thread's stack (a Windows thread has 1 MB unless its maker asks otherwise); with the fix the
+whole life fits 256 KB.
 
 ## R-LINUX-PANEL-REPAINT. Submit a snapped panel's frame in its input event
 

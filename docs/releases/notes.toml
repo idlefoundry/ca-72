@@ -99,8 +99,11 @@ features = [
 performance_improvements = [
   "Much cleaner high notes in every QUALITY mode; ULTRA's VCA now runs at four times the sample rate.",
   "One latency in every QUALITY mode, so switching QUALITY never shifts your timing.",
+  "QUALITY LO shares its voices with spare processor cores on Mac and Linux, and on Windows when the computer is busy.",
 ]
 bug_fixes = [
-  "Knobs follow every fraction of a trackpad or mouse movement.",
+  "Knobs move smoothly from the mouse, a trackpad and automation, in offline renders too; choosing a preset still changes the sound at once.",
+  "Fewer dropouts in POLY with DOUBLE at QUALITY HI on a busy computer.",
+  "Hosts that load the CA-72 on a smaller thread no longer crash.",
   "The Audio Unit no longer crashes when a host prepares it on a thread with a small stack.",
 ]

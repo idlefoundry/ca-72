@@ -251,7 +251,10 @@ fn effects_that_crash_or_hang_as_they_load_never_hold_the_start_and_stay_off() {
     });
     let (k, hung_then) = joined.expect("the working effect joined");
     assert_eq!(hung_then, Health::Loading, "while the hung one still loads");
-    assert!(!blocks[0].0, "the first block dry");
+    // The first block dry, unless the working effect had loaded by then: on a loaded machine
+    // it can load before the test plays its first block (each block's health is read before
+    // it plays), and the start not waiting for it is `took`'s and `hung_then`'s to show.
+    assert!(!blocks[0].0 || k <= 1, "the first block dry ({k})");
     assert!(blocks[k + 2..].iter().all(|b| b.0), "wet once it joined");
     let worst = blocks.iter().map(|b| b.1).max().unwrap();
     assert!(

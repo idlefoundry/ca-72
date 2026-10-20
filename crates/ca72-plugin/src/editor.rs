@@ -93,8 +93,34 @@ fn settings_menu_corner() -> (f64, f64) {
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// A mouse wheel's turns are one gesture until it rests this long.
 const SCROLL_REST: Duration = Duration::from_millis(400);
-/// A trackpad's logical travel equivalent to one wheel line (also its old notch threshold).
+/// A trackpad's logical travel equivalent to one wheel line (also its old notch threshold): a
+/// continuous knob turns a notch's move (2 % of its travel) for each, a fraction for a fraction
+/// (issue #107).
 const SCROLL_PIXELS_PER_LINE: f64 = 40.0;
+/// Whether lines scrolled count as far as they go (Windows: a notch is a line, a precision
+/// touchpad's or a free-spinning wheel's `WM_MOUSEWHEEL` gives fractions of one, and a fast
+/// wheel several in one event). Elsewhere a line event is a notch whatever its size: on macOS a
+/// precise device gives points, and a wheel's lines are accelerated, a slow turn giving a
+/// fraction of a line for a notch; X11 gives only whole lines, one a notch (R-KNOB-GLIDE).
+const PRECISE_LINES: bool = cfg!(target_os = "windows");
+
+/// A scroll's vertical travel in logical pixels, [`SCROLL_PIXELS_PER_LINE`] to a notch: points
+/// (macOS's trackpad and Magic Mouse) as they come; lines with `precise_lines` (Windows) as far
+/// as they go, else a notch each, as before.
+fn scroll_travel(delta: ScrollDelta, precise_lines: bool) -> f64 {
+    match delta {
+        ScrollDelta::Pixels { y, .. } => f64::from(y),
+        ScrollDelta::Lines { y, .. } => {
+            let y = f64::from(y);
+            let lines = if precise_lines || y == 0.0 {
+                y
+            } else {
+                y.signum()
+            };
+            lines * SCROLL_PIXELS_PER_LINE
+        }
+    }
+}
 /// A control's menu's lettering, against the tip's.
 const MENU_TEXT: f64 = 1.15;
 
@@ -155,8 +181,14 @@ fn clamp_width(width: u32) -> u32 {
 /// The width the editor opens at before it is resized: its share of the usable screen
 /// (logical pixels), its height kept within the same share.
 fn fitted_width(screen: Option<(f64, f64)>) -> u32 {
+    fitted_width_in(screen, chosen_panel())
+}
+
+/// [`fitted_width`] for the panel `panel` (the chosen look's is the process's, which an editor
+/// opening another look changes).
+fn fitted_width_in(screen: Option<(f64, f64)>, panel: art::Panel) -> u32 {
     screen.map_or(DEFAULT_WIDTH, |(w, h)| {
-        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / chosen_panel().drawing_h());
+        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / panel.drawing_h());
         clamp_width(w.round() as u32)
     })
 }
@@ -1146,6 +1178,9 @@ struct Editing {
     hover: Option<Target>,
     drag: Option<Drag>,
     scroll: Option<Scroll>,
+    /// Whether a control takes lines scrolled as far as they go ([`PRECISE_LINES`]: this
+    /// system's reading; a test's to choose).
+    precise_lines: bool,
     /// The presets' list's scrolling not yet a whole row, in rows (+ up).
     list_travel: f64,
     last_press: Option<(Instant, Target)>,
@@ -1477,6 +1512,7 @@ impl Editing {
             hover: None,
             drag: None,
             scroll: None,
+            precise_lines: PRECISE_LINES,
             list_travel: 0.0,
             last_press: None,
             resizing: None,
@@ -3396,10 +3432,7 @@ impl Editing {
         if !self.operable(i) {
             return;
         }
-        let travel = match delta {
-            ScrollDelta::Lines { y, .. } => f64::from(y) * SCROLL_PIXELS_PER_LINE,
-            ScrollDelta::Pixels { y, .. } => f64::from(y),
-        };
+        let travel = scroll_travel(delta, self.precise_lines);
         if !travel.is_finite() || travel == 0.0 {
             return;
         }
@@ -9679,6 +9712,8 @@ mod tests {
     #[test]
     fn knob_resolution_keeps_fractional_lines_excess_travel_and_direction() {
         let (mut e, host, params) = editing();
+        // (Lines as Windows reads them, as far as they go: R-KNOB-GLIDE.)
+        e.precise_lines = true;
         let p = at(&e, centre("cutoff"));
         go(&mut e, p);
         for _ in 0..384 {
@@ -9718,6 +9753,8 @@ mod tests {
     #[test]
     fn knob_resolution_leaves_discrete_controls_at_their_positions() {
         let (mut e, host, _) = editing_poly();
+        // (Lines as Windows reads them, fractions too: R-KNOB-GLIDE.)
+        e.precise_lines = true;
         for (id, positions) in [
             ("voices", 8.0),
             ("osc1_range", 5.0),
@@ -9815,6 +9852,105 @@ mod tests {
                 Call::Set(cutoff, 0.61),
                 Call::Set(cutoff, 0.71),
                 Call::End(cutoff)
+            ]
+        );
+    }
+
+    /// A trackpad's or a Magic Mouse's points turn a knob as far as they travel (a notch's 2 %
+    /// for every 40 points, a fraction for a fraction; issue #107), in one gesture; VOICES, a
+    /// stepped knob, steps once a notch's travel has gathered.
+    #[test]
+    fn a_trackpad_turns_a_knob_in_proportion_and_voices_by_steps() {
+        let (mut e, host, params) = editing_poly();
+        let pixels = |e: &mut Editing, y: f32| {
+            e.mouse(MouseEvent::WheelScrolled {
+                delta: ScrollDelta::Pixels { x: 0.0, y },
+                modifiers: Modifiers::empty(),
+            });
+        };
+        let p = at(&e, centre("emphasis"));
+        go(&mut e, p);
+        for y in [4.0, 6.0, 30.0, -10.0] {
+            pixels(&mut e, y);
+        }
+        let emphasis = params.emphasis.as_ptr();
+        let calls = host.take();
+        assert_eq!(calls.first(), Some(&Call::Begin(emphasis)));
+        let set: Vec<f32> = calls
+            .iter()
+            .filter_map(|c| match c {
+                Call::Set(p, v) if *p == emphasis => Some(*v),
+                _ => None,
+            })
+            .collect();
+        let want = [0.002, 0.005, 0.02, 0.015];
+        assert_eq!(set.len(), want.len(), "{calls:?}");
+        for (got, want) in set.iter().zip(want) {
+            assert!((got - want).abs() < 1e-6, "{set:?}");
+        }
+        if let Some(s) = &mut e.scroll {
+            s.last -= SCROLL_REST * 2;
+        }
+        e.draw();
+        assert_eq!(host.take(), vec![Call::End(emphasis)]);
+        // VOICES: 30 points nothing; 15 more, a voice.
+        let p = at(&e, centre("voices"));
+        go(&mut e, p);
+        let before = params.voices.unmodulated_normalized_value();
+        pixels(&mut e, 30.0);
+        let voices = params.voices.as_ptr();
+        assert_eq!(host.take(), vec![Call::Begin(voices)]);
+        pixels(&mut e, 15.0);
+        let calls = host.take();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert!(
+            matches!(calls[0], Call::Set(p, v) if p == voices && (v - before - 0.125).abs() < 1e-6),
+            "{calls:?} from {before}"
+        );
+    }
+
+    /// What a scroll is as baseview gives it on each system (issue #107): macOS's points (a
+    /// precise device) as they come, 40 to a notch; a line a notch whatever its size (a wheel's,
+    /// X11's and macOS's, fractions too); on Windows lines as far as they go, a line a notch,
+    /// fractions (a precision touchpad's) and several at once (a fast wheel's) alike.
+    #[test]
+    fn scrolls_read_as_notches_or_travel_as_each_system_reports_them() {
+        let px = |y| ScrollDelta::Pixels { x: 0.0, y };
+        let lines = |y| ScrollDelta::Lines { x: 0.0, y };
+        for windows in [false, true] {
+            assert_eq!(scroll_travel(px(10.0), windows), 10.0);
+            assert_eq!(scroll_travel(px(-80.0), windows), -80.0);
+            assert_eq!(scroll_travel(lines(1.0), windows), 40.0);
+            assert_eq!(scroll_travel(lines(-1.0), windows), -40.0);
+            assert_eq!(scroll_travel(lines(0.0), windows), 0.0);
+        }
+        for (y, elsewhere, windows) in [
+            (0.125, 40.0, 5.0),
+            (-0.25, -40.0, -10.0),
+            (3.0, 40.0, 120.0),
+            (-1.5, -40.0, -60.0),
+        ] {
+            assert_eq!(scroll_travel(lines(y), false), elsewhere, "{y}");
+            assert_eq!(scroll_travel(lines(y), true), windows, "{y}");
+        }
+        assert_eq!(PRECISE_LINES, cfg!(windows));
+        // A slow turn of a Mac's wheel, a tenth of a line an event, turns a knob a notch an
+        // event, as before.
+        let (mut e, host, params) = editing();
+        e.precise_lines = false;
+        let p = at(&e, centre("cutoff"));
+        go(&mut e, p);
+        for _ in 0..3 {
+            wheel(&mut e, 0.1);
+        }
+        let cutoff = params.cutoff.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(cutoff),
+                Call::Set(cutoff, 0.52),
+                Call::Set(cutoff, 0.54),
+                Call::Set(cutoff, 0.56)
             ]
         );
     }
@@ -9985,6 +10121,8 @@ mod tests {
 
     #[test]
     fn it_opens_at_four_fifths_of_the_screen_until_resized() {
+        // (The official panel's: the process's chosen look is another test's to change.)
+        let fitted_width = |screen| fitted_width_in(screen, art::Panel::OFFICIAL);
         // A 14-inch MacBook Pro's screen less the menu bar; a 34-inch ultrawide's.
         assert_eq!(fitted_width(Some((1512.0, 949.0))), 1210);
         // The height's share sets it on a wide screen (the panel and the strip under it).
@@ -10005,6 +10143,7 @@ mod tests {
     fn on_x11_it_opens_to_fit_the_monitor_it_is_on() {
         use screen::{Rect, monitor_area};
         let r = |x, y, w, h| Rect { x, y, w, h };
+        let fitted_width = |screen| fitted_width_in(screen, art::Panel::OFFICIAL);
         let whole = r(0, 0, 5120, 1440);
         let (left, right) = (r(0, 0, 2560, 1440), r(2560, 0, 2560, 1440));
         let monitors = [(left, true), (right, false)];

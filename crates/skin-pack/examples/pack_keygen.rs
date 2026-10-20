@@ -302,6 +302,60 @@ mod tests {
         assert!(destination(&dir.path().join("existing:secret.key")).is_err());
     }
 
+    /// A SID as a security descriptor's text writes it: its SDDL alias if it has one, else as
+    /// given.
+    #[cfg(windows)]
+    #[allow(unsafe_code)]
+    fn sddl_name(sid: &str) -> String {
+        use windows_sys::Win32::{
+            Foundation::LocalFree,
+            Security::{
+                Authorization::{
+                    ConvertSecurityDescriptorToStringSecurityDescriptorW,
+                    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+                },
+                OWNER_SECURITY_INFORMATION,
+            },
+        };
+        let sddl: Vec<u16> = format!("O:{sid}\0").encode_utf16().collect();
+        let mut descriptor = std::ptr::null_mut();
+        // SAFETY: the SDDL is NUL-terminated; the descriptor's out pointer is valid.
+        let made = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                SDDL_REVISION_1,
+                &mut descriptor,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_ne!(made, 0, "{sid}");
+        let mut text = std::ptr::null_mut();
+        // SAFETY: the descriptor was made above; text is a valid out pointer.
+        let written = unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor,
+                SDDL_REVISION_1,
+                OWNER_SECURITY_INFORMATION,
+                &mut text,
+                std::ptr::null_mut(),
+            )
+        };
+        // SAFETY: the conversion allocated the descriptor, no longer used.
+        unsafe { LocalFree(descriptor) };
+        assert_ne!(written, 0, "{sid}");
+        let mut len = 0;
+        // SAFETY: a NUL-terminated UTF-16 allocation, copied before it is freed.
+        let back = unsafe {
+            while *text.add(len) != 0 {
+                len += 1;
+            }
+            String::from_utf16_lossy(std::slice::from_raw_parts(text, len))
+        };
+        // SAFETY: the conversion allocated text, now copied.
+        unsafe { LocalFree(text.cast()) };
+        back.strip_prefix("O:").unwrap_or(&back).to_owned()
+    }
+
     #[cfg(windows)]
     #[test]
     #[allow(unsafe_code)]
@@ -360,10 +414,17 @@ mod tests {
         };
         // SAFETY: conversion allocated text, now copied and no longer used.
         unsafe { LocalFree(text.cast()) };
-        let sid = current_user_sid().expect("the current user");
+        // (As the descriptor's text names the user: a well-known account by its SDDL alias, as
+        // the built-in Administrator's `LA`, which a CI runner's account can be.)
+        let sid = sddl_name(&current_user_sid().expect("the current user"));
+        assert_eq!(
+            sddl_name("S-1-5-32-544"),
+            "BA",
+            "aliases are as the descriptor writes them"
+        );
         let dacl = actual
             .strip_prefix(&format!("O:{sid}D:"))
-            .expect("the user's ownership");
+            .unwrap_or_else(|| panic!("the user's ownership: {actual}"));
         let (flags, ace) = dacl.split_once('(').expect("one grant");
         assert!(flags.contains('P'), "the DACL is not protected: {actual}");
         assert_eq!(ace, format!("A;;FA;;;{sid})"));

@@ -557,10 +557,13 @@ impl Browser {
         self.end_edit();
         self.drawer.hint.clear();
         let params = sound_params(p);
+        // (Its knobs land at once in the voices, not gliding: decisions.md R-KNOB-GLIDE.)
+        let landing = p.lands.begin();
         for (id, v) in targets(p, e) {
             if let Some((_, q)) = params.iter().find(|(i, _)| *i == id)
                 && (q.normalized() - v).abs() > 1e-6
             {
+                p.lands.mark(landing, p, id, v);
                 q.set_once(s, v);
             }
         }
@@ -579,10 +582,13 @@ impl Browser {
     /// action, not a library entry: it cannot replace a user's preset named Init.
     fn init(&mut self, p: &Ca72Params, s: &ParamSetter<'_>) {
         self.end_edit();
+        // (Its knobs land at once, as a preset's: decisions.md R-KNOB-GLIDE.)
+        let landing = p.lands.begin();
         for (id, q) in sound_params(p) {
             if !PLAYERS.contains(&id) {
                 let v = q.default_normalized();
                 if q.normalized() != v {
+                    p.lands.mark(landing, p, id, v);
                     q.set_once(s, v);
                 }
             }
@@ -1085,6 +1091,46 @@ mod tests {
         fn set_state(&self, _: PluginState) {
             panic!("Init must not replace project state")
         }
+    }
+
+    /// A preset chosen, and Init, set the voices to their knobs at the plug-in's next block, not
+    /// gliding; a knob turned in the editor glides there over 30 ms and lands on its value
+    /// (decisions.md R-KNOB-GLIDE).
+    #[test]
+    fn a_chosen_preset_lands_in_the_voices_at_once_and_a_turned_knob_glides() {
+        let mut plugin = crate::tests::initialised(false);
+        let mut c = crate::tests::hostless(&plugin);
+        let p = plugin.parameters().clone();
+        let host = ApplyingHost::new(p.clone());
+        let setter = ParamSetter::new(&host);
+        let dir = tempfile::tempdir().unwrap();
+        let mut b = Browser::new(Library::at(dir.path()));
+        b.show(true, &p);
+        crate::tests::block(&mut plugin, &mut c, 256);
+        let landed = |plugin: &crate::Ca72, what: &str| {
+            assert!(!plugin.smooth.moving(), "{what}");
+            assert_eq!(plugin.controls(), p.controls(), "{what}");
+        };
+        for name in ["Brass Choir", "Felt Bass", "Brass Choir"] {
+            let e = b.library.find(name).unwrap();
+            b.choose(&e, &p, &setter);
+            crate::tests::block(&mut plugin, &mut c, 64);
+            landed(&plugin, name);
+        }
+        b.drawer_press(DrawerTarget::Key(PresetKey::Init), 0.0, &p, &setter);
+        crate::tests::block(&mut plugin, &mut c, 64);
+        landed(&plugin, "Init");
+        // The editor's turn glides.
+        p.cutoff.set_once(&setter, 0.9);
+        crate::tests::block(&mut plugin, &mut c, 64);
+        assert!(plugin.smooth.moving());
+        let voices = plugin.controls().panel.cutoff;
+        assert!(voices > 0.5 && voices < 0.9, "{voices}");
+        for _ in 0..22 {
+            crate::tests::block(&mut plugin, &mut c, 64);
+        }
+        landed(&plugin, "the turned knob, 30 ms on");
+        assert_eq!(plugin.controls().panel.cutoff.to_bits(), 0.9f64.to_bits());
     }
 
     #[test]
