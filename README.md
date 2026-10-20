@@ -298,9 +298,12 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   too heavy for. It follows the same panel, the plug-in's own controls with it, its laws
   fitted to the circuit's (pitch, levels, the filter's cutoff, emphasis and rings, the
   contours, GLIDE, the VCA, DRIVE and FILTER MODE), and sounds close to it but simpler: ten
-  voices were a thirtieth to a fortieth of HI's cost in the 0.2.0 measurements. The 0.2.2
-  filter fixes increase both LO and HI's cost; those earlier ratios no longer describe this
-  release. Switching it stops the notes
+  voices cost a quarter to a seventh of HI's on one thread (about a fifth of a core of a fast
+  computer, a Ryzen 7 7800X3D, against four fifths of a core to one and a half at HI;
+  [docs/decisions.md](docs/decisions.md) R-LO-WORKERS). In 0.2.0 it was a thirtieth to a
+  fortieth; 0.2.2's filter fixes made LO's filter costlier. Like HI's, LO's voices are shared
+  with the plug-in's own threads where the machine has them and enough voices sound to repay it
+  (on Windows only while the host's thread is busy; see below). Switching it stops the notes
   sounding (switching between HI and ULTRA does not). It is saved with the session, not with
   presets: it suits the computer, not the sound.
 
@@ -633,8 +636,10 @@ The service documents and datasheets the model was derived from are not included
   computer (a Ryzen 7 7800X3D) with every voice sounding, twice what 0.1's POLY presets did,
   and on a computer of four processors or a slower one they can overload. QUALITY LO took
   about a fortieth of that then ([docs/decisions.md](docs/decisions.md) R67). Both costs
-  increase with the 0.2.2 filter fixes; the R71 measurements cover one voice, not this full
-  polyphony matrix.
+  increased with the 0.2.2 filter fixes: at LO, Horn Bloom now takes about a third of a core
+  and Brass Choir and Warp Field a little less, on one thread (R-LO-WORKERS): a seventh to an
+  eighth of Horn Bloom's and Brass Choir's at HI (R-POLY-CRACKLE), shared with the plug-in's
+  threads as HI's are.
 - POLY's voices are shared between the host's audio thread and threads of the plug-in's own,
   as many as the machine gives ([docs/decisions.md](docs/decisions.md) R-THREADS): every
   instance in the host shares one budget of the machine's hardware threads less two and
@@ -644,7 +649,13 @@ The service documents and datasheets the model was derived from are not included
   machine's fast cores less two (the performance cores on a processor with efficiency
   cores): 8 on an Apple M4 Pro, 4 on an Intel i5-13600K. An instance holds its threads only
   while its POLY is on, taking them a moment after POLY is switched on and giving them back
-  when it is switched off (R18, R21).
+  when it is switched off (R18, R21). At QUALITY LO, whose voices are light, a run of voices is
+  shared only on as many threads as repay waking them: a thread a voice up to four, then one
+  for each two, so ten voices use five threads at most (R-LO-WORKERS). With one worker (a
+  computer of 3 or 4 processors) LO's voices are split between it and the host's thread. On
+  Linux and macOS LO always shares; on Windows, where a worker's short runs cost more, it
+  shares only while the host's thread is busy (above half the block, smoothed, or after a late
+  block) and returns to the host's thread when the load has stayed below 30 % for a while.
 - At ULTRA, on a machine of 6 or more fast cores, each sounding voice plays on six threads
   (one voice where the machine has 6 to 9, two from 10), when every sounding voice can: the
   same samples, in about half the time. The one instrument does too, so at ULTRA it holds
