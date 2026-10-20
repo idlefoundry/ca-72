@@ -11768,3 +11768,124 @@ by `STATUS_STACK_OVERFLOW` (0xc00000fd: what Windows reports for a crash to the 
 kind), and passes with the fix. In a release build making an instance needed 640 to 768 KB of
 the thread's stack (a Windows thread has 1 MB unless its maker asks otherwise); with the fix the
 whole life fits 256 KB.
+
+## R-LINUX-PANEL-REPAINT. Submit a snapped panel's frame in its input event
+
+2026-10-14: the owner confirmed that a scoped Hyprland `no_anim` rule removed the
+long stretch in Bitwig's CA-72 CLAP window, but controls still briefly stretched
+or jumped. A height-only PANEL change preserves renderer scale; however, its input
+event resized the native window and software surface without drawing or presenting
+the new image, and the next X11 frame callback could be 15 ms away.
+
+On Linux, an input-triggered height-only resize now draws and fully presents at
+the end of the action. Draw-time reconciliation and native follow still precede
+presentation, preserving a delayed host refusal and restore. Width changes (the
+grip, SIZE) keep the normal frame pacing; macOS and Windows do not take this path.
+First proposed as PR #40 on 0.1.x; re-applied to 0.2.7's editor (What's New, the
+window fixes of #97, #102 and #103) without other changes.
+
+A native regression creates only its own off-screen X11 parent/child windows,
+without a processor or audio device. It invokes actual PanelWindow input handling
+immediately after a scheduled frame, checking a successful full surface submission
+and correct composed/native dimensions before another frame can run. It covers
+both accepted directions, unchanged control scale and synchronous refusal. The
+earlier code fails at the first accepted collapse; this one submits in the same
+event (5 to 8 ms on omarchy, descriptive rather than a timing gate). `scripts/validate.sh`
+runs it, under Xvfb in CI.
+
+**Bitwig 5.2.7 on Linux, 2026-10-19 (issue #65).** Renamed CLAP builds of 0.2.7 and of
+this change, in an isolated Bitwig profile on a nested Hyprland 0.56 (Omarchy's look and
+window rules, the owner's `no_anim` rule for the test build's title), every composited
+frame captured (`ext-image-copy-capture`, about 60 a second), the same clicks by a
+virtual pointer. Per PANEL click, in both builds alike: one compositor frame (3 to 26 ms)
+shows the old image scaled into the new window (squashed on collapse, stretched on
+expand); that frame comes from the compositor drawing XWayland's old buffer in the new
+box, and the editor's early present does not remove it. On expand, both builds then show
+the old view at the top and black below for 230 to 265 ms, until the 250 ms whole repaint
+(`REPAINT`): Bitwig grows its window after the editor's child has taken the new height,
+the X server discards what was drawn outside the old parent, and baseview ignores the
+`Expose` that follows. Collapse is correct after the one squashed frame in both (this
+change 7 to 37 ms after the click, 0.2.7 24 to 64 ms). So this change alone makes no
+visible difference in Bitwig. A test build adding `Expose` → `WindowEvent::Damaged` to
+baseview's X11 loop showed the expanded panel 18 to 33 ms after the click with this change,
+but not on 0.2.7 (its frame is not yet shown when the `Expose` comes, so nothing is
+presented); that baseview change is issue #65's to adopt, with the SIZE, grip and
+reopen paths, which this change does not touch. No DSP, preset or installer behaviour
+changes.
+
+## R-LINUX-RESIZE. The editor's window on Linux as it changes size (issue #65)
+
+Issue #65: "Linux host resize/panel changes can visibly stretch the old frame, especially in
+Bitwig." Checked in Bitwig 5.2.7 on Linux, 2026-10-19/20, as R-LINUX-PANEL-REPAINT was: renamed
+test builds ("CA-72 LR": 0.2.8, release-0.3.0 at 17f1b5f, and this branch) in an isolated
+Bitwig profile (Demo Mode) on a nested Hyprland 0.56 with Omarchy's look and window rules and
+the owner's `no_anim` rule for the test build's title; every composited frame captured, the same
+clicks by a virtual pointer, each build in a fresh session; each frame after an action classed
+as the new view, the old one, the old one scaled into the new window (a stretch), or the old one
+unscaled in it (cut off, or black where not yet drawn). Milliseconds from the click until the
+view shown is the right one, CLAP:
+
+| Action | 0.2.8 | 0.3.0 | this change |
+|---|---|---|---|
+| PANEL on (×4) | 268 to 282 (old view, black below) | 263 to 285 (same) | 21 to 34 |
+| PANEL off (×4) | 17 to 39 | 19 to 37 | 15 to 44 |
+| SIZE 150 %, 100 %, 75 %, FIT | 708, 479, 424, 648 | 707, 486, 407, 727 | 286, 276, 181, 301 |
+| Grip, 500 px narrower, wider | 1517, 1396 | 1779, 1657 | 1164, 1168 |
+| Old view cut off or black during the drags | 355, 0 | 416, 484 | 0, 0 |
+| Reopen (×3) | 790 to 818 | 811 to 1245 | 424 to 478 |
+
+VST3 in Bitwig, 0.3.0 against this change: PANEL on 271 to 281 against 13 to 42, SIZE 417 to
+728 against 149 to 317, reopen 828 to 944 against 438 to 529. REAPER 7.79's VST3 FX window on
+the same compositor (no `no_anim` rule for its title, so Hyprland animates its window over about
+340 ms whichever build): PANEL 338 to 358 in both, no stretched frame; SIZE 413 to 700 against
+341 to 438; reopen 838 to 1004 against 576 to 630.
+
+Three changes, each found by measuring first:
+
+- **PANEL: shown again as the X server asks** (baseview's PATCHES.md change 12, with
+  R-LINUX-PANEL-REPAINT). A trace of the X events in Bitwig showed the order: the click; the
+  editor's own window taken to the new height and its frame shown in the same event (3 ms); the
+  X server's `Expose` for the window at its new size; that frame shown again at the `Damaged`
+  baseview now gives (5 to 8 ms), by which time Bitwig has grown its own window. The panel was
+  whole 8 to 44 ms after the click in every capture. This corrects R-LINUX-PANEL-REPAINT's
+  reading: the editor's window is 32 bits deep, so XWayland keeps its pixels in a pixmap of its
+  own (nothing is "discarded outside the old parent"), and no `Expose` comes as Bitwig's window
+  grows; a showing of the frame after Bitwig's window has its new size is what fills the lower
+  half, and before this none came until the 250 ms `REPAINT`.
+- **SIZE and the grip: the worn skin's background drawn side by side** (`ca72-panel`'s
+  `render.rs`). Timed in a release build, a new scale (`Editing::fit`) took 195 ms at the 1380
+  pixel width, 411 at 150 % (2070) and 800 at 2760, almost all of it the worn background: the
+  knobs' blurred shadows (`art::worn_overlay`, about 80 Gaussian blurs, each over its own region
+  whatever the canvas, so cutting the frame into bands of rows did not help) and the faces'
+  bicubic texture. Now the wood and faces are drawn in bands of rows and the shadows a part at
+  a time, on as many threads as there are processors (eight at most), each part over a pixmap
+  of its own laid over the frame in order, as resvg itself lays a filtered part. The same
+  background on one thread and on eight differ by two levels of light at most; the shadows so
+  against resvg's own drawing, by three (the test
+  `the_worn_background_drawn_side_by_side_is_the_background_drawn_at_once`); against 0.3.0's
+  background at 860, 1720 and 3440 pixels, by three at most. The print stays drawn at once
+  (drawn a part at a time its lettering came out up to 200 levels off). A worn renderer at 1720
+  pixels: 353 ms on one thread, 146 on eight (both with the pictures' 87 ms decoding);
+  `fit` at 150 % about 125 to 165 ms with the machine's other builds running (load 14). The
+  first frame drawn at a new scale (each knob's layer and picture made again, the strip) is
+  still 100 to 200 ms on one thread, and is most of what remains; the drawn skin was never slow
+  (20 to 50 ms). Every platform draws the background this way; nothing else changes.
+- **Reopen, and any size first shown: shown again at every frame for 250 ms** (`SETTLE`, Linux
+  only). The trace showed the editor's first frame after Bitwig reopened its window shown 165 ms
+  after the window was mapped, and lost (R19's case): the window stayed black until a later
+  showing, about 300 ms in all. Now a frame first shown at a size (the window opened or seen
+  again, PANEL, SIZE, the grip) is shown again, a copy, at each 15 ms frame for 250 ms; the
+  editor's first frame is then the one seen, and what black remains (about 180 ms) is the time
+  to draw it.
+
+Not fixable from the editor: **one compositor frame** (3 to 19 ms) of the old image scaled into
+the new window at most size changes, in every build, 0.2.8 to this change (5 of 8 PANEL clicks,
+2 of 4 SIZE steps in the last run, and between the grip's steps). Hyprland draws XWayland's
+buffer of the old size in the window's new box for the frame before the new buffer arrives;
+when the plug-in shows its frame does not change it. It would need XWayland or Hyprland to hold
+the window's new size until its new buffer, or a host that resizes its window only after the
+plug-in has drawn; the owner's `no_anim` rule already removes the long animated stretch.
+
+Not done: the owner's own (unnested) compositor at its refresh, Hyprland's default animations
+(no `no_anim` rule), a host's synchronous refusal in a real host (the X11 test covers it), the
+first frame at a new scale made quicker, macOS and Windows hosts (their editor tests pass).

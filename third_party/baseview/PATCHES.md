@@ -12,7 +12,8 @@ today's rustfmt gives it, so that `cargo fmt --all` leaves the tree as it is.
 
 Six changes for Windows (1 to 3, 5, 6 and 9), in `src/win/window.rs`, `src/win/drop_target.rs`,
 `src/win/escape.rs`, `src/event.rs` and `src/window.rs` (the first three the CA-72's
-`docs/decisions.md` R26, R28 and R34), four for macOS (4, 7, 8 and 11) and one for Linux (10, below):
+`docs/decisions.md` R26, R28 and R34), four for macOS (4, 7, 8 and 11) and two for Linux (10 and
+12, below):
 
 1. **The window procedure never calls the handler while it is busy.** baseview keeps the
    window's handler in a `RefCell` and borrows it for each event. A message can be sent to
@@ -58,8 +59,8 @@ Six changes for Windows (1 to 3, 5, 6 and 9), in `src/win/window.rs`, `src/win/d
    `WM_PAINT` gives the handler a new event, `WindowEvent::Damaged`, as any event is given
    (queued while the handler is busy, and given once its call returns), and `DefWindowProcW`
    then validates what the handler has not drawn (softbuffer validates the window as it
-   presents). Nothing else sends it: macOS keeps a window's pixels, and on X11 baseview
-   ignores `Expose` (the CA-72's editor shows its frame again every 250 ms there, R19).
+   presents). macOS keeps a window's pixels and sends nothing; on X11 baseview ignored
+   `Expose` (the CA-72's editor shows its frame again every 250 ms there, R19) until change 12.
 
    The CA-72's test `the_panel_is_shown_again_as_windows_repaints_its_window` fails without
    this change (the host's background left on the editor's window).
@@ -236,6 +237,27 @@ And one more for macOS, in `src/macos/application.rs` and `src/macos/window.rs` 
    modifiers and actions; and sends the quit Apple event from another process, as the Dock
    does, awaiting its answer: the window closed, answered with no error. With the delegate's
    Apple event handler left out, it fails ("0 -128" for "0 none").
+
+And one more for Linux, in `src/x11/event_loop.rs` (the CA-72's `docs/decisions.md`
+R-LINUX-RESIZE, its issue #65, 2026-10-20):
+
+12. **On X11, the handler is told when the X server asks for the window to be drawn again.**
+   `EXPOSURE` was in the window's event mask, but `Expose` fell through to `_ => {}`. Now an
+   `Expose` (any of a series) marks the events being drained, and once they are handled, after
+   the `Resized` they may have brought, the handler gets `WindowEvent::Damaged`, once, as
+   change 2 gives it on Windows. Under XWayland the editor's window (32 bits deep, so kept in a
+   pixmap of its own by the Composite extension) is sent one as it is mapped and each time it
+   takes a new size, and never as it is uncovered, the server putting its kept pixels back
+   itself; a server without compositing sends one where it was covered, too. In Bitwig 5.2.7 on
+   Linux, which grows its plug-in window after the editor's own has grown, the frame the CA-72
+   shows at once on PANEL (R-LINUX-PANEL-REPAINT) left the lower panel black for about 250 ms,
+   until its periodic repaint; shown again at the `Damaged` that follows, the panel was whole
+   8 to 40 ms after the click (every composited frame captured, 4 of 4 clicks).
+
+   The CA-72's test `a_panel_grown_is_shown_again_as_x_asks`
+   (`crates/ca72-plugin/src/editor/linux_resize_tests.rs`, X11, own off-screen windows) clicks
+   PANEL in an editor parented in a host window of its own and waits for `Damaged` with the
+   frame of the window's new size ready; with the `Expose` arm taken out it times out.
 
 Upstream's master has since rewritten the Windows backend and the handler's interface; to
 move to it, the editor must be ported, and the tests above show whether it still needs this.
