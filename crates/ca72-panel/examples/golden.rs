@@ -2,6 +2,8 @@
 //! ca72-panel --example golden -- <dir>` writes one PNG per case (each skin and lettering, two
 //! scales, scenes drawn in sequence so that the renderer's partial redraws are compared too).
 //! Two directories written by two builds are compared with `--compare <a> <b>`.
+//! `CA72_GOLDEN_LAYOUT=<file>` uses another layout, for comparing the lettering with a frozen
+//! pack's without rebuilding the renderer.
 
 use ca72_panel::{CONTROLS, Lettering, Renderer, Scene, Skin};
 
@@ -16,7 +18,16 @@ fn main() {
     for (skin, sk) in [(Skin::Drawn, "drawn"), (Skin::Worn, "worn")] {
         for (lettering, lt) in [(Lettering::Standard, "std"), (Lettering::Large, "large")] {
             for scale in [0.44, 1.0] {
-                let mut r = Renderer::with_look(skin, lettering, scale, 1.0);
+                let mut look = ca72_panel::Look::of(skin);
+                if let Ok(path) = std::env::var("CA72_GOLDEN_LAYOUT") {
+                    let text = std::fs::read_to_string(path).expect("the layout read");
+                    let mut report = skin_pack::Report::default();
+                    look.arrangement = std::sync::Arc::new(
+                        ca72_panel::Arrangement::read(&text, &mut report)
+                            .unwrap_or_else(|| panic!("{report}")),
+                    );
+                }
+                let mut r = Renderer::with_pack(look, lettering, scale, 1.0);
                 for (k, scene) in scenes().into_iter().enumerate() {
                     r.render(&scene);
                     let path = format!("{dir}/{sk}-{lt}-{scale}-{k}.png");

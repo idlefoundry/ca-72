@@ -11889,3 +11889,39 @@ plug-in has drawn; the owner's `no_anim` rule already removes the long animated 
 Not done: the owner's own (unnested) compositor at its refresh, Hyprland's default animations
 (no `no_anim` rule), a host's synchronous refusal in a real host (the X11 test covers it), the
 first frame at a new scale made quicker, macOS and Windows hosts (their editor tests pass).
+
+
+## R-READABILITY-4K. Small print at 4K, and QUALITY's captions in LARGE
+
+**Owner brief, 2026-10-19:** survey issue #70 with measured text and screenshots at 4K,
+100 % scaling, both lettering settings and each window size; implement only evidenced
+omissions from LARGE, leaving the approved realistic panel's design alone.
+
+**Agent decisions, 2026-10-19** (not separately approved):
+- **The survey**, `docs/readability-4k.md`, with each small text instance in
+  `docs/readability-4k-text.md`. The fresh 4K opening is 3026 by 1728, whereas the SIZE menu's
+  100 % is 1380 by 788. Fonts were measured from their outlines, dot displays from their
+  pitch and lit dot diameter. The 9 px x-height warning line is a conservative reading-size
+  screen, with cap height reported separately for the panel's capitals and numerals.
+- **QUALITY's ULTRA, HI and LO** follow LARGE's small-print step, 15 to 17 units. They had
+  stayed fixed at 15, although R-LETTERING includes LO / HI in the step. This is an
+  interpretation of that record for the owner to inspect, not a new panel design. An optional
+  `large_size` in a layout makes it explicit: only those three official captions use it;
+  a pack's existing fixed size stays fixed. The selected size is used in font-fit checks too.
+- **No baseline increase to tips or menus.** They already follow LARGE, but their x-heights
+  are still small: tips 6.56 / 8.21 px, menu group headings 5.50 / 6.88 px before any fitting
+  reduction. Larger minima and scrolling menus need the owner's eye. R-LETTERING explicitly
+  leaves the presets' drawer, keyboard, caps and displays unchanged; those reflows are
+  proposals, with preset-browser work coordinated separately. The FX chooser also needs
+  fewer rows and shared drawing/hit-test changes to take larger letters without clipping.
+
+**Evidence (the Linux reference machine, 2026-10-19):** offscreen renders at eight widths
+(860, 1035, 1380, 1725, 2070, 2760, 3026, 3108), both looks and lettering settings, with
+strip, keyboard, presets, rename, MIDI list, arp and FX chooser; separate settings/tooltip
+renders. Both approved-panel images are unchanged. The 32-frame golden comparison against
+v1's frozen layout leaves all 16 STANDARD frames identical; all 16 LARGE frames differ only
+at the three QUALITY captions. `cargo test -p ca72-panel`: 109 passed, 8 ignored; clippy
+(all targets, `-D warnings`) clean. The new `large_small_print_is_optional_and_checked` checks
+the three enlarged captions, an older pack's fixed sizes, and invalid size limits. Not tried:
+a host, other OS/host scales, a real 4K display or a human comfort trial. The handoff keeps
+native screenshots and crops outside the repository; the survey names the reproduction tools.

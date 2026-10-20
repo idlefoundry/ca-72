@@ -593,6 +593,7 @@ baseline = 724
 text = "VOLUME"
 at = [1221, 59]
 # size = 16               # fixed; without it, the panel's legend size (19, large 22)
+# large_size = 18         # optional size in LARGE; without it, `size` still applies
 # large = [1221, 55]      # its place in the large lettering, if different
 ```
 

@@ -16,6 +16,9 @@
 //! rail alone.
 //! `CA72_PACK=<folder>` in a skin pack's look (decisions.md R-SKIN-PACKS), what its checks
 //! found printed.
+//! `CA72_TIP=1` adds CUTOFF's hover tip; `CA72_MENU=settings` the built-in standalone
+//! settings' menu (a review fixture, without installed packs). `CA72_PRINT_SVG=<file>` writes
+//! the drawing's text as SVG, before rasterisation, for measuring its physical heights.
 
 use ca72_panel::{CONTROLS, Renderer, Scene, Skin};
 
@@ -48,6 +51,24 @@ fn main() {
     let arp = std::env::var("CA72_ARP").is_ok_and(|v| v == "1");
     let fx = std::env::var("CA72_FX").ok();
     let built = t0.elapsed();
+    if let Ok(path) = std::env::var("CA72_PRINT_SVG") {
+        let fonts = ca72_panel::fonts::Fonts::new();
+        let arrangement = r.arrangement();
+        let layout = ca72_panel::Layout::measure_in(&fonts, lettering, arrangement);
+        let plate = ca72_panel::art::plate();
+        let body = format!(
+            "{}<g transform='translate({} {})'>{}</g>",
+            ca72_panel::art::background(&layout, arrangement),
+            plate.origin.0,
+            plate.origin.1,
+            plate.body
+        );
+        std::fs::write(
+            path,
+            ca72_panel::art::document([0.0, 0.0, ca72_panel::W, ca72_panel::H], 3108, 1775, &body),
+        )
+        .expect("the print's SVG written");
+    }
     let mut scene = Scene::default();
     // The plugin's defaults: as the mock-up was drawn; the strip's knobs at what its readouts
     // read. `CA72_ALL=0.5`: every control at one value instead.
@@ -60,6 +81,9 @@ fn main() {
     if std::env::var("CA72_STANDALONE").is_ok_and(|v| v == "1") {
         let bpm = std::env::var("CA72_TEMPO").unwrap_or_else(|_| "120".into());
         scene.tempo = Some(format!("{bpm} BPM"));
+    }
+    if std::env::var("CA72_TIP").is_ok_and(|v| v == "1") {
+        scene.tip = Some(("CUTOFF FREQUENCY: 1.2 kHz".into(), 2081.0, 300.0));
     }
     let t1 = std::time::Instant::now();
     r.render(&scene);
@@ -200,6 +224,9 @@ fn main() {
             all.data_mut()[to..to + n].copy_from_slice(&d.data()[from..from + n]);
         }
     }
+    if std::env::var("CA72_MENU").as_deref() == Ok("settings") {
+        settings_menu(&mut all, &r);
+    }
     if std::env::var("CA72_KEYBOARD_CROP").is_ok_and(|v| v == "1") {
         let [x0, y0, x1, y1] = [370.0, 925.0, 3080.0, 1750.0].map(|v| (v * scale).round() as u32);
         let mut cropped = ca72_panel::Pixmap::new(x1 - x0, y1 - y0).expect("keyboard proof crop");
@@ -215,6 +242,78 @@ fn main() {
         eprintln!("{out}: {e}");
         std::process::exit(1);
     }
+}
+
+/// The built-in standalone's menu, as `learning::open_settings_menu` lays it out in 0.3.0.
+/// Drawn last, over the strip too, as the editor composes its overlays.
+fn settings_menu(frame: &mut ca72_panel::Pixmap, r: &Renderer) {
+    use ca72_panel::art::{H, W};
+    use ca72_panel::learn::{self, Menu};
+    let labels = [
+        "LOOK",
+        "REALISTIC",
+        "CLASSIC",
+        "LETTERING",
+        "STANDARD",
+        "LARGE",
+        "FREQUENCY DIALS",
+        "SEMITONES",
+        "HARDWARE",
+        "WINDOW",
+        "SIZE…",
+        "WHAT'S NEW…",
+        "MOD WHEEL SOURCE",
+        "CC 1…",
+        "STANDALONE",
+        "AUDIO & MIDI…",
+        "AGENTS",
+        "ALLOW",
+        "OFF",
+    ];
+    let mut menu = Menu {
+        x: 0.0,
+        y: 0.0,
+        size: r.text_size() * 1.15,
+        title: "SETTINGS · CA-72 0.3.0".into(),
+        items: labels.iter().map(|t| ((*t).into(), true)).collect(),
+        heads: vec![0, 3, 6, 9, 12, 14, 16],
+        marked: vec![
+            1,
+            if r.lettering() == ca72_panel::Lettering::Large {
+                5
+            } else {
+                4
+            },
+            7,
+            17,
+        ],
+        hover: None,
+    };
+    let (w, _) = menu.extent(r.fonts());
+    menu = menu.placed(r.fonts(), 3055.0 - w, 1017.0, [0.0, 0.0, W, H]);
+    let layer = learn::menu(r.fonts(), &menu);
+    let body = format!(
+        "<g transform='translate({} {})'>{}</g>",
+        menu.x, menu.y, layer.body
+    );
+    let doc = ca72_panel::art::document(
+        [0.0, r.top(), W, H - r.top()],
+        frame.width(),
+        frame.height(),
+        &body,
+    );
+    let options = resvg::usvg::Options {
+        fontdb: r.fonts().database(),
+        font_family: ca72_panel::fonts::FAMILY.into(),
+        ..Default::default()
+    };
+    let tree = resvg::usvg::Tree::from_str(&doc, &options).expect("the review menu parses");
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::identity(),
+        &mut frame.as_mut(),
+    );
+    eprintln!("settings items {} logical px", menu.size * r.scale());
 }
 
 /// The plugin's default for a parameter, normalized.
