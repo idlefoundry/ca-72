@@ -1612,20 +1612,20 @@ pub enum Blend {
 /// of its centre (the mock-ups' eighth note's place).
 pub const KEY: (f64, f64) = (60.0, 24.0);
 pub const KEY_SIGN: f64 = 39.0;
-/// How far above the key's middle its sign may reach: a thirty-second note's stem in the large
-/// lettering, and a little over.
-pub const KEY_SIGN_TOP: f64 = 38.0;
+/// How far above and below the key's middle its sign may reach: half a thirty-second note's
+/// height in the large lettering, a triplet's 3 above it, and a little over.
+pub const KEY_SIGN_TOP: f64 = 26.0;
 
 /// A control's extent about its centre (left, top, right, bottom), its shadow included.
 pub fn bounds(kind: &Kind) -> [f64; 4] {
     match *kind {
-        // (The cap and its light round it, and the sign printed to its right: a note's stem
-        // above it, its flags at their natural length.)
+        // (The cap and its light round it, and the sign printed to its right: a note centred on
+        // it, its stem and flags at their natural length above and below.)
         Kind::Key => [
             -KEY.0 / 2.0 - 8.0,
             -KEY_SIGN_TOP,
             KEY_SIGN + 40.0,
-            KEY.1 / 2.0 + 8.0,
+            KEY_SIGN_TOP,
         ],
         Kind::Knob { big, .. } => {
             let r = if big { BIG.skirt } else { STD.skirt };
@@ -2313,14 +2313,10 @@ fn breve_for_two_bars() -> bool {
     std::env::var("CA72_TIMED_BREVE").is_ok_and(|v| v == "1")
 }
 
-/// Whether a sign is centred on its key's middle as a whole (`CA72_TIMED_ALIGN=middle`, the
-/// mock-ups' comparison) rather than its notehead on it.
-fn sign_centred() -> bool {
-    std::env::var("CA72_TIMED_ALIGN").is_ok_and(|v| v == "middle")
-}
-
-/// A note value's sign (decisions.md R-OSC-TIMED), its left edge at x 0 and its notehead's middle
-/// at y 0, its notehead `head` tall, in the panel's ink: engraved notes (`crate::notes`, GNU
+/// A note value's sign (decisions.md R-OSC-TIMED), its left edge at x 0 and the note centred on
+/// y 0 from its notehead to its stem's or flag's tip (the owner, 2026-10-20: "can you center
+/// everything?"; its dot and its triplet's 3 hang off it, outside the centring), its notehead
+/// `head` tall, in the panel's ink: engraved notes (`crate::notes`, GNU
 /// FreeSerif's), 4 and 2 bars a whole note marked 4× and 2× (the dial's numbers), 1 bar a whole
 /// note, then a half note to a thirty-second, a dotted value with its dot and a triplet with a
 /// small 3. `division` is its place among the eighteen; `num` the dials' numbers' size.
@@ -2354,11 +2350,7 @@ pub fn note_sign(s: &mut Svg, division: usize, head: f64, num: f64, times: &str)
     };
     let g = glyph(note);
     let k = head / crate::notes::HEAD;
-    let dy = if sign_centred() {
-        -(g.bounds[1] + g.bounds[3]) / 2.0 * k
-    } else {
-        0.0
-    };
+    let dy = -(g.bounds[1] + g.bounds[3]) / 2.0 * k;
     // (Thickened a little, as the legends are, to stand with the lettering.)
     put!(
         s,

@@ -11823,10 +11823,16 @@ because I guess you're trying to fit them into the same height as what the butto
 there's no need for that. You can extend the note height to regular note height. I would rather
 that than have these stumpy-looking notes." And: "is there no open source note font that you
 could just use for this instead of making your own ... Just see if there's a better option. If
-not, this is fine."
+not, this is fine." Shown the fonts compared: "use the free serif version ... the free serif
+version looks great." And of the notes placed by their noteheads: "can you center everything?
+So like the whole note looks great, but then as soon as we get the long tail, the stem on the
+notes, it starts to look a bit weird ... You're better at design than I am, so why don't you
+tell me what you think? I could be wrong." (The coordinator's recommendation, which the owner
+deferred to: each note centred as a whole, its dot and triplet's 3 left out of the centring, its
+left edge fixed.)
 
 **The panel, as built (agent decisions, 2026-10-20, from the owner's words above and the
-mock-ups he saw: the night's folder `osc3-timed-mockups`, its sheets `v4` and `v5`):**
+mock-ups he saw: the night's folder `osc3-timed-mockups`, its sheets `v4` to `v6`):**
 - **The keys:** `osc2_timed` and `osc3_timed`, a new kind of panel control (`Kind::Key`), each
   centred under its RANGE, 84 units below the selector's centre (x 617, y 454 and 660): the
   strip's amber tab at 0.4 of its size (60 by 24), its translucent amber lit from inside while on
@@ -11843,15 +11849,20 @@ mock-ups he saw: the night's folder `osc3-timed-mockups`, its sheets `v4` and `v
 - **The notes are GNU FreeSerif's** (its Western Musical Symbols, U+1D15D to U+1D162 and the
   augmentation dot U+1D16D), at their engraved proportions: the notehead 7 units tall (the
   legends' lower case), the stem three and a half to four noteheads above it, flags and dot in
-  proportion, so the sign stands taller than the key (up to 28 units above its middle, a
-  thirty-second's). Each notehead sits on the key's middle line (as notes stand beside text);
-  centring each sign as a whole was compared and set the heads low and the whole note high.
+  proportion, so the sign stands taller than the key (a thirty-second 32 units tall). Each note
+  is centred on the key's middle line as a whole, from its notehead to its stem's or flag's tip
+  (the whole note on its own middle); its augmentation dot and a triplet's 3 hang off it, left
+  out of the centring, so a dotted value sits where the plain one does. Its left edge is the
+  same for every value, 9 units right of the key. (Each notehead on the key's line was built
+  first, sheet `v5`; the owner asked for this, sheet `v6`.)
   Thickened by 0.45 units, as the legends are, to stand with the lettering. The font is
   vendored as a 5 KB subset of those glyphs (`third_party/gnu-freefont`), its outlines read once
   (`ca72_panel::notes`, ttf-parser through rustybuzz); it is GPL-3.0 or later with the font
   exception, so it may be built in as URW Gothic is (R22). Compared (sheet `fonts/compare`):
   LilyPond's Emmentaler (dual GPL with the font exception and OFL; its engraving flags and stems
-  too thin to survive the opening size), FreeSerif, Bravura and Leland (SMuFL's metronome notes,
+  too thin to survive the opening size; it has no stems of its own, LilyPond draws them, so its
+  row there is our assembly of its heads and flags, not LilyPond's output, and the extra lines
+  the owner saw on it are that assembly's), FreeSerif, Bravura and Leland (SMuFL's metronome notes,
   as good as FreeSerif) and Noto Music. Bravura, Leland and Noto Music are under the SIL Open
   Font License alone, which the plug-in keeps out of its binaries (R22; R-SKIN-PACKS: OFL fonts
   are test files only), so FreeSerif is the best that may be used. The hand-drawn notes before
@@ -12015,4 +12026,27 @@ or a session saved before reads every TIMED off and every DIVISION a quarter not
   their DIVISION stepped. The agents: `osc2_timed` to `osc3_division` (docs/mcp.md).
 - Off, the sound is the code's before to the bit: `preset_render`, the 19 factory presets with
   POLY's ten voices, at HI, LO and ULTRA against 47a987f ("every preset the same to the bit"), for
-  oscillator 3 alone and again with all three oscillators' keys off.
+  oscillator 3 alone, again with all three oscillators' keys off, and again with oscillator 1's
+  taken out (4d88b39).
+- The panel (`ca72-panel`): `a_timed_dial_and_its_key_are_drawn_and_undrawn_in_place` (both
+  skins: a key pressed at LO, its sign following its division, another RANGE dimming it; each
+  frame drawn in parts the frame drawn whole; off again the frame before, to the pixel);
+  `a_timed_dials_part_of_the_background_is_laid_without_a_seam` and
+  `a_timed_dials_part_is_the_whole_timed_backgrounds` (at most 3 of a dial's pixels over 2 levels,
+  0.37 and 0.87); `a_layout_made_before_the_timed_keys_gets_them`; the notes' proportions
+  (`notes::tests`); the approved images; the compatibility packs (revision 1) loading with notes.
+- The editor (`ca72-plugin`): `a_timed_oscillators_dial_and_key_operate_its_timed_mode` (the scene,
+  a notch of the wheel one DIVISION step and nothing of FREQUENCY's, the tip, a note value typed,
+  MIDI Learn's targets, the key's press, the inert key taking none);
+  `a_timed_dial_takes_its_note_values` (every division's text and the host's names back).
+- Frame times (`frames`, worn skin, median and slowest of 40; at 0.44 and 0.87): the key pressed
+  1.1 and 2.9 ms, its first press at a scale (the dials' places printed again) 4.5 and 7.6 ms;
+  the timed dial turned 1.2 and 3.0 ms; RANGE to LO 0.8 and 2.5 ms; CUTOFF turned 0.7 and 2.8 ms
+  as before; the editor opened in 371 and 914 ms (376 and 915 before).
+- `cargo test -p ca72-plugin -p ca72-panel`: 597 passed, 0 failed; `-p ca72`: 96 passed, 0 failed;
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings` and `cargo fmt --check`
+  clean; `scripts/notices.py --check` passes (FreeFont's entry added).
+- **Found on the way:** the POLY workers' test (`the_workers_follow_poly_through_the_plug_ins_life`)
+  failed in full runs on a loaded machine: two timed tests ran instances at ULTRA, whose split
+  crews draw on the process's workers, without the budget lock the other such tests take. They
+  take it now; the full run passed twice under load.

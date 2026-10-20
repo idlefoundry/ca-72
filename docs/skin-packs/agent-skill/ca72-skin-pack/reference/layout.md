@@ -57,7 +57,7 @@ wider than tall (`size = [108, 50]`).
 
 The plug-in prints each knob's dial numbers and each selector's legends itself, round the
 control (oscillators 2's and 3's FREQUENCY dials print note values while they are timed, and a
-TIMED key prints its note value to its right, its stem rising up to 38 units above the key's
+TIMED key prints its note value to its right, centred on the key, reaching up to 26 units above and below its
 centre): they are not in the layout and can't be changed. Leave room for them, including at
 the panel's edges: a control whose own dial or legends would be cut off by the edge goes to
 review (`layout.print-outside`), though its click area fits.
@@ -73,7 +73,7 @@ outside the panel (`layout.outside`). Click areas, from the centre:
 | Big knob | ±73 | about 220 across, 190 down |
 | Selector | ±60 | about 200 across, 170 down |
 | Rocker, toggle | ±(w/2 + 4), ±(h/2 + 4) | its size plus a legend |
-| Key | 36 left, 69 right (its note value), ±18 down | 120 across, 38 above and 20 below its centre |
+| Key | 36 left, 69 right (its note value), ±18 down | 120 across, 26 above and below its centre |
 | POWER | ±26 across, ±64 down | |
 
 The starter spaces its columns 222 apart and its rows 240 apart, with legends 100 below each

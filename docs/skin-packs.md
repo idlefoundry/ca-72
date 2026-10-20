@@ -629,7 +629,7 @@ The controls' parameters:
 `osc2_timed` and `osc3_timed` are oscillators 2's and 3's TIMED keys (revision 2 of the
 controls): small amber keys, taking no field but `at`, dressed by the `tab` and `tab-lit`
 pictures as the strip's tabs are. Each prints its oscillator's note value to its right (the
-plug-in's print, its stem rising up to 38 units above the key's centre), and while one is on at
+plug-in's print, centred on the key, up to 26 units above and below its centre), and while one is on at
 its RANGE's LO its oscillator's FREQUENCY dial prints note values. A layout made for revision 1
 gets them from the plug-in, at their official places under oscillators 2's and 3's RANGE when
 nothing of the layout's is there.
