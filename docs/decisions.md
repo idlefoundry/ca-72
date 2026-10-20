@@ -12661,3 +12661,29 @@ voice's (correlation 0.98 over two seconds of oscillator 3's triangle).
 **Compatibility.** A session or preset saved before plays STEPPED, width at the square, PWM off.
 With every oscillator STEPPED nothing in the engine differs: the factory presets render the same
 to the bit.
+
+**Checks.**
+- `tests/variable_rect.rs` (the engine): the travel gives the switch's three widths exactly (and
+  through a host's f32 or a preset's rounding); at them VARIABLE is the switch to the bit at HI,
+  ULTRA (No Compromises) and LO's full voice, and in the light voice, PWM on with the wheel back
+  too; PWM's share sweeps 0 to 1 with oscillator 3's triangle and the wheel forward, none with it
+  back, about a fifth of the travel with it half way (the wheel's law), the light voice's the
+  full voice's way (correlation 0.98); the pulse comes once a cycle at 0, -1.5, -2.5 V and the
+  floor from 55 Hz to 4 kHz, its duty within 1.5 % of `rect_duty` (3 % above 1 kHz, where the
+  edges' delays add a little); a width moved past the ramp switches the comparator at once with
+  VARIABLE, at the next cycle without.
+- The panel (`ca72-panel`): `a_variable_switchs_arc_and_key_are_drawn_and_undrawn_in_place`
+  (both skins: VARIABLE on and off, the switch turned, a key lit; each frame drawn in parts the
+  frame drawn whole; STEPPED again the frame before, to the pixel); `a_variable_switch_steps_then_turns`;
+  `a_layout_made_before_the_pwm_keys_gets_them`.
+- The editor: `a_waveform_switchs_menu_makes_its_rectangle_variable` (RECTANGLE's head, STEPPED
+  marked, VARIABLE on WIDE putting the width at WIDE's first, each a gesture);
+  `a_variable_switch_turns_past_square_and_its_key_flips_pwm` (the arc and key on the panel, a
+  hidden key not found; dragged a step and a half, the width there and WAVEFORM the nearest
+  rectangle; NARROW's legend NARROW's bias exactly; the tip "Square 48 %"; the key a gesture).
+- Parameters: `variable_rectangles_are_off_by_default_and_their_travel_the_engines`; MIDI Learn's
+  kinds; sessions before open STEPPED.
+- Off, the sound is the code's before to the bit: `preset_render`, the 19 factory presets with
+  POLY's ten voices, at HI, LO and ULTRA against b96e2a6: "every preset the same to the bit".
+- The whole suite and clippy on the branch, and merged with `test-v03-20oct-b` (MPE and the
+  timed oscillators): 121 suites pass.
