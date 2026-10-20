@@ -100,9 +100,9 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         lock: r.end(),
         potato: r.end(),
         ultra: r.end(),
-        // (Each oscillator timed at its slowest and fastest divisions, or not.)
-        timed: std::array::from_fn(|_| {
-            r.end().then(|| {
+        // (Oscillators 2 and 3 timed at their slowest and fastest divisions, or not; 1 never.)
+        timed: std::array::from_fn(|n| {
+            (n > 0 && r.end()).then(|| {
                 if r.end() {
                     ca72_plugin::timed::Length::Bars(4.0)
                 } else {

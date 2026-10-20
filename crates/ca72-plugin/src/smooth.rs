@@ -436,8 +436,6 @@ mod tests {
             "arp_octaves",
             "arp_gate",
             "arp_swing",
-            "osc1_timed",
-            "osc1_division",
             "osc2_timed",
             "osc2_division",
             "osc3_timed",

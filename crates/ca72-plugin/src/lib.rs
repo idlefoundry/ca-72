@@ -653,7 +653,7 @@ impl Plugin for Ca72 {
         // And before the oscillators timed: each off, its DIVISION at its default, whatever the
         // instance had (decisions.md R-OSC-TIMED).
         let quarter = d.osc3_division.default_plain_value().to_index() as i32;
-        for n in 1..=3 {
+        for n in 2..=3 {
             state
                 .params
                 .entry(format!("osc{n}_timed"))
@@ -1582,7 +1582,7 @@ mod tests {
             ParamValue::String("lo".into()),
         )]);
         let quarter = params::Division::Quarter.to_index() as i32;
-        for n in 1..=3 {
+        for n in 2..=3 {
             let timed = old.get(&format!("osc{n}_timed"));
             assert!(matches!(timed, Some(ParamValue::Bool(false))), "{n}");
             let division = old.get(&format!("osc{n}_division"));
@@ -1592,21 +1592,22 @@ mod tests {
             );
         }
         let new = filtered(vec![
-            ("osc1_timed".to_owned(), ParamValue::Bool(true)),
+            ("osc2_timed".to_owned(), ParamValue::Bool(true)),
             (
-                "osc1_division".to_owned(),
+                "osc2_division".to_owned(),
                 ParamValue::String("1/16t".to_owned()),
             ),
         ]);
         assert!(matches!(
-            new.get("osc1_timed"),
+            new.get("osc2_timed"),
             Some(ParamValue::Bool(true))
         ));
-        assert!(matches!(new.get("osc1_division"), Some(ParamValue::String(s)) if s == "1/16t"));
+        assert!(matches!(new.get("osc2_division"), Some(ParamValue::String(s)) if s == "1/16t"));
         assert!(matches!(
-            new.get("osc2_timed"),
+            new.get("osc3_timed"),
             Some(ParamValue::Bool(false))
         ));
+        assert!(!new.contains_key("osc1_timed"));
     }
 
     /// `n` blocks of `len` with the host's transport playing from beat `from` at `tempo` (4/4),

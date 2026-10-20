@@ -202,8 +202,6 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("arp_swing", &p.arp_swing),
         // The oscillators timed (decisions.md R-OSC-TIMED): a preset that does not name them
         // plays them free.
-        ("osc1_timed", &p.osc1_timed),
-        ("osc1_division", &p.osc1_division),
         ("osc2_timed", &p.osc2_timed),
         ("osc2_division", &p.osc2_division),
         ("osc3_timed", &p.osc3_timed),
@@ -1594,13 +1592,13 @@ mod tests {
                 .find(|(k, _)| *k == id)
                 .map(|(_, v)| v)
         };
-        for n in 1..=3 {
+        for n in 2..=3 {
             for id in [format!("osc{n}_timed"), format!("osc{n}_division")] {
                 assert!(values_now(&p).iter().any(|(k, _)| *k == id), "{id}");
             }
         }
         for e in lib.entries().0 {
-            for n in 1..=3 {
+            for n in 2..=3 {
                 let (on, division) = (format!("osc{n}_timed"), format!("osc{n}_division"));
                 assert_eq!(target(&e, &on), Some(0.0), "{}", e.sound.name);
                 assert_eq!(

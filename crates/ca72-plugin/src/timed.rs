@@ -220,7 +220,7 @@ mod played {
     use nih_plug::prelude::*;
     use std::sync::Arc;
 
-    /// Oscillator `n` (0, 1, 2) heard, its TIMED `on` at `division`, its RANGE at `range`, at
+    /// Oscillator `n` (1 or 2: oscillator 2 or 3) heard, its TIMED `on` at `division`, its RANGE at `range`, at
     /// `quality`.
     fn timed_osc(
         n: usize,
@@ -240,13 +240,6 @@ mod played {
             BoolParam::new("On", true),
         );
         match n {
-            0 => Ca72Params {
-                osc1_timed: t,
-                osc1_division: dv,
-                osc1_range: r,
-                osc1_on: o,
-                ..d
-            },
             1 => Ca72Params {
                 osc2_timed: t,
                 osc2_division: dv,
@@ -455,13 +448,13 @@ mod played {
         }
     }
 
-    /// At LO, HI and ULTRA, each oscillator's resets fall where the host's cycles start (a
+    /// At LO, HI and ULTRA, oscillators 2's and 3's resets fall where the host's cycles start (a
     /// thirty-second at 123.7 BPM, from an odd place), the circuit's within a thousandth of a
     /// sample and the light voice's within a tenth; ENTROPY (at its default) moves them not
     /// at all.
     #[test]
     fn its_resets_are_on_the_hosts_grid_at_every_quality() {
-        for (n, quality) in (0..3)
+        for (n, quality) in (1..3)
             .flat_map(|n| [QualityMode::Lo, QualityMode::Hi, QualityMode::Ultra].map(|q| (n, q)))
         {
             let mut p = initialised_with(
@@ -581,7 +574,7 @@ mod played {
     /// off, to the bit, for each oscillator at HI and LO.
     #[test]
     fn at_any_other_range_timed_does_nothing() {
-        for n in 0..3 {
+        for n in 1..3 {
             for quality in [QualityMode::Hi, QualityMode::Lo] {
                 for range in [Footage::R32, Footage::R8, Footage::R2] {
                     let render = |on: bool| {
@@ -610,7 +603,7 @@ mod played {
     /// and the PITCH wheel move a timed oscillator not at all: its resets are the same wherever.
     #[test]
     fn the_keys_and_the_wheel_leave_it_on_its_clock() {
-        for n in 0..3 {
+        for n in 1..3 {
             let render = |note: u8, bend: f32| {
                 let params = Ca72Params {
                     osc3_control: BoolParam::new("Osc 3 Control", true),

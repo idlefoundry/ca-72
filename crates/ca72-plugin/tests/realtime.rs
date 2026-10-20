@@ -914,7 +914,6 @@ fn the_oscillators_timed_neither_allocate_nor_free() {
     let a = p.parameters().clone();
     let mut c = TestProcessContext::<Ca72>::new(params, RATE as f32, ProcessMode::Realtime);
     for (q, v) in [
-        (a.osc1_timed.as_ptr(), 1.0),
         (a.osc2_timed.as_ptr(), 1.0),
         (a.osc2_on.as_ptr(), 1.0),
         (a.osc3_timed.as_ptr(), 1.0),
@@ -979,10 +978,8 @@ fn the_oscillators_timed_neither_allocate_nor_free() {
         }
         let k = (b / 19) as f32;
         c.automate(a.osc3_division.as_ptr(), (k % 18.0) / 17.0);
-        c.automate(a.osc1_division.as_ptr(), ((k + 5.0) % 18.0) / 17.0);
         c.automate(a.osc2_division.as_ptr(), ((k + 11.0) % 18.0) / 17.0);
         c.automate(a.osc3_timed.as_ptr(), if b % 170 < 150 { 1.0 } else { 0.0 });
-        c.automate(a.osc1_timed.as_ptr(), if b % 190 < 120 { 1.0 } else { 0.0 });
         c.automate(a.osc3_range.as_ptr(), if b % 130 < 100 { 0.0 } else { 0.6 });
         c.automate(a.osc1_range.as_ptr(), if b % 110 < 70 { 0.0 } else { 0.6 });
         c.automate(a.osc2_range.as_ptr(), if b % 150 < 90 { 0.0 } else { 0.2 });
