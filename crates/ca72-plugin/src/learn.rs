@@ -93,7 +93,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 87] = [
+pub const LEARNABLE: [Learnable; 127] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -200,6 +200,47 @@ pub const LEARNABLE: [Learnable; 87] = [
     knob("osc3_shape", "OSCILLATOR-3 SHAPE"),
     switch("osc3_shape_mod", "OSCILLATOR-3 MOD"),
     stepped("osc3_shape_mod_dir", "OSCILLATOR-3 MOD DIRECTION"),
+    // The LFOs (decisions.md R-LFO).
+    stepped("lfo1_waveform", "LFO 1 WAVEFORM"),
+    switch("lfo1_shape_mode", "LFO 1 WAVEFORM (STEPPED or CONTINUOUS)"),
+    knob("lfo1_shape", "LFO 1 SHAPE"),
+    knob("lfo1_rate", "LFO 1 RATE"),
+    switch("lfo1_timed", "LFO 1 TIMED"),
+    stepped("lfo1_division", "LFO 1 DIVISION"),
+    knob("lfo1_phase", "LFO 1 PHASE"),
+    knob("lfo1_rise", "LFO 1 RISE"),
+    stepped("lfo1_mode", "LFO 1 MODE"),
+    switch("lfo1_mono", "LFO 1 MONO"),
+    stepped("lfo2_waveform", "LFO 2 WAVEFORM"),
+    switch("lfo2_shape_mode", "LFO 2 WAVEFORM (STEPPED or CONTINUOUS)"),
+    knob("lfo2_shape", "LFO 2 SHAPE"),
+    knob("lfo2_rate", "LFO 2 RATE"),
+    switch("lfo2_timed", "LFO 2 TIMED"),
+    stepped("lfo2_division", "LFO 2 DIVISION"),
+    knob("lfo2_phase", "LFO 2 PHASE"),
+    knob("lfo2_rise", "LFO 2 RISE"),
+    stepped("lfo2_mode", "LFO 2 MODE"),
+    switch("lfo2_mono", "LFO 2 MONO"),
+    stepped("lfo3_waveform", "LFO 3 WAVEFORM"),
+    switch("lfo3_shape_mode", "LFO 3 WAVEFORM (STEPPED or CONTINUOUS)"),
+    knob("lfo3_shape", "LFO 3 SHAPE"),
+    knob("lfo3_rate", "LFO 3 RATE"),
+    switch("lfo3_timed", "LFO 3 TIMED"),
+    stepped("lfo3_division", "LFO 3 DIVISION"),
+    knob("lfo3_phase", "LFO 3 PHASE"),
+    knob("lfo3_rise", "LFO 3 RISE"),
+    stepped("lfo3_mode", "LFO 3 MODE"),
+    switch("lfo3_mono", "LFO 3 MONO"),
+    stepped("lfo4_waveform", "LFO 4 WAVEFORM"),
+    switch("lfo4_shape_mode", "LFO 4 WAVEFORM (STEPPED or CONTINUOUS)"),
+    knob("lfo4_shape", "LFO 4 SHAPE"),
+    knob("lfo4_rate", "LFO 4 RATE"),
+    switch("lfo4_timed", "LFO 4 TIMED"),
+    stepped("lfo4_division", "LFO 4 DIVISION"),
+    knob("lfo4_phase", "LFO 4 PHASE"),
+    knob("lfo4_rise", "LFO 4 RISE"),
+    stepped("lfo4_mode", "LFO 4 MODE"),
+    switch("lfo4_mono", "LFO 4 MONO"),
     Learnable {
         id: "previous_preset",
         label: "PREVIOUS PRESET",
@@ -1043,7 +1084,7 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "osc3_shape" => &p.osc3_shape,
         "osc3_shape_mod" => &p.osc3_shape_mod,
         "osc3_shape_mod_dir" => &p.osc3_shape_mod_dir,
-        _ => return None,
+        id => return crate::lfo::learn_target(p, id),
     })
 }
 
@@ -1099,7 +1140,7 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
         "osc1_shape" => &p.osc1_shape,
         "osc2_shape" => &p.osc2_shape,
         "osc3_shape" => &p.osc3_shape,
-        _ => return None,
+        id => return crate::lfo::knob(p, id),
     })
 }
 
@@ -1220,8 +1261,10 @@ mod tests {
             // (The arpeggiator's: GATE and SWING knobs, DIRECTION, RATE and OCTAVES selectors,
             // ON and HOLD switches; the expression's four reaches, knobs: R-MPE; oscillators
             // 2's and 3's timed DIVISION and TIMED; each oscillator's waveform: its SHAPE knob,
-            // its STEPPED or CONTINUOUS and its MOD switches, its MOD DIRECTION stepped.)
-            (36, 16, 33)
+            // its STEPPED or CONTINUOUS and its MOD switches, its MOD DIRECTION stepped; each
+            // LFO's SHAPE, RATE, PHASE and RISE knobs, WAVEFORM, DIVISION and MODE selectors,
+            // STEPPED or CONTINUOUS, TIMED and MONO switches: R-LFO.)
+            (52, 28, 45)
         );
     }
 

@@ -1618,6 +1618,12 @@ pub struct Engine {
     position: Position,
     since: f64,
     cursor: f64,
+    /// The controls as the plug-in gave them, before the LFOs move their knobs (decisions.md
+    /// R-LFO; `controls` is them moved, and what everything plays by); the LFOs' generators;
+    /// and how long since the modulation's last step, s (EDGES' slew).
+    base: Controls,
+    bank: Box<crate::lfo::Bank>,
+    lfo_dt: f64,
 }
 
 impl Default for Engine {
@@ -1648,6 +1654,9 @@ impl Engine {
             cursor: 0.0,
             seed: 0,
             gain: output_gain(controls.volume, controls.main_output),
+            base: controls,
+            bank: Box::default(),
+            lfo_dt: 0.0,
             controls,
             held: [false; 128],
             counter: 0,
@@ -2041,8 +2050,25 @@ impl Engine {
     /// The controls for the samples that follow. POLY, UNISON or DOUBLE switched lifts every
     /// key first (the notes then sounding stop; the next notes play in the new way).
     pub fn set(&mut self, c: &Controls) {
-        if *c != self.controls {
+        if *c != self.base {
             self.rest.wake();
+            self.base = *c;
+            // (The knobs where the LFOs have them now: decisions.md R-LFO. None assigned, the
+            // controls as given.)
+            let m = if c.lfo.active() {
+                let values = crate::lfo::source_values(&self.bank.shared_values);
+                c.lfo.modulated(c, &values)
+            } else {
+                *c
+            };
+            self.take(&m, true);
+        }
+    }
+
+    /// The controls `c` (the LFOs' moves in them) in force: their gains, and the voices' panel,
+    /// at once (`eager`) or as each voice next plays.
+    fn take(&mut self, c: &Controls, eager: bool) {
+        {
             if c.poly != self.controls.poly
                 || c.potato != self.controls.potato
                 || c.unison != self.controls.unison
@@ -2064,8 +2090,42 @@ impl Engine {
                 * double_trim(c)
                 * level_gain(c.level);
             self.follow_auto(auto_trim(c, &self.curve), false);
-            self.apply();
+            if eager {
+                self.apply();
+            } else {
+                // (Each voice takes it as it next plays: those not playing, never.)
+                self.panel_gen = self.panel_gen.wrapping_add(1);
+            }
         }
+    }
+
+    /// The LFOs a step on (decisions.md R-LFO): each one's value at the samples about to be
+    /// played, `n` of them, the knobs they modulate moved there, and each voice's own where MONO
+    /// is off; the generators moved on by `n`. Never wakes the sleeping instrument (R68): asleep,
+    /// the generators run on and nothing more.
+    fn modulate(&mut self, n: usize) {
+        let rate = if self.rate > 0.0 { self.rate } else { 48_000.0 };
+        let l = &self.base.lfo;
+        let (per, clock) = crate::lfo::Bank::clock(l, &self.position, self.since, rate);
+        let voices = if self.many() { self.slots.len() } else { 1 };
+        self.bank.step(l, &clock, self.lfo_dt, voices);
+        self.bank.advance(l, &per, n, rate, voices);
+        self.lfo_dt = n as f64 / rate;
+        if self.rest.asleep {
+            return;
+        }
+        let values = crate::lfo::source_values(&self.bank.shared_values);
+        let m = l.modulated(&self.base, &values);
+        if m != self.controls {
+            self.take(&m, false);
+        } else if l.per_voice() {
+            self.panel_gen = self.panel_gen.wrapping_add(1);
+        }
+    }
+
+    /// Each LFO's present reading, for the editor's scopes (decisions.md R-LFO).
+    pub fn lfo_readings(&self) -> [crate::lfo::Reading; crate::lfo::LFOS] {
+        self.bank.readings(&self.base.lfo)
     }
 
     /// The one instrument's key pressed or released (POLY off), on the first voice (once it
@@ -2174,10 +2234,21 @@ impl Engine {
                     self.presses += 1;
                     self.pressed[usize::from(key)] = self.presses;
                 }
+                // (A new note for the LFOs: a key from silence, or any with RETRIGGER on;
+                // decisions.md R-LFO.)
+                let new = on && (phrase || self.controls.panel.retrigger);
+                if new {
+                    self.bank.start_shared(&self.base.lfo);
+                }
                 if self.slots.is_empty() {
                     return;
                 }
                 if self.controls.unison || !self.controls.poly {
+                    if new {
+                        for k in 0..self.instruments() {
+                            self.bank.start_voice(&self.base.lfo, k);
+                        }
+                    }
                     self.one_note(i32::from(key), on);
                     self.follow_sounding(phrase);
                 } else if on {
@@ -2376,7 +2447,7 @@ impl Engine {
         let s = &mut self.slots[k];
         (s.lift, s.pending, s.shown) = (false, 0, false);
         // (The panel before the keys: DOUBLE's, which the twin takes keys by.)
-        self.voice_panel(p, &self.panel());
+        self.voice_panel(k, p, &self.panel());
         if k < self.instruments() {
             for (key, _) in self.held.iter().enumerate().filter(|(_, h)| **h) {
                 p.note(key as i32, true);
@@ -2441,6 +2512,8 @@ impl Engine {
         s.drop = s.active && s.shown;
         (s.note, s.gate, s.age, s.active, s.peak) = (key, true, self.counter, true, 0.0);
         (s.expression, s.fresh) = (e, true);
+        // (Its own LFOs start with each note it takes: decisions.md R-LFO.)
+        self.bank.start_voice(&self.base.lfo, pick);
     }
 
     /// The voices POLY plays.
@@ -2561,6 +2634,23 @@ impl Engine {
     /// order (decisions.md R11). The one instrument asleep, and nothing at EXTERNAL INPUT:
     /// silence, as as many samples would give, without them (decisions.md R68).
     pub fn render(&mut self, ext: &[f32], left: &mut [f32], right: &mut [f32]) {
+        if !self.base.lfo.active() {
+            return self.render_part(ext, left, right);
+        }
+        // (The LFOs modulating: a step every `lfo::STEP` samples, decisions.md R-LFO.)
+        let len = left.len().min(right.len());
+        let mut i = 0;
+        while i < len {
+            let n = (len - i).min(crate::lfo::STEP);
+            self.modulate(n);
+            let x = &ext[i.min(ext.len())..(i + n).min(ext.len())];
+            self.render_part(x, &mut left[i..i + n], &mut right[i..i + n]);
+            i += n;
+        }
+    }
+
+    /// [`Engine::render`]'s samples, with the controls as they are.
+    fn render_part(&mut self, ext: &[f32], left: &mut [f32], right: &mut [f32]) {
         let len = left.len().min(right.len());
         let from = self.since;
         self.since += len as f64;
@@ -2838,7 +2928,7 @@ impl Engine {
         }
         // (The panel before the keys: DOUBLE's, which the twin takes keys by.)
         if p.panel_gen != self.panel_gen {
-            self.voice_panel(p, &self.panel());
+            self.voice_panel(k, p, &self.panel());
         }
         if k == 0 && std::mem::take(&mut self.restart) {
             p.turn = None;
@@ -3156,16 +3246,32 @@ impl Engine {
         for k in 0..self.slots.len() {
             let play = self.slots[k].play.clone();
             if let Ok(mut v) = play.try_lock() {
-                self.voice_panel(&mut v, &p);
+                self.voice_panel(k, &mut v, &p);
             }
         }
     }
 
     /// A voice's panel `p` with its tolerances, FEEDBACK and its loop's preamplifier; its
     /// twin's with the twin's tolerances; and whether DOUBLE is on.
-    fn voice_panel(&self, v: &mut Playing, p: &Panel) {
+    fn voice_panel(&self, k: usize, v: &mut Playing, p: &Panel) {
         let entropy = entropy_depth(self.controls.entropy);
-        let feedback = self.controls.feedback.clamp(0.0, 1.0);
+        let mut feedback = self.controls.feedback;
+        // (Its own LFOs on the knobs it has of its own, where MONO is off: decisions.md R-LFO.)
+        let own;
+        let p = if self.base.lfo.per_voice() && k < crate::lfo::VOICES {
+            let mut q = *p;
+            self.base.lfo.voice(
+                &mut q,
+                &mut feedback,
+                &crate::lfo::source_values(&self.bank.shared_values),
+                &crate::lfo::source_values(&self.bank.voice_values[k]),
+            );
+            own = q;
+            &own
+        } else {
+            p
+        };
+        let feedback = feedback.clamp(0.0, 1.0);
         for (voice, character) in [
             (&mut v.voice, &v.character),
             (&mut v.twin.voice, &v.twin.character),
@@ -6710,3 +6816,7 @@ mod expression_tests {
         assert_eq!((e.pressure, e.timbre), (0.0, -1.0));
     }
 }
+
+#[cfg(test)]
+#[path = "engine_lfo_tests.rs"]
+mod lfo_tests;

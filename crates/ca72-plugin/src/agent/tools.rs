@@ -359,6 +359,51 @@ pub fn tools() -> Vec<Tool> {
             Instance,
         ),
         t(
+            "ca72_modulations",
+            "modulation.list",
+            "What each modulation source (LFO 1 to LFO 4, `lfo1` to `lfo4`) modulates: each knob by its id and label with its depth in % of the knob's travel (-100 to 100; negative inverts), `shared` where an LFO with MONO off still moves it with one copy (a knob every voice shares: MAIN OUTPUT VOLUME, the strip's), `inert` where it does nothing now; each LFO's EDGES and MONO; the most a source takes (8); and the knobs that can take one now. The LFOs' own controls are parameters (`lfo1_rate` and the others: ca72_describe).",
+            none,
+            true,
+            false,
+            Instance,
+        ),
+        t(
+            "ca72_modulation_set",
+            "modulation.set",
+            "Make a source modulate a knob, as dragging from an LFO's OUT jack does, or change its depth: `source` (lfo1 to lfo4, \"LFO 1\" or 1 to 4), `target` (a continuous knob of the panel or the strip by id or label; an oscillator's WAVEFORM only while CONTINUOUS; not a switch, selector, wheel, VOICES or a timed dial) and `depth` in % of the knob's travel, -100 to 100 (25 if a new one is given none). `edges` (SOFT or SHARP) sets the LFO's EDGES. A source takes at most 8 knobs. Patch state, saved with presets and sessions. Returns what every source modulates.",
+            |p| {
+                obj(
+                    json!({
+                        "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4."},
+                        "target": param_key(p),
+                        "depth": {"type": "number", "minimum": -100, "maximum": 100},
+                        "edges": {"type": "string", "enum": ["SOFT", "SHARP"]},
+                    }),
+                    &["source"],
+                )
+            },
+            false,
+            false,
+            Instance,
+        ),
+        t(
+            "ca72_modulation_remove",
+            "modulation.remove",
+            "Stop a source modulating a knob (the knob's menu's REMOVE), or every knob it modulates (no `target`). Returns what every source modulates.",
+            |p| {
+                obj(
+                    json!({
+                        "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4."},
+                        "target": param_key(p),
+                    }),
+                    &["source"],
+                )
+            },
+            false,
+            true,
+            Instance,
+        ),
+        t(
             "ca72_midi_learn",
             "midi.learn",
             "MIDI Learn for a control, or for PREVIOUS PRESET or NEXT PRESET (`previous_preset`, `next_preset`: kept on this computer): the next controller (CC) moved on a MIDI device is assigned to it (a preset action also takes a note: a pad), check with ca72_midi_assignments. `cancel` true stops waiting. `channel` and `cc` given, the controller is assigned at once, without waiting (as if moved); a preset action takes `channel` and `note` too.",

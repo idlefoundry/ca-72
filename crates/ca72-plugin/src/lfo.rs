@@ -388,17 +388,84 @@ pub fn is_lfo_target(p: &Ca72Params, param_id: &str) -> bool {
     target_of(p, param_id).is_some()
 }
 
+// ---- Modulation sources.
+
+/// The macros (knobs of the patch's own, 0 to 100 %, sources like the LFOs; not built yet: the
+/// owner's mock-ups are in progress). [`Source::Macro`] and the sources' arrays take them when
+/// this is more than 0, without reshaping the patch, its saved forms or the engine.
+pub const MACROS: usize = 0;
+/// Every modulation source: the LFOs, then the macros.
+pub const SOURCES: usize = LFOS + MACROS;
+
+/// A modulation source: something with a value that moves the knobs assigned to it, each by
+/// its own depth, with rings on them (decisions.md R-LFO). Its index ([`Source::index`]) is
+/// its place in the sources' arrays; its ID ([`Source::id`], `lfo1`, `macro1`) what presets
+/// and sessions save.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Source {
+    /// LFO `n` (0 to 3).
+    Lfo(usize),
+    /// Macro `n` (0 to [`MACROS`] less 1; none yet).
+    Macro(usize),
+}
+
+impl Source {
+    /// Every source, the LFOs first.
+    pub fn all() -> impl Iterator<Item = Source> {
+        (0..SOURCES).filter_map(Source::of_index)
+    }
+
+    /// Its place in the sources' arrays (past [`SOURCES`] for one that is not there).
+    pub fn index(self) -> usize {
+        match self {
+            Source::Lfo(n) if n < LFOS => n,
+            Source::Macro(n) if n < MACROS => LFOS + n,
+            _ => usize::MAX,
+        }
+    }
+
+    pub fn of_index(i: usize) -> Option<Source> {
+        if i < LFOS {
+            Some(Source::Lfo(i))
+        } else if i < SOURCES {
+            Some(Source::Macro(i - LFOS))
+        } else {
+            None
+        }
+    }
+
+    /// As presets and sessions save it: `lfo1` to `lfo4`, `macro1` on.
+    pub fn id(self) -> String {
+        match self {
+            Source::Lfo(n) => format!("lfo{}", n + 1),
+            Source::Macro(n) => format!("macro{}", n + 1),
+        }
+    }
+
+    pub fn of_id(id: &str) -> Option<Source> {
+        Source::all().find(|s| s.id() == id)
+    }
+
+    /// The LFO it is, if it is one.
+    pub fn lfo(self) -> Option<usize> {
+        match self {
+            Source::Lfo(n) if n < LFOS => Some(n),
+            _ => None,
+        }
+    }
+}
+
 // ---- The patch's part: assignments and EDGES.
 
-/// One knob an LFO modulates, by `depth` (-1..1, a share of the knob's travel either way:
-/// -100 to +100 %; negative inverts the LFO exactly).
+/// One knob a source modulates, by `depth` (-1..1, a share of the knob's travel either way:
+/// -100 to +100 %; negative inverts the source exactly).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Assignment {
     pub target: Target,
     pub depth: f32,
 }
 
-/// EDGES: SOFT (a jump slewed over [`SOFT_EDGE`]) or SHARP (none).
+/// EDGES: SOFT (a jump slewed over [`SOFT_EDGE`]) or SHARP (none). An LFO's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Edges {
     #[default]
@@ -409,19 +476,19 @@ pub enum Edges {
 /// Why an assignment was not made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refused {
-    /// The LFO already modulates [`MOST`] knobs.
+    /// The source already modulates [`MOST`] knobs.
     Full,
-    /// No such LFO (1 to [`LFOS`] are 0 to 3 here).
-    NoLfo,
+    /// No such source.
+    NoSource,
 }
 
-/// The assignments and EDGES of the four LFOs: the patch's (saved with presets and sessions,
-/// not host parameters: the owner, "Patch state only"). Set from the editor and the agents,
-/// read by the audio thread without locks: each slot one atomic word (its target and its
-/// depth), and [`Patch::changes`] counting every change.
+/// Every source's assignments, and the LFOs' EDGES: the patch's (saved with presets and
+/// sessions, not host parameters: the owner, "Patch state only"). Set from the editor and the
+/// agents, read by the audio thread without locks: each slot one atomic word (its target and
+/// its depth), and [`Patch::changes`] counting every change.
 #[derive(Debug)]
 pub struct Patch {
-    slots: [[AtomicU64; MOST]; LFOS],
+    slots: [[AtomicU64; MOST]; SOURCES],
     sharp: [AtomicBool; LFOS],
     changes: AtomicU32,
 }
@@ -462,10 +529,10 @@ fn depth_within(d: f32) -> f32 {
 }
 
 impl Patch {
-    /// LFO `lfo`'s (0 to 3) assignments, in the order they were made.
-    pub fn assignments(&self, lfo: usize) -> [Option<Assignment>; MOST] {
+    /// `source`'s assignments, in the order they were made.
+    pub fn assignments(&self, source: Source) -> [Option<Assignment>; MOST] {
         let mut out = [None; MOST];
-        if let Some(slots) = self.slots.get(lfo) {
+        if let Some(slots) = self.slots.get(source.index()) {
             let mut n = 0;
             for s in slots {
                 if let Some(a) = of_word(s.load(Ordering::Acquire)) {
@@ -477,29 +544,30 @@ impl Patch {
         out
     }
 
-    /// How many knobs LFO `lfo` modulates.
-    pub fn count(&self, lfo: usize) -> usize {
-        self.assignments(lfo).iter().flatten().count()
+    /// How many knobs `source` modulates.
+    pub fn count(&self, source: Source) -> usize {
+        self.assignments(source).iter().flatten().count()
     }
 
-    /// LFO `lfo`'s depth on `target`, if it modulates it.
-    pub fn depth(&self, lfo: usize, target: Target) -> Option<f32> {
-        self.assignments(lfo)
+    /// `source`'s depth on `target`, if it modulates it.
+    pub fn depth(&self, source: Source, target: Target) -> Option<f32> {
+        self.assignments(source)
             .into_iter()
             .flatten()
             .find(|a| a.target == target)
             .map(|a| a.depth)
     }
 
-    /// Each LFO's depth on `target` (the knob's rings, its hover dials, its tip and menu).
-    pub fn on_knob(&self, target: Target) -> [Option<f32>; LFOS] {
-        std::array::from_fn(|lfo| self.depth(lfo, target))
+    /// Each source's depth on `target`, [`Source::index`]'s order (the knob's rings, its
+    /// hover dials, its tip and menu).
+    pub fn on_knob(&self, target: Target) -> [Option<f32>; SOURCES] {
+        std::array::from_fn(|i| Source::of_index(i).and_then(|s| self.depth(s, target)))
     }
 
-    /// LFO `lfo` set to modulate `target` by `depth` (-1..1): its depth changed if it already
+    /// `source` set to modulate `target` by `depth` (-1..1): its depth changed if it already
     /// does, else added after the others, if it has room.
-    pub fn assign(&self, lfo: usize, target: Target, depth: f32) -> Result<(), Refused> {
-        let slots = self.slots.get(lfo).ok_or(Refused::NoLfo)?;
+    pub fn assign(&self, source: Source, target: Target, depth: f32) -> Result<(), Refused> {
+        let slots = self.slots.get(source.index()).ok_or(Refused::NoSource)?;
         let depth = depth_within(depth);
         let new = word(Some(Assignment { target, depth }));
         let same = slots
@@ -512,23 +580,23 @@ impl Patch {
         Ok(())
     }
 
-    /// LFO `lfo`'s depth on `target` set, if it modulates it (false if not).
-    pub fn set_depth(&self, lfo: usize, target: Target, depth: f32) -> bool {
-        if self.depth(lfo, target).is_none() {
+    /// `source`'s depth on `target` set, if it modulates it (false if not).
+    pub fn set_depth(&self, source: Source, target: Target, depth: f32) -> bool {
+        if self.depth(source, target).is_none() {
             return false;
         }
-        self.assign(lfo, target, depth).is_ok()
+        self.assign(source, target, depth).is_ok()
     }
 
-    /// LFO `lfo` no longer modulating `target` (false if it did not).
-    pub fn remove(&self, lfo: usize, target: Target) -> bool {
-        let Some(slots) = self.slots.get(lfo) else {
+    /// `source` no longer modulating `target` (false if it did not).
+    pub fn remove(&self, source: Source, target: Target) -> bool {
+        let Some(slots) = self.slots.get(source.index()) else {
             return false;
         };
         let mut kept = [None; MOST];
         let mut n = 0;
         let mut gone = false;
-        for a in self.assignments(lfo).into_iter().flatten() {
+        for a in self.assignments(source).into_iter().flatten() {
             if a.target == target {
                 gone = true;
             } else {
@@ -545,8 +613,8 @@ impl Patch {
         gone
     }
 
-    /// Every LFO's every assignment taken away, EDGES SOFT again (Init; a preset or session
-    /// saved before LFOs).
+    /// Every source's every assignment taken away, every EDGES SOFT again (Init; a preset or
+    /// session saved before LFOs).
     pub fn clear(&self) {
         for s in self.slots.iter().flatten() {
             s.store(0, Ordering::Release);
@@ -557,6 +625,7 @@ impl Patch {
         self.changed();
     }
 
+    /// LFO `lfo`'s (0 to 3) EDGES.
     pub fn edges(&self, lfo: usize) -> Edges {
         match self.sharp.get(lfo) {
             Some(s) if s.load(Ordering::Acquire) => Edges::Sharp,
@@ -580,79 +649,91 @@ impl Patch {
         self.changes.fetch_add(1, Ordering::AcqRel);
     }
 
-    /// As saved with the session.
+    /// As saved with the session: each source that has an assignment or SHARP EDGES.
     pub fn saved(&self) -> Saved {
         Saved {
-            lfos: (0..LFOS)
-                .map(|lfo| SavedLfo {
+            sources: Source::all()
+                .map(|s| SavedSource {
+                    source: s.id(),
                     to: self
-                        .assignments(lfo)
+                        .assignments(s)
                         .into_iter()
                         .flatten()
                         .map(|a| (a.target.id().to_owned(), a.depth))
                         .collect(),
-                    sharp: self.edges(lfo) == Edges::Sharp,
+                    sharp: s.lfo().is_some_and(|l| self.edges(l) == Edges::Sharp),
                 })
+                .filter(|s| !s.to.is_empty() || s.sharp)
                 .collect(),
         }
     }
 
     /// A session's (or a preset's) in place of what it had: what is not understood left out
-    /// (a target not known, a depth not finite, past [`MOST`]).
-    pub fn load(&self, s: &Saved) {
-        for lfo in 0..LFOS {
-            let saved = s.lfos.get(lfo);
-            let mut n = 0;
-            let mut words = [0u64; MOST];
-            for (id, depth) in saved.map_or(&[][..], |l| &l.to[..]) {
+    /// (a source or target not known, a depth not finite, past [`MOST`] a source).
+    pub fn load(&self, saved: &Saved) {
+        let mut words = [[0u64; MOST]; SOURCES];
+        let mut counts = [0usize; SOURCES];
+        let mut sharp = [false; LFOS];
+        for s in &saved.sources {
+            let Some(source) = Source::of_id(&s.source) else {
+                continue;
+            };
+            let i = source.index();
+            if let Some(l) = source.lfo() {
+                sharp[l] |= s.sharp;
+            }
+            for (id, depth) in &s.to {
                 let Some(target) = Target::of_id(id) else {
                     continue;
                 };
-                if n == MOST
-                    || !depth.is_finite()
-                    || words[..n]
-                        .iter()
-                        .any(|w| of_word(*w).is_some_and(|a| a.target == target))
-                {
+                let n = counts[i];
+                let taken = words[i][..n]
+                    .iter()
+                    .any(|w| of_word(*w).is_some_and(|a| a.target == target));
+                if n == MOST || !depth.is_finite() || taken {
                     continue;
                 }
-                words[n] = word(Some(Assignment {
+                words[i][n] = word(Some(Assignment {
                     target,
                     depth: depth_within(*depth),
                 }));
-                n += 1;
+                counts[i] += 1;
             }
-            for (slot, w) in self.slots[lfo].iter().zip(words) {
+        }
+        for (slots, w) in self.slots.iter().zip(words) {
+            for (slot, w) in slots.iter().zip(w) {
                 slot.store(w, Ordering::Release);
             }
-            self.sharp[lfo].store(saved.is_some_and(|l| l.sharp), Ordering::Release);
+        }
+        for (s, v) in self.sharp.iter().zip(sharp) {
+            s.store(v, Ordering::Release);
         }
         self.changed();
     }
 
-    /// As a preset's values (with the parameters' own): `lfoN_to_<target>`, the depth in
-    /// percent, for each assignment, and `lfoN_edges` (0 SOFT, 1 SHARP) where it is SHARP.
+    /// As a preset's values (with the parameters' own): `<source>_to_<target>` (`lfo1_to_cutoff`),
+    /// the depth in percent, for each assignment, and `lfoN_edges` (1, SHARP) where it is SHARP.
     pub fn values(&self) -> Vec<(String, f64)> {
         let mut out = Vec::new();
-        for lfo in 0..LFOS {
-            for a in self.assignments(lfo).into_iter().flatten() {
+        for s in Source::all() {
+            for a in self.assignments(s).into_iter().flatten() {
                 let pct = (f64::from(a.depth) * 100.0 * 1e4).round() / 1e4;
-                out.push((format!("lfo{}_to_{}", lfo + 1, a.target.id()), pct));
+                out.push((format!("{}_to_{}", s.id(), a.target.id()), pct));
             }
-            if self.edges(lfo) == Edges::Sharp {
-                out.push((format!("lfo{}_edges", lfo + 1), 1.0));
+            if s.lfo().is_some_and(|l| self.edges(l) == Edges::Sharp) {
+                out.push((format!("{}_edges", s.id()), 1.0));
             }
         }
         out
     }
 
     /// A preset's assignments and EDGES (its [`Patch::values`]) in place of what it had: a
-    /// preset that names none, no LFO assigned and every EDGES SOFT. In the targets' order.
+    /// preset that names none, nothing assigned and every EDGES SOFT. In the targets' order.
     pub fn load_values(&self, values: &[(String, f64)]) {
-        let mut s = Saved::default();
-        for lfo in 0..LFOS {
-            let prefix = format!("lfo{}_to_", lfo + 1);
-            let edges = format!("lfo{}_edges", lfo + 1);
+        let mut saved = Saved::default();
+        for s in Source::all() {
+            let prefix = format!("{}_to_", s.id());
+            let edges = format!("{}_edges", s.id());
             let mut to: Vec<(Target, f32)> = values
                 .iter()
                 .filter_map(|(k, v)| {
@@ -661,7 +742,8 @@ impl Patch {
                 })
                 .collect();
             to.sort_by_key(|(t, _)| *t);
-            s.lfos.push(SavedLfo {
+            saved.sources.push(SavedSource {
+                source: s.id(),
                 to: to
                     .into_iter()
                     .map(|(t, d)| (t.id().to_owned(), d))
@@ -669,7 +751,7 @@ impl Patch {
                 sharp: values.iter().any(|(k, v)| *k == edges && *v >= 0.5),
             });
         }
-        self.load(&s);
+        self.load(&saved);
     }
 
     /// `other`'s assignments and EDGES in place of these, without allocating (a preset a MIDI
@@ -691,23 +773,27 @@ impl Patch {
 
     /// Whether a preset's value's ID is one of these (not a parameter's).
     pub fn is_value_id(id: &str) -> bool {
-        (1..=LFOS).any(|n| {
-            id.strip_prefix(&format!("lfo{n}_"))
-                .is_some_and(|rest| rest == "edges" || rest.starts_with("to_"))
+        Source::all().any(|s| {
+            id.strip_prefix(&s.id())
+                .and_then(|rest| rest.strip_prefix('_'))
+                .is_some_and(|rest| {
+                    (rest == "edges" && s.lfo().is_some()) || rest.starts_with("to_")
+                })
         })
     }
 }
 
-/// The LFOs' assignments as a session keeps them (JSON under the state's `lfo` key).
+/// The sources' assignments as a session keeps them (JSON under the state's `lfo` key).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Saved {
-    pub lfos: Vec<SavedLfo>,
+    pub sources: Vec<SavedSource>,
 }
 
-/// An LFO's: each knob it modulates by its parameter's ID and its depth (-1..1), and whether
-/// its EDGES are SHARP.
+/// A source's, by its ID (`lfo1`): each knob it modulates by its parameter's ID and its depth
+/// (-1..1), and whether its EDGES are SHARP (an LFO's).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct SavedLfo {
+pub struct SavedSource {
+    pub source: String,
     pub to: Vec<(String, f32)>,
     #[serde(default)]
     pub sharp: bool,
@@ -1088,13 +1174,14 @@ impl Gen {
     }
 }
 
-/// The LFOs as the engine is given them: each one's settings, its assignments, each assigned
-/// knob's travel after its glide, and the computer's FREQUENCY law (the knobs' travel through
-/// it). Part of the engine's `Controls`; none assigned, nothing more runs.
+/// The modulation as the engine is given it: each LFO's settings, every source's assignments,
+/// each assigned knob's travel after its glide, and the computer's FREQUENCY law (the knobs'
+/// travel through it). Part of the engine's `Controls`; none assigned, nothing more runs.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct Lfos {
     pub lfo: [Settings; LFOS],
-    pub to: [[Option<Assignment>; MOST]; LFOS],
+    /// Each source's assignments, [`Source::index`]'s order.
+    pub to: [[Option<Assignment>; MOST]; SOURCES],
     /// Each target's travel (0..1), [`Target::ALL`]'s order: the assigned ones'; 0 the rest.
     pub base: [f32; TARGETS],
     pub law: FreqLaw,
@@ -1126,16 +1213,35 @@ impl From<Law> for FreqLaw {
     }
 }
 
+/// The sources' values with the LFOs' at `lfos` (the macros', when there are any, their knobs').
+pub fn source_values(lfos: &[f64; LFOS]) -> [f64; SOURCES] {
+    std::array::from_fn(|i| match Source::of_index(i) {
+        Some(Source::Lfo(n)) => lfos[n],
+        _ => 0.0,
+    })
+}
+
 impl Lfos {
-    /// Whether any LFO modulates anything (an assignment of a depth other than 0).
+    /// Whether any source modulates anything (an assignment of a depth other than 0).
     pub fn active(&self) -> bool {
         self.to.iter().flatten().flatten().any(|a| a.depth != 0.0)
     }
 
-    /// Whether any LFO with MONO off modulates a knob each voice has.
+    /// Whether source `i` ([`Source::index`]) has a value of each voice's own: an LFO with MONO
+    /// off. The macros never.
+    pub fn own(&self, i: usize) -> bool {
+        matches!(Source::of_index(i), Some(Source::Lfo(n)) if !self.lfo[n].mono)
+    }
+
+    /// Whether any LFO is assigned (a depth other than 0): its generator runs.
+    pub fn lfo_active(&self, lfo: usize) -> bool {
+        self.to[lfo].iter().flatten().any(|a| a.depth != 0.0)
+    }
+
+    /// Whether a source with values of each voice's own modulates a knob each voice has.
     pub fn per_voice(&self) -> bool {
-        self.to.iter().enumerate().any(|(k, to)| {
-            !self.lfo[k].mono
+        self.to.iter().enumerate().any(|(i, to)| {
+            self.own(i)
                 && to
                     .iter()
                     .flatten()
@@ -1143,10 +1249,10 @@ impl Lfos {
         })
     }
 
-    /// The controls `c` with every assigned knob moved by the LFOs' shared values `shared`.
-    pub fn modulated(&self, c: &Controls, shared: &[f64; LFOS]) -> Controls {
+    /// The controls `c` with every assigned knob moved by the sources' shared values `shared`.
+    pub fn modulated(&self, c: &Controls, shared: &[f64; SOURCES]) -> Controls {
         let mut m = *c;
-        let (sums, touched) = self.sums(|_, _| true, |lfo, _| shared[lfo]);
+        let (sums, touched) = self.sums(|_, _| true, |i| shared[i]);
         for t in Target::ALL {
             if touched & (1 << t.index()) != 0 {
                 let travel = f64::from(self.base[t.index()]) + sums[t.index()];
@@ -1156,25 +1262,24 @@ impl Lfos {
         m
     }
 
-    /// Voice's panel `p` and FEEDBACK `feedback` with its own LFOs (`own`, where MONO is
-    /// off) and the shared ones (`shared`) on the knobs it has of its own that an LFO with MONO
-    /// off moves; the rest as `p` has them.
+    /// Voice's panel `p` and FEEDBACK `feedback` with its own values (`own`, of the sources
+    /// [`Lfos::own`] says are) and the shared ones (`shared`) on the knobs it has of its own
+    /// that a source of its own moves; the rest as `p` has them.
     pub fn voice(
         &self,
         p: &mut Panel,
         feedback: &mut f64,
-        shared: &[f64; LFOS],
-        own: &[f64; LFOS],
+        shared: &[f64; SOURCES],
+        own: &[f64; SOURCES],
     ) {
-        let mono = |lfo: usize| self.lfo[lfo].mono;
-        // (The knobs that an LFO with MONO off moves: only they differ from the shared panel.)
-        let (_, own_touched) = self.sums(|lfo, t| !mono(lfo) && t.per_voice(), |_, _| 0.0);
+        // (The knobs a source of the voice's own moves: only they differ from the shared panel.)
+        let (_, own_touched) = self.sums(|i, t| self.own(i) && t.per_voice(), |_| 0.0);
         if own_touched == 0 {
             return;
         }
         let (sums, _) = self.sums(
             |_, t| own_touched & (1 << t.index()) != 0,
-            |lfo, _| if mono(lfo) { shared[lfo] } else { own[lfo] },
+            |i| if self.own(i) { own[i] } else { shared[i] },
         );
         let law = self.law.into();
         for t in Target::ALL {
@@ -1190,21 +1295,21 @@ impl Lfos {
         }
     }
 
-    /// The sum of depth × value for each target `which` takes, and which those are (a bit
-    /// a target).
+    /// The sum of depth × value for each target `which` takes (by the source's index and the
+    /// target), and which those are (a bit a target).
     fn sums(
         &self,
         which: impl Fn(usize, Target) -> bool,
-        value: impl Fn(usize, Target) -> f64,
+        value: impl Fn(usize) -> f64,
     ) -> ([f64; TARGETS], u32) {
         let mut sums = [0.0f64; TARGETS];
         let mut touched = 0u32;
-        for (lfo, to) in self.to.iter().enumerate() {
+        for (i, to) in self.to.iter().enumerate() {
             for a in to.iter().flatten() {
-                if a.depth == 0.0 || !which(lfo, a.target) {
+                if a.depth == 0.0 || !which(i, a.target) {
                     continue;
                 }
-                sums[a.target.index()] += f64::from(a.depth) * value(lfo, a.target);
+                sums[a.target.index()] += f64::from(a.depth) * value(i);
                 touched |= 1 << a.target.index();
             }
         }
@@ -1303,7 +1408,7 @@ impl Bank {
             } else {
                 &self.voices[self.latest.min(VOICES - 1)][k]
             };
-            let assigned = l.to[k].iter().flatten().any(|a| a.depth != 0.0);
+            let assigned = l.lfo_active(k);
             g.reading(s, assigned && g.moving(s))
         })
     }
@@ -1343,9 +1448,12 @@ pub fn controls(p: &Ca72Params, knob: &dyn Fn(&FloatParam) -> f32) -> Lfos {
         ..Lfos::default()
     };
     for n in 0..LFOS {
-        l.to[n] = patch.assignments(n);
         l.lfo[n] = settings(p, n, patch.edges(n));
-        for a in l.to[n].iter().flatten() {
+    }
+    for s in Source::all() {
+        let i = s.index();
+        l.to[i] = patch.assignments(s);
+        for a in l.to[i].iter().flatten() {
             let t = a.target;
             l.base[t.index()] = t.travel(p, knob(t.param(p)), law);
         }
@@ -1551,6 +1659,105 @@ pub const PARAM_IDS: [[&str; 10]; LFOS] = [
     ],
 ];
 
+/// Each LFO's parameters' labels for the agents (docs/mcp.md), [`PARAM_IDS`]' order, and
+/// each LFO's section.
+pub const PARAM_LABELS: [[&str; 10]; LFOS] = [
+    [
+        "LFO 1 WAVEFORM",
+        "LFO 1 WAVEFORM MODE",
+        "LFO 1 SHAPE",
+        "LFO 1 RATE",
+        "LFO 1 TIMED",
+        "LFO 1 DIVISION",
+        "LFO 1 PHASE",
+        "LFO 1 RISE",
+        "LFO 1 MODE",
+        "LFO 1 MONO",
+    ],
+    [
+        "LFO 2 WAVEFORM",
+        "LFO 2 WAVEFORM MODE",
+        "LFO 2 SHAPE",
+        "LFO 2 RATE",
+        "LFO 2 TIMED",
+        "LFO 2 DIVISION",
+        "LFO 2 PHASE",
+        "LFO 2 RISE",
+        "LFO 2 MODE",
+        "LFO 2 MONO",
+    ],
+    [
+        "LFO 3 WAVEFORM",
+        "LFO 3 WAVEFORM MODE",
+        "LFO 3 SHAPE",
+        "LFO 3 RATE",
+        "LFO 3 TIMED",
+        "LFO 3 DIVISION",
+        "LFO 3 PHASE",
+        "LFO 3 RISE",
+        "LFO 3 MODE",
+        "LFO 3 MONO",
+    ],
+    [
+        "LFO 4 WAVEFORM",
+        "LFO 4 WAVEFORM MODE",
+        "LFO 4 SHAPE",
+        "LFO 4 RATE",
+        "LFO 4 TIMED",
+        "LFO 4 DIVISION",
+        "LFO 4 PHASE",
+        "LFO 4 RISE",
+        "LFO 4 MODE",
+        "LFO 4 MONO",
+    ],
+];
+pub const SECTIONS: [&str; LFOS] = ["LFO 1", "LFO 2", "LFO 3", "LFO 4"];
+
+/// LFO parameter `id`'s LFO (0 to 3) and its place in [`PARAM_IDS`]' row.
+fn param_place(id: &str) -> Option<(usize, usize)> {
+    PARAM_IDS
+        .iter()
+        .enumerate()
+        .find_map(|(n, row)| row.iter().position(|r| *r == id).map(|k| (n, k)))
+}
+
+/// An LFO's parameter of `id`, as MIDI Learn sets it (`learn::target`).
+pub fn learn_target<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn crate::learn::Target> {
+    let (n, k) = param_place(id)?;
+    let q = p.lfo(n);
+    Some(match k {
+        0 => &q.waveform,
+        1 => &q.shape_mode,
+        2 => &q.shape,
+        3 => &q.rate,
+        4 => &q.timed,
+        5 => &q.division,
+        6 => &q.phase,
+        7 => &q.rise,
+        8 => &q.mode,
+        _ => &q.mono,
+    })
+}
+
+/// An LFO's knob of `id` (SHAPE, RATE, PHASE, RISE), if it is one (`learn::knob_param`). They
+/// do not glide: none is on the audio path (R-LFO; EDGES smooths what they step).
+pub fn knob<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a FloatParam> {
+    let (n, k) = param_place(id)?;
+    let q = p.lfo(n);
+    match k {
+        2 => Some(&q.shape),
+        3 => Some(&q.rate),
+        6 => Some(&q.phase),
+        7 => Some(&q.rise),
+        _ => None,
+    }
+}
+
+/// Whether `id` is one of the LFOs' knobs (continuous, not gliding).
+pub fn is_knob_id(id: &str) -> bool {
+    param_place(id).is_some_and(|(_, k)| matches!(k, 2 | 3 | 6 | 7))
+}
+
 /// The IDs of each LFO's parameters, `lfoN_<part>`, in the order the host lists them.
 pub fn param_ids() -> impl Iterator<Item = String> {
     const PARTS: [&str; 10] = [
@@ -1602,56 +1809,154 @@ mod tests {
         assert!(close(wave(1.0, 0.2 + 3.0), wave(1.0, 0.2)));
     }
 
-    /// The patch: at most eight a LFO, a depth set again in place, removal keeping the
+    /// The patch: at most eight a source, a depth set again in place, removal keeping the
     /// others' order, a saved form and a preset's values read back the same.
     #[test]
     fn assignments_are_kept_set_and_saved() {
+        let (l0, l2) = (Source::Lfo(0), Source::Lfo(2));
         let p = Patch::default();
-        assert_eq!(p.assign(0, Target::Cutoff, 0.4), Ok(()));
-        assert_eq!(p.assign(0, Target::Osc2Frequency, -0.1), Ok(()));
-        assert_eq!(p.assign(0, Target::Cutoff, 0.5), Ok(()));
-        assert_eq!(p.count(0), 2);
-        assert_eq!(p.depth(0, Target::Cutoff), Some(0.5));
+        assert_eq!(p.assign(l0, Target::Cutoff, 0.4), Ok(()));
+        assert_eq!(p.assign(l0, Target::Osc2Frequency, -0.1), Ok(()));
+        assert_eq!(p.assign(l0, Target::Cutoff, 0.5), Ok(()));
+        assert_eq!(p.count(l0), 2);
+        assert_eq!(p.depth(l0, Target::Cutoff), Some(0.5));
         for t in &Target::ALL[..7] {
-            assert_eq!(p.assign(0, *t, 0.1), Ok(()));
+            assert_eq!(p.assign(l0, *t, 0.1), Ok(()));
         }
-        assert_eq!(p.count(0), MOST);
-        assert_eq!(p.assign(0, Target::Drive, 0.1), Err(Refused::Full));
-        assert_eq!(p.assign(4, Target::Drive, 0.1), Err(Refused::NoLfo));
-        assert!(p.remove(0, Target::Cutoff));
-        assert!(!p.remove(0, Target::Cutoff));
+        assert_eq!(p.count(l0), MOST);
+        assert_eq!(p.assign(l0, Target::Drive, 0.1), Err(Refused::Full));
         assert_eq!(
-            p.assignments(0)[0].map(|a| a.target),
+            p.assign(Source::Lfo(4), Target::Drive, 0.1),
+            Err(Refused::NoSource)
+        );
+        assert_eq!(
+            p.assign(Source::Macro(0), Target::Drive, 0.1),
+            Err(Refused::NoSource)
+        );
+        assert!(p.remove(l0, Target::Cutoff));
+        assert!(!p.remove(l0, Target::Cutoff));
+        assert_eq!(
+            p.assignments(l0)[0].map(|a| a.target),
             Some(Target::Osc2Frequency)
         );
-        p.assign(2, Target::Volume, -2.0).expect("room");
-        assert_eq!(p.depth(2, Target::Volume), Some(-1.0));
+        p.assign(l2, Target::Volume, -2.0).expect("room");
+        assert_eq!(p.depth(l2, Target::Volume), Some(-1.0));
+        assert_eq!(p.on_knob(Target::Volume)[2], Some(-1.0));
         p.set_edges(3, Edges::Sharp);
         let q = Patch::default();
         q.load(&p.saved());
         assert_eq!(q.saved(), p.saved());
         let r = Patch::default();
         r.load_values(&p.values());
-        for lfo in 0..LFOS {
+        for s in Source::all() {
             let mut a: Vec<_> = p
-                .assignments(lfo)
+                .assignments(s)
                 .into_iter()
                 .flatten()
                 .map(|a| a.target)
                 .collect();
             a.sort();
             let b: Vec<_> = r
-                .assignments(lfo)
+                .assignments(s)
                 .into_iter()
                 .flatten()
                 .map(|a| a.target)
                 .collect();
             assert_eq!(a, b);
-            assert_eq!(p.edges(lfo), r.edges(lfo));
         }
+        assert_eq!(r.edges(3), Edges::Sharp);
         r.load_values(&[]);
-        assert!((0..LFOS).all(|l| r.count(l) == 0 && r.edges(l) == Edges::Soft));
+        assert!(Source::all().all(|s| r.count(s) == 0));
+        assert!((0..LFOS).all(|l| r.edges(l) == Edges::Soft));
         assert!(Patch::is_value_id("lfo2_to_cutoff") && Patch::is_value_id("lfo4_edges"));
         assert!(!Patch::is_value_id("lfo2_rate") && !Patch::is_value_id("lfo5_edges"));
+        assert_eq!(Source::of_id("lfo3"), Some(l2));
+        assert_eq!(Source::all().count(), SOURCES);
+    }
+
+    /// The control a target sets, as the engine has it.
+    fn field(t: Target, c: &Controls) -> f64 {
+        let p = &c.panel;
+        match t {
+            Target::Tune => p.tune,
+            Target::Glide => p.glide,
+            Target::ModMix => p.mod_mix,
+            Target::Osc2Frequency => p.osc[1].freq,
+            Target::Osc3Frequency => p.osc[2].freq,
+            Target::Osc1Volume => p.osc[0].volume,
+            Target::ExtVolume => p.ext_volume,
+            Target::Osc2Volume => p.osc[1].volume,
+            Target::NoiseVolume => p.noise_volume,
+            Target::Osc3Volume => p.osc[2].volume,
+            Target::Cutoff => p.cutoff,
+            Target::Emphasis => p.emphasis,
+            Target::ContourAmount => p.contour_amount,
+            Target::FilterAttack => p.filter_contour.attack,
+            Target::FilterDecay => p.filter_contour.decay,
+            Target::FilterSustain => p.filter_contour.sustain,
+            Target::LoudnessAttack => p.loudness_contour.attack,
+            Target::LoudnessDecay => p.loudness_contour.decay,
+            Target::LoudnessSustain => p.loudness_contour.sustain,
+            Target::Volume => c.volume,
+            Target::Feedback => c.feedback,
+            Target::Entropy => c.entropy,
+            Target::Spread => c.spread,
+            Target::Double => c.double,
+            Target::Drive => c.drive,
+            Target::Inner => c.inner,
+            Target::Osc1Shape => p.shape[0].at,
+            Target::Osc2Shape => p.shape[1].at,
+            Target::Osc3Shape => p.shape[2].at,
+        }
+    }
+
+    /// Every target's law is its parameter's as the engine's controls take it: the knob at a
+    /// travel, written by the target, is the controls with the parameter at that travel's
+    /// value (within an f32's rounding), under both FREQUENCY laws; and travel and value are
+    /// each other's inverses.
+    #[test]
+    fn every_targets_law_is_the_parameters() {
+        let p = Ca72Params::default();
+        for law in [Law::Semitones, Law::Hardware] {
+            p.set_freq_law(law);
+            for t in Target::ALL {
+                for x in [0.0f32, 0.07, 0.25, 0.5, 0.61, 0.9, 1.0] {
+                    let plain = t.plain_at(&p, x, law);
+                    let back = t.travel(&p, plain, law);
+                    assert!((back - x).abs() < 2e-4, "{t:?} {x} {back}");
+                    let q = t.param(&p);
+                    let want = p.controls_with(&|k| {
+                        if std::ptr::eq(k, q) { plain } else { k.value() }
+                    });
+                    let mut got = p.controls();
+                    t.write(&mut got, f64::from(back), law);
+                    let (a, b) = (field(t, &got), field(t, &want));
+                    let tol = if t == Target::Drive { 1e-4 } else { 1e-5 };
+                    assert!((a - b).abs() < tol, "{t:?} {law:?} at {x}: {a} {b}");
+                }
+            }
+        }
+    }
+
+    /// The modulation starts from where the knob's glide has it, not its parameter's value:
+    /// the base travel is the glided value's (R-KNOB-GLIDE).
+    #[test]
+    fn the_base_is_the_knobs_glided_place() {
+        let p = Ca72Params::default();
+        p.lfo_patch
+            .assign(Source::Lfo(1), Target::Cutoff, 0.3)
+            .expect("room");
+        let gliding = |k: &FloatParam| {
+            if std::ptr::eq(k, &p.cutoff) {
+                2.5
+            } else {
+                k.value()
+            }
+        };
+        let l = controls(&p, &gliding);
+        assert!((l.base[Target::Cutoff.index()] - 0.75).abs() < 1e-6);
+        assert_eq!(l.to[1][0].map(|a| a.depth), Some(0.3));
+        assert!(l.active() && !l.per_voice());
+        assert_eq!(p.controls_with(&gliding).lfo, l);
     }
 }

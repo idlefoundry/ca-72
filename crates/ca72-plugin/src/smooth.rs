@@ -435,14 +435,16 @@ mod tests {
         assert!(param(&p, KNOBS.len()).is_none());
         for i in 0..crate::learn::LEARNABLE.len() {
             let id = crate::learn::LEARNABLE[i].id;
-            if crate::learn::knob_param(&p, i).is_some() && !TIMING.contains(&id) {
+            let unglided = TIMING.contains(&id) || crate::lfo::is_knob_id(id);
+            if crate::learn::knob_param(&p, i).is_some() && !unglided {
                 assert!(index(id).is_some(), "{id}");
             }
         }
         // Every continuous control the editor turns, but the arpeggiator's timing: a knob
         // added later is not left out unseen.
         for c in ca72_panel::controls::CONTROLS.iter() {
-            let timing = TIMING.contains(&c.param);
+            // (Nor the LFOs' knobs: not on the audio path, decisions.md R-LFO.)
+            let timing = TIMING.contains(&c.param) || crate::lfo::is_knob_id(c.param);
             assert_eq!(
                 index(c.param).is_some(),
                 c.kind.is_continuous() && !timing,

@@ -981,6 +981,8 @@ impl Plugin for Ca72 {
             if let Some(shapes) = self.engine.shapes() {
                 self.meters.publish_shapes(shapes);
             }
+            // The LFOs' scopes, orbs and rings (decisions.md R-LFO).
+            self.params.lfo_scope.publish(&self.engine.lfo_readings());
         }
         // The standalone's effects, after the synth and its meters: each effect's block is
         // waited for until a share of the period from the block's start, then the effect
@@ -1707,6 +1709,48 @@ mod tests {
         assert!(
             matches!(s.params.get("osc3_division"), Some(ParamValue::String(v)) if v == "1/8d")
         );
+    }
+
+    /// What the LFOs modulate is kept with the session (its `lfo` field) and read back the
+    /// same; a session saved before the LFOs opens with none, whatever the instance had
+    /// (decisions.md R-LFO).
+    #[test]
+    fn a_session_keeps_what_the_lfos_modulate_and_an_old_one_none() {
+        use crate::lfo::{Edges, Source, Target};
+        let p = Ca72Params::default();
+        p.lfo_patch
+            .assign(Source::Lfo(0), Target::Cutoff, 0.4)
+            .unwrap();
+        p.lfo_patch
+            .assign(Source::Lfo(2), Target::Osc1Shape, -0.75)
+            .unwrap();
+        p.lfo_patch.set_edges(3, Edges::Sharp);
+        let fields = p.serialize_fields();
+        assert!(fields.contains_key(lfo::STATE_KEY));
+        let q = Ca72Params::default();
+        q.lfo_patch
+            .assign(Source::Lfo(1), Target::Drive, 0.1)
+            .unwrap();
+        q.deserialize_fields(&fields);
+        assert_eq!(q.lfo_patch.saved(), p.lfo_patch.saved());
+        let mut s = PluginState {
+            version: "0.2.8".to_owned(),
+            params: Default::default(),
+            fields: Default::default(),
+        };
+        Ca72::filter_state(&mut s);
+        q.deserialize_fields(&s.fields);
+        assert!(Source::all().all(|x| q.lfo_patch.count(x) == 0));
+        assert!((0..lfo::LFOS).all(|l| q.lfo_patch.edges(l) == Edges::Soft));
+        // (One saved since keeps its own through the filter.)
+        let mut s = PluginState {
+            version: "0.3.0".to_owned(),
+            params: Default::default(),
+            fields: fields.into_iter().collect(),
+        };
+        Ca72::filter_state(&mut s);
+        q.deserialize_fields(&s.fields);
+        assert_eq!(q.lfo_patch.saved(), p.lfo_patch.saved());
     }
 
     /// A session saved before the oscillators timed opens with each off and its DIVISION at a

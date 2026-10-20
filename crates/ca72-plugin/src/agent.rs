@@ -18,6 +18,7 @@
 pub mod bridge;
 pub mod discovery;
 pub mod mcp;
+pub mod modulation;
 pub mod server;
 pub mod tools;
 pub mod values;

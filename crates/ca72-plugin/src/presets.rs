@@ -1433,6 +1433,69 @@ mod tests {
         );
     }
 
+    /// What the LFOs modulate, and their EDGES, are a preset's (decisions.md R-LFO): saved with
+    /// it, chosen with it, none from a preset that names none, none after Init; the LFOs'
+    /// parameters are a preset's as any sound parameter's.
+    #[test]
+    fn a_preset_keeps_what_the_lfos_modulate() {
+        use crate::lfo::{Edges, Source, Target};
+        let sorted = |p: &Ca72Params| {
+            Source::all()
+                .map(|x| {
+                    let mut a: Vec<_> = p
+                        .lfo_patch
+                        .assignments(x)
+                        .into_iter()
+                        .flatten()
+                        .map(|a| (a.target, a.depth))
+                        .collect();
+                    a.sort_by_key(|(t, _)| *t);
+                    a
+                })
+                .collect::<Vec<_>>()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let p = Ca72Params::default();
+        let patch = &p.lfo_patch;
+        patch.assign(Source::Lfo(0), Target::Cutoff, 0.4).unwrap();
+        patch
+            .assign(Source::Lfo(0), Target::Osc2Frequency, -0.125)
+            .unwrap();
+        patch.assign(Source::Lfo(3), Target::Volume, -0.5).unwrap();
+        patch.set_edges(1, Edges::Sharp);
+        let before = sorted(&p);
+        let values = values_now(&p);
+        assert!(
+            values
+                .iter()
+                .any(|(k, v)| k == "lfo1_to_cutoff" && *v == 40.0)
+        );
+        assert!(values.iter().any(|(k, v)| k == "lfo2_edges" && *v == 1.0));
+        assert!(values.iter().any(|(k, _)| k == "lfo4_rate"));
+        lib.save("Wobble", values, None).unwrap();
+        let s = ParamSetter::new(&Host);
+        let mut b = Browser::new(Library::at(dir.path()));
+        b.show(true, &p);
+        b.choose(&lib.find("Felt Bass").unwrap(), &p, &s);
+        assert!(
+            Source::all().all(|x| patch.count(x) == 0),
+            "a preset without them"
+        );
+        assert_eq!(patch.edges(1), Edges::Soft);
+        b.choose(&lib.find("Wobble").unwrap(), &p, &s);
+        assert_eq!(sorted(&p), before, "read back from its file");
+        assert_eq!(patch.edges(1), Edges::Sharp);
+        b.init(&p, &s);
+        assert!(Source::all().all(|x| patch.count(x) == 0), "Init");
+        let felt = lib.find("Felt Bass").unwrap();
+        let rate = targets(&p, &felt)
+            .into_iter()
+            .find(|(k, _)| *k == "lfo3_rate")
+            .map(|(_, v)| v);
+        assert_eq!(rate, Some(p.lfo3.rate.default_normalized_value()));
+    }
+
     /// The MIDI assignments (decisions.md R34) are the instance's, not a sound's: choosing,
     /// saving, replacing and reverting a preset leave them as they are, and no preset file holds
     /// them.

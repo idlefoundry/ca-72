@@ -182,7 +182,7 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
     const H: &str = "NOT ON THE PANEL";
     // (Each note's own pressure and timbre's reach, decisions.md R-MPE: the MPE drawer's.)
     const X: &str = "EXPRESSION";
-    vec![
+    let mut all = vec![
         e("bypass", "POWER", OUT, &p.bypass, Plain),
         e("tune", "TUNE", C, &p.tune, Plain),
         e("osc_mod", "OSCILLATOR MODULATION", C, &p.osc_mod, Plain),
@@ -497,7 +497,33 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
             &p.midi_bend_range,
             Plain,
         ),
-    ]
+    ];
+    // The LFOs' (decisions.md R-LFO): what they modulate is `modulation.*`'s, not a parameter.
+    for n in 0..crate::lfo::LFOS {
+        let q = p.lfo(n);
+        let params: [&dyn Agentic; 10] = [
+            &q.waveform,
+            &q.shape_mode,
+            &q.shape,
+            &q.rate,
+            &q.timed,
+            &q.division,
+            &q.phase,
+            &q.rise,
+            &q.mode,
+            &q.mono,
+        ];
+        for (k, param) in params.into_iter().enumerate() {
+            all.push(e(
+                crate::lfo::PARAM_IDS[n][k],
+                crate::lfo::PARAM_LABELS[n][k],
+                crate::lfo::SECTIONS[n],
+                param,
+                Plain,
+            ));
+        }
+    }
+    all
 }
 
 /// The parameter of this id, label or host name (any case).
