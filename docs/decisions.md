@@ -5985,7 +5985,11 @@ tested, and this follows it.
 - **What changes.** QUALITY's default is LO (Potato mode, R47), not HI, so a new instance
   (and the standalone's first session) plays the light voices: 2.1 to 3.8 % of a core for ten
   POLY voices against 78 to 107 % at HI (R47's measurement, three presets), so a first try
-  works on a slower computer. "New users" is taken as new instances: a parameter's default cannot tell a
+  works on a slower computer. (Corrected 2026-10-19, R-LO-WORKERS: since R71's filter, ten LO
+  voices cost 17.8 to 21.4 % of a Ryzen 7 7800X3D core on one thread, every factory preset's
+  sound, against 83 to 146 % at HI: a quarter to a seventh, not a thirtieth. LO's voices are
+  now shared with the workers: on the Ryzen under Linux that takes about half of it off the
+  host's thread with one worker and three quarters with four or more; on Windows less.) "New users" is taken as new instances: a parameter's default cannot tell a
   new user from an existing one, and the choice per computer that could (like LOOK) would hide
   the default from a host's own reset.
 - **What does not.** A project keeps the QUALITY it was saved with (every 0.2 session saves
@@ -11356,3 +11360,199 @@ pin, `bcc4d8f7706043dccdecfe8b115ba129f84ec39c`.
   host test of the installed package was made.
 - Issue #112 closed with the release. The release's scripts and logs are in
   `~/lab/artifacts/ca-72/0.2.8/` on the Mac.
+
+## R-LO-WORKERS. LO's voices shared with the workers where that lightens the host's thread
+
+**Owner decision, 2026-10-19.** On R-POLY-CRACKLE's finding that LO plays every voice on the
+host's thread: "Low should use extra processor threads if that makes a positive difference to
+the amount of usage that it takes. It shouldn't require that. I would hope that we can keep it
+dynamic... We need to keep this working on older, like 4-core computers for sure. But if
+somebody has, you know, an 8 or a 16-core computer and we can make use of more threads, then
+let's do so."
+
+**Agent decisions, 2026-10-19** (placeholder id; not yet reviewed by the owner):
+- **LO shares its voices with POLY's workers** (and UNISON's), which an instance already holds at
+  LO (R21: the pool follows POLY and UNISON, not QUALITY), so the budget, the seats and each
+  machine's count of workers are as at HI: one worker on a computer of 3 or 4 hardware threads,
+  five on 4 cores with 8 threads, nine on the Ryzen. Nothing is required: with no workers, or
+  one voice, every voice plays on the host's thread as before.
+- **As many threads as pay** (`engine::lo_threads`): a thread a voice up to four voices, then a
+  thread for each two (five threads for ten voices), never more than the pool's workers and the
+  host's thread. "Pays" here: each thread added takes from the host's thread at least half the
+  processor time the workers spend for it, so the host's time falls by more than the computer's
+  total rises. The host's thread waits for the longest of the threads' shares, so the count is
+  the fewest threads for that share (four voices on three threads would be no shorter than on
+  two). DOUBLE's twins, played with their voices, do not change the count: measured, doubled
+  voices wanted the same. `Pool::play` takes the most threads to wake (`threads`; HI and ULTRA
+  pass `MAX`, as before).
+- **Workers park at the block's end** (`Pool::rest`, from `Engine::end_block`): they spun 50 us
+  (R-SPIN) after the block's last run for a run that comes only with the next block. Beside LO's
+  light voices (about 50 us a voice a run of 128 samples) that spin was most of a worker's time:
+  with all nine woken for ten voices, the workers took 42 % of a core for 19 % of voices' work.
+  With the rest, 30 %. A run offered clears it, so the spin between a block's runs is kept. It
+  applies at HI and ULTRA too, where it can only save the same spin.
+- **The break-even** (the Ryzen 7 7800X3D, ordinary threads, paced, 64 to 512 frames): with the
+  rest, sharing pays from two voices, the fewest that can be shared (two voices at 128 frames:
+  the host's thread 4.3 to 2.7 % of a core, the workers 2.5 %); without it, two voices were below
+  it (the workers 4.3 % for 1.8 saved). Past four voices a thread a voice does not pay: ten voices
+  from five threads to ten took 2.2 more points off the host's thread for 7.3 of the workers'
+  (doubled, 3.4 for 18.6).
+- **The samples do not change**: each voice is still played whole by one thread and summed in
+  order.
+
+**Evidence (2026-10-19):**
+- **The same to the bit** (`tests/lo_workers.rs`, `same`): 21 materials (changing chords on 1 to
+  10 voices, with and without DOUBLE, and Horn Bloom, Brass Choir, Warp Field, Cycle of Fifths and
+  Swarm Riser as set), 3 seconds each, against the host's thread alone in blocks of the same
+  size, with 3, 5 and 9 workers by the rule and on 4 and 10 threads whatever it: all 420 renders
+  the same to the bit, none of a voice's runs unheard, the workers' processor time 46 to 380 ms a
+  render. (Swarm Riser's render on the host's thread alone differs between block sizes, as it did
+  before this change: its host-only path is unchanged.) `preset_render`, every factory preset at
+  LO, ten voices, with DOUBLE at 0 and 50 %: with 3, 5 and 9 workers the same to the bit as with
+  none (the 9 workers' run took 4.5 s against 15.5 s, 17.4 s of processor time), and with none the
+  same to the bit as `poly-crackle` (the code before this change, built apart).
+- **The host's thread at LO, paced** (`tests/lo_workers.rs`, `paced`: 48 kHz, each block at its
+  time with the plug-in's deadline, 3 seconds after one unmeasured; fewer workers than the
+  machine's standing for smaller computers; the before is every voice on the host's thread, as
+  `poly-crackle` plays). The figures are the host's thread's time in the plug-in as a share of the
+  period, its mean (and 99th percentile), and the process's processor time in shares of a core.
+  - **Linux, Ryzen 7 7800X3D** (ordinary threads, as R-POLY-CRACKLE measured; two rounds, the
+    order swapped, averaged; 128 frames; the other block sizes alike within a few points):
+
+    | Sound | 1 worker | 2 | 3 | 4 | 9 (the machine's) |
+    |---|---|---|---|---|---|
+    | Ten voices | 22 → 12 (p99 26 → 14) | 22 → 9 | 22 → 7 | 22 → 5 | 21 → 6 (p99 25 → 7) |
+    | Horn Bloom as set | 42 → 23 (p99 51 → 30) | 42 → 17 | 43 → 14 | 43 → 10 | 43 → 10 (p99 51 → 13) |
+    | Brass Choir as set | 34 → 18 | 32 → 14 | 32 → 10 | 32 → 10 | 32 → 10 |
+    | Warp Field as set | 34 → 19 | 34 → 14 | 34 → 10 | 34 → 10 | 34 → 10 |
+    | Cycle of Fifths as set | 19 → 11 | 19 → 9 | 19 → 6 | 19 → 6 | 20 → 6 |
+    | Swarm Riser as set | 17 → 10 | 17 → 9 | 17 → 5 | 17 → 5 | 17 → 5 |
+
+    The process's processor time rose 1 to 14 points (ten voices 22 → 23 with one worker, 22 →
+    26 to 27 with more; Horn Bloom 42 → 46 and 50). Of 320 cases each way, the host's thread
+    alone had no block late and no voice's run unheard; shared, 2 blocks late and 3 runs unheard
+    (ordinary threads, which the system may preempt; the plug-in's workers are audio threads).
+  - **Windows 11, i5-13600K** (the Balanced power plan, as it is set; the measuring thread and
+    the workers in MMCSS's Pro Audio, as a host's and the plug-in's are; processor time from the
+    threads' cycle counts; 128 frames; 4 workers is the plug-in's own count there): ten voices 26
+    → 25 with one worker (p99 50 → 31), 28 → 24 with two, 27 → 20 with four (p99 49 → 27); Horn
+    Bloom 32 → 26, 33 → 26, 34 → 24 (p99 53 → 31). Of 96 cases each way, the host's thread alone
+    had 78 blocks late, shared none (4 runs unheard). But the process's processor time rose from
+    25 to 34 % to 48 to 57 % with one worker and 73 to 131 % with four. There a voice's run costs
+    about half again as much paced as flat out (`preset_cost` on Windows: ten voices 15 to 21 %,
+    as on the Ryzen; paced on the host's thread alone, 26 %): a core busy for a few hundred
+    microseconds a block is not brought up to speed, the more so the thinner the voices are
+    spread. Restricting the process to the performance cores changed nothing.
+  - **Idle** (POLY's ten voices, no note): the same before and after on both (the host's thread
+    0.0 to 0.1 % on Linux, 0.2 to 0.3 % on Windows; no run is offered with no voice sounding).
+- **LO's cost now** (`preset_cost`, one thread, ten POLY voices, each factory preset's sound
+  without DOUBLE, the Ryzen): 17.8 to 21.4 % of a core, against HI's 83 to 146 %: a quarter to a
+  seventh of HI's (about a sixth on average). Each preset as set: Horn Bloom 36 %, Brass Choir
+  28 %, Warp Field 30 %, Swarm Riser 15 %, Cycle of Fifths 17 %.
+- **Tests:** `lo_s_threads_follow_its_voices`; `a_pool_at_rest_shares_the_next_blocks_run` (a run
+  after the workers have parked at a block's end is shared still); the no-allocation test with
+  workers (`poly_with_workers_neither_allocates_nor_frees_while_it_plays`) now switches QUALITY to
+  LO for part of its run.
+
+**For the owner:** on Windows LO shared lightens the host's thread a little on average and
+much at its peaks, and costs the computer more processor time (two to four times the voices'
+own). Whether that is wanted there, and the Mac's figures, are open.
+
+**Not done:** the Mac (another session was signing a release on it): macOS's time-constraint
+workers and work intervals at LO are unmeasured, as is an Intel Mac. No host was tried. The
+Linux measurements used ordinary threads (real-time threads there were demoted by the
+plug-in's own watch, `ca72_rt::watch`, partway through a run on this busy desktop, so those
+figures were set aside).
+
+**Owner decision, 2026-10-19 (later).** Told the Windows trade and offered load-responsive
+sharing there: "okay, sounds like we should definitely do this on linux, and do the windows fix
+as you have suggested. Were there no gains to be had on Mac?" The suggestion: "make the sharing
+respond to load. LO stays on one thread while the audio thread has plenty of headroom, and
+spreads out only when it gets busy (above about half the block, or after a late block)."
+
+**Agent decisions, 2026-10-19 (later)** (not separately approved):
+- **Each system its way** (`engine::lo_sharing`, `LoSharing`): Linux always, as built; Windows
+  by load; macOS always, by the Mac's measurements below. Where sharing is by load and the load
+  is light, LO plays every voice on the host's thread, as 0.2.8 does.
+- **By load** (`engine::Busy`): the host's thread's time in the plug-in each block, from the
+  block's start (`set_deadline`) to its end (`end_block`), against the block's period,
+  smoothed with a time constant of 0.2 s. LO shares from a smoothed load of half the period,
+  and at once after a block late (longer than its period) or one with a voice's run not heard.
+  It stops once the load has stayed below 30 % for the hold: 2 s at first, doubled (to 30 s) each
+  time it is busy again within 10 s of stopping, back to 2 s after 10 s not busy. 30 % is well
+  below the half, and above the 24 to 28 % that a light load's sharing left on Windows, where it
+  hardly lowers the host's thread's time, so a light load made busy by one late block returns to
+  the host's thread. Two readings of the clock a block and plain arithmetic: nothing allocates
+  or waits. The samples are the same whichever way it goes.
+- **Evidence:** `lo_shares_while_the_host_s_thread_is_busy` (below half stays off, above shares,
+  a late block or a run not heard shares at once, the hold, its doubling and its return);
+  `tests/lo_workers.rs` `same`: 504 renders the same to the bit on Linux, 84 of them with the
+  sharing switched on and off every 37 blocks, and 72 on the Mac; in every paced run on the three
+  systems the render was the same to the bit as the host's thread's alone wherever no voice's run
+  went unheard (a voice that sits a run out is a run behind from then on).
+
+**The Mac** (M4 Pro, 10 performance and 4 efficiency cores; its own count is 8 workers; the
+workers on the plug-in's own path, time-constraint threads in their work interval, `ps -M`
+showing them at priority 97R; the measuring thread made one too, in a work interval of its own
+opened at each block's start and closed at its end, as a host's thread is in its device's
+workgroup; 48 kHz, 3 s a case, the Mac's background load as it was). The host's thread's mean /
+99th percentile in % of the period; CPU, the process's processor time in % of a core:
+
+| Sound | Workers | Block | host | always | load |
+|---|---|---|---|---|---|
+| Ten voices | 2 | 128 | 17 / 23; CPU 18; late 0, unheard 0 | 7 / 10; CPU 22; late 0, unheard 0 | 17 / 23; CPU 18; late 0, unheard 0, shared 0 % |
+| Ten voices | 2 | 256 | 24 / 28; CPU 25; late 0, unheard 0 | 6 / 11; CPU 18; late 0, unheard 0 | 20 / 27; CPU 20; late 0, unheard 0, shared 0 % |
+| Ten voices | 3 | 128 | 17 / 22; CPU 17; late 0, unheard 0 | 6 / 9; CPU 24; late 0, unheard 0 | 17 / 23; CPU 18; late 0, unheard 0, shared 0 % |
+| Ten voices | 3 | 256 | 14 / 24; CPU 14; late 0, unheard 0 | 7 / 9; CPU 28; late 0, unheard 0 | 23 / 28; CPU 24; late 0, unheard 0, shared 0 % |
+| Ten voices, DOUBLE | 2 | 128 | 28 / 36; CPU 29; late 0, unheard 0 | 16 / 65; CPU 42; late 4, unheard 0 | 16 / 42; CPU 42; late 2, unheard 2, shared 97 % |
+| Ten voices, DOUBLE | 2 | 256 | 107 / 172; CPU 85; late 323, unheard 0 | 15 / 48; CPU 39; late 0, unheard 0 | 21 / 56; CPU 53; late 0, unheard 0, shared 99 % |
+| Ten voices, DOUBLE | 3 | 128 | 112 / 240; CPU 94; late 542, unheard 0 | 12 / 20; CPU 42; late 1, unheard 0 | 13 / 42; CPU 43; late 4, unheard 0, shared 98 % |
+| Ten voices, DOUBLE | 3 | 256 | 120 / 180; CPU 104; late 431, unheard 0 | 9 / 16; CPU 34; late 0, unheard 0 | 23 / 42; CPU 33; late 0, unheard 0, shared 33 % |
+| Horn Bloom | 2 | 128 | 105 / 226; CPU 85; late 443, unheard 0 | 16 / 32; CPU 42; late 3, unheard 0 | 22 / 39; CPU 38; late 0, unheard 0, shared 59 % |
+| Horn Bloom | 2 | 256 | 107 / 181; CPU 85; late 309, unheard 0 | 15 / 32; CPU 40; late 0, unheard 0 | 21 / 57; CPU 53; late 0, unheard 0, shared 100 % |
+| Horn Bloom | 3 | 128 | 106 / 231; CPU 84; late 432, unheard 0 | 12 / 25; CPU 41; late 4, unheard 0 | 15 / 72; CPU 42; late 3, unheard 0, shared 88 % |
+| Horn Bloom | 3 | 256 | 115 / 204; CPU 99; late 369, unheard 0 | 10 / 19; CPU 38; late 0, unheard 0 | 11 / 56; CPU 37; late 1, unheard 0, shared 100 % |
+| Brass Choir | 2 | 128 | 47 / 191; CPU 42; late 99, unheard 0 | 11 / 14; CPU 32; late 0, unheard 0 | 26 / 35; CPU 27; late 0, unheard 0, shared 0 % |
+| Brass Choir | 2 | 256 | 22 / 37; CPU 22; late 0, unheard 0 | 9 / 16; CPU 27; late 0, unheard 0 | 31 / 38; CPU 31; late 0, unheard 0, shared 0 % |
+| Brass Choir | 3 | 128 | 26 / 35; CPU 27; late 0, unheard 0 | 8 / 10; CPU 30; late 0, unheard 0 | 27 / 35; CPU 28; late 0, unheard 0, shared 0 % |
+| Brass Choir | 3 | 256 | 22 / 37; CPU 22; late 0, unheard 0 | 10 / 12; CPU 40; late 0, unheard 0 | 27 / 37; CPU 27; late 0, unheard 0, shared 0 % |
+| Ten voices | 4 | 128 | 17 / 23; CPU 17; late 0, unheard 0 | 5 / 7; CPU 23; late 0, unheard 0 | 17 / 23; CPU 18; late 0, unheard 0, shared 0 % |
+| Ten voices | 4 | 256 | 23 / 28; CPU 23; late 0, unheard 0 | 4 / 6; CPU 20; late 0, unheard 0 | 15 / 27; CPU 15; late 0, unheard 0, shared 0 % |
+| Ten voices | 8 | 128 | 17 / 23; CPU 18; late 0, unheard 0 | 4 / 4; CPU 18; late 0, unheard 0 | 17 / 23; CPU 17; late 0, unheard 0, shared 0 % |
+| Ten voices | 8 | 256 | 14 / 18; CPU 14; late 0, unheard 0 | 5 / 6; CPU 26; late 0, unheard 0 | 14 / 26; CPU 14; late 0, unheard 0, shared 0 % |
+| Ten voices, DOUBLE | 4 | 128 | 30 / 39; CPU 31; late 0, unheard 0 | 11 / 40; CPU 44; late 3, unheard 0 | 24 / 33; CPU 36; late 0, unheard 0, shared 33 % |
+| Ten voices, DOUBLE | 4 | 256 | 106 / 181; CPU 92; late 314, unheard 0 | 9 / 25; CPU 40; late 0, unheard 0 | 23 / 35; CPU 38; late 0, unheard 0, shared 33 % |
+| Ten voices, DOUBLE | 8 | 128 | 51 / 155; CPU 49; late 107, unheard 0 | 9 / 25; CPU 38; late 0, unheard 0 | 17 / 36; CPU 37; late 0, unheard 0, shared 64 % |
+| Ten voices, DOUBLE | 8 | 256 | 104 / 163; CPU 90; late 305, unheard 0 | 9 / 11; CPU 43; late 0, unheard 0 | 24 / 32; CPU 38; late 0, unheard 0, shared 33 % |
+| Horn Bloom | 4 | 128 | 51 / 171; CPU 47; late 162, unheard 0 | 10 / 30; CPU 43; late 0, unheard 0 | 10 / 32; CPU 38; late 1, unheard 0, shared 95 % |
+| Horn Bloom | 4 | 256 | 108 / 184; CPU 95; late 321, unheard 0 | 7 / 9; CPU 33; late 0, unheard 0 | 16 / 42; CPU 53; late 0, unheard 1, shared 86 % |
+| Horn Bloom | 8 | 128 | 127 / 223; CPU 116; late 798, unheard 0 | 9 / 12; CPU 44; late 0, unheard 0 | 26 / 39; CPU 38; late 0, unheard 0, shared 34 % |
+| Horn Bloom | 8 | 256 | 105 / 175; CPU 89; late 292, unheard 0 | 10 / 29; CPU 42; late 0, unheard 0 | 19 / 35; CPU 50; late 1, unheard 0, shared 84 % |
+| Brass Choir | 4 | 128 | 45 / 149; CPU 42; late 85, unheard 0 | 8 / 10; CPU 31; late 0, unheard 0 | 25 / 34; CPU 25; late 0, unheard 0, shared 0 % |
+| Brass Choir | 4 | 256 | 24 / 34; CPU 24; late 0, unheard 0 | 9 / 11; CPU 36; late 0, unheard 0 | 23 / 29; CPU 23; late 0, unheard 0, shared 0 % |
+| Brass Choir | 8 | 128 | 25 / 32; CPU 26; late 0, unheard 0 | 7 / 10; CPU 30; late 0, unheard 0 | 25 / 34; CPU 26; late 0, unheard 0, shared 0 % |
+| Brass Choir | 8 | 256 | 34 / 38; CPU 34; late 0, unheard 0 | 6 / 11; CPU 25; late 0, unheard 0 | 36 / 42; CPU 36; late 0, unheard 0, shared 0 % |
+
+- Every voice on the host's thread, a heavy load ran away: the measuring thread, once past its
+  period, ran at a fraction of its speed (Horn Bloom's third of a core became 85 to 116 %), 5,332
+  blocks late in 32 cases; at 128 frames Horn Bloom was at times fine (28 %) and at times not.
+  A host's own thread, in its device's workgroup, may fare better; the light cases (ten voices,
+  Brass Choir, at 14 to 34 %) are the fair comparison.
+- Shared always: the host's thread at 4 to 16 % (a half to a sixth of its time alone), 15 blocks
+  late in 32 cases; where the host's thread alone kept up, the processor time from 9 points less
+  to 18 more (4 to 7 more in most cases). Shared by load: light loads stay on the host's thread as in 0.2.8, but heavy ones flapped
+  (shared 33 to 64 % of the blocks in seven cases), 12 blocks late and 3 runs not heard.
+- **So macOS shares always**: as on Linux, a worker costs little, and the host's thread alone is
+  the more fragile.
+
+**Windows again, by load** (the i5-13600K as before; light: 6 s a case; heavy: the measuring
+thread kept busy 40 % of each period first, `CA72_EXTRA`, a slower computer standing in):
+- Light: idle and ten voices (26 to 29 %) never shared, their processor time 0.2.8's. Horn
+  Bloom, Brass Choir and ten voices doubled (about a third of the period) have a few late blocks
+  every few seconds on this computer even alone (43 in 30 cases): each brought the sharing on
+  for a while (0 to 97 % of the blocks), the processor time 3 to 35 points more, late blocks 19.
+- Heavy (the host's thread alone at 56 to 73 %): shared throughout, the host's thread at 45 to
+  57 %; 108 blocks late alone against 1 (and 2 runs not heard); the processor time 1 to 10 points
+  more.
+
+**Not done (later):** a host on any system; an Intel Mac.
