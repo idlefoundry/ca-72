@@ -13,6 +13,8 @@ against them, the factory calibration procedures included.
 
 Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU).
 
+New to the instrument? Start with the [illustrated quick-start guide](docs/quick-start.md).
+
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
