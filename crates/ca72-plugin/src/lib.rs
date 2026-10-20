@@ -2213,6 +2213,40 @@ mod tests {
         );
     }
 
+    /// A preset a MIDI pad chooses lands in the voices at once, as the drawer's does
+    /// (R-PRESET-KEYS, R-KNOB-GLIDE); a knob turned after it glides again.
+    #[test]
+    fn a_preset_a_pad_chooses_lands_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = initialised(false);
+        // (The test does the helper's part, `prepare`, itself: the helper would race it.)
+        p.helper = None;
+        let library = library::Library::at(dir.path());
+        let first = library.entries().0[0].clone();
+        p.preset_actions = Arc::new(preset_actions::PresetActions::new(
+            p.params.clone(),
+            library,
+        ));
+        let mut c = hostless(&p);
+        p.params
+            .midi_map
+            .assign(learnable("next_preset"), on(0, 20));
+        block(&mut p, &mut c, 64);
+        let before = p.controls();
+        c.push_event(cc(0, 0, 20, 127));
+        block(&mut p, &mut c, 64);
+        p.preset_actions.prepare();
+        block(&mut p, &mut c, 64);
+        p.preset_actions.prepare();
+        assert_eq!(*p.params.preset.read().unwrap(), first.sound.name);
+        assert_ne!(p.params.controls(), before, "a preset of another sound");
+        assert!(!p.smooth.moving());
+        assert_eq!(p.controls(), p.params.controls());
+        assert!(c.automate(p.params.cutoff.as_ptr(), 0.9));
+        block(&mut p, &mut c, 64);
+        assert!(p.smooth.moving());
+    }
+
     #[test]
     fn queued_preset_presses_keep_the_rails_filtered_order() {
         let dir = tempfile::tempdir().unwrap();
