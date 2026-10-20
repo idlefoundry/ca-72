@@ -96,9 +96,9 @@ fn edge_finds_every_control_where_it_is_drawn() {
         let r = Renderer::with_pack(look.clone(), lettering, 0.3, 1.0);
         for (i, c) in a.controls.iter().enumerate() {
             let (x, y) = c.centre();
-            // (The arpeggiator's drawer's knobs, the plug-in's own, are found while it is open.)
-            let found = if c.place == ca72_panel::controls::Place::Arp {
-                interact::hit_arp(x, y)
+            // (The drawers' knobs, the plug-in's own, are found while their drawer is open.)
+            let found = if c.place.is_drawer() {
+                interact::hit_drawer(c.place, x, y)
             } else {
                 interact::hit(r.layout(), &a, x, y)
             };

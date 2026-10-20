@@ -536,6 +536,7 @@ impl Browser {
             panel: self.bar.panel,
             arp: self.bar.arp,
             fx: self.bar.fx,
+            mpe: self.bar.mpe,
         };
     }
 
@@ -650,7 +651,8 @@ impl Browser {
             | BarTarget::Panel
             | BarTarget::Keyboard
             | BarTarget::Arp
-            | BarTarget::Fx => {}
+            | BarTarget::Fx
+            | BarTarget::Mpe => {}
             BarTarget::Next => self.step(1, p, s),
             BarTarget::Star => {
                 let current = Self::current(p);

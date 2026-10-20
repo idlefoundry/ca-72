@@ -617,6 +617,8 @@ impl Editing {
             "frequency_dials": match s.frequency { Law::Semitones => "SEMITONES", Law::Hardware => "HARDWARE" },
             "quality_indicator": s.shutter,
             "mod_wheel_source": self.params.midi_map.wheel_source().text(),
+            "mpe_input": mpe_input_word(self.params.mpe_mode()),
+            "timbre_rest": timbre_rest_word(self.params.timbre_rest()),
             "agents": s.agents,
             "agents_for_this_session": crate::agent::forced(),
             "size": {"width": self.width, "sizes": sizes},
@@ -673,6 +675,36 @@ impl Editing {
             None => None,
             Some(w) => Some(wheel_source(&w)?),
         };
+        // (MPE's, as the settings' MPE menu chooses them: decisions.md R-MPE.)
+        use crate::expression::{Mode, TimbreRest};
+        let mpe_input = match word("mpe_input")?.as_deref() {
+            None => None,
+            Some(w) => match [Mode::Auto, Mode::Lower, Mode::Off]
+                .into_iter()
+                .find(|m| mpe_input_word(*m) == w)
+            {
+                Some(m) => Some(m),
+                None => {
+                    return Err(ApiError::params(format!(
+                        "`mpe_input` is AUTO, LOWER ZONE or OFF, not {w}"
+                    )));
+                }
+            },
+        };
+        let timbre_rest = match word("timbre_rest")?.as_deref() {
+            None => None,
+            Some(w) => match [TimbreRest::Centred, TimbreRest::Zero, TimbreRest::NoteStart]
+                .into_iter()
+                .find(|r| timbre_rest_word(*r) == w)
+            {
+                Some(r) => Some(r),
+                None => {
+                    return Err(ApiError::params(format!(
+                        "`timbre_rest` is CENTERED ON 64, FROM 0 or FROM THE NOTE'S START, not {w}"
+                    )));
+                }
+            },
+        };
         let size = match arg(args, "size") {
             None => None,
             Some(v) => {
@@ -716,6 +748,8 @@ impl Editing {
             "frequency_dials",
             "quality_indicator",
             "mod_wheel_source",
+            "mpe_input",
+            "timbre_rest",
             "size",
             "agents",
         ];
@@ -739,6 +773,12 @@ impl Editing {
         }
         if let Some(source) = wheel {
             self.set_wheel_source(source);
+        }
+        if let Some(m) = mpe_input {
+            self.set_mpe_input(m);
+        }
+        if let Some(r) = timbre_rest {
+            self.set_timbre_rest(r);
         }
         if let Some(w) = size {
             // Asked of the host at the next frame, as the SIZE menu's are.
@@ -1144,6 +1184,24 @@ fn wheel_source(word: &str) -> Result<crate::mod_wheel::Source, ApiError> {
             learn::reserved(cc).unwrap_or("reserved")
         ))
     })
+}
+
+/// MPE INPUT's word, as the settings' MPE menu prints it (decisions.md R-MPE).
+fn mpe_input_word(m: crate::expression::Mode) -> &'static str {
+    match m {
+        crate::expression::Mode::Auto => "AUTO",
+        crate::expression::Mode::Lower => "LOWER ZONE",
+        crate::expression::Mode::Off => "OFF",
+    }
+}
+
+/// TIMBRE REST's words, as the menu prints them.
+fn timbre_rest_word(r: crate::expression::TimbreRest) -> &'static str {
+    match r {
+        crate::expression::TimbreRest::Centred => "CENTERED ON 64",
+        crate::expression::TimbreRest::Zero => "FROM 0",
+        crate::expression::TimbreRest::NoteStart => "FROM THE NOTE'S START",
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -1657,6 +1715,39 @@ mod tests {
         assert!(
             refused(&a.tool(&mut e, "ca72_settings_set", json!({"colour": "red"})))
                 .contains("colour")
+        );
+        // MPE's two (decisions.md R-MPE), in the menu's words.
+        let read = a.tool(&mut e, "ca72_settings", json!({}));
+        assert_eq!(
+            (
+                ok(&read)["mpe_input"].clone(),
+                ok(&read)["timbre_rest"].clone()
+            ),
+            (json!("AUTO"), json!("CENTERED ON 64"))
+        );
+        let set = a.tool(
+            &mut e,
+            "ca72_settings_set",
+            json!({"mpe_input": "lower zone", "timbre_rest": "FROM THE NOTE'S START"}),
+        );
+        assert_eq!(
+            (
+                ok(&set)["mpe_input"].clone(),
+                ok(&set)["timbre_rest"].clone()
+            ),
+            (json!("LOWER ZONE"), json!("FROM THE NOTE'S START"))
+        );
+        assert_eq!(
+            (params.mpe_mode(), params.timbre_rest()),
+            (
+                crate::expression::Mode::Lower,
+                crate::expression::TimbreRest::NoteStart
+            )
+        );
+        assert_eq!(e.settings.mpe, crate::expression::Mode::Lower);
+        assert!(
+            refused(&a.tool(&mut e, "ca72_settings_set", json!({"timbre_rest": "64"})))
+                .contains("CENTERED ON 64")
         );
         assert!(
             refused(&a.tool(&mut e, "ca72_settings_set", json!({"size": 1234}))).contains("size")

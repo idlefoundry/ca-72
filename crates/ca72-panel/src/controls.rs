@@ -30,6 +30,8 @@ pub enum Dial {
     ArpOctaves,
     /// GATE and SWING: 0 to 100 %.
     Percent,
+    /// The expression drawer's MODULATION (decisions.md R-MPE): –100 to 100 %.
+    Reach,
 }
 
 impl Dial {
@@ -143,6 +145,16 @@ pub enum Place {
     /// The arpeggiator's drawer's (`strip::arp`), its origin the drawing's with the drawer
     /// open: drawn by the drawer, found only while it is open.
     Arp,
+    /// The expression drawer's (`strip::mpe`; decisions.md R-MPE), as the arpeggiator's.
+    Mpe,
+}
+
+impl Place {
+    /// Whether it is a drawer's dropped from the rail: drawn by the drawer, found only while it
+    /// is open.
+    pub fn is_drawer(self) -> bool {
+        matches!(self, Place::Arp | Place::Mpe)
+    }
 }
 
 /// A control of the panel, operating the parameter of the same function.
@@ -165,7 +177,7 @@ impl Control {
         let (ox, oy) = match self.place {
             Place::Panel => (crate::art::COL, crate::art::TOP),
             Place::Column => crate::strip::LEFT_HAND,
-            Place::Strip | Place::Arp => (0.0, 0.0),
+            Place::Strip | Place::Arp | Place::Mpe => (0.0, 0.0),
         };
         (ox + self.x, oy + self.y)
     }
@@ -190,6 +202,18 @@ const fn arp_knob(param: &'static str, label: &'static str, at: usize, dial: Dia
         place: Place::Arp,
         x: crate::strip::arp::UNITS[at] + crate::strip::UNIT_KNOB,
         y: crate::strip::arp::ROW,
+        kind: Kind::Knob { dial, big: false },
+    }
+}
+
+/// A knob of the expression drawer, the `at`th of its units (`strip::mpe::UNITS`).
+const fn mpe_knob(param: &'static str, label: &'static str, at: usize, dial: Dial) -> Control {
+    Control {
+        param,
+        label,
+        place: Place::Mpe,
+        x: crate::strip::mpe::UNITS[at] + crate::strip::UNIT_KNOB,
+        y: crate::strip::mpe::ROW,
         kind: Kind::Knob { dial, big: false },
     }
 }
@@ -289,7 +313,7 @@ const fn switch(
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 59] = [
+pub const CONTROLS: [Control; 63] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -636,6 +660,11 @@ pub const CONTROLS: [Control; 59] = [
     arp_knob("arp_octaves", "OCTAVES", 1, Dial::ArpOctaves),
     arp_knob("arp_gate", "GATE", 2, Dial::Percent),
     arp_knob("arp_swing", "SWING", 3, Dial::Percent),
+    // The expression drawer's (decisions.md R-MPE), the plug-in's own, after every other.
+    mpe_knob("pressure_mod", "PRESSURE MODULATION", 0, Dial::Reach),
+    mpe_knob("pressure_filter", "PRESSURE CUTOFF", 1, Dial::Cutoff),
+    mpe_knob("timbre_mod", "TIMBRE MODULATION", 2, Dial::Reach),
+    mpe_knob("timbre_filter", "TIMBRE CUTOFF", 3, Dial::Cutoff),
 ];
 
 /// The panel's controls' history (decisions.md R-SKIN-PACKS), so that a skin pack's layout made

@@ -27,7 +27,7 @@ use baseview::{
 };
 use ca72::freq_dial::{Law, Pot};
 use ca72_panel::art;
-use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
+use ca72_panel::controls::{FEEDBACK_SILENT, Place as DrawerPlace, feedback_silent};
 use ca72_panel::fonts::Weight;
 use ca72_panel::keyboard;
 use ca72_panel::learn::{Note, Tone};
@@ -38,6 +38,7 @@ use ca72_panel::presets::{
 use ca72_panel::strip::arp::{self as arp_ui, ArpBank, ArpRenderer, ArpScene, ArpTarget};
 use ca72_panel::strip::fx::{self as fx_ui, FxRenderer, FxScene};
 use ca72_panel::strip::lower as lower_ui;
+use ca72_panel::strip::mpe::{self as mpe_ui, MpeRenderer, MpeScene, MpeTarget};
 use ca72_panel::strip::{self, Bank, Field, Rail, Readout, StripRenderer, StripScene, StripTarget};
 use ca72_panel::{CONTROLS, Kind, Lettering, Look, Renderer, Scene, Skin, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
@@ -413,16 +414,23 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "arp_octaves" => &p.arp_octaves,
         "arp_gate" => &p.arp_gate,
         "arp_swing" => &p.arp_swing,
+        // Each note's own expression's drawer's (decisions.md R-MPE).
+        "pressure_mod" => &p.pressure_mod,
+        "pressure_filter" => &p.pressure_filter,
+        "timbre_mod" => &p.timbre_mod,
+        "timbre_filter" => &p.timbre_filter,
         _ => return None,
     })
 }
 
-/// A readout a value is typed into (decisions.md R52): the strip's, or the arpeggiator's
-/// drawer's (RATE, OCTAVES, GATE, SWING; R-ARP).
+/// A readout a value is typed into (decisions.md R52): the strip's, the arpeggiator's drawer's
+/// (RATE, OCTAVES, GATE, SWING; R-ARP), or the expression drawer's (PRESSURE's MODULATION and
+/// CUTOFF, TIMBRE's; R-MPE).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Typed {
     Strip(Readout),
     Arp(usize),
+    Mpe(usize),
     /// The standalone's TEMPO screen.
     Tempo,
 }
@@ -435,18 +443,31 @@ fn arp_readout(i: usize) -> Option<usize> {
         .then(|| arp_ui::KNOB_PARAMS.iter().position(|id| *id == c.param))?
 }
 
+/// The expression drawer's readout of control `i`, if it is one of the drawer's knobs
+/// (decisions.md R-MPE).
+fn mpe_readout(i: usize) -> Option<usize> {
+    let c = &CONTROLS[i];
+    (c.place == ca72_panel::controls::Place::Mpe)
+        .then(|| mpe_ui::KNOB_PARAMS.iter().position(|id| *id == c.param))?
+}
+
+/// How long INPUT reads what came in last after it stops (decisions.md R-MPE): long enough for a
+/// held note's pressure at rest between a controller's messages.
+const HEARD_FOR: Duration = Duration::from_secs(3);
+
 /// Logical pixels a beat a minute while the TEMPO screen is dragged (with SHIFT, four times
 /// as many), and a trackpad's travel a beat a minute.
 const TEMPO_DRAG: f64 = 2.0;
 const TEMPO_SCROLL: f64 = 8.0;
 
-/// The drawers dropped from the rail: the arpeggiator's (decisions.md R-ARP), and the
-/// standalone's effects' (R-FX-DRAWER).
+/// The drawers dropped from the rail: the arpeggiator's (decisions.md R-ARP), the standalone's
+/// effects' (R-FX-DRAWER), and each note's own expression's (R-MPE).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Lower {
     #[default]
     Arp,
     Fx,
+    Mpe,
 }
 
 impl Lower {
@@ -455,6 +476,7 @@ impl Lower {
         match self {
             Lower::Arp => arp_ui::DEPTH,
             Lower::Fx => fx_ui::DEPTH,
+            Lower::Mpe => mpe_ui::DEPTH,
         }
     }
 }
@@ -1141,6 +1163,13 @@ struct Editing {
     lower: Dropped,
     lower_shown: (f64, Lower),
     last_arp_press: Option<(Instant, ArpTarget)>,
+    /// Each note's own expression's drawer (decisions.md R-MPE): its renderer, what it shows, its
+    /// readouts' last press (for a double click), and what INPUT heard: the audio thread's counts
+    /// as last seen, and when each last changed.
+    mpe: MpeRenderer,
+    mpe_scene: MpeScene,
+    last_mpe_press: Option<(Instant, MpeTarget)>,
+    heard: ((u32, u32), Option<Instant>, Option<Instant>),
     /// The standalone's effects' drawer (decisions.md R-FX-DRAWER): the chain as it shows it and
     /// what a pointer does there, its renderer (none without a chain), what it shows; the rail's
     /// keys (its FX key with a chain).
@@ -1421,6 +1450,9 @@ impl Editing {
         params.set_freq_law(settings.frequency);
         params.midi_map.set_wheel_source(settings.mod_wheel_source);
         params.set_tempo(f64::from(settings.tempo));
+        // (MPE's, as another editor may have chosen them since: decisions.md R-MPE.)
+        params.set_mpe_mode(settings.mpe);
+        params.set_timbre_rest(settings.timbre_rest);
         let standalone = context.plugin_api() == PluginApi::Standalone;
         let mut playing = Playing::default();
         playing.standalone = standalone;
@@ -1467,6 +1499,14 @@ impl Editing {
             lower: Dropped::default(),
             lower_shown: (0.0, Lower::Arp),
             last_arp_press: None,
+            mpe: MpeRenderer::new(
+                f64::from(physical_width) / art::W,
+                settings.skin,
+                settings.lettering,
+            ),
+            mpe_scene: MpeScene::default(),
+            last_mpe_press: None,
+            heard: ((0, 0), None, None),
             fx_view: FxView::new(None),
             fx: None,
             fx_scene: FxScene::default(),
@@ -1650,12 +1690,13 @@ impl Editing {
         self.composed = None;
     }
 
-    /// The drawers dropped from the rail (the arpeggiator's and the effects') drawn in the
-    /// look's base skin and lettering: a pack's look dresses neither (decisions.md R-SKIN-PACKS),
-    /// so they draw its base's built-in artwork.
+    /// The drawers dropped from the rail (the arpeggiator's, the effects' and the expression's)
+    /// drawn in the look's base skin and lettering: a pack's look dresses none (decisions.md
+    /// R-SKIN-PACKS), so they draw its base's built-in artwork.
     fn dress_drawers(&mut self) {
         let (skin, lettering) = (self.renderer.skin(), self.renderer.lettering());
         self.arp.set_look(skin, lettering);
+        self.mpe.set_look(skin, lettering);
         if let Some(fx) = &mut self.fx {
             fx.set_look(skin, lettering);
         }
@@ -1781,6 +1822,20 @@ impl Editing {
         self.params.midi_map.cancel();
         self.params.midi_map.set_wheel_source(source);
         self.keep_settings(Change::ModWheelSource(source));
+    }
+
+    /// MPE's zones from `mode` from now on, on this computer (decisions.md R-MPE): the
+    /// controller's MPE Configuration Message (AUTO), a lower zone of fifteen channels, or none.
+    fn set_mpe_input(&mut self, mode: crate::expression::Mode) {
+        self.keep_settings(Change::Mpe(mode));
+        self.params.set_mpe_mode(mode);
+    }
+
+    /// Timbre (CC 74, a host's brightness) resting at `rest` from now on, on this computer
+    /// (decisions.md R-MPE).
+    fn set_timbre_rest(&mut self, rest: crate::expression::TimbreRest) {
+        self.keep_settings(Change::TimbreRest(rest));
+        self.params.set_timbre_rest(rest);
     }
 
     /// The FREQUENCY knobs read through `law` from now on, on this computer (decisions.md
@@ -1924,6 +1979,7 @@ impl Editing {
         self.strip.set_under_top(self.renderer.top_px());
         self.drawer.rescale(scale);
         self.arp.rescale(scale);
+        self.mpe.rescale(scale);
         if let Some(fx) = &mut self.fx {
             fx.rescale(scale);
         }
@@ -2002,6 +2058,11 @@ impl Editing {
     /// Whether the pointer is over the arpeggiator's drawer.
     fn in_arp(&self, at: (f64, f64)) -> bool {
         self.lower.which == Lower::Arp && self.in_lower(at)
+    }
+
+    /// Whether the pointer is over the expression drawer.
+    fn in_mpe(&self, at: (f64, f64)) -> bool {
+        self.lower.which == Lower::Mpe && self.in_lower(at)
     }
 
     /// Whether the pointer is over the effects' drawer or its list.
@@ -2244,6 +2305,14 @@ impl Editing {
         self.typing_keys = true;
     }
 
+    /// A value to be typed into the expression drawer's readout `i` (decisions.md R-MPE).
+    fn start_mpe_typing(&mut self, i: usize) {
+        self.playing.release();
+        self.knob_entry = None;
+        self.typing = Some((Typed::Mpe(i.min(3)), String::new()));
+        self.typing_keys = true;
+    }
+
     /// The standalone's TEMPO set to `bpm` (within 30 to 300, whole beats), the arpeggiator's at
     /// once, and this computer's: written now if `kept`, else when the gesture ends.
     fn set_tempo(&mut self, bpm: f64, kept: bool) {
@@ -2312,6 +2381,7 @@ impl Editing {
             Key::Character(c) => {
                 for ch in c.chars() {
                     let cells = text.chars().filter(|c| *c != '.').count();
+                    let digits = text.chars().filter(char::is_ascii_digit).count();
                     // (RATE's note value: dotted with a point after it, a triplet with a T;
                     // OCTAVES one digit.)
                     let ended = text.ends_with(['.', 't']);
@@ -2321,6 +2391,11 @@ impl Editing {
                         (Typed::Arp(0), 't' | 'T') => cells > 0 && !ended,
                         (Typed::Arp(1), '0'..='9') => cells < 1,
                         (Typed::Arp(1), _) => false,
+                        // (MODULATION's -100 to 100, CUTOFF's -4 to 4 with a point.)
+                        (Typed::Mpe(_), '0'..='9') => digits < 3,
+                        (Typed::Mpe(i), '.') => i % 2 == 1 && !text.contains('.'),
+                        (Typed::Mpe(_), '-') => text.is_empty(),
+                        (Typed::Mpe(_), _) => false,
                         (Typed::Tempo, '0'..='9') => cells < 3,
                         (Typed::Tempo, _) => false,
                         (_, '0'..='9') => cells < 3,
@@ -2343,6 +2418,7 @@ impl Editing {
                 match r {
                     Typed::Strip(r) => self.set_typed(r, &text),
                     Typed::Arp(i) => self.set_arp_typed(i, &text),
+                    Typed::Mpe(i) => self.set_mpe_typed(i, &text),
                     Typed::Tempo => {
                         if let Ok(bpm) = text.parse::<f64>() {
                             self.set_tempo(bpm, true);
@@ -2422,6 +2498,45 @@ impl Editing {
         }
     }
 
+    /// The value typed into the expression drawer's readout `i` set, as it reads it (decisions.md
+    /// R-MPE): MODULATION's percent, CUTOFF's octaves, within the knob's travel; nothing for what
+    /// is not a number.
+    fn set_mpe_typed(&mut self, i: usize, text: &str) {
+        let Ok(v) = text.trim().parse::<f32>() else {
+            return;
+        };
+        if !v.is_finite() {
+            return;
+        }
+        let i = i.min(3);
+        let p = &self.params;
+        let q = [
+            &p.pressure_mod,
+            &p.pressure_filter,
+            &p.timbre_mod,
+            &p.timbre_filter,
+        ][i];
+        let normalized = q.preview_normalized(v);
+        if let Some(c) = ca72_panel::controls::index(mpe_ui::KNOB_PARAMS[i]) {
+            self.set_once(c, f64::from(normalized.clamp(0.0, 1.0)));
+        }
+    }
+
+    /// A press on the expression drawer's readouts (decisions.md R-MPE): one double-clicked typed
+    /// into.
+    fn mpe_press(&mut self, t: MpeTarget) {
+        let now = Instant::now();
+        let double = self
+            .last_mpe_press
+            .is_some_and(|(at, last)| last == t && now - at < DOUBLE_CLICK);
+        self.last_mpe_press = Some((now, t));
+        let MpeTarget::Readout(i) = t;
+        if double {
+            self.last_mpe_press = None;
+            self.start_mpe_typing(i);
+        }
+    }
+
     /// A press on the arpeggiator's drawer's tabs and readouts (decisions.md R-ARP): ON and
     /// HOLD each switched, DIRECTION's choice set, a readout double-clicked typed into.
     fn arp_press(&mut self, t: ArpTarget) {
@@ -2456,7 +2571,7 @@ impl Editing {
         }
     }
 
-    /// The rail's ARP key, or the standalone's FX key: its drawer dropped down over the lower
+    /// The rail's ARP or MPE key, or the standalone's FX key: its drawer dropped down over the lower
     /// page (the other's put away for it), or put away (the presets' drawer, if open, shut for it;
     /// the lower panel shown if hidden).
     fn toggle_lower(&mut self, which: Lower) {
@@ -2574,6 +2689,7 @@ impl Editing {
         match t {
             StripTarget::Bar(BarTarget::Panel) => self.toggle_panel(),
             StripTarget::Bar(BarTarget::Arp) => self.toggle_lower(Lower::Arp),
+            StripTarget::Bar(BarTarget::Mpe) => self.toggle_lower(Lower::Mpe),
             StripTarget::Bar(BarTarget::Fx) if self.fx_view.available() => {
                 self.toggle_lower(Lower::Fx);
             }
@@ -2703,10 +2819,14 @@ impl Editing {
             let on_it = match r {
                 Typed::Strip(r) => {
                     !self.in_arp((x, y))
+                        && !self.in_mpe((x, y))
                         && matches!(strip::hit(self.rail, x, y), Some(StripTarget::Switch(t) | StripTarget::Readout(t)) if t == r)
                 }
                 Typed::Arp(i) => {
                     self.in_arp((x, y)) && arp_ui::hit(x, y) == Some(ArpTarget::Readout(i))
+                }
+                Typed::Mpe(i) => {
+                    self.in_mpe((x, y)) && mpe_ui::hit(x, y) == Some(MpeTarget::Readout(i))
                 }
                 Typed::Tempo => art::tempo_hit(self.renderer.arrangement(), x, y),
             };
@@ -2760,6 +2880,23 @@ impl Editing {
             }
             Pressed::WheelSource(source) => {
                 self.set_wheel_source(source);
+                return;
+            }
+            Pressed::MpeMenu => {
+                self.learning.open_mpe_menu(
+                    self.renderer.fonts(),
+                    settings_menu_corner(),
+                    self.renderer.text_size() * MENU_TEXT,
+                    (self.params.mpe_mode(), self.params.timbre_rest()),
+                );
+                return;
+            }
+            Pressed::MpeInput(mode) => {
+                self.set_mpe_input(mode);
+                return;
+            }
+            Pressed::TimbreRest(rest) => {
+                self.set_timbre_rest(rest);
                 return;
             }
             Pressed::Look(skin) => {
@@ -2852,6 +2989,18 @@ impl Editing {
             }
             return;
         }
+        // The expression drawer, as the arpeggiator's (decisions.md R-MPE).
+        if self.in_mpe((x, y)) {
+            if !self.lower.settled() {
+                return;
+            }
+            if let Some(t) = mpe_ui::hit(x, y) {
+                self.mpe_press(t);
+            } else if let Some(target) = interact::hit_drawer(DrawerPlace::Mpe, x, y) {
+                self.press_target(target, modifiers);
+            }
+            return;
+        }
         // The effects' drawer and its list (decisions.md R-FX-DRAWER).
         if self.in_fx((x, y)) {
             if self.lower.settled() {
@@ -2904,6 +3053,10 @@ impl Editing {
                     self.start_arp_typing(r);
                     return;
                 }
+            } else if let Some(r) = mpe_readout(i) {
+                // (The expression drawer's the same, R-MPE.)
+                self.start_mpe_typing(r);
+                return;
             } else if self.start_knob_entry(i) {
                 return;
             }
@@ -3004,8 +3157,13 @@ impl Editing {
         }
         // The arpeggiator's drawer: a knob's menu, as the panel's (its tabs are learned from the
         // presets' drawer's MIDI list).
-        if self.in_arp((x, y)) {
-            match interact::hit_arp(x, y).filter(|_| self.lower.settled()) {
+        if self.in_arp((x, y)) || self.in_mpe((x, y)) {
+            let place = if self.in_mpe((x, y)) {
+                DrawerPlace::Mpe
+            } else {
+                DrawerPlace::Arp
+            };
+            match interact::hit_drawer(place, x, y).filter(|_| self.lower.settled()) {
                 Some(target @ Target::Control(i)) => self.learning.open_menu(
                     self.renderer.fonts(),
                     map,
@@ -3154,6 +3312,13 @@ impl Editing {
                 return;
             }
             self.arp_scene.hover = None;
+            if self.in_mpe(at) {
+                let settled = self.lower.settled();
+                self.hover = interact::hit_drawer(DrawerPlace::Mpe, x, y).filter(|_| settled);
+                self.strip_scene.hover = None;
+                self.browser.bar.hover = None;
+                return;
+            }
             // The effects' drawer: a slot carried, the part under the pointer.
             if self.in_fx(at) || self.fx_view.pressing() {
                 if self.lower.settled() {
@@ -3394,6 +3559,8 @@ impl Editing {
         }
         let over = if self.in_arp((x, y)) {
             interact::hit_arp(x, y).filter(|_| self.lower.settled())
+        } else if self.in_mpe((x, y)) {
+            interact::hit_drawer(DrawerPlace::Mpe, x, y).filter(|_| self.lower.settled())
         } else if strip::hit(self.rail, x, y).is_some() {
             return;
         } else {
@@ -3561,6 +3728,34 @@ impl Editing {
             &self.scene.values,
             std::mem::take(&mut self.arp_scene),
         );
+        // Each note's own expression's (decisions.md R-MPE): the MPE key lit while an amount is
+        // not 0; INPUT reading what the audio thread heard in the last few seconds.
+        self.browser.bar.mpe = reaching(&self.params);
+        let now = Instant::now();
+        let counts = (0u32, 0u32); // TODO-HEARD self.params.heard.counts()
+        let (was, per_note, channel) = self.heard;
+        self.heard = (
+            counts,
+            if counts.0 != was.0 {
+                Some(now)
+            } else {
+                per_note
+            },
+            if counts.1 != was.1 {
+                Some(now)
+            } else {
+                channel
+            },
+        );
+        let recent = |t: Option<Instant>| t.is_some_and(|t| now - t < HEARD_FOR);
+        let input = if recent(self.heard.1) {
+            mpe_ui::Input::Mpe
+        } else if recent(self.heard.2) {
+            mpe_ui::Input::Channel
+        } else {
+            mpe_ui::Input::None
+        };
+        self.mpe_scene = mpe_scene(&self.params, &self.scene.values, input);
         // A value being typed: what is typed so far, lit, the next digit's place marked while
         // there is room for one.
         if let Some((r, text)) = &self.typing {
@@ -3568,6 +3763,7 @@ impl Editing {
             let room = match r {
                 Typed::Arp(0) => cells < 2 && !text.ends_with(['.', 't']),
                 Typed::Arp(1) => cells < 1,
+                Typed::Mpe(_) => text.chars().filter(char::is_ascii_digit).count() < 3,
                 _ => cells < 3,
             };
             let shown = if room {
@@ -3582,6 +3778,7 @@ impl Editing {
                     }
                 }
                 Typed::Arp(i) => self.arp_scene.readouts[(*i).min(3)] = (shown, true),
+                Typed::Mpe(i) => self.mpe_scene.readouts[(*i).min(3)] = (shown, true),
                 Typed::Tempo => self.scene.tempo = Some(format!("{shown} BPM")),
             }
         }
@@ -3785,6 +3982,7 @@ impl Editing {
         let lower = lower_k > 0.0
             && (match (which, &mut self.fx) {
                 (Lower::Fx, Some(fx)) => fx.render(&self.fx_scene),
+                (Lower::Mpe, _) => self.mpe.render(&self.mpe_scene, &mut self.renderer),
                 _ => self.arp.render(&self.arp_scene, &mut self.renderer),
             } || self.lower.sliding()
                 || lower_moved);
@@ -3825,6 +4023,7 @@ impl Editing {
             }
             let lower_damage = match (which, &self.fx) {
                 (Lower::Fx, Some(fx)) => fx.damage(),
+                (Lower::Mpe, _) => self.mpe.damage(),
                 _ => self.arp.damage(),
             };
             if lower && let Some([x0, y0, x1, y1]) = lower_damage {
@@ -3850,7 +4049,9 @@ impl Editing {
             &mut self.composed,
             &self.renderer,
             self.strip.frame(),
-            lower_top.map(|top| lower_frame(which, top, &self.arp, self.fx.as_ref(), scale)),
+            lower_top.map(|top| {
+                lower_frame(which, top, (&self.arp, &self.mpe), self.fx.as_ref(), scale)
+            }),
             (k > 0.0).then(|| (self.drawer.frame(), DRAWER_TOP - (1.0 - k) * DRAWER_H)),
             self.damage.as_deref(),
             expanded,
@@ -4016,11 +4217,21 @@ struct LowerFrame<'a> {
 fn lower_frame<'a>(
     which: Lower,
     top: f64,
-    arp: &'a ArpRenderer,
+    (arp, mpe): (&'a ArpRenderer, &'a MpeRenderer),
     fx: Option<&'a FxRenderer>,
     scale: f64,
 ) -> LowerFrame<'a> {
     match (which, fx) {
+        (Lower::Mpe, _) => LowerFrame {
+            frame: mpe.frame(),
+            depth: mpe_ui::DEPTH,
+            top,
+            under: mpe
+                .shadow()
+                .map(|p| (p, 0, (mpe_ui::DEPTH * scale).round() as i32))
+                .into_iter()
+                .collect(),
+        },
         (Lower::Fx, Some(fx)) => LowerFrame {
             frame: fx.frame(),
             depth: fx_ui::DEPTH,
@@ -4106,6 +4317,48 @@ fn arp_scene(p: &Ca72Params, values: &[f64; CONTROLS.len()], was: ArpScene) -> A
         ],
         knobs: arp_ui::KNOB_PARAMS.map(knob),
         hover: was.hover,
+    }
+}
+
+/// Whether an amount of each note's own expression is not 0 (decisions.md R-MPE): the rail's MPE
+/// key lit, as ARP's while the arpeggiator runs.
+fn reaching(p: &Ca72Params) -> bool {
+    [
+        &p.pressure_mod,
+        &p.pressure_filter,
+        &p.timbre_mod,
+        &p.timbre_filter,
+    ]
+    .iter()
+    .any(|q| q.value() != 0.0)
+}
+
+/// What the expression drawer shows (decisions.md R-MPE): the readouts in the knobs' units
+/// (MODULATION's whole percent, CUTOFF's octaves to a tenth), the knobs as the panel shows them
+/// (a knob dragged where the drag has it), and what INPUT heard.
+fn mpe_scene(p: &Ca72Params, values: &[f64; CONTROLS.len()], input: mpe_ui::Input) -> MpeScene {
+    let knob = |id: &str| ca72_panel::controls::index(id).map_or(0.5, |i| values[i]);
+    // (No "-0".)
+    let shown = |v: f32, places: usize| {
+        let t = format!("{v:.places$}");
+        if t.trim_start_matches('-')
+            .chars()
+            .all(|c| c == '0' || c == '.')
+        {
+            t.trim_start_matches('-').to_owned()
+        } else {
+            t
+        }
+    };
+    MpeScene {
+        input,
+        readouts: [
+            (shown(p.pressure_mod.value(), 0), true),
+            (shown(p.pressure_filter.value(), 1), true),
+            (shown(p.timbre_mod.value(), 0), true),
+            (shown(p.timbre_filter.value(), 1), true),
+        ],
+        knobs: mpe_ui::KNOB_PARAMS.map(knob),
     }
 }
 
@@ -7903,7 +8156,7 @@ mod tests {
             lower_frame(
                 e.lower.which,
                 top,
-                &e.arp,
+                (&e.arp, &e.mpe),
                 e.fx.as_ref(),
                 e.renderer.scale(),
             )
@@ -8287,6 +8540,272 @@ mod tests {
         );
         assert!(e.composed == whole, "a knob turned in the drawer");
         release(&mut e);
+    }
+
+    /// The expression drawer opened by the rail's MPE key and slid all the way down.
+    fn mpe_open(e: &mut Editing) {
+        e.draw();
+        let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Mpe)));
+        click(e, p);
+        assert!(e.lower.is_open(Lower::Mpe));
+        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        e.draw();
+        assert!(e.lower.settled());
+    }
+
+    /// The rail's MPE key (the owner's A, 2026-10-20; decisions.md R-MPE) drops the expression
+    /// drawer over the lower page, inside the window (its size kept), one drawer at a time with
+    /// ARP's; the frame shown is its frame put together whole. The strip under it does nothing.
+    /// The key is lit while any of its four amounts is not 0.
+    #[test]
+    fn the_mpe_key_drops_its_drawer_one_at_a_time() {
+        let (mut e, host, params) = editing();
+        e.playing.visible = false;
+        let size = (e.width, e.window_height());
+        mpe_open(&mut e);
+        assert_eq!((e.width, e.window_height()), size);
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "the drawer as put together whole");
+        let c = e.composed.as_ref().expect("a frame");
+        let s = e.renderer.scale();
+        let (x, y) = (
+            (2000.0 * s) as usize,
+            ((mpe_ui::TOP + 200.0) * s).round() as usize,
+        );
+        let row = mpe_ui::top_px(s) as usize;
+        let px = |p: &ca72_panel::Pixmap, x: usize, y: usize| {
+            let i = (y * p.width() as usize + x) * 4;
+            p.data()[i..i + 4].to_vec()
+        };
+        assert_eq!(px(c, x, y), px(e.mpe.frame(), x, y - row));
+        // VOICES's knob's top, under it, does nothing.
+        let (x, y) = (centre("voices").0, mpe_ui::TOP + mpe_ui::DEPTH - 20.0);
+        assert_eq!(
+            (
+                mpe_ui::hit(x, y),
+                interact::hit_drawer(DrawerPlace::Mpe, x, y)
+            ),
+            (None, None)
+        );
+        let p = at(&e, (x, y));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -40.0));
+        release(&mut e);
+        assert!(host.take().is_empty(), "nothing under the drawer");
+        // ARP puts it away for its own, MPE again the arpeggiator's for it, and again puts it
+        // away.
+        e.strip_press(StripTarget::Bar(BarTarget::Arp));
+        assert!(e.lower.is_open(Lower::Arp) && !e.lower.is_open(Lower::Mpe));
+        e.strip_press(StripTarget::Bar(BarTarget::Mpe));
+        assert!(e.lower.is_open(Lower::Mpe) && !e.lower.is_open(Lower::Arp));
+        e.strip_press(StripTarget::Bar(BarTarget::Mpe));
+        assert!(!e.lower.open);
+        // Lit while an amount is not 0, each of the four.
+        let p = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            Arc::clone(&params) as Arc<dyn Params>,
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        e.update_scene();
+        assert!(!e.browser.bar.mpe);
+        for q in [
+            &params.pressure_mod,
+            &params.pressure_filter,
+            &params.timbre_mod,
+            &params.timbre_filter,
+        ] {
+            assert!(p.automate(q.as_ptr(), 0.6));
+            e.update_scene();
+            assert!(e.browser.bar.mpe, "{}", q.name());
+            assert!(p.automate(q.as_ptr(), 0.5));
+            e.update_scene();
+            assert!(!e.browser.bar.mpe, "{}", q.name());
+        }
+    }
+
+    /// The drawer's knobs operate the expression's four amounts (decisions.md R-MPE): turned,
+    /// each a gesture; a readout double-clicked, or a knob ⌘-clicked (R-KNOB-ENTRY), takes a
+    /// value typed in its units (MODULATION percent with its sign, CUTOFF octaves with a
+    /// point); the readouts read the amounts (no "-0"); the frame shown with a knob turned is
+    /// the frame put together whole.
+    #[test]
+    fn the_mpe_drawer_operates_its_parameters() {
+        let (mut e, host, params) = editing();
+        mpe_open(&mut e);
+        host.take();
+        for (i, id) in mpe_ui::KNOB_PARAMS.iter().enumerate() {
+            entry_click(&mut e, id);
+            assert!(e.knob_entry.is_none(), "{id}: no panel field");
+            assert_eq!(e.typing.as_ref().map(|t| t.0), Some(Typed::Mpe(i)), "{id}");
+            keyed(&mut e, Key::Escape);
+            assert!(e.typing.is_none(), "{id}");
+        }
+        assert!(
+            host.take().is_empty(),
+            "nothing set by the clicks or Escape"
+        );
+        let double = |e: &mut Editing, i: usize| {
+            let p = at(e, mpe_ui::centre(MpeTarget::Readout(i)));
+            click(e, p);
+            click(e, p);
+        };
+        let typed = |e: &mut Editing, text: &str| {
+            for c in text.chars() {
+                keyed(e, Key::Character(c.to_string()));
+            }
+            keyed(e, Key::Enter);
+        };
+        for (i, text, q, want) in [
+            (0, "-50", &params.pressure_mod, -50.0),
+            (1, "2.5", &params.pressure_filter, 2.5),
+            (2, "100", &params.timbre_mod, 100.0),
+            (3, "-1.25", &params.timbre_filter, -1.25),
+            // (Past the knob's travel: its end.)
+            (0, "-300", &params.pressure_mod, -100.0),
+        ] {
+            double(&mut e, i);
+            assert!(e.typing.is_some(), "{text}");
+            e.draw();
+            assert_eq!(e.mpe_scene.readouts[i], ("_".to_owned(), true));
+            typed(&mut e, text);
+            let ptr = q.as_ptr();
+            assert_eq!(
+                host.take(),
+                vec![
+                    Call::Begin(ptr),
+                    Call::Set(ptr, q.preview_normalized(want)),
+                    Call::End(ptr)
+                ],
+                "{text}"
+            );
+        }
+        // (A letter is not taken: nothing typed, nothing set.)
+        double(&mut e, 1);
+        typed(&mut e, "x");
+        assert!(host.take().is_empty(), "not a number");
+        // The readouts as the amounts read.
+        let p = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            Arc::clone(&params) as Arc<dyn Params>,
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        assert!(p.automate(params.pressure_mod.as_ptr(), 0.0));
+        assert!(p.automate(params.pressure_filter.as_ptr(), 0.5));
+        assert!(p.automate(params.timbre_mod.as_ptr(), 0.65));
+        assert!(p.automate(params.timbre_filter.as_ptr(), 0.4375));
+        e.update_scene();
+        assert_eq!(
+            e.mpe_scene.readouts.clone().map(|r| r.0),
+            ["-100", "0.0", "30", "-0.5"].map(str::to_owned)
+        );
+        // A knob turned: a gesture, and the frame shown the frame put together whole.
+        let ptr = params.timbre_filter.as_ptr();
+        let at_knob = at(&e, centre("timbre_filter"));
+        go(&mut e, at_knob);
+        press(&mut e);
+        go(&mut e, below(at_knob, -30.0));
+        assert!(e.draw());
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "a knob turned in the drawer");
+        e.update_scene();
+        assert!(
+            e.scene
+                .tip
+                .as_ref()
+                .is_some_and(|t| t.0.starts_with("TIMBRE CUTOFF: ")),
+            "{:?}",
+            e.scene.tip
+        );
+        release(&mut e);
+        let calls = host.take();
+        well_formed(&calls);
+        assert!(
+            calls
+                .iter()
+                .any(|c| matches!(c, Call::Set(q, _) if *q == ptr))
+        );
+    }
+
+    /// The settings' MPE (decisions.md R-MPE): one item, INPUT & TIMBRE…, opening a menu of its
+    /// own (the settings' is already taller than the window at its opening size), where MPE
+    /// INPUT (AUTO by default) and TIMBRE REST (CENTERED ON 64 by default) are chosen for this
+    /// computer, each group's choice marked.
+    #[test]
+    fn the_settings_mpe_menu_chooses_the_input_and_the_timbre_rest() {
+        use crate::expression::{Mode, TimbreRest};
+        let (mut e, _, params) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        let open = |e: &mut Editing| {
+            click(e, key);
+            menu_item(e, "INPUT & TIMBRE…");
+        };
+        click(&mut e, key);
+        let items = menu_items(&e);
+        let at_head = items
+            .iter()
+            .position(|(t, _)| t == "MPE")
+            .expect("an MPE head");
+        assert_eq!(items[at_head + 1], ("INPUT & TIMBRE…".to_owned(), true));
+        e.learning.close_menu();
+        open(&mut e);
+        assert_eq!(
+            menu_items(&e),
+            [
+                ("MPE INPUT", false),
+                ("AUTO", false),
+                ("LOWER ZONE", true),
+                ("OFF", true),
+                ("TIMBRE REST", false),
+                ("CENTERED ON 64", false),
+                ("FROM 0", true),
+                ("FROM THE NOTE'S START", true),
+            ]
+            .map(|(t, on)| (t.to_owned(), on))
+        );
+        let m = e.learning.menu().expect("a menu");
+        assert_eq!(m.title, "MPE");
+        assert_eq!(m.marked, vec![1, 5]);
+        assert_eq!(m.heads, vec![0, 4]);
+        menu_item(&mut e, "LOWER ZONE");
+        assert_eq!(
+            (params.mpe_mode(), e.settings.mpe),
+            (Mode::Lower, Mode::Lower)
+        );
+        open(&mut e);
+        menu_item(&mut e, "FROM THE NOTE'S START");
+        assert_eq!(
+            (params.timbre_rest(), e.settings.timbre_rest),
+            (TimbreRest::NoteStart, TimbreRest::NoteStart)
+        );
+        open(&mut e);
+        assert_eq!(e.learning.menu().expect("a menu").marked, vec![2, 7]);
+        menu_item(&mut e, "OFF");
+        assert_eq!(params.mpe_mode(), Mode::Off);
+        open(&mut e);
+        menu_item(&mut e, "FROM 0");
+        assert_eq!(params.timbre_rest(), TimbreRest::Zero);
     }
 
     /// The standalone's editor with a chain for its effects' drawer (`fx_view::fake`): two

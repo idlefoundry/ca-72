@@ -1121,7 +1121,6 @@ fn clap_note_expressions_and_mpe_midi_play_the_same_samples() {
     }
 }
 
-
 /// A host may make, start and play an instance on a thread of its own, with less stack than a
 /// main thread's (a macOS secondary thread has 512 KB; a host's own threads may have less): the
 /// instance's whole life, made, activated, played at each QUALITY in POLY with GLIDE moving,

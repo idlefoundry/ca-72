@@ -180,7 +180,7 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
     const SO: &str = "STRIP: OUTPUT";
     const A: &str = "ARPEGGIATOR";
     const H: &str = "NOT ON THE PANEL";
-    // (Each note's own pressure and timbre's reach, decisions.md R-MPE: not yet on the panel.)
+    // (Each note's own pressure and timbre's reach, decisions.md R-MPE: the MPE drawer's.)
     const X: &str = "EXPRESSION";
     vec![
         e("bypass", "POWER", OUT, &p.bypass, Plain),
