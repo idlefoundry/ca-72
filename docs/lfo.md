@@ -99,7 +99,7 @@ them; choosing a preset loads its own (none where it names none); a MIDI pad's p
 
 ## Targets: which controls can take an LFO
 
-`lfo::Target` (`TARGETS`, 50), the same for every source (the macros' knobs are not targets):
+`lfo::Target` (`TARGETS`, 51), the same for every source (the macros' knobs are not targets):
 the panel's continuous knobs and the strip's (27, the strip's LEVEL last: R-LFO's corrections),
 each oscillator's CONTINUOUS shape (`KNOB_TARGETS`, 30, first), then each LFO's own five
 (R-LFO's addendum), LFO by LFO: `Target::LfoRate(n)`, `LfoPhase(n)`, `LfoRise(n)`,
@@ -121,13 +121,22 @@ which the hover pop-up marks "shared").
 - `lfo::takes_shared(params, source, target)`: whether a MONO-off LFO moves `target` by its
   shared copy (a control every voice shares, or a MONO LFO's own knob: option C); the pop-up's
   SHARED and the agents' `shared`.
+- **TEMPO** (`Target::Tempo`, `tempo`, last; R-LFO's "The standalone's TEMPO a target"): the
+  standalone's alone (`target_of` none in a plug-in, `Ca72Params::is_standalone`); its travel
+  30 to 300 BPM straight along it (`lfo::tempo_travel`, `lfo::tempo_at`, the law
+  `Ca72Params::tempo_knob`'s); moved on the ticks below (`Target::ticks`); `lfo::controls`
+  leaves its assignments out in a plug-in, which keeps them. The engine's `Engine::tempo()` is
+  the tempo of the latest tick while a source moves it, `Engine::next_tempo_tick()` where in the
+  block the next falls; the plug-in's `process` retimes the arpeggiator (`Arp::retime`) and the
+  timed clock (`timed::Clock::retime`, `Engine::retime`) there, so they go on from the beats
+  they had come to.
 - `Target::travel(params, plain, law)` and `Target::plain_at(params, travel, law)`: the knob's
   travel (its pointer, 0..1) and its parameter's value; FREQUENCY's through the computer's law
   (`params.freq_law()`), as its knob reads. A ring's swing is `travel ± depth`, clamped to 0..1.
 
 ## The LFOs moving the LFOs (R-LFO's addendum)
 
-While any source moves an LFO's own knob (`Lfos::cross()`), the engine's generators run on
+While any source moves an LFO's own knob or TEMPO (`Lfos::cross()`), the engine's generators run on
 **ticks** fixed in audio time, `lfo::TICK` (0.5 ms, `TICKS_A_SECOND` 2000), numbered from the
 engine's own count of host samples since it was prepared (the engine's `played`; `lfo::tick_at`), not
 from blocks or steps; otherwise they run as before, to the bit (`Bank::step`, `advance`).
@@ -140,7 +149,8 @@ from blocks or steps; otherwise they run as before, to the bit (`Bank::step`, `a
   through its parameter's own range, `RATE_RANGE` and the rest), so nothing feeds back within
   one; then its value there (`Gen::tick_value`: waveform, RISE, POLARITY, ON's fade, LEVEL; not
   EDGES' slew, which smooths only what reaches the sound). `lfo::Cross` keeps each copy's
-  settings in force and its value.
+  settings in force and its value, and TEMPO in force (`Cross::tempo`, by the shared copies'
+  values at the latest tick).
 - **The sound** reads each generator at its own time between ticks (`Bank::peek`: its cycle on
   at the settings in force, RISE, EDGES' slew, ON's fade, LEVEL), as before every step.
 - **Per voice:** a voice's own LFO (MONO off) is moved by the sources' own values for that voice,
@@ -156,7 +166,7 @@ from blocks or steps; otherwise they run as before, to the bit (`Bank::step`, `a
 ## What the audio thread gives back
 
 `params.lfo_scope: Arc<lfo::Scope>`, published after each block while an editor is open.
-`Scope::read(lfo) -> Reading { value, phase, since, rise, moving }`:
+`Scope::read(lfo) -> Reading { value, phase, since, rise, moving, shape, offset, level, moved }`:
 
 - `value`: the output, -1..1 (0..1 UNI), after RISE, EDGES and ON's fade (the latest voice's
   where MONO is off): a knob's present point is `travel + depth × value`, clamped.
@@ -165,6 +175,14 @@ from blocks or steps; otherwise they run as before, to the bit (`Bank::step`, `a
 - `rise`: RISE's gain now (0..1).
 - `moving`: assigned, running, not an ENV whose cycle is over, and not muted and faded out (the
   orb's frame runs only while some LFO moves). `Scope::any_moving()`: the rail key's faint glow.
+- `shape`, `offset`, `level`, `moved`: its WAVEFORM's place, PHASE (cycles) and LEVEL as in
+  force, and whether a source moves them (`Lfos::trace_moved`): the scope then draws its trace
+  from them (`lfo_page::drawn_settings`, `trace_of`; R-LFO's "Scope traces as the engine plays
+  them"), by the cheaper glow (`Column::live`).
+
+The strip's screens of controls a source moves read the engine's modulated controls
+(`Engine::controls_now`, published by the editor's `Meters::publish_live`; R-LFO's "Screens
+reading the modulated value"), and the TEMPO screen the moving tempo (`Meters::publish_tempo`).
 
 For the still trace: `lfo::settings(params, n, edges) -> Settings`, and
 `Settings::cycle_at(x)` (the waveform `x` of the way through one cycle from PHASE, REVERSE and
@@ -191,7 +209,8 @@ purple and pink. Which the left area shows, the wheels or the macros, is the com
 `ca72_modulations`, `ca72_modulation_set` and `ca72_modulation_remove` (docs/mcp.md), carried
 out by `agent::modulation` on the patch, for the LFOs and the macros (a macro also by its typed
 name; `name` sets one); the LFOs' 40 parameters and the macros' six are in `ca72_describe`'s
-table.
+table. `tempo` is a target in the standalone alone (refused in a plug-in, "standalone only";
+one a session brought there listed `inert`).
 
 ## The engine, in short
 

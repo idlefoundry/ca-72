@@ -117,6 +117,14 @@ pub enum Target {
     LfoRise(usize),
     LfoShape(usize),
     LfoLevel(usize),
+    /// The standalone's TEMPO (decisions.md R-LFO; the owner, 2026-10-20: "in standalone mode,
+    /// lfo or macro should also be able to control the BPM, I think"): its travel 30 to 300 BPM
+    /// straight along it (`params::TEMPO_RANGE`), moved on the LFOs' ticks ([`TICK`]) as an
+    /// LFO's own knobs are, and everything the tempo times following the beats it adds up. The
+    /// plug-ins follow their host's tempo: there it is never applied ([`controls`] leaves its
+    /// assignments out), though a patch keeps them. After the LFOs' own, so that no target's
+    /// index moves.
+    Tempo,
     /// A pinned parameter of the standalone's effects, `n` 0 to [`FX_PINS`] less 1 (decisions.md
     /// R-FX-PARAMS; the owner, 2026-10-20: "expose plugin parameters so that those can also be
     /// modulated by our LFOs and Macros"): a fixed target the effects' chain pins a parameter
@@ -166,8 +174,12 @@ pub const LFO_KNOBS: usize = 5;
 /// The effects' pinned parameters' targets ([`Target::Fx`]): four for each of the chain's four
 /// effects (`ca72_fx::MAX_PINS`).
 pub const FX_PINS: usize = 16;
-/// How many targets there are.
-pub const TARGETS: usize = KNOB_TARGETS + LFOS * LFO_KNOBS + FX_PINS;
+/// TEMPO's place in [`Target::ALL`], after the LFOs' own; the effects' pins' first, after it.
+const TEMPO_AT: usize = KNOB_TARGETS + LFOS * LFO_KNOBS;
+const FX_AT: usize = TEMPO_AT + 1;
+/// How many targets there are: the panel's and the strip's, each LFO's own, TEMPO, the
+/// effects' pins.
+pub const TARGETS: usize = FX_AT + FX_PINS;
 
 /// The pin targets that can take a source now, a bit each ([`target_of`]): those pinned to
 /// an effect that runs, set by the standalone's effects (none in the plug-ins).
@@ -226,9 +238,10 @@ const fn all_targets() -> [Target; TARGETS] {
         all[at + 4] = Target::LfoLevel(n);
         n += 1;
     }
+    all[TEMPO_AT] = Target::Tempo;
     let mut k = 0;
     while k < FX_PINS {
-        all[KNOB_TARGETS + LFOS * LFO_KNOBS + k] = Target::Fx(k);
+        all[FX_AT + k] = Target::Fx(k);
         k += 1;
     }
     all
@@ -311,7 +324,8 @@ impl Target {
             Target::Osc2Shape => 27,
             Target::Osc3Shape => 28,
             Target::Level => 29,
-            Target::Fx(k) => KNOB_TARGETS + LFOS * LFO_KNOBS + k.min(FX_PINS - 1),
+            Target::Tempo => TEMPO_AT,
+            Target::Fx(k) => FX_AT + k.min(FX_PINS - 1),
             t => {
                 let (n, k) = t.lfo_knob().unwrap_or((0, LfoKnob::Rate));
                 KNOB_TARGETS + LFO_KNOBS * n.min(LFOS - 1) + k as usize
@@ -353,6 +367,7 @@ impl Target {
             Target::Osc2Shape => "osc2_shape",
             Target::Osc3Shape => "osc3_shape",
             Target::Level => "level",
+            Target::Tempo => "tempo",
             Target::Fx(k) => FX_TARGET_IDS[k.min(FX_PINS - 1)],
             t => {
                 let (n, k) = t.lfo_knob().unwrap_or((0, LfoKnob::Rate));
@@ -399,6 +414,7 @@ impl Target {
             Target::Osc2Shape => "OSC 2 WAVE",
             Target::Osc3Shape => "OSC 3 WAVE",
             Target::Level => "LEVEL",
+            Target::Tempo => "TEMPO",
             // (The pin's own name is the effects' to give: its parameter's.)
             Target::Fx(k) => FX_TARGET_SHORT[k.min(FX_PINS - 1)],
             // (Ten characters: "LFO2 LEVEL", apart from the strip's LEVEL.)
@@ -440,8 +456,15 @@ impl Target {
                 | Target::LfoRise(_)
                 | Target::LfoShape(_)
                 | Target::LfoLevel(_)
+                | Target::Tempo
                 | Target::Fx(_)
         )
+    }
+
+    /// Whether it runs on the LFOs' ticks ([`TICK`]): an LFO's own knob, or TEMPO (the clock
+    /// the timed LFOs keep).
+    pub fn ticks(self) -> bool {
+        self.is_lfo() || self == Target::Tempo
     }
 
     /// Its parameter (none for an effects' pin, which is its effect's: R-FX-PARAMS).
@@ -482,6 +505,7 @@ impl Target {
             Target::LfoRise(n) => &p.lfo(n).rise,
             Target::LfoShape(n) => &p.lfo(n).shape,
             Target::LfoLevel(n) => &p.lfo_level(n).level,
+            Target::Tempo => &p.tempo_knob,
             Target::Fx(_) => return None,
         })
     }
@@ -549,6 +573,7 @@ impl Target {
             | Target::LfoRise(_)
             | Target::LfoShape(_)
             | Target::LfoLevel(_)
+            | Target::Tempo
             | Target::Fx(_) => {}
             _ => self.write_panel(&mut c.panel, t, law),
         }
@@ -593,11 +618,23 @@ impl Target {
             | Target::LfoRise(_)
             | Target::LfoShape(_)
             | Target::LfoLevel(_)
+            | Target::Tempo
             | Target::Fx(_) => {}
         }
     }
 }
 
+/// TEMPO's travel (0..1, straight along its range) at `bpm`.
+pub fn tempo_travel(bpm: f64) -> f64 {
+    let (lo, hi) = crate::params::TEMPO_RANGE;
+    ((bpm - lo) / (hi - lo)).clamp(0.0, 1.0)
+}
+
+/// The tempo (BPM) with TEMPO's travel at `travel`, clamped to its range.
+pub fn tempo_at(travel: f64) -> f64 {
+    let (lo, hi) = crate::params::TEMPO_RANGE;
+    lo + (hi - lo) * travel.clamp(0.0, 1.0)
+}
 /// The effects' pins' targets' IDs (R-FX-PARAMS).
 const FX_TARGET_IDS: [&str; FX_PINS] = [
     "fx1", "fx2", "fx3", "fx4", "fx5", "fx6", "fx7", "fx8", "fx9", "fx10", "fx11", "fx12", "fx13",
@@ -735,6 +772,8 @@ pub fn target_of(p: &Ca72Params, param_id: &str) -> Option<Target> {
         Target::Osc3Frequency if p.timed_now(2) => None,
         // (Timed, its knob is a DIVISION dial, stepped: as a FREQUENCY.)
         Target::LfoRate(n) if p.lfo(n).timed.value() => None,
+        // (The standalone's alone: a plug-in follows its host's tempo.)
+        Target::Tempo if !p.is_standalone() => None,
         _ => Some(t),
     }
 }
@@ -1378,13 +1417,21 @@ pub struct Scope {
     since: [AtomicU32; LFOS],
     rise: [AtomicU32; LFOS],
     moving: AtomicU8,
+    shape: [AtomicU32; LFOS],
+    offset: [AtomicU32; LFOS],
+    level: [AtomicU32; LFOS],
+    moved: AtomicU8,
 }
 
 /// An LFO as the audio thread last had it: its output (-1..1, after RISE and EDGES, as it
 /// moves its knobs: the latest voice's where MONO is off), where it is in its cycle (0..1,
 /// PHASE included: the scope's trace at `phase` is the waveform there), how long since the
 /// note that last started it (s; the scope's time base starts there), RISE's gain then (0..1),
-/// and whether it moves (assigned, running, not an ENV whose cycle is over).
+/// and whether it moves (assigned, running, not an ENV whose cycle is over); and the settings
+/// its trace is drawn from as they are in force (its WAVEFORM's place along the switch's
+/// travel, PHASE in cycles, LEVEL 0..1), whether a source moves them (R-LFO's corrections: the
+/// owner, 2026-10-20, "the oscilloscope wave isn't changing to match the actual pattern that's
+/// happening at the moment").
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Reading {
     pub value: f32,
@@ -1392,6 +1439,10 @@ pub struct Reading {
     pub since: f32,
     pub rise: f32,
     pub moving: bool,
+    pub shape: f32,
+    pub offset: f32,
+    pub level: f32,
+    pub moved: bool,
 }
 
 impl Scope {
@@ -1404,6 +1455,10 @@ impl Scope {
             since: f(&self.since),
             rise: f(&self.rise),
             moving: self.moving.load(Ordering::Relaxed) & (1 << lfo.min(7)) != 0,
+            shape: f(&self.shape),
+            offset: f(&self.offset),
+            level: f(&self.level),
+            moved: self.moved.load(Ordering::Relaxed) & (1 << lfo.min(7)) != 0,
         }
     }
 
@@ -1413,15 +1468,20 @@ impl Scope {
     }
 
     pub fn publish(&self, r: &[Reading; LFOS]) {
-        let mut moving = 0u8;
+        let (mut moving, mut moved) = (0u8, 0u8);
         for (k, r) in r.iter().enumerate() {
             self.value[k].store(r.value.to_bits(), Ordering::Relaxed);
             self.phase[k].store(r.phase.to_bits(), Ordering::Relaxed);
             self.since[k].store(r.since.to_bits(), Ordering::Relaxed);
             self.rise[k].store(r.rise.to_bits(), Ordering::Relaxed);
+            self.shape[k].store(r.shape.to_bits(), Ordering::Relaxed);
+            self.offset[k].store(r.offset.to_bits(), Ordering::Relaxed);
+            self.level[k].store(r.level.to_bits(), Ordering::Relaxed);
             moving |= u8::from(r.moving) << k;
+            moved |= u8::from(r.moved) << k;
         }
         self.moving.store(moving, Ordering::Relaxed);
+        self.moved.store(moved, Ordering::Relaxed);
     }
 }
 
@@ -1891,6 +1951,10 @@ impl Gen {
                 s.rise_gain(self.since) as f32
             },
             moving,
+            shape: s.at as f32,
+            offset: s.phase as f32,
+            level: s.level as f32,
+            moved: false,
         }
     }
 }
@@ -1999,14 +2063,32 @@ impl Lfos {
         self.to[lfo].iter().flatten().any(|a| a.depth != 0.0)
     }
 
-    /// Whether any source moves an LFO's own knob (R-LFO's addendum): the generators then run
-    /// on [`TICK`]'s clock ([`Bank`]'s ticks).
+    /// Whether any source moves an LFO's own knob (R-LFO's addendum) or TEMPO: the generators
+    /// then run on [`TICK`]'s clock ([`Bank`]'s ticks).
     pub fn cross(&self) -> bool {
         self.to
             .iter()
             .flatten()
             .flatten()
-            .any(|a| a.depth != 0.0 && a.target.is_lfo())
+            .any(|a| a.depth != 0.0 && a.target.ticks())
+    }
+
+    /// Whether a source moves LFO `k`'s knobs its trace is drawn from: PHASE, its CONTINUOUS
+    /// shape, LEVEL.
+    pub fn trace_moved(&self, k: usize) -> bool {
+        self.to.iter().flatten().flatten().any(|a| {
+            a.depth != 0.0
+                && matches!(a.target.lfo_knob(), Some((n, LfoKnob::Phase | LfoKnob::Shape | LfoKnob::Level)) if n == k)
+        })
+    }
+
+    /// Whether any source moves TEMPO.
+    pub fn tempo_moved(&self) -> bool {
+        self.to
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|a| a.depth != 0.0 && a.target == Target::Tempo)
     }
 
     /// Whether a source with values of each voice's own modulates a knob each voice has.
@@ -2212,6 +2294,9 @@ impl Bank {
             let mut r = g.reading(s, assigned && g.moving(s));
             r.value *= s.level as f32;
             r.rise *= s.level as f32;
+            // (What its trace is drawn from, as in force; moved where a source moves them.)
+            (r.shape, r.offset, r.level) = (s.at as f32, s.phase as f32, s.level as f32);
+            r.moved = self.cross.on && l.trace_moved(k);
             r
         })
     }
@@ -2254,6 +2339,9 @@ struct Route {
 struct Routes {
     n: usize,
     all: [Route; SOURCES * MOST],
+    /// The sources moving TEMPO (each one's index and depth), and how many.
+    tempo_n: usize,
+    tempo: [(usize, f64); SOURCES],
 }
 
 impl Default for Routes {
@@ -2266,6 +2354,8 @@ impl Default for Routes {
                 knob: LfoKnob::Rate,
                 depth: 0.0,
             }; SOURCES * MOST],
+            tempo_n: 0,
+            tempo: [(0, 0.0); SOURCES],
         }
     }
 }
@@ -2288,6 +2378,10 @@ impl Routes {
                     };
                     r.n += 1;
                 }
+                if a.target == Target::Tempo && a.depth != 0.0 && r.tempo_n < r.tempo.len() {
+                    r.tempo[r.tempo_n] = (from, f64::from(a.depth));
+                    r.tempo_n += 1;
+                }
             }
         }
         r
@@ -2295,6 +2389,19 @@ impl Routes {
 
     fn iter(&self) -> impl Iterator<Item = &Route> {
         self.all[..self.n].iter()
+    }
+
+    /// TEMPO with each source's value `value(i)` (its index): its travel plus depth × value,
+    /// clamped, in BPM; none where nothing moves it.
+    fn tempo(&self, l: &Lfos, value: impl Fn(usize) -> f64) -> Option<f64> {
+        if self.tempo_n == 0 {
+            return None;
+        }
+        let sum: f64 = self.tempo[..self.tempo_n]
+            .iter()
+            .map(|&(i, d)| d * value(i))
+            .sum();
+        Some(tempo_at(f64::from(l.base[Target::Tempo.index()]) + sum))
     }
 }
 
@@ -2354,6 +2461,9 @@ pub struct Cross {
     shared_out: [f64; LFOS],
     voice_out: [[f64; LFOS]; VOICES],
     routes: Routes,
+    /// TEMPO in force since the latest tick (BPM), moved by the sources' shared values at the
+    /// tick before (a shared target: option C), if a source moves it.
+    pub tempo: Option<f64>,
 }
 
 impl Cross {
@@ -2539,9 +2649,18 @@ impl Bank {
             self.cross.shared_out = self.shared_values;
             self.cross.voice_out = self.voice_values;
             self.cross.routes = Routes::of(l);
+            let shared = self.shared_values;
+            self.cross.tempo = self.cross.routes.tempo(l, |i| match Source::of_index(i) {
+                Some(Source::Lfo(m)) => shared[m],
+                Some(Source::Macro(m)) => f64::from(l.macros[m.min(MACROS - 1)]),
+                None => 0.0,
+            });
             return;
         }
         self.cross.routes = Routes::of(l);
+        if self.cross.routes.tempo_n == 0 {
+            self.cross.tempo = None;
+        }
         while self.cross.next <= due {
             let k = self.cross.next;
             self.tick(l, clocks, k, n);
@@ -2590,6 +2709,12 @@ impl Bank {
                 }
             }
         }
+        // TEMPO likewise, by the shared copies (it is the instrument's: option C).
+        cross.tempo = routes.tempo(l, |i| match Source::of_index(i) {
+            Some(Source::Lfo(m)) => was_shared[m],
+            Some(Source::Macro(m)) => macros(m),
+            None => 0.0,
+        });
         // Their values here.
         for j in 0..LFOS {
             let at = clocks.at(j, t);
@@ -2682,14 +2807,25 @@ pub fn controls(p: &Ca72Params, knob: &dyn Fn(&FloatParam) -> f32) -> Lfos {
     for n in 0..LFOS {
         l.lfo[n] = settings(p, n, patch.edges(n));
     }
+    let standalone = p.is_standalone();
     for s in Source::all() {
         let i = s.index();
         l.to[i] = patch.assignments(s);
+        for a in &mut l.to[i] {
+            // (TEMPO in a plug-in: kept in the patch, never applied, so that nothing runs.)
+            if a.is_some_and(|a| a.target == Target::Tempo && !standalone) {
+                *a = None;
+            }
+        }
         for a in l.to[i].iter().flatten() {
             let t = a.target;
-            if let Some(q) = t.param(p) {
-                l.base[t.index()] = t.travel(p, knob(q), law);
-            }
+            l.base[t.index()] = if t == Target::Tempo {
+                tempo_travel(p.tempo()) as f32
+            } else if let Some(q) = t.param(p) {
+                t.travel(p, knob(q), law)
+            } else {
+                0.0
+            };
         }
     }
     // (A macro's value only where it is assigned, so that one turned with nothing to move
@@ -3351,6 +3487,57 @@ mod tests {
         assert!(!l.own(Source::Macro(2).index()));
     }
 
+    /// The standalone's TEMPO a target (decisions.md R-LFO): found by its ID, named TEMPO, a
+    /// target the voices share, on the LFOs' ticks, its travel 30 to 300 BPM straight along it;
+    /// one the standalone alone can take; saved with a session and a preset and read back in a
+    /// plug-in too (kept, never applied: [`controls`] leaves it out there).
+    #[test]
+    fn tempo_is_a_target_of_the_standalones_alone() {
+        let t = Target::Tempo;
+        assert_eq!(
+            (t.id(), t.short(), t.name()),
+            ("tempo", "TEMPO", "TEMPO".to_owned())
+        );
+        assert_eq!(Target::of_id("tempo"), Some(t));
+        assert_eq!(t.index(), TARGETS - 1);
+        assert!(!t.per_voice() && t.ticks() && !t.is_lfo());
+        assert_eq!(
+            (tempo_at(0.0), tempo_at(1.0), tempo_at(2.0)),
+            (30.0, 300.0, 300.0)
+        );
+        assert!((tempo_travel(120.0) - 1.0 / 3.0).abs() < 1e-12);
+        let params = Ca72Params::default();
+        assert_eq!(target_of(&params, "tempo"), None, "a plug-in's");
+        params.set_standalone(true);
+        assert_eq!(target_of(&params, "tempo"), Some(t));
+        // The parameter's law is TEMPO's (the depth a share of its travel).
+        assert!((t.travel(&params, 165.0, Law::Semitones) - 0.5).abs() < 1e-6);
+        assert!((t.plain_at(&params, 0.25, Law::Semitones) - 97.5).abs() < 1e-3);
+        params.lfo_patch.assign(Source::Lfo(1), t, -0.4).unwrap();
+        params.lfo_patch.assign(Source::Macro(5), t, 0.7).unwrap();
+        let values = params.lfo_patch.values();
+        let saved = params.lfo_patch.saved();
+        params.set_standalone(false);
+        for (q, how) in [(Patch::default(), "session"), (Patch::default(), "preset")] {
+            if how == "session" {
+                q.load(&saved);
+                assert_eq!(q.saved(), saved);
+            } else {
+                q.load_values(&values);
+                assert!(q.same_as_values(&values));
+            }
+            assert_eq!(q.depth(Source::Lfo(1), t), Some(-0.4), "{how}");
+            assert_eq!(q.depth(Source::Macro(5), t), Some(0.7), "{how}");
+        }
+        // In a plug-in the controls leave it out: nothing runs.
+        let l = controls(&params, &|q: &FloatParam| q.value());
+        assert!(!l.active() && !l.cross() && !l.tempo_moved());
+        params.set_standalone(true);
+        let l = controls(&params, &|q: &FloatParam| q.value());
+        assert!(l.active() && l.cross() && l.tempo_moved());
+        assert!((l.base[t.index()] - (1.0 / 3.0)).abs() < 1e-6);
+    }
+
     /// An LFO's own knobs as targets (R-LFO's addendum): every target at its index, found by
     /// its ID, its screen name ten characters at most; LFO 2's LEVEL apart from the strip's
     /// (`lfo2_level`, "LFO2 LEVEL", "LFO 2 LEVEL"; `level`, "LEVEL"); saved with a session and a
@@ -3462,12 +3649,15 @@ mod tests {
             Target::Osc2Shape => p.shape[1].at,
             Target::Osc3Shape => p.shape[2].at,
             Target::Level => c.level,
-            // (An LFO's own: not the controls', its ticks' (engine_lfo_tests).)
+            // (An LFO's own and TEMPO: not the controls', the ticks' (engine_lfo_tests,
+            // tempo_tests); an effects' pin, the chain's.)
             Target::LfoRate(_)
             | Target::LfoPhase(_)
             | Target::LfoRise(_)
             | Target::LfoShape(_)
-            | Target::LfoLevel(_) => 0.0,
+            | Target::LfoLevel(_)
+            | Target::Tempo
+            | Target::Fx(_) => 0.0,
         }
     }
 
@@ -3485,7 +3675,11 @@ mod tests {
                     let plain = t.plain_at(&p, x, law);
                     let back = t.travel(&p, plain, law);
                     assert!((back - x).abs() < 2e-4, "{t:?} {x} {back}");
-                    let q = t.param(&p);
+                    // (An effects' pin has no parameter here: its travel is its value.)
+                    let Some(q) = t.param(&p) else {
+                        assert_eq!(plain, x);
+                        continue;
+                    };
                     let want = p.controls_with(&|k| {
                         if std::ptr::eq(k, q) { plain } else { k.value() }
                     });

@@ -10,10 +10,10 @@
 
 use std::time::Instant;
 
+use ca72_panel::Target;
 use ca72_panel::controls::MACRO_FIRST;
 use ca72_panel::modulation as mods;
 use ca72_panel::strip::macros::{self as macro_ui, Cell, MacroScene, MacroTarget};
-use ca72_panel::{CONTROLS, Target};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::prelude::Param;
 
@@ -246,9 +246,10 @@ impl Editing {
                 continue;
             };
             rows.push(Row::Head(format!(
-                "{} \u{b7} {}",
-                CONTROLS[i].label,
-                mods::percent(f64::from(a.depth))
+                "{} \u{b7} {}{}",
+                super::lfo_page::control_label(i),
+                mods::percent(f64::from(a.depth)),
+                self.standalone_only(a.target)
             )));
             rows.push(Row::Item(
                 ModItem::Depth(s, a.target, i),
@@ -339,8 +340,12 @@ impl Editing {
             .flatten()
             .map(|a| {
                 let name = super::lfo_page::control_of(a.target)
-                    .map_or(a.target.short(), |i| CONTROLS[i].label);
-                format!("{name} {}", mods::percent(f64::from(a.depth)))
+                    .map_or(a.target.short(), super::lfo_page::control_label);
+                format!(
+                    "{name} {}{}",
+                    mods::percent(f64::from(a.depth)),
+                    self.standalone_only(a.target)
+                )
             })
             .collect();
         let title = self.macro_title(n);

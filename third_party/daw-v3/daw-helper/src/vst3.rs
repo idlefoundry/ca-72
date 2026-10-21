@@ -2438,7 +2438,8 @@ impl Processor {
     /// must not exceed the processor's block size.
     pub unsafe fn process(
         &mut self,
-        _steady_time: i64,
+        steady_time: i64,
+        timing: daw_ipc::Timing,
         frames: usize,
         events: &[Event],
         input: [*mut f32; 2],
@@ -2614,6 +2615,24 @@ impl Processor {
             outputEvents: std::ptr::null_mut(),
             processContext: std::ptr::null_mut(),
         };
+        // The host's tempo and place, its transport stopped (CA-72's change 5).
+        // SAFETY: a plain C struct, all zeros a valid value (nothing valid in its state).
+        let mut context: ProcessContext = unsafe { std::mem::zeroed() };
+        if timing.has_tempo() {
+            use ProcessContext_::StatesAndFlags_::*;
+            context.state =
+                (kTempoValid | kProjectTimeMusicValid | kBarPositionValid | kTimeSigValid)
+                    as uint32;
+            context.sampleRate = timing.rate;
+            context.projectTimeSamples = steady_time;
+            context.continousTimeSamples = steady_time;
+            context.projectTimeMusic = timing.beats;
+            context.barPositionMusic = (timing.beats / 4.0).floor() * 4.0;
+            context.tempo = timing.tempo;
+            context.timeSigNumerator = 4;
+            context.timeSigDenominator = 4;
+            data.processContext = &mut context;
+        }
         // SAFETY: every pointer in `data` is valid for the call (the caller's contract
         // covers the channels); `process` is called on the audio thread.
         let r = unsafe { self.processor.process(&mut data) };

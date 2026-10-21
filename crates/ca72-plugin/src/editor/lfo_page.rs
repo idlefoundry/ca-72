@@ -84,6 +84,44 @@ pub(super) fn orb_at(set: &lfo::Settings, r: &Reading, tempo: f64, assigned: boo
     if x > 1.0 - 1e-6 { 0.0 } else { x }
 }
 
+/// What an LFO's trace is drawn from (decisions.md R-LFO's corrections; the owner, 2026-10-20:
+/// "the oscilloscope wave isn't changing to match the actual pattern that's happening at the
+/// moment. The floating orb however is following the correct path"): its settings as its knobs
+/// are set, and LEVEL's 1; a source moving its PHASE, its CONTINUOUS shape or its LEVEL, those
+/// as the engine has them now (`r`), so that the orb rides on the line.
+pub(super) fn drawn_settings(set: &lfo::Settings, r: &Reading) -> (lfo::Settings, f64) {
+    if !r.moved {
+        return (*set, 1.0);
+    }
+    (
+        lfo::Settings {
+            at: f64::from(r.shape),
+            phase: f64::from(r.offset),
+            ..*set
+        },
+        f64::from(r.level).clamp(0.0, 1.0),
+    )
+}
+
+/// How finely a moved trace's samples are kept: a change smaller is under half a pixel of the
+/// trace's height at the largest size, and draws nothing again.
+const TRACE_STEP: f64 = 1.0 / 256.0;
+
+/// The trace of one cycle from PHASE ([`TRACE_POINTS`] samples) at LEVEL `level`; a moved one's
+/// (`moved`) kept to [`TRACE_STEP`].
+pub(super) fn trace_of(set: &lfo::Settings, level: f64, moved: bool) -> Vec<f32> {
+    (0..TRACE_POINTS)
+        .map(|i| {
+            let v = set.cycle_at(i as f64 / (TRACE_POINTS - 1) as f64) * level;
+            if moved {
+                ((v / TRACE_STEP).round() * TRACE_STEP) as f32
+            } else {
+                v as f32
+            }
+        })
+        .collect()
+}
+
 /// An assignment being dragged from a source's jack: the pointer's place (the drawing's), and
 /// whether it has left the jack (an LFO's cord let go on its own jack without, a click, gives
 /// its LEVEL nothing: R-LFO's addendum).
@@ -278,6 +316,20 @@ pub(super) fn lfo_param<'a>(
     })
 }
 
+/// The standalone's TEMPO screen as a control the sources take (decisions.md R-LFO): past the
+/// panel's (`CONTROLS` has none for it), so that the cord, the rails, the pop-up, the menus and
+/// a typed depth take it as they take a knob, by this number.
+pub(super) const TEMPO_CONTROL: usize = usize::MAX;
+
+/// A control's name as the menus and the tips give it: TEMPO's screen's too.
+pub(super) fn control_label(i: usize) -> &'static str {
+    if i == TEMPO_CONTROL {
+        "TEMPO"
+    } else {
+        CONTROLS.get(i).map_or("", |c| c.label)
+    }
+}
+
 /// The LFO whose LEVEL control `i` is (its OUT jack: R-LFO's addendum), if it is one.
 pub(super) fn level_of_control(i: usize) -> Option<usize> {
     (0..LFOS).find(|&n| lfo_index(n, ca72_panel::controls::LFO_LEVEL_PART) == i)
@@ -293,6 +345,7 @@ pub(super) fn control_of(t: ModTarget) -> Option<usize> {
         ModTarget::LfoShape(n) => {
             return Some(lfo_index(n.min(LFOS - 1), 0));
         }
+        ModTarget::Tempo => return Some(TEMPO_CONTROL),
         t => t.id(),
     };
     ca72_panel::controls::index(id)
@@ -301,7 +354,12 @@ pub(super) fn control_of(t: ModTarget) -> Option<usize> {
 /// What an LFO's MODULATES screen reads (its ten characters): the one knob and its depth, the
 /// count, or NOT IN USE (dim); MUTED (dim) while its ON is off, whatever it modulates (R-LFO's
 /// corrections).
-pub(super) fn screen_text(patch: &lfo::Patch, n: usize, on: bool) -> (String, bool) {
+pub(super) fn screen_text(
+    patch: &lfo::Patch,
+    n: usize,
+    on: bool,
+    standalone: bool,
+) -> (String, bool) {
     if !on {
         return ("MUTED".into(), false);
     }
@@ -312,6 +370,8 @@ pub(super) fn screen_text(patch: &lfo::Patch, n: usize, on: bool) -> (String, bo
         .collect();
     match a.len() {
         0 => ("NOT IN USE".into(), false),
+        // (TEMPO in a plug-in: kept, doing nothing, dim; its tip and menu say why.)
+        1 if a[0].target == ModTarget::Tempo && !standalone => ("TEMPO".into(), false),
         1 => {
             let s = a[0].target.short();
             let d = format!("{:+.0}", f64::from(a[0].depth) * 100.0);
@@ -361,8 +421,12 @@ impl Editing {
         self.composed = None;
     }
 
-    /// The modulation target control `i` is now, if it can take one.
+    /// The modulation target control `i` is now, if it can take one (TEMPO's screen, the
+    /// standalone's: [`TEMPO_CONTROL`]).
     pub(super) fn mod_target(&self, i: usize) -> Option<ModTarget> {
+        if i == TEMPO_CONTROL {
+            return self.playing.standalone.then_some(ModTarget::Tempo);
+        }
         CONTROLS
             .get(i)
             .and_then(|c| lfo::target_of(&self.params, c.param))
@@ -372,6 +436,9 @@ impl Editing {
     /// shows (neither the keyboard nor the LFO page over it), the LFO page's while it shows (its
     /// knobs and jacks take the sources too: R-LFO's addendum).
     fn in_view(&self, i: usize) -> bool {
+        if i == TEMPO_CONTROL {
+            return self.playing.standalone;
+        }
         match CONTROLS.get(i).map(|c| c.place) {
             Some(ControlPlace::Panel) => true,
             Some(ControlPlace::Strip) => {
@@ -385,6 +452,9 @@ impl Editing {
     /// The control under (`x`, `y`) a source can be given to: the LFO page's while it shows and
     /// the pointer is over it, else the panel's and the strip's.
     pub(super) fn mod_hit(&self, x: f64, y: f64) -> Option<Target> {
+        if self.tempo_hovered((x, y)) {
+            return Some(Target::Control(TEMPO_CONTROL));
+        }
         if self.page_shows() && lfo_ui::inside(x, y) {
             interact::hit_lfo(self.renderer.layout(), x, y)
         } else {
@@ -399,8 +469,25 @@ impl Editing {
             .collect()
     }
 
-    /// Control `i`'s knob's travel now (0..1, its pointer: a CONTINUOUS WAVEFORM's its shape's).
+    /// Whether (`x`, `y`) is on the standalone's TEMPO screen.
+    pub(super) fn tempo_hovered(&self, (x, y): (f64, f64)) -> bool {
+        self.playing.standalone && art::tempo_hit(self.renderer.arrangement(), x, y)
+    }
+
+    /// The TEMPO screen's window (left, top, width, height), and where its rails hang from (its
+    /// surround's foot, its middle) and half their length.
+    fn tempo_place(&self) -> ((f64, f64, f64, f64), (f64, f64), f64) {
+        let (x, y, w, h) = art::tempo_window(self.renderer.arrangement().plate_at());
+        let o = art::TEMPO_SURROUND;
+        ((x, y, w, h), (x + w / 2.0, y + h + o), w / 2.0)
+    }
+
+    /// Control `i`'s knob's travel now (0..1, its pointer: a CONTINUOUS WAVEFORM's its shape's;
+    /// TEMPO's as it is set, along its range).
     fn travel_of(&self, i: usize) -> f64 {
+        if i == TEMPO_CONTROL {
+            return lfo::tempo_travel(self.params.tempo());
+        }
         if self.continuous_switch(i) {
             self.value_of(i)
         } else {
@@ -445,26 +532,27 @@ impl Editing {
         for (n, col) in s.columns.iter_mut().enumerate() {
             let q = self.params.lfo(n);
             let set = lfo::settings(&self.params, n, self.params.lfo_patch.edges(n));
-            // (One cycle across the scope from PHASE: the owner, 2026-10-20, "it should be 1".)
-            let trace: Vec<f32> = (0..TRACE_POINTS)
-                .map(|i| set.cycle_at(i as f64 / (TRACE_POINTS - 1) as f64) as f32)
-                .collect();
             let r = self.modulating.readings[n];
+            // (One cycle across the scope from PHASE: the owner, 2026-10-20, "it should be 1";
+            // a source moving its PHASE, shape or LEVEL, the cycle as the engine plays it now.)
+            let (drawn, level) = drawn_settings(&set, &r);
+            let trace = trace_of(&drawn, level, r.moved);
             let assigned = (self.params.lfo_patch.assignments(Source::Lfo(n)).iter())
                 .flatten()
                 .any(|a| a.depth != 0.0);
-            let x = orb_at(&set, &r, tempo, assigned);
+            let x = orb_at(&drawn, &r, tempo, assigned);
             // (Moving, at its output, RISE's fade and EDGES in it; still, on the trace.)
             let (y, gain) = if r.moving {
                 (f64::from(r.value), f64::from(r.rise).clamp(0.0, 1.0))
             } else {
-                (set.cycle_at(x), 1.0)
+                (drawn.cycle_at(x) * level, 1.0)
             };
             let v = |k: usize| self.scene.values[lfo_index(n, k)];
             let continuous = q.shape_mode.value() == WaveMode::Continuous;
             let keys = self.params.lfo_keys(n);
             let on = keys.on.value();
-            let (screen, in_use) = screen_text(&self.params.lfo_patch, n, on);
+            let (screen, in_use) =
+                screen_text(&self.params.lfo_patch, n, on, self.playing.standalone);
             *col = Column {
                 colour: colour(&self.settings, Source::Lfo(n)),
                 wave: if continuous {
@@ -493,6 +581,7 @@ impl Editing {
                 orb_rise: gain,
                 screen,
                 in_use,
+                live: r.moved,
             };
         }
         s
@@ -514,29 +603,40 @@ impl Editing {
         let mut knobs = Vec::new();
         let mut targets = Vec::new();
         let mut over = None;
+        let (mut boxes, mut over_box, mut under_room) = (Vec::new(), None, false);
         let pointer = patching.map(|p| p.at);
         let under = pointer.and_then(|(x, y)| match self.mod_hit(x, y) {
             Some(Target::Control(i) | Target::Legend(i, _)) => Some(i),
             _ => None,
         });
-        for i in 0..CONTROLS.len() {
+        // (The panel's knobs, then the standalone's TEMPO screen: R-LFO.)
+        let tempo = self.playing.standalone.then_some(TEMPO_CONTROL);
+        for i in (0..CONTROLS.len()).chain(tempo) {
             if !self.in_view(i) {
                 continue;
             }
             let Some(t) = self.mod_target(i) else {
                 continue;
             };
-            let c = self.renderer.arrangement().control(i);
-            let place = (c.centre(), art::skirt(&c.kind));
-            let sweep = art::sweep(&c.kind);
+            // Where it is: a knob's centre, skirt and sweep; TEMPO's screen and its rails.
+            let (place, sweep, bar, screen) = if i == TEMPO_CONTROL {
+                let (window, foot, half) = self.tempo_place();
+                ((foot, 0.0), (-150.0, 150.0), Some(half), Some(window))
+            } else {
+                let c = self.renderer.arrangement().control(i);
+                let place = (c.centre(), art::skirt(&c.kind));
+                (place, art::sweep(&c.kind), None, None)
+            };
             if let Some(p) = patching {
                 let room = self.params.lfo_patch.depth(p.source, t).is_some()
                     || self.params.lfo_patch.count(p.source) < lfo::MOST;
                 if room {
-                    if under == Some(i) {
-                        over = Some(place);
-                    } else {
-                        targets.push(place);
+                    under_room |= under == Some(i);
+                    match (screen, under == Some(i)) {
+                        (Some(w), true) => over_box = Some(w),
+                        (Some(w), false) => boxes.push(w),
+                        (None, true) => over = Some(place),
+                        (None, false) => targets.push(place),
                     }
                 }
             }
@@ -558,7 +658,7 @@ impl Editing {
             if let Some(p) = patching
                 && under == Some(i)
                 && !on.iter().any(|(s, _)| *s == p.source)
-                && over.is_some()
+                && under_room
             {
                 on.push((p.source, lfo::DEFAULT_DEPTH));
                 on.sort_by_key(|(s, _)| s.index());
@@ -588,6 +688,7 @@ impl Editing {
                 sweep,
                 travel,
                 rings,
+                bar,
             });
         }
         let cord = patching.and_then(|p| {
@@ -602,6 +703,8 @@ impl Editing {
                 colour: colour(&self.settings, p.source),
                 targets,
                 over,
+                boxes,
+                over_box,
             })
         });
         let popup = self
@@ -614,11 +717,18 @@ impl Editing {
                 if on.is_empty() {
                     return None;
                 }
-                let c = self.renderer.arrangement().control(i);
-                let (a0, a1) = art::sweep(&c.kind);
+                // (Under TEMPO's rails, its dials on a knob's 300 degrees.)
+                let (knob, span) = if i == TEMPO_CONTROL {
+                    let (_, foot, _) = self.tempo_place();
+                    ((foot, mods::rails_depth(on.len())), 300.0)
+                } else {
+                    let c = self.renderer.arrangement().control(i);
+                    let (a0, a1) = art::sweep(&c.kind);
+                    ((c.centre(), art::skirt(&c.kind)), a1 - a0)
+                };
                 Some(Popup {
-                    knob: (c.centre(), art::skirt(&c.kind)),
-                    span: a1 - a0,
+                    knob,
+                    span,
                     dials: on
                         .iter()
                         .map(|&(s, d)| PopDial {
@@ -661,6 +771,16 @@ impl Editing {
             .collect()
     }
 
+    /// What a menu or a tip adds to an assignment that does nothing here: TEMPO's in a plug-in,
+    /// which follows its host's tempo (decisions.md R-LFO).
+    pub(super) fn standalone_only(&self, t: ModTarget) -> &'static str {
+        if t == ModTarget::Tempo && !self.playing.standalone {
+            " (STANDALONE ONLY)"
+        } else {
+            ""
+        }
+    }
+
     /// Whether source `s` moves its knobs one way: a macro, or an LFO whose POLARITY is UNI
     /// (R-LFO's corrections).
     pub(super) fn one_way(&self, s: Source) -> bool {
@@ -690,9 +810,12 @@ impl Editing {
                     .into_iter()
                     .flatten()
                     .map(|a| {
-                        let name =
-                            control_of(a.target).map_or(a.target.short(), |i| CONTROLS[i].label);
-                        format!("{name} {}", mods::percent(f64::from(a.depth)))
+                        let name = control_of(a.target).map_or(a.target.short(), control_label);
+                        format!(
+                            "{name} {}{}",
+                            mods::percent(f64::from(a.depth)),
+                            self.standalone_only(a.target)
+                        )
                     })
                     .collect();
                 if a.is_empty() {
@@ -952,6 +1075,14 @@ impl Editing {
             return;
         }
         self.modulating.popup_hover = None;
+        // (TEMPO's screen, the standalone's, with something on it: R-LFO.)
+        if self.tempo_hovered(at)
+            && self.modulating.patching.is_none()
+            && !self.sources_on(ModTarget::Tempo).is_empty()
+        {
+            self.modulating.popup = Some(TEMPO_CONTROL);
+            return;
+        }
         self.modulating.popup = match self.hover {
             Some(Target::Control(i) | Target::Legend(i, _))
                 if self.in_view(i)
@@ -975,7 +1106,16 @@ impl Editing {
             return self.macro_rows(n);
         }
         let mut rows = Vec::new();
-        if let Some((n, "waveform")) = lfo_part(CONTROLS[i].param) {
+        if i == TEMPO_CONTROL {
+            // (What moves it, then a source to give it, as a strip knob's: R-LFO.)
+            rows.extend(self.depth_rows(ModTarget::Tempo, i));
+            rows.extend(self.assign_rows(ModTarget::Tempo));
+            return rows;
+        }
+        let Some(control) = CONTROLS.get(i) else {
+            return rows;
+        };
+        if let Some((n, "waveform")) = lfo_part(control.param) {
             // (CONTINUOUS, what moves its shape first: R-LFO's addendum.)
             if let Some(t) = self.mod_target(i) {
                 rows.extend(self.depth_rows(t, i));
@@ -1015,22 +1155,39 @@ impl Editing {
             return rows;
         }
         rows.extend(self.depth_rows(t, i));
-        if CONTROLS[i].place == ControlPlace::Strip {
-            for (head, macros) in [("LFO", false), ("MACRO", true)] {
-                rows.push(Row::Head(head.into()));
-                for s in Source::all().filter(|s| s.macro_n().is_some() == macros) {
-                    let free = self.params.lfo_patch.depth(s, t).is_none()
-                        && self.params.lfo_patch.count(s) < lfo::MOST;
-                    rows.push(Row::Item(
-                        ModItem::Assign(s, t),
-                        label(&self.params.lfo_patch, s),
-                        free,
-                        false,
-                    ));
-                }
+        if control.place == ControlPlace::Strip {
+            rows.extend(self.assign_rows(t));
+        }
+        rows
+    }
+
+    /// An LFO head and a MACRO head, each source an item that gives it `t` (those with room
+    /// that do not move it yet).
+    fn assign_rows(&self, t: ModTarget) -> Vec<Row> {
+        let mut rows = Vec::new();
+        for (head, macros) in [("LFO", false), ("MACRO", true)] {
+            rows.push(Row::Head(head.into()));
+            for s in Source::all().filter(|s| s.macro_n().is_some() == macros) {
+                let free = self.params.lfo_patch.depth(s, t).is_none()
+                    && self.params.lfo_patch.count(s) < lfo::MOST;
+                rows.push(Row::Item(
+                    ModItem::Assign(s, t),
+                    label(&self.params.lfo_patch, s),
+                    free,
+                    false,
+                ));
             }
         }
         rows
+    }
+
+    /// The TEMPO screen's menu (a right click on it, the standalone's): what moves it, with
+    /// DEPTH… and REMOVE, and the sources that can.
+    pub(super) fn open_tempo_menu(&mut self, at: (f64, f64)) {
+        let rows = self.knob_rows(TEMPO_CONTROL);
+        let size = self.renderer.text_size() * MENU_TEXT;
+        self.learning
+            .open_rows_menu(self.renderer.fonts(), at, size, "TEMPO".into(), rows);
     }
 
     /// A head for each source on target `t` (control `i`'s) with DEPTH… and REMOVE.
@@ -1108,9 +1265,10 @@ impl Editing {
                 continue;
             };
             rows.push(Row::Head(format!(
-                "{} \u{b7} {}",
-                CONTROLS[i].label,
-                mods::percent(f64::from(a.depth))
+                "{} \u{b7} {}{}",
+                control_label(i),
+                mods::percent(f64::from(a.depth)),
+                self.standalone_only(a.target)
             )));
             rows.push(Row::Item(
                 ModItem::Depth(s, a.target, i),
@@ -1234,5 +1392,95 @@ impl Editing {
         CONTROLS.get(i).is_some_and(
             |c| matches!(lfo_part(c.param), Some((n, "rate")) if self.params.lfo(n).timed.value()),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{Controls, Engine, Event};
+    use crate::lfo::{Assignment, Edges, LfoKnob, Mode, Settings, Target};
+
+    /// LFO 1 CONTINUOUS, its shape moved by LFO 2 (and its PHASE and LEVEL by LFO 3), as the
+    /// owner's picture had it (decisions.md R-LFO's corrections: "the oscilloscope wave isn't
+    /// changing to match the actual pattern that's happening at the moment"): at every reading,
+    /// the trace drawn from what the engine has in force passes through the orb within a pixel of
+    /// the largest scope; the trace from the knobs as set, as before, does not.
+    #[test]
+    fn a_moved_trace_passes_through_its_orb() {
+        let sharp = |at: f64, hz: f64| Settings {
+            at,
+            hz,
+            mode: Mode::Free,
+            edges: Edges::Sharp,
+            continuous: true,
+            ..Settings::default()
+        };
+        let mut c = Controls {
+            entropy: 0.0,
+            potato: true,
+            ..Controls::default()
+        };
+        c.lfo.lfo = [
+            sharp(1.0, 1.7),
+            sharp(0.0, 0.31),
+            sharp(2.0, 0.13),
+            sharp(0.0, 1.0),
+        ];
+        let mut give = |from: usize, t: Target, depth: f32, base: f32| {
+            let slot = c.lfo.to[from].iter_mut().find(|a| a.is_none()).unwrap();
+            *slot = Some(Assignment { target: t, depth });
+            c.lfo.base[t.index()] = base;
+        };
+        give(0, Target::Cutoff, 0.3, 0.5);
+        give(1, Target::of_lfo(0, LfoKnob::Shape), 0.4, 0.4);
+        give(2, Target::of_lfo(0, LfoKnob::Phase), 0.3, 0.2);
+        give(2, Target::of_lfo(0, LfoKnob::Level), -0.3, 0.8);
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 3);
+        e.event(Event::Note { key: 60, on: true });
+        let (mut l, mut r) = (vec![0.0f32; 256], vec![0.0f32; 256]);
+        // (A pixel at 0.87 pixels a unit, in the trace's values.)
+        let pixel = 1.0 / (ca72_panel::strip::lfo::trace_amplitude() * 0.87);
+        let (mut worst, mut as_set) = (0.0f64, 0.0f64);
+        let mut seen = 0;
+        for b in 0..1200 {
+            e.render(&[], &mut l, &mut r);
+            e.end_block(256);
+            if b % 7 != 0 {
+                continue;
+            }
+            let reading = e.lfo_readings()[0];
+            assert!(reading.moved && reading.moving);
+            let set = c.lfo.lfo[0];
+            let (drawn, level) = drawn_settings(&set, &reading);
+            let trace = trace_of(&drawn, level, true);
+            let x = orb_at(&drawn, &reading, 120.0, true);
+            let at = |trace: &[f32]| {
+                let f = x * (TRACE_POINTS - 1) as f64;
+                let i = (f.floor() as usize).min(TRACE_POINTS - 2);
+                let k = f - i as f64;
+                f64::from(trace[i]) * (1.0 - k) + f64::from(trace[i + 1]) * k
+            };
+            let y = f64::from(reading.value);
+            // (A square's or a sawtooth's edge under the orb: the beam's jump, any height.)
+            let jump = (f64::from(trace[(x * 479.0) as usize])
+                - f64::from(trace[((x * 479.0) as usize + 1).min(479)]))
+            .abs();
+            if jump > 0.1 {
+                continue;
+            }
+            seen += 1;
+            worst = worst.max((at(&trace) - y).abs());
+            let still = trace_of(&set, 1.0, false);
+            as_set = as_set.max((at(&still) - y).abs());
+        }
+        assert!(seen > 100, "{seen} readings");
+        assert!(
+            worst < pixel,
+            "the orb {worst} off its trace, a pixel {pixel}"
+        );
+        assert!(as_set > 10.0 * pixel, "as set it was off by {as_set}");
     }
 }

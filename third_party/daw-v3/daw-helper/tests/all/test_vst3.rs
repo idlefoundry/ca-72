@@ -96,6 +96,7 @@ fn run(
         let status = unsafe {
             p.process(
                 pos as i64,
+                daw_ipc::Timing::default(),
                 n,
                 &evs,
                 [in_l.as_mut_ptr().add(pos), in_r.as_mut_ptr().add(pos)],
@@ -248,6 +249,7 @@ fn play(inst: &Instance, len: usize, block: usize, notes: &[(usize, bool, i16, f
         let status = unsafe {
             p.process(
                 pos as i64,
+                daw_ipc::Timing::default(),
                 n,
                 &evs,
                 [s.add(pos), s.add(pos)],
@@ -396,7 +398,16 @@ fn a_running_instruments_names_follow_its_changes() {
             .collect();
         let s = silence.as_mut_ptr();
         // SAFETY: every buffer holds 64 samples.
-        let status = unsafe { p.process(0, 64, &evs, [s, s], [l.as_mut_ptr(), r.as_mut_ptr()]) };
+        let status = unsafe {
+            p.process(
+                0,
+                daw_ipc::Timing::default(),
+                64,
+                &evs,
+                [s, s],
+                [l.as_mut_ptr(), r.as_mut_ptr()],
+            )
+        };
         assert_eq!(status, 0);
     };
     let names =
@@ -509,7 +520,16 @@ fn block_peak(p: &mut daw_helper::vst3::Processor, params: &[(u32, f64)], note_o
     let mut silence = vec![0.0f32; 256];
     let s = silence.as_mut_ptr();
     // SAFETY: every buffer holds 256 samples.
-    let status = unsafe { p.process(0, 256, &evs, [s, s], [l.as_mut_ptr(), r.as_mut_ptr()]) };
+    let status = unsafe {
+        p.process(
+            0,
+            daw_ipc::Timing::default(),
+            256,
+            &evs,
+            [s, s],
+            [l.as_mut_ptr(), r.as_mut_ptr()],
+        )
+    };
     assert_eq!(status, 0);
     l.iter().fold(0.0f32, |m, x| m.max(x.abs()))
 }

@@ -18,6 +18,11 @@ pub(super) struct Entry {
 }
 
 impl Entry {
+    /// Whether it is control `i`'s own value being typed (not a source's depth on it).
+    pub(super) fn is_value_of(&self, i: usize) -> bool {
+        self.control == i && self.depth.is_none()
+    }
+
     /// What it holds now.
     #[cfg(test)]
     pub(super) fn text(&self) -> &str {
@@ -352,7 +357,9 @@ impl Editing {
                 "% of its travel, \u{2013}100 to 100"
             } else if self.timed_dial(entry.control) {
                 "note · . dotted · t triplet"
-            } else if CONTROLS[entry.control].param.ends_with("_frequency")
+            } else if CONTROLS
+                .get(entry.control)
+                .is_some_and(|c| c.param.ends_with("_frequency"))
                 && self.params.freq_law() == ca72::freq_dial::Law::Semitones
             {
                 "semitones"
@@ -363,7 +370,14 @@ impl Editing {
         }
         .placed(
             self.renderer.fonts(),
-            CONTROLS[entry.control].centre(),
+            // (A depth on the standalone's TEMPO typed over its screen: R-LFO.)
+            match CONTROLS.get(entry.control) {
+                Some(c) => c.centre(),
+                None => {
+                    let (x, y, w, h) = art::tempo_window(self.renderer.arrangement().plate_at());
+                    (x + w / 2.0, y + h / 2.0)
+                }
+            },
             [
                 0.0,
                 0.0,

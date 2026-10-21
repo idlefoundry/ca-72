@@ -875,7 +875,15 @@ fn lfo_page(
     use ca72_panel::strip::lfo::{self, LfoRenderer};
     let t = std::time::Instant::now();
     let mut page = LfoRenderer::new(scale, skin, lettering);
-    page.render(&lfo_example(), r);
+    let mut scene = lfo_example();
+    // (`CA72_LFO_LIVE=1`: every scope's trace drawn as a moved one's, its cheaper glow:
+    // decisions.md R-LFO's corrections.)
+    if std::env::var("CA72_LFO_LIVE").is_ok_and(|v| v == "1") {
+        for c in &mut scene.columns {
+            c.live = true;
+        }
+    }
+    page.render(&scene, r);
     eprintln!("the LFO page {:?}", t.elapsed());
     let (w, f) = (all.width() as usize, page.frame());
     let top = (lfo::top_px(scale) - r.top_px()) as usize;
@@ -918,6 +926,7 @@ fn lfo_overlay(all: &mut ca72_panel::Pixmap, r: &Renderer, scale: f64, values: &
                 continue;
             };
             scene.knobs.push(KnobRings {
+                bar: None,
                 control,
                 at,
                 skirt,
@@ -964,6 +973,8 @@ fn lfo_overlay(all: &mut ca72_panel::Pixmap, r: &Renderer, scale: f64, values: &
         ];
         let over = knob(&to).map(|(_, at, skirt, _)| (at, skirt));
         scene.cord = Some(Cord {
+            boxes: Vec::new(),
+            over_box: None,
             from: ca72_panel::strip::lfo::places(0).jack,
             to: over.map_or((2281.0, 170.0), |(at, _)| at),
             colour: colour(0),
@@ -1000,6 +1011,62 @@ fn lfo_overlay(all: &mut ca72_panel::Pixmap, r: &Renderer, scale: f64, values: &
                 },
             ],
             hover: Some(0),
+            size: r.text_size(),
+        });
+    }
+    // (`CA72_TEMPO_RAILS=1`: the standalone's TEMPO screen moved by LFO 1 and a macro, its
+    // rails and pop-up under it: decisions.md R-LFO.)
+    if var("CA72_TEMPO_RAILS").as_deref() == Some("1") {
+        let (x, y, w, h) = ca72_panel::art::tempo_window(r.arrangement().plate_at());
+        let foot = (x + w / 2.0, y + h + ca72_panel::art::TEMPO_SURROUND);
+        let travel = (120.0 - 30.0) / 270.0;
+        let macro_colour = [0xe8, 0x6a, 0x9a];
+        scene.knobs.push(KnobRings {
+            bar: Some(w / 2.0),
+            control: usize::MAX,
+            at: foot,
+            skirt: 0.0,
+            sweep: (-150.0, 150.0),
+            travel,
+            rings: vec![
+                Ring {
+                    colour: colour(0),
+                    depth: 0.25,
+                    point: Some(travel + 0.25 * 0.6),
+                    one_way: false,
+                    dim: false,
+                },
+                Ring {
+                    colour: macro_colour,
+                    depth: -0.2,
+                    point: Some(travel - 0.2 * 0.5),
+                    one_way: true,
+                    dim: false,
+                },
+            ],
+        });
+        scene.popup = Some(Popup {
+            knob: (foot, ca72_panel::modulation::rails_depth(2)),
+            span: 300.0,
+            dials: vec![
+                PopDial {
+                    colour: colour(0),
+                    label: "LFO 1".into(),
+                    depth: 0.25,
+                    shared: false,
+                    uni: false,
+                    muted: false,
+                },
+                PopDial {
+                    colour: macro_colour,
+                    label: "MACRO 1".into(),
+                    depth: -0.2,
+                    shared: false,
+                    uni: true,
+                    muted: false,
+                },
+            ],
+            hover: None,
             size: r.text_size(),
         });
     }

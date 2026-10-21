@@ -1410,3 +1410,127 @@ fn lfos_play_without_allocating(cross: bool) {
         "the LFOs allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
     );
 }
+
+/// The standalone's TEMPO moved by the sources (decisions.md R-LFO): an LFO free, a timed one
+/// (a loop through its own clock) and a macro on it, the arpeggiator playing at the moving tempo,
+/// oscillator 3 timed and the timed LFO following its beats, the depths changed between blocks
+/// as the editor changes them: no allocation, no free.
+#[test]
+fn a_moving_tempo_neither_allocates_nor_frees() {
+    use ca72_plugin::Ca72;
+    use ca72_plugin::lfo::{Source, Target};
+    use nih_plug::context::process::TestProcessContext;
+    use nih_plug::prelude::*;
+
+    struct Init;
+    impl InitContext<Ca72> for Init {
+        fn plugin_api(&self) -> PluginApi {
+            PluginApi::Standalone
+        }
+        fn execute(&self, _: ()) {}
+        fn set_latency_samples(&self, _: u32) {}
+        fn set_current_voice_capacity(&self, _: u32) {}
+    }
+
+    let _serial = start();
+    let mut p = Ca72::default();
+    let config = BufferConfig {
+        sample_rate: RATE as f32,
+        min_buffer_size: None,
+        max_buffer_size: BLOCK as u32,
+        process_mode: ProcessMode::Realtime,
+    };
+    assert!(p.initialize(&Ca72::AUDIO_IO_LAYOUTS[0], &config, &mut Init));
+    let params = p.params();
+    let a = p.parameters().clone();
+    // (The standalone's own: its transport stopped, its clock running on at TEMPO.)
+    let mut c = TestProcessContext::<Ca72>::new(params, RATE as f32, ProcessMode::Realtime);
+    for (q, v) in [
+        (a.poly.as_ptr(), 1.0),
+        (a.voices.as_ptr(), 1.0),
+        (a.arp_on.as_ptr(), 1.0),
+        (a.osc3_timed.as_ptr(), 1.0),
+        (a.lfo(1).timed.as_ptr(), 1.0),
+    ] {
+        assert!(c.automate(q, v));
+    }
+    for (s, d) in [
+        (Source::Lfo(0), 0.3),
+        (Source::Lfo(1), -0.4),
+        (Source::Macro(0), 0.2),
+    ] {
+        a.lfo_patch.assign(s, Target::Tempo, d).expect("room");
+    }
+    a.lfo_patch
+        .assign(Source::Lfo(1), Target::Cutoff, 0.2)
+        .expect("room");
+    let (mut l, mut r) = (vec![0.0f32; BLOCK], vec![0.0f32; BLOCK]);
+    let mut buffer = Buffer::default();
+    // SAFETY: both slices are `BLOCK` long and live as long as the buffer.
+    unsafe {
+        buffer.set_slices(BLOCK, |s| {
+            s.clear();
+            s.push(&mut l);
+            s.push(&mut r);
+        });
+    }
+    let mut aux = AuxiliaryBuffers {
+        inputs: &mut [],
+        outputs: &mut [],
+    };
+    let key = |timing: u32, note: u8, on: bool| {
+        if on {
+            NoteEvent::NoteOn {
+                timing,
+                voice_id: None,
+                channel: 0,
+                note,
+                velocity: 1.0,
+            }
+        } else {
+            NoteEvent::NoteOff {
+                timing,
+                voice_id: None,
+                channel: 0,
+                note,
+                velocity: 0.0,
+            }
+        }
+    };
+    HERE.with(|h| h.set(true));
+    for b in 0..900usize {
+        ARMED.store(false, Ordering::SeqCst);
+        if b % 40 == 0 {
+            c.push_event(key(3, 48 + (b / 40 % 12) as u8, true));
+            c.push_event(key(5, 55 + (b / 40 % 12) as u8, true));
+        }
+        if b % 40 == 30 {
+            c.push_event(key(9, 48 + (b / 40 % 12) as u8, false));
+            c.push_event(key(9, 55 + (b / 40 % 12) as u8, false));
+        }
+        c.automate(a.lfo(0).rate.as_ptr(), (b % 50) as f32 / 49.0);
+        c.automate(a.macro_param(0).as_ptr(), (b % 33) as f32 / 32.0);
+        c.automate(a.quality.as_ptr(), (b / 300) as f32 / 2.0);
+        ARMED.store(true, Ordering::SeqCst);
+        if b % 50 == 25 {
+            a.lfo_patch.set_depth(
+                Source::Lfo(0),
+                Target::Tempo,
+                if b % 100 == 25 { 0.8 } else { -0.5 },
+            );
+        }
+        p.process(&mut buffer, &mut aux, &mut c);
+    }
+    ARMED.store(false, Ordering::SeqCst);
+    let (allocs, frees) = (ALLOCS.load(Ordering::SeqCst), FREES.load(Ordering::SeqCst));
+    let first = FIRST
+        .lock()
+        .ok()
+        .and_then(|f| f.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        (allocs, frees),
+        (0, 0),
+        "the moving tempo allocated {allocs} and freed {frees} times; the first:\n{first}"
+    );
+}

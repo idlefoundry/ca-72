@@ -16,6 +16,13 @@
 //! - **The hover pop-up** over a modulated knob: one small depth dial per source in its colour
 //!   (Pigments' way), a source marked SHARED where every voice takes one copy of it.
 //!
+//! - **TEMPO's rails** (the standalone's TEMPO screen, decisions.md R-LFO): a screen has no
+//!   round travel, so its rings are straight rails under it, along its width (30 BPM at its
+//!   left, 300 at its right), nested downwards (the first source nearest), drawn as a ring's:
+//!   the swing faint, the half its positive peak reaches bright with its end ticked, the point
+//!   where the source has it now; its target while an assignment is dragged a dashed box round
+//!   the screen.
+//!
 //! Each knob's rings are a patch of their own, drawn again only when they change; the cord and
 //! the pop-up likewise; the damage is where each was and is.
 
@@ -56,6 +63,9 @@ pub struct KnobRings {
     pub sweep: (f64, f64),
     pub travel: f64,
     pub rings: Vec<Ring>,
+    /// Rails instead of rings (TEMPO's screen): half their length, `at` their middle's top (the
+    /// screen's surround's foot).
+    pub bar: Option<f64>,
 }
 
 impl KnobRings {
@@ -68,6 +78,32 @@ impl KnobRings {
     pub fn span(&self) -> f64 {
         self.sweep.1 - self.sweep.0
     }
+
+    /// Where along its rails travel `t` is (the drawing's x), if it has rails.
+    pub fn rail_x(&self, t: f64) -> Option<f64> {
+        self.bar
+            .map(|half| self.at.0 - half + 2.0 * half * t.clamp(0.0, 1.0))
+    }
+}
+
+/// How far below the screen's surround its first rail runs, and apart they are (the drawing's
+/// units): four in the wood under it, closer where more share it.
+const RAIL_IN: f64 = 4.5;
+const RAIL_STEP: f64 = 5.0;
+
+/// Rail `k`'s height of `n` under its screen (`at`'s y the surround's foot).
+pub fn rail_y(knob: &KnobRings, k: usize, n: usize) -> f64 {
+    let step = if n > 4 {
+        RAIL_STEP * 3.0 / (n - 1) as f64
+    } else {
+        RAIL_STEP
+    };
+    knob.at.1 + RAIL_IN + step * k as f64
+}
+
+/// How deep a screen's rails reach under it, for `n` of them (its pop-up stands under them).
+pub fn rails_depth(n: usize) -> f64 {
+    RAIL_IN + RAIL_STEP * 3.0_f64.min(n.saturating_sub(1) as f64) + 4.0
 }
 
 /// An assignment being dragged from a source's jack: from the jack to the pointer, in the
@@ -80,6 +116,9 @@ pub struct Cord {
     pub colour: [u8; 3],
     pub targets: Vec<((f64, f64), f64)>,
     pub over: Option<((f64, f64), f64)>,
+    /// Screens that can take it (left, top, width, height: TEMPO's), and the one under the plug.
+    pub boxes: Vec<(f64, f64, f64, f64)>,
+    pub over_box: Option<(f64, f64, f64, f64)>,
 }
 
 /// One of the pop-up's dials: its source's colour and label, its depth (-1..1), whether every
@@ -169,6 +208,9 @@ pub fn dial_angle(depth: f64, span: f64) -> f64 {
 
 /// Where ring `k`'s end (its positive peak, ticked) is: the drawing's units.
 pub fn ring_end(knob: &KnobRings, k: usize) -> (f64, f64) {
+    if let Some(x) = knob.rail_x(knob.travel + knob.rings[k].depth) {
+        return (x, rail_y(knob, k, knob.rings.len()));
+    }
     let r = ring_radius(knob.skirt, k, knob.rings.len());
     let end = knob.angle(knob.travel + knob.rings[k].depth);
     let (x, y) = art::polar(r, end);
@@ -190,8 +232,25 @@ pub fn hit_ring_end(knobs: &[KnobRings], x: f64, y: f64) -> Option<(usize, usize
 /// The depth a ring's end dragged to (`x`, `y`) gives: the angle from the knob's pointer to it,
 /// a share of the knob's own sweep, within -1..1.
 pub fn depth_at(knob: &KnobRings, (x, y): (f64, f64)) -> f64 {
+    if let Some(half) = knob.bar {
+        let from = knob.rail_x(knob.travel).unwrap_or(knob.at.0);
+        return ((x - from) / (2.0 * half)).clamp(-1.0, 1.0);
+    }
     let a = (x - knob.at.0).atan2(-(y - knob.at.1)).to_degrees();
     ((a - knob.angle(knob.travel)) / knob.span()).clamp(-1.0, 1.0)
+}
+
+/// What `ring` draws on rails (`k`'s bar) as travels (0..1): its faint swing's ends and its
+/// ticked end, depth × the whole travel from where it is set, within it; one way, from there to
+/// the ticked end.
+pub fn rail_swing(k: &KnobRings, ring: &Ring) -> (f64, f64, f64) {
+    let (base, d) = (k.travel, ring.depth);
+    let end = (base + d).clamp(0.0, 1.0);
+    if ring.one_way {
+        (base, end, end)
+    } else {
+        ((base - d.abs()).max(0.0), (base + d.abs()).min(1.0), end)
+    }
 }
 
 /// What `ring` draws on knob `k` (degrees from twelve o'clock): its faint swing's ends and its
@@ -269,6 +328,12 @@ pub fn on_popup(p: &Popup, x: f64, y: f64) -> bool {
     (bx..bx + bw).contains(&x) && (by - 18.0..by + bh).contains(&y)
 }
 
+/// A screen's place: left, top, width, height (the drawing's units).
+pub type BoxPlace = (f64, f64, f64, f64);
+
+/// What a dragged assignment can be dropped on: knobs and screens.
+type Targets = (Vec<KnobPlace>, Vec<BoxPlace>);
+
 /// A patch laid over the frame: its top left corner (the frame's pixels) and pixels.
 struct Patch {
     at: (i32, i32),
@@ -292,7 +357,7 @@ pub struct ModRenderer {
     origin: i32,
     options: usvg::Options<'static>,
     knobs: Vec<(KnobRings, Patch)>,
-    targets: Option<(Vec<KnobPlace>, [u8; 3], Patch)>,
+    targets: Option<(Targets, [u8; 3], Patch)>,
     cord: Option<(Cord, Patch)>,
     popup: Option<(Popup, Patch)>,
     damages: Vec<[i32; 4]>,
@@ -382,7 +447,10 @@ impl ModRenderer {
         self.knobs = kept;
         // The targets' dotted rings while an assignment is dragged (the bright one apart, with
         // the cord).
-        let targets = scene.cord.as_ref().map(|c| (c.targets.clone(), c.colour));
+        let targets = scene
+            .cord
+            .as_ref()
+            .map(|c| ((c.targets.clone(), c.boxes.clone()), c.colour));
         if targets.as_ref()
             != self
                 .targets
@@ -392,7 +460,7 @@ impl ModRenderer {
         {
             damage.extend(self.targets.take().map(|t| t.2.rect()));
             if let Some((t, c)) = targets
-                && let Some(p) = self.targets_patch(&t, c)
+                && let Some(p) = self.targets_patch(&t.0, &t.1, c)
             {
                 damage.push(p.rect());
                 self.targets = Some((t, c, p));
@@ -454,6 +522,9 @@ impl ModRenderer {
     }
 
     fn rings_patch(&self, k: &KnobRings) -> Option<Patch> {
+        if k.bar.is_some() {
+            return self.rails_patch(k);
+        }
         let s = self.scale;
         let m = k.skirt + 14.0;
         let (mut p, (px0, py0)) = self.blank((k.at.0 - m, k.at.1 - m, k.at.0 + m, k.at.1 + m))?;
@@ -524,8 +595,81 @@ impl ModRenderer {
         })
     }
 
-    fn targets_patch(&self, targets: &[((f64, f64), f64)], colour: [u8; 3]) -> Option<Patch> {
-        if targets.is_empty() {
+    /// A screen's rails (TEMPO's): as [`ModRenderer::rings_patch`]'s rings, straight.
+    fn rails_patch(&self, k: &KnobRings) -> Option<Patch> {
+        let s = self.scale;
+        let half = k.bar?;
+        let n = k.rings.len();
+        let foot = rail_y(k, n.saturating_sub(1), n) + 8.0;
+        let (mut p, (px0, py0)) =
+            self.blank((k.at.0 - half - 10.0, k.at.1, k.at.0 + half + 10.0, foot))?;
+        let local = |(x, y): (f64, f64)| ((x * s) as f32 - px0 as f32, (y * s) as f32 - py0 as f32);
+        let (w, h) = (p.width(), p.height());
+        let x = |t: f64| k.rail_x(t).unwrap_or(k.at.0);
+        let line_of = |x0: f64, x1: f64, y: f64| {
+            let mut pb = PathBuilder::new();
+            let (a, b) = (local((x0, y)), local((x1, y)));
+            pb.move_to(a.0, a.1);
+            pb.line_to(b.0, b.1);
+            pb.finish()
+        };
+        for (j, ring) in k.rings.iter().enumerate() {
+            let y = rail_y(k, j, n);
+            let ph = Phosphor::of(ring.colour);
+            let line = mix(ring.colour, [255; 3], 0.25);
+            let glow_c = mix(ring.colour, ph.halo, 0.5);
+            let light = if ring.dim { DIMMED } else { 1.0 };
+            let (lo, hi, end) = rail_swing(k, ring);
+            if hi > lo
+                && let Some(path) = line_of(x(lo), x(hi), y)
+            {
+                stroke(&mut p, &path, line, light * 0.38, 2.2 * s, None);
+            }
+            let bright = match (ring.one_way, ring.point) {
+                (true, Some(t)) => Some(t),
+                (true, None) => None,
+                (false, _) => Some(end),
+            };
+            if let Some(b) = bright
+                && (b - k.travel).abs() > 1e-6
+                && let Some(path) = line_of(x(k.travel), x(b), y)
+            {
+                let mut g = Coverage::new(w, h);
+                g.stroke(&path, (5.0 * s) as f32, (0.55 * light) as f32);
+                g.blur((2.2 * s) as f32);
+                g.tint(&mut p, glow_c, 1.0, (0, 0));
+                stroke(&mut p, &path, line, light, 2.6 * s, None);
+            }
+            // Its end ticked, across the rail.
+            let mut pb = PathBuilder::new();
+            let (a, b) = (local((x(end), y - 3.0)), local((x(end), y + 3.0)));
+            pb.move_to(a.0, a.1);
+            pb.line_to(b.0, b.1);
+            if let Some(path) = pb.finish() {
+                stroke(&mut p, &path, ph.core, light, 2.2 * s, None);
+            }
+            if let Some(t) = ring.point {
+                let c = local((x(t), y));
+                let mut g = Coverage::new(w, h);
+                g.disc(c, (6.0 * s) as f32, 0.7);
+                g.blur((2.2 * s) as f32);
+                g.tint(&mut p, glow_c, 1.0, (0, 0));
+                fill_disc(&mut p, c, (2.8 * s) as f32, mix(ph.core, [255; 3], 0.5));
+            }
+        }
+        Some(Patch {
+            at: (px0, py0 - self.origin),
+            pixels: p,
+        })
+    }
+
+    fn targets_patch(
+        &self,
+        targets: &[((f64, f64), f64)],
+        boxes: &[BoxPlace],
+        colour: [u8; 3],
+    ) -> Option<Patch> {
+        if targets.is_empty() && boxes.is_empty() {
             return None;
         }
         let s = self.scale;
@@ -539,8 +683,23 @@ impl ModRenderer {
                 b.3.max(y + m),
             );
         }
+        for &(x, y, w, h) in boxes {
+            let m = TARGET_OUT + 4.0;
+            b = (
+                b.0.min(x - m),
+                b.1.min(y - m),
+                b.2.max(x + w + m),
+                b.3.max(y + h + m),
+            );
+        }
         let (mut p, (px0, py0)) = self.blank(b)?;
         let line = mix(colour, [255; 3], 0.25);
+        for &place in boxes {
+            if let Some(path) = box_path(place, s, (px0, py0)) {
+                let dash = StrokeDash::new(vec![(4.0 * s) as f32, (6.0 * s) as f32], 0.0);
+                stroke(&mut p, &path, line, 0.8, 3.0 * s, dash);
+            }
+        }
         for &((x, y), r) in targets {
             let c = ((x * s) as f32 - px0 as f32, (y * s) as f32 - py0 as f32);
             if let Some(path) = PathBuilder::from_circle(c.0, c.1, ((r + TARGET_OUT) * s) as f32) {
@@ -577,10 +736,30 @@ impl ModRenderer {
                 b.3.max(y + m),
             );
         }
+        if let Some((x, y, w, h)) = c.over_box {
+            let m = TARGET_OUT + 10.0;
+            b = (
+                b.0.min(x - m),
+                b.1.min(y - m),
+                b.2.max(x + w + m),
+                b.3.max(y + h + m),
+            );
+        }
         let b = (b.0 - 40.0, b.1 - 80.0, b.2 + 40.0, b.3 + 40.0);
         let (mut p, (px0, py0)) = self.blank(b)?;
         let local = |(x, y): (f64, f64)| ((x * s) as f32 - px0 as f32, (y * s) as f32 - py0 as f32);
         let ph = Phosphor::of(c.colour);
+        // The bright box round the screen under the plug.
+        if let Some(place) = c.over_box
+            && let Some(path) = box_path(place, s, (px0, py0))
+        {
+            let (w, h) = (p.width(), p.height());
+            let mut g = Coverage::new(w, h);
+            g.stroke(&path, (7.0 * s) as f32, 0.7);
+            g.blur((2.5 * s) as f32);
+            g.tint(&mut p, mix(c.colour, ph.halo, 0.5), 1.0, (0, 0));
+            stroke(&mut p, &path, ph.core, 1.0, 2.6 * s, None);
+        }
         // The bright ring round the knob under the plug.
         if let Some(((x, y), r)) = c.over {
             let ctr = local((x, y));
@@ -822,6 +1001,23 @@ fn stroke(
     );
 }
 
+/// A screen's target box, `TARGET_OUT` round its place, in a patch at `(px0, py0)` (pixels) at
+/// `scale`.
+fn box_path(
+    (x, y, w, h): BoxPlace,
+    scale: f64,
+    (px0, py0): (i32, i32),
+) -> Option<resvg::tiny_skia::Path> {
+    let o = TARGET_OUT;
+    let r = resvg::tiny_skia::Rect::from_xywh(
+        ((x - o) * scale) as f32 - px0 as f32,
+        ((y - o) * scale) as f32 - py0 as f32,
+        ((w + 2.0 * o) * scale) as f32,
+        ((h + 2.0 * o) * scale) as f32,
+    )?;
+    Some(PathBuilder::from_rect(r))
+}
+
 fn fill_disc(p: &mut Pixmap, (x, y): (f32, f32), r: f32, c: [u8; 3]) {
     if let Some(path) = PathBuilder::from_circle(x, y, r.max(0.5)) {
         let mut paint = Paint::default();
@@ -844,6 +1040,7 @@ mod tests {
 
     fn knob() -> KnobRings {
         KnobRings {
+            bar: None,
             control: 29,
             at: (2081.0, 170.0),
             skirt: art::STD.skirt,
@@ -893,6 +1090,7 @@ mod tests {
         for sweep in [art::KNOB_SWEEP, art::sweep(&CONTROLS[waveform()].kind)] {
             for d in [0.25, -0.25, 0.1, 0.4, -0.5] {
                 let k = KnobRings {
+                    bar: None,
                     sweep,
                     rings: vec![Ring {
                         depth: d,
@@ -962,6 +1160,7 @@ mod tests {
                         ..knob().rings[0]
                     };
                     let k = KnobRings {
+                        bar: None,
                         skirt: art::skirt(&kind),
                         sweep,
                         travel,
@@ -988,6 +1187,7 @@ mod tests {
             }
             // (At the travel's foot the swing stops at the sweep's start.)
             let k = KnobRings {
+                bar: None,
                 sweep,
                 travel: 0.1,
                 rings: vec![Ring {

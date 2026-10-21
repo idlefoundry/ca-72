@@ -409,6 +409,22 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   buffer size, live and exported. RETRIG on every LFO of a loop starts it again the same at each
   note. A MONO-off LFO on another MONO-off LFO's knob moves each voice's own; on a MONO LFO's
   knob, its shared one.
+
+  **The tempo (standalone).** The standalone's **TEMPO** screen takes a cord from an LFO's or a
+  macro's jack too: its depth is a share of TEMPO's 30 to 300 BPM, and the arpeggiator, the
+  timed oscillators and LFOs and your effects follow the moving tempo, going on from where they
+  were, never jumping. The screen shows the moving tempo (the one you set while you drag or type
+  it); thin rails under it in the wood stand for a knob's rings (30 BPM at the left, 300 at the
+  right), with the pop-up under them, and its right-click menu has DEPTH… and REMOVE and the
+  sources that can move it. The plug-ins follow the host's tempo: a patch from the standalone
+  keeps its TEMPO assignment there but it does nothing, and the LFO's tip and menus say
+  STANDALONE ONLY.
+
+  **Screens show the value as it plays.** A screen whose control an LFO or a macro moves (the
+  strip's ENTROPY, WIDTH, DETUNE, DRIVE, LEVEL, INNER and AUTO GAIN, and TEMPO) reads the value
+  the instrument plays by, lit as that value is, up to 30 times a second; while you turn the
+  control or type into it, its own value. An LFO scope whose PHASE, WAVEFORM (CONTINUOUS) or
+  LEVEL another source moves draws its cycle as it plays now, so the orb stays on the line.
 - **Macros** (from 0.3.0; none assigned in any preset or project saved before it, which sound as
   they did, each macro at 0): the rail's **MACRO** key, at its far left, flips the lower page's
   left area from the PITCH and MOD wheels and their switches to six macro knobs, two across and

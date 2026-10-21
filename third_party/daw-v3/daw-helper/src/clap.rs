@@ -13,8 +13,10 @@ use clap_sys::entry::clap_plugin_entry;
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_DONT_RECORD, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON,
     CLAP_EVENT_PARAM_GESTURE_BEGIN, CLAP_EVENT_PARAM_GESTURE_END, CLAP_EVENT_PARAM_MOD,
-    CLAP_EVENT_PARAM_VALUE, clap_event_header, clap_event_note, clap_event_param_gesture,
-    clap_event_param_mod, clap_event_param_value, clap_input_events, clap_output_events,
+    CLAP_EVENT_PARAM_VALUE, CLAP_EVENT_TRANSPORT, CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
+    CLAP_TRANSPORT_HAS_TEMPO, CLAP_TRANSPORT_HAS_TIME_SIGNATURE, clap_event_header,
+    clap_event_note, clap_event_param_gesture, clap_event_param_mod, clap_event_param_value,
+    clap_event_transport, clap_input_events, clap_output_events,
 };
 use clap_sys::ext::audio_ports::{
     CLAP_AUDIO_PORT_IS_MAIN, CLAP_EXT_AUDIO_PORTS, clap_audio_port_info, clap_plugin_audio_ports,
@@ -36,6 +38,7 @@ use clap_sys::ext::state::{CLAP_EXT_STATE, clap_host_state, clap_plugin_state};
 use clap_sys::ext::tail::{CLAP_EXT_TAIL, clap_plugin_tail};
 use clap_sys::ext::thread_check::{CLAP_EXT_THREAD_CHECK, clap_host_thread_check};
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
+use clap_sys::fixedpoint::CLAP_BEATTIME_FACTOR;
 use clap_sys::host::clap_host;
 use clap_sys::id::clap_id;
 use clap_sys::plugin::{clap_plugin, clap_plugin_descriptor};
@@ -1317,6 +1320,7 @@ impl Processor {
     pub unsafe fn process(
         &mut self,
         steady_time: i64,
+        timing: daw_ipc::Timing,
         frames: usize,
         events: &[Event],
         input: [*mut f32; 2],
@@ -1364,10 +1368,37 @@ impl Processor {
         let out_events = out.output();
         // A block is the flush a plugin may have asked for (D222).
         self.flush.store(false, Ordering::Release);
+        // The host's tempo and place, its transport stopped (CA-72's change 5).
+        let transport = timing.has_tempo().then(|| clap_event_transport {
+            header: clap_event_header {
+                size: std::mem::size_of::<clap_event_transport>() as u32,
+                time: 0,
+                space_id: CLAP_CORE_EVENT_SPACE_ID,
+                type_: CLAP_EVENT_TRANSPORT,
+                flags: 0,
+            },
+            flags: CLAP_TRANSPORT_HAS_TEMPO
+                | CLAP_TRANSPORT_HAS_BEATS_TIMELINE
+                | CLAP_TRANSPORT_HAS_TIME_SIGNATURE,
+            song_pos_beats: (timing.beats * CLAP_BEATTIME_FACTOR as f64).round() as i64,
+            song_pos_seconds: 0,
+            tempo: timing.tempo,
+            tempo_inc: 0.0,
+            loop_start_beats: 0,
+            loop_end_beats: 0,
+            loop_start_seconds: 0,
+            loop_end_seconds: 0,
+            bar_start: ((timing.beats / 4.0).floor() * 4.0 * CLAP_BEATTIME_FACTOR as f64) as i64,
+            bar_number: (timing.beats / 4.0).floor() as i32,
+            tsig_num: 4,
+            tsig_denom: 4,
+        });
         let proc_ = clap_process {
             steady_time,
             frames_count: frames as u32,
-            transport: std::ptr::null(),
+            transport: transport
+                .as_ref()
+                .map_or(std::ptr::null(), |t| t as *const clap_event_transport),
             audio_inputs: std::ptr::null(),
             audio_outputs: std::ptr::null_mut(),
             audio_inputs_count: 0,

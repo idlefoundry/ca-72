@@ -64,6 +64,7 @@ fn a_third_party_plugin_loads_plays_and_keeps_its_state() {
             let status = unsafe {
                 p.process(
                     block * 512,
+                    daw_ipc::Timing::default(),
                     512,
                     &notes,
                     [l.as_mut_ptr(), r.as_mut_ptr()],

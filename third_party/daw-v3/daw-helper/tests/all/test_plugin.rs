@@ -78,6 +78,7 @@ fn run(
         let status = unsafe {
             p.process(
                 pos as i64,
+                daw_ipc::Timing::default(),
                 n,
                 &evs,
                 [in_l.as_mut_ptr().add(pos), in_r.as_mut_ptr().add(pos)],
@@ -234,6 +235,7 @@ fn a_running_plugins_names_follow_its_changes() {
         let status = unsafe {
             p.process(
                 0,
+                daw_ipc::Timing::default(),
                 64,
                 &evs,
                 [il.as_mut_ptr(), ir.as_mut_ptr()],
@@ -306,6 +308,7 @@ fn a_running_plugins_own_edits_and_requests_are_kept() {
         let status = unsafe {
             p.process(
                 0,
+                daw_ipc::Timing::default(),
                 64,
                 &evs,
                 [il.as_mut_ptr(), ir.as_mut_ptr()],
@@ -407,6 +410,7 @@ fn a_preset_the_plugin_loads_is_read_again() {
         let status = unsafe {
             p.process(
                 0,
+                daw_ipc::Timing::default(),
                 64,
                 &evs,
                 [il.as_mut_ptr(), ir.as_mut_ptr()],
@@ -486,6 +490,7 @@ fn a_samples_state_changes_with_a_word_or_without_one() {
         let status = unsafe {
             p.process(
                 0,
+                daw_ipc::Timing::default(),
                 64,
                 &evs,
                 [il.as_mut_ptr(), ir.as_mut_ptr()],
@@ -574,6 +579,7 @@ fn a_quiet_sample_waits_for_its_baseline_before_changing_under_a_slow_host() {
             unsafe {
                 p.process(
                     0,
+                    daw_ipc::Timing::default(),
                     256,
                     events,
                     [input_l.as_mut_ptr(), input_r.as_mut_ptr()],

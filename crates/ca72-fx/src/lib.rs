@@ -36,6 +36,8 @@ pub use chain::{
     Chain, ChainOptions, Disabled, Health, MAX_PINS, MAX_SLOTS, PIN_POINTS, PINS_PER_SLOT, PinMods,
     PinStatus, Restore, Runner, SavedChain, SavedPin, SavedSlot, SlotStatus, pinnable,
 };
+/// Where the music is as a block begins, given to the effects (the host's tempo and place).
+pub use daw_ipc::Timing;
 pub use sandbox::{Event, Fault, Sandbox, SandboxOptions};
 
 use serde::{Deserialize, Serialize};

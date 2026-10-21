@@ -124,6 +124,9 @@ host, the editor and the saved state would not see:
     Its `set_transport()` gives the next runs a host's transport (playing, tempo, position in
     quarter notes, time signature), for a plugin that follows it (the CA-72's arpeggiator,
     `docs/decisions.md` R-ARP; the transport's fields are crate-private too).
+    It says it is the standalone (`PluginApi::Standalone`) until `set_plugin_api()` tells it
+    otherwise, for what a plugin does in its standalone alone (the CA-72's TEMPO as a
+    modulation target, R-LFO).
 
 One more came from a report: the CA-72's switches and buttons did nothing in Cubase 15 on
 Windows 11 (2026-10-07; the CA-72's `docs/decisions.md` R36):

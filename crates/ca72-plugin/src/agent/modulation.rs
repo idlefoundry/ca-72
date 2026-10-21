@@ -77,9 +77,9 @@ fn target_of(p: &Ca72Params, v: Option<&Value>) -> Result<Target, ApiError> {
         return Err(ApiError::params("`target` must be a knob's id or label"));
     };
     let table = values::table(p);
-    let id = values::find(&table, key)
-        .map(|e| e.id)
-        .unwrap_or(key.trim());
+    // (An id in any case: TEMPO has no parameter to be found by, R-LFO.)
+    let lower = key.trim().to_ascii_lowercase();
+    let id = values::find(&table, key).map(|e| e.id).unwrap_or(&lower);
     lfo::target_of(p, id).ok_or_else(|| {
         let why = match Target::of_id(id) {
             Some(
@@ -93,6 +93,10 @@ fn target_of(p: &Ca72Params, v: Option<&Value>) -> Result<Target, ApiError> {
             Some(Target::Fx(_)) => {
                 format!("{key} is not pinned to an effect that runs (effects.pin pins one)")
             }
+            Some(Target::Tempo) => format!(
+                "{key} is the standalone's TEMPO: a plug-in follows its host's tempo (standalone \
+                 only)"
+            ),
             Some(_) => format!("{key} cannot take a source now (its oscillator is timed)"),
             None if id.ends_with("_waveform")
                 && (id.starts_with("osc") || id.starts_with("lfo")) =>
@@ -146,6 +150,8 @@ fn live(p: &Ca72Params, t: Target) -> bool {
         Target::Osc3Frequency => !p.timed_now(2),
         Target::LfoShape(n) => p.lfo(n).shape_mode.value() == crate::params::WaveMode::Continuous,
         Target::LfoRate(n) => !p.lfo(n).timed.value(),
+        // (The standalone's alone: kept in a plug-in's patch, never applied.)
+        Target::Tempo => p.is_standalone(),
         _ => true,
     }
 }
@@ -173,7 +179,7 @@ pub fn list(p: &Ca72Params) -> Value {
                     let label = match pin {
                         Some(x) => format!("{}: {}", x.effect, x.name),
                         None => values::find(&table, a.target.id())
-                            .map_or("", |e| e.label)
+                            .map_or(a.target.short(), |e| e.label)
                             .to_owned(),
                     };
                     json!({
@@ -595,6 +601,51 @@ mod tests {
         remove(&p, &json!({"source": "macro1", "target": "lfo2_level"})).unwrap();
         assert_eq!(at(Source::Macro(0), Target::LfoLevel(1)), None);
         assert!(remove(&p, &json!({"source": "macro1", "target": "lfo2_level"})).is_err());
+    }
+
+    /// The standalone's TEMPO (decisions.md R-LFO): listed among the targets and taken there
+    /// alone; in a plug-in refused with its reason, and one a session brought kept, marked inert.
+    #[test]
+    fn agents_move_the_tempo_in_the_standalone_alone() {
+        let p = Ca72Params::default();
+        let tempo = json!("tempo");
+        assert!(!list(&p)["targets"].as_array().unwrap().contains(&tempo));
+        let refused = set(
+            &p,
+            &json!({"source": "lfo1", "target": "tempo", "depth": 40}),
+        );
+        assert!(format!("{:?}", refused.unwrap_err()).contains("standalone only"));
+        p.set_standalone(true);
+        assert!(list(&p)["targets"].as_array().unwrap().contains(&tempo));
+        set(
+            &p,
+            &json!({"source": "macro2", "target": "TEMPO", "depth": -30}),
+        )
+        .unwrap();
+        let r = set(
+            &p,
+            &json!({"source": "lfo1", "target": "tempo", "depth": 40}),
+        )
+        .unwrap();
+        assert_eq!(p.lfo_patch.depth(Source::Lfo(0), Target::Tempo), Some(0.4));
+        assert_eq!(
+            p.lfo_patch.depth(Source::Macro(1), Target::Tempo),
+            Some(-0.3)
+        );
+        let knob = &r["sources"][0]["knobs"][0];
+        assert_eq!(
+            (
+                &knob["target"],
+                &knob["label"],
+                &knob["shared"],
+                &knob["inert"]
+            ),
+            (&tempo, &json!("TEMPO"), &json!(false), &json!(false))
+        );
+        p.set_standalone(false);
+        assert_eq!(list(&p)["sources"][0]["knobs"][0]["inert"], json!(true));
+        remove(&p, &json!({"source": "lfo1", "target": "tempo"})).unwrap();
+        assert_eq!(p.lfo_patch.depth(Source::Lfo(0), Target::Tempo), None);
     }
 
     #[test]

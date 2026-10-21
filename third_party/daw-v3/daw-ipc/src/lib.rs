@@ -15,5 +15,5 @@ pub mod rt;
 pub mod shm;
 pub mod wake;
 
-pub use layout::{Done, Event, MAX_BLOCK, MAX_EVENTS, SLOTS, Transport, TransportName};
+pub use layout::{Done, Event, MAX_BLOCK, MAX_EVENTS, SLOTS, Timing, Transport, TransportName};
 pub use wake::WaitError;

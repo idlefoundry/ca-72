@@ -392,6 +392,17 @@ impl Ca72 {
         });
     }
 
+    /// The tempo `bpm` from sample `at` of a block of `len` (TEMPO moved by a modulation
+    /// source, decisions.md R-LFO): the arpeggiator's beats, oscillators 2's and 3's and the
+    /// timed LFOs' clock go on from where they were at it.
+    fn retime(&mut self, at: usize, bpm: f64, len: usize) {
+        if self.arp.retime(at, bpm, self.rate, len)
+            && let Some(p) = self.timed_clock.retime(at, self.arp.position().1, len)
+        {
+            self.engine.retime(p);
+        }
+    }
+
     /// What the arpeggiator has due by the block's sample `at` played.
     fn arp_until(&mut self, at: usize) {
         let engine = &mut self.engine;
@@ -813,6 +824,8 @@ impl Plugin for Ca72 {
         // One latency in every QUALITY mode, ULTRA's (HI and LO held back to match), so a
         // host never compensates afresh when it switches (decisions.md R-LATENCY).
         context.set_latency_samples(self.engine.latency());
+        self.params
+            .set_standalone(context.plugin_api() == PluginApi::Standalone);
         let block = config.max_buffer_size.max(1) as usize;
         let rate = f64::from(config.sample_rate);
         self.rate = rate;
@@ -872,6 +885,9 @@ impl Plugin for Ca72 {
     ) -> ProcessStatus {
         #[cfg(feature = "fx-host")]
         let started = std::time::Instant::now();
+        // (The standalone's TEMPO a modulation target there alone: decisions.md R-LFO.)
+        self.params
+            .set_standalone(context.plugin_api() == PluginApi::Standalone);
         // (A preset a MIDI pad or key chose lands at once in the voices, as the drawer's does:
         // decisions.md R-PRESET-KEYS, R-KNOB-GLIDE.)
         if self.preset_actions.apply(context) {
@@ -903,7 +919,9 @@ impl Plugin for Ca72 {
         // The arpeggiator's settings and the host's transport, as the block begins (ON or LATCH
         // changed are taken at its first sample).
         self.now = 0;
-        let clock = arp_clock(context.transport(), self.rate, self.params.tempo());
+        // (Moved by a source, the block begins at the tempo in force at the LFOs' latest tick.)
+        let tempo = self.engine.tempo().unwrap_or_else(|| self.params.tempo());
+        let clock = arp_clock(context.transport(), self.rate, tempo);
         let engine = &mut self.engine;
         self.arp
             .begin(self.params.arp(), clock, len, &mut |key, on| {
@@ -914,6 +932,14 @@ impl Plugin for Ca72 {
         // R-OSC-TIMED).
         let (beats, per) = self.arp.position();
         let at = self.timed_clock.begin(context.transport(), beats, per, len);
+        // (Where the block began on the clock, for the standalone's effects: decisions.md
+        // R-LFO.)
+        #[cfg(feature = "fx-host")]
+        let timing = ca72_fx::Timing {
+            tempo: clock.tempo,
+            beats,
+            rate: self.rate,
+        };
         self.engine.set_position(at);
         let panic_token = context.standalone_panic_token();
         let standalone_panic = context.take_standalone_panic();
@@ -954,10 +980,19 @@ impl Plugin for Ca72 {
                 self.smooth.follow(&self.params);
                 self.engine.set(&self.controls());
             }
+            // TEMPO moved by a source (the standalone's: decisions.md R-LFO): the tempo of the
+            // LFOs' latest tick from here, everything it times going on from where it was, and
+            // the run ending at their next tick, where it changes again.
+            if let Some(bpm) = self.engine.tempo() {
+                self.retime(i, bpm, len);
+            }
             let mut end = next
                 .map_or(len, |e| e.timing() as usize)
                 .min(len)
                 .min(i + RUN);
+            if let Some(tick) = self.engine.next_tempo_tick() {
+                end = end.min(tick.max(i + 1));
+            }
             if self.smooth.moving() {
                 end = end.min(i + smooth::STEP);
             }
@@ -1015,8 +1050,12 @@ impl Plugin for Ca72 {
             }
             // The LFOs' scopes, orbs and rings (decisions.md R-LFO).
             self.params.lfo_scope.publish(&self.engine.lfo_readings());
-            // The tempo it played at, for the LFO page's timed scopes (decisions.md R-LFO-PAGE).
-            self.meters.publish_tempo(clock.tempo);
+            // The tempo it played at, for the LFO page's timed scopes (decisions.md R-LFO-PAGE),
+            // and the TEMPO screen: moved by a source, where the sources have it now (R-LFO).
+            self.meters
+                .publish_tempo(self.engine.tempo().unwrap_or(clock.tempo));
+            // The strip's screens' controls as they play, modulated (R-LFO).
+            self.meters.publish_live(&self.engine.controls_now());
         }
         // The standalone's effects, after the synth and its meters: each effect's block is
         // waited for until a share of the period from the block's start, then the effect
@@ -1028,6 +1067,7 @@ impl Plugin for Ca72 {
         {
             let deadline =
                 started + std::time::Duration::from_secs_f64(period * crate::fx::DEADLINE);
+            fx.set_timing(timing);
             // (The pins' points where the LFOs and macros moved them: R-FX-PARAMS.)
             let p = self.engine.fx_points();
             fx.process_modulated(
@@ -1063,6 +1103,9 @@ impl Vst3Plugin for Ca72 {
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
         &[Vst3SubCategory::Instrument, Vst3SubCategory::Synth];
 }
+
+#[cfg(test)]
+mod tempo_tests;
 
 #[cfg(test)]
 mod tests {

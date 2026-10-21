@@ -219,7 +219,23 @@ pub struct Meters {
     /// The tempo the audio thread plays at (the host's, else the standalone's TEMPO), beats a
     /// minute; NaN before a block: the LFO page's timed scopes (decisions.md R-LFO-PAGE).
     tempo: AtomicU32,
+    /// The strip's controls with a screen as the engine plays them, modulated (decisions.md
+    /// R-LFO): ENTROPY, WIDTH, DETUNE, DRIVE, LEVEL and INNER ([`LIVE`]'s order), the controls'
+    /// own units; NaN before a block.
+    live: [AtomicU32; LIVE.len()],
 }
+
+/// The modulation targets with a screen on the strip (decisions.md R-LFO: the owner, 2026-10-20,
+/// "if we attach a modulator to a parameter with a screen, that screen should represent where
+/// the modulator currently is"), in [`Meters`]' order. (TEMPO's screen is the tempo's.)
+const LIVE: [crate::lfo::Target; 6] = [
+    crate::lfo::Target::Entropy,
+    crate::lfo::Target::Spread,
+    crate::lfo::Target::Double,
+    crate::lfo::Target::Drive,
+    crate::lfo::Target::Level,
+    crate::lfo::Target::Inner,
+];
 
 impl Default for Meters {
     fn default() -> Self {
@@ -233,6 +249,7 @@ impl Default for Meters {
             watchers: AtomicU32::new(0),
             shapes: std::array::from_fn(|_| AtomicU32::new(f32::NAN.to_bits())),
             tempo: AtomicU32::new(f32::NAN.to_bits()),
+            live: std::array::from_fn(|_| AtomicU32::new(f32::NAN.to_bits())),
         }
     }
 }
@@ -253,6 +270,26 @@ impl Meters {
     /// The tempo a block played at (decisions.md R-LFO-PAGE).
     pub fn publish_tempo(&self, bpm: f64) {
         self.tempo.store((bpm as f32).to_bits(), Ordering::Relaxed);
+    }
+
+    /// The strip's screens' controls as the engine plays them now (modulated: decisions.md
+    /// R-LFO), from its controls in force.
+    pub fn publish_live(&self, c: &crate::engine::Controls) {
+        for (a, v) in self
+            .live
+            .iter()
+            .zip([c.entropy, c.spread, c.double, c.drive, c.level, c.inner])
+        {
+            a.store((v as f32).to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    /// [`Meters::publish_live`]'s, by [`LIVE`]'s order; none before a block.
+    fn live(&self) -> [Option<f64>; LIVE.len()] {
+        self.live.each_ref().map(|a| {
+            let v = f64::from(f32::from_bits(a.load(Ordering::Relaxed)));
+            v.is_finite().then_some(v)
+        })
     }
 
     /// The tempo the audio thread last played at, if it has played.
@@ -1368,6 +1405,12 @@ struct Editing {
     /// double click), and a trackpad's travel over it not yet a beat a minute.
     tempo_drag: Option<(f64, f64, bool, u16)>,
     last_tempo_press: Option<Instant>,
+    /// The screens' controls as the engine plays them, modulated ([`Meters::publish_live`]),
+    /// and the moving tempo, read at most 30 times a second while a source moves one of them
+    /// (decisions.md R-LFO), and when they are next due.
+    live: [Option<f64>; LIVE.len()],
+    live_tempo: Option<f64>,
+    live_due: Option<Instant>,
     tempo_travel: f64,
     composed: Option<ca72_panel::Pixmap>,
     /// Where the window's frame changed in the last `draw` that changed it (pixels: left,
@@ -1751,6 +1794,9 @@ impl Editing {
             rail: Rail::Plugin,
             tempo_drag: None,
             last_tempo_press: None,
+            live: [None; LIVE.len()],
+            live_tempo: None,
+            live_due: None,
             tempo_travel: 0.0,
             composed: None,
             damage: None,
@@ -2652,6 +2698,63 @@ impl Editing {
         self.params.tempo().round()
     }
 
+    /// What the TEMPO screen reads: the tempo the sources have it at, while one moves it
+    /// (decisions.md R-LFO), else as it is set, and as set while it is dragged or typed into.
+    fn tempo_shown(&self) -> f64 {
+        match self.live_tempo {
+            Some(t)
+                if self.tempo_drag.is_none() && !matches!(self.typing, Some((Typed::Tempo, _))) =>
+            {
+                t.round()
+            }
+            _ => self.tempo_now(),
+        }
+    }
+
+    /// Whether a source moves target `t` (an assignment of a depth other than 0).
+    fn source_moves(&self, t: crate::lfo::Target) -> bool {
+        self.sources_on(t).iter().any(|(_, d)| *d != 0.0)
+    }
+
+    /// Whether control `i` is being operated or typed into now (its screen then reads its own
+    /// value).
+    fn operated_now(&self, i: usize) -> bool {
+        self.drag.as_ref().is_some_and(|d| d.control == i)
+            || self.scroll.as_ref().is_some_and(|s| s.control == i)
+            || self.knob_entry.as_ref().is_some_and(|e| e.is_value_of(i))
+    }
+
+    /// The live values read again (at most 30 times a second, and only while a source moves a
+    /// screen's control: decisions.md R-LFO); none for the rest.
+    fn read_live(&mut self, now: Instant) {
+        let tempo = self.playing.standalone && self.source_moves(crate::lfo::Target::Tempo);
+        let any = tempo || LIVE.iter().any(|&t| self.source_moves(t));
+        if !any {
+            (self.live, self.live_tempo, self.live_due) = ([None; LIVE.len()], None, None);
+            return;
+        }
+        if self.live_due.is_some_and(|d| now < d) {
+            return;
+        }
+        let live = self.meters.live();
+        self.live = std::array::from_fn(|k| live[k].filter(|_| self.source_moves(LIVE[k])));
+        self.live_tempo = self.meters.tempo().filter(|_| tempo);
+        // (A thirtieth after it was due, never before now: the first a thirtieth from now.)
+        let next = self.live_due.map_or(now, |d| d.max(now - LIVE_FRAME)) + LIVE_FRAME;
+        self.live_due = Some(next);
+    }
+
+    /// The live values the strip's screens read now: a control's while a source moves it and it
+    /// is not operated or typed into.
+    fn live_shown(&self) -> [Option<f64>; LIVE.len()] {
+        std::array::from_fn(|k| {
+            let i = lfo_page::control_of(LIVE[k])?;
+            let typed =
+                matches!(self.typing, Some((Typed::Strip(r), _)) if readout_of(LIVE[k]) == Some(r));
+            self.live[k].filter(|_| !self.operated_now(i) && !typed)
+        })
+    }
+
     /// A press on the TEMPO screen: a drag begun, or, the second of a double click, a tempo
     /// typed into it.
     fn tempo_press(&mut self, modifiers: Modifiers) {
@@ -3364,9 +3467,12 @@ impl Editing {
             self.fx_view.close_list();
             return;
         }
-        // The standalone's TEMPO screen, on the wood above the panel (R-ARP).
+        // The standalone's TEMPO screen, on the wood above the panel (R-ARP): Alt/Option, the
+        // last touched source's depth on it, as a knob's (R-LFO).
         if self.playing.standalone && art::tempo_hit(self.renderer.arrangement(), x, y) {
-            self.tempo_press(modifiers);
+            if !(modifiers.contains(Modifiers::ALT) && self.mod_press((x, y), modifiers)) {
+                self.tempo_press(modifiers);
+            }
             return;
         }
         if let Some((dx, dy)) = self.in_drawer((x, y)) {
@@ -3652,6 +3758,11 @@ impl Editing {
         // The LFO page's: a control's, else its LFO's colour and EDGES (decisions.md R-LFO).
         if self.page_shows() && lfo_ui::inside(x, y) {
             self.page_menu((x, y));
+            return;
+        }
+        // The standalone's TEMPO screen: what moves it, and the sources that can (R-LFO).
+        if self.tempo_hovered((x, y)) {
+            self.open_tempo_menu((x, y));
             return;
         }
         if let Some(t) = strip::hit(self.rail, x, y) {
@@ -4278,14 +4389,20 @@ impl Editing {
         if self.scene.entry.is_some() {
             self.scene.tip = None;
         }
+        // The screens of the controls a source moves read where it has them (decisions.md
+        // R-LFO), the TEMPO screen the moving tempo; each its control's own while that is
+        // operated or typed into.
+        self.read_live(Instant::now());
         self.scene.tempo = self
             .playing
             .standalone
-            .then(|| format!("{} BPM", self.tempo_now()));
+            .then(|| format!("{} BPM", self.tempo_shown()));
+        let live = self.live_shown();
         self.strip_scene = strip_scene(
             &self.params,
             self.meters.voices.load(Ordering::Relaxed),
             (&self.levels, self.output),
+            &live,
             std::mem::take(&mut self.strip_scene),
         );
         // (The LFO page in the keyboard's place while it shows: decisions.md R-LFO.)
@@ -4408,6 +4525,24 @@ impl Editing {
             && let Some(t) = self.fx_view.tip()
         {
             return Some(t);
+        }
+        // The standalone's TEMPO screen with a source on it: its tempo as set, and the depths
+        // (R-LFO; it reads the moving tempo).
+        if self.drag.is_none()
+            && self.tempo_drag.is_none()
+            && self.tempo_hovered(self.in_drawing(self.pointer))
+            && !self.sources_on(crate::lfo::Target::Tempo).is_empty()
+        {
+            // (Beside the screen, to its right: above it there is no room in the window.)
+            let (x, y, w, h) = art::tempo_window(self.renderer.arrangement().plate_at());
+            let text = format!(
+                "TEMPO: {} BPM{}",
+                self.tempo_now(),
+                self.depths_tip(lfo_page::TEMPO_CONTROL)
+            );
+            let b = art::tip_bounds(self.renderer.fonts(), &text, self.renderer.text_size());
+            let left = x + w + art::TEMPO_SURROUND + 12.0;
+            return Some((text, left - b[0], y + h / 2.0 - (b[1] + b[3]) / 2.0));
         }
         let operated = self
             .drag
@@ -5189,6 +5324,24 @@ fn voices_inert(p: &Ca72Params) -> bool {
     !c.poly && !c.unison && (p.doubled.value() || c.spread <= 0.0)
 }
 
+/// How often the screens of modulated controls are read again: at most 30 times a second, as
+/// the LFO page's orbs (decisions.md R-LFO).
+const LIVE_FRAME: Duration = Duration::from_millis(33);
+
+/// The strip's readout showing target `t`, if one does.
+fn readout_of(t: crate::lfo::Target) -> Option<Readout> {
+    use crate::lfo::Target as T;
+    Some(match t {
+        T::Entropy => Readout::Entropy,
+        T::Spread => Readout::Width,
+        T::Double => Readout::Detune,
+        T::Drive => Readout::Drive,
+        T::Level => Readout::Level,
+        T::Inner => Readout::Inner,
+        _ => return None,
+    })
+}
+
 /// What the strip shows, from the parameters, the voices sounding (a bit a voice), their levels
 /// (0 to 1, by voice) and the output's, and the scene before (its rail, hover and MIDI Learn's
 /// ring are set elsewhere).
@@ -5196,9 +5349,25 @@ fn strip_scene(
     p: &Ca72Params,
     sounding: u32,
     (levels, output): (&[f64], f64),
+    live: &[Option<f64>; LIVE.len()],
     was: StripScene,
 ) -> StripScene {
     let c = p.controls();
+    // (The screens of the controls a source moves: where the engine has them, modulated, in
+    // their own units; lit as those values are. The rest of the strip as set: R-LFO.)
+    let mut r = c;
+    for (t, v) in LIVE.iter().zip(live) {
+        if let Some(v) = *v {
+            match t {
+                crate::lfo::Target::Entropy => r.entropy = v,
+                crate::lfo::Target::Spread => r.spread = v,
+                crate::lfo::Target::Double => r.double = v,
+                crate::lfo::Target::Drive => r.drive = v,
+                crate::lfo::Target::Level => r.level = v,
+                _ => r.inner = v,
+            }
+        }
+    }
     let unison = c.unison;
     let poly = c.poly && !unison;
     let mono = !poly && !unison;
@@ -5226,28 +5395,29 @@ fn strip_scene(
             "OFF".to_owned()
         }
     };
-    let auto = if c.auto_gain && c.drive > 0.0 {
+    // (AUTO GAIN's at DRIVE as it plays: the engine reads its curve there.)
+    let auto = if c.auto_gain && r.drive > 0.0 {
         let curve = crate::drive::Curve(p.drive_curve.saved().db);
-        (num3(curve.at(c.drive, crate::engine::DRIVE_TOP)), true)
+        (num3(curve.at(r.drive, crate::engine::DRIVE_TOP)), true)
     } else {
         (String::new(), false)
     };
     let readouts = [
         (format!("{voices}"), !voices_inert(p)),
-        (percent(c.entropy), c.entropy > 0.0),
-        (percent(c.spread), c.spread > 0.0),
+        (percent(r.entropy), r.entropy > 0.0),
+        (percent(r.spread), r.spread > 0.0),
         (
             if doubled {
-                crate::params::cents(c.double * crate::engine::DOUBLE_CENTS)
+                crate::params::cents(r.double * crate::engine::DOUBLE_CENTS)
             } else {
                 "OFF".to_owned()
             },
             doubled,
         ),
         auto,
-        (num3(c.drive), c.drive > 0.0),
-        (num3(c.level), true),
-        (percent(c.inner), c.inner > 0.0 && c.spread > 0.0),
+        (num3(r.drive), r.drive > 0.0),
+        (num3(r.level), true),
+        (percent(r.inner), r.inner > 0.0 && r.spread > 0.0),
     ];
     let on = |k: usize| sounding & (1 << k) != 0;
     // Where they sound: in MONO with DOUBLE the one pair, all of WIDTH's way out; else each of
@@ -11792,7 +11962,14 @@ mod tests {
                 placement: EnumParam::new("Scatter Placement", placement),
                 ..Ca72Params::default()
             };
-            strip_scene(&p, 0, (&[], 0.0), StripScene::default()).placement
+            strip_scene(
+                &p,
+                0,
+                (&[], 0.0),
+                &[None; LIVE.len()],
+                StripScene::default(),
+            )
+            .placement
         };
         assert_eq!(lit(true, false, Scatter::Even), Some(0));
         assert_eq!(lit(true, false, Scatter::Centre), Some(1));
@@ -11824,7 +12001,13 @@ mod tests {
                 doubled: BoolParam::new("Double", doubled),
                 ..Ca72Params::default()
             };
-            strip_scene(&p, 1 << 2, (&[], 0.5), StripScene::default())
+            strip_scene(
+                &p,
+                1 << 2,
+                (&[], 0.5),
+                &[None; LIVE.len()],
+                StripScene::default(),
+            )
         };
         let s = scene(false);
         let Field::Scatter(places) = &s.field else {
@@ -11885,7 +12068,13 @@ mod tests {
                 inert,
                 "POLY {poly}, UNISON {unison}, DOUBLE {doubled}, WIDTH {width}"
             );
-            let s = strip_scene(&p, 0, (&[], 0.0), StripScene::default());
+            let s = strip_scene(
+                &p,
+                0,
+                (&[], 0.0),
+                &[None; LIVE.len()],
+                StripScene::default(),
+            );
             assert_eq!(s.readouts[0].1, !inert, "the readout lit");
         }
         // The editor, at the defaults (MONO, SCATTER, WIDTH 0).
@@ -14205,6 +14394,7 @@ mod tests {
             since: 0.4 + k,
             rise: 1.0,
             moving: true,
+            ..Reading::default()
         };
         params
             .lfo_scope
@@ -14414,6 +14604,7 @@ mod tests {
             since: 0.3,
             rise,
             moving,
+            ..Reading::default()
         };
         params.lfo_scope.publish(&[
             r(0.75, 0.3, 1.0, true),
@@ -15458,6 +15649,180 @@ mod tests {
         assert!(e.mod_scene.knobs.is_empty());
     }
 
+    /// The standalone's TEMPO a target (decisions.md R-LFO): a macro's cord dropped on its
+    /// screen (a dashed box round it while dragged, a bright one under the plug), its rails under
+    /// the screen with the pop-up beneath them while it is hovered, its tip beside it, its menu's
+    /// DEPTH… and REMOVE and the sources that can take it, a rail's end dragged; the screen reading
+    /// the moving tempo, and its own while it is dragged. In a plug-in none of it.
+    #[test]
+    fn the_tempo_screen_takes_a_source_and_reads_the_moving_tempo() {
+        use crate::lfo::{Source, Target as T};
+        use lfo_page::TEMPO_CONTROL;
+        let (mut e, host, params) = editing_standalone();
+        e.playing.visible = false;
+        macro_key(&mut e);
+        host.take();
+        let (x, y, w, h) = art::tempo_window(e.renderer.arrangement().plate_at());
+        let screen = at(&e, (x + w / 2.0, y + h / 2.0));
+        let jack = at(&e, ca72_panel::strip::macros::jack_at(0));
+        go(&mut e, jack);
+        press(&mut e);
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.draw();
+        let cord = e.mod_scene.cord.clone().expect("a cord");
+        assert_eq!(cord.boxes, vec![(x, y, w, h)], "TEMPO's screen can take it");
+        go(&mut e, screen);
+        e.draw();
+        let cord = e.mod_scene.cord.clone().expect("a cord");
+        assert_eq!((cord.over_box, cord.boxes.len()), (Some((x, y, w, h)), 0));
+        release(&mut e);
+        assert_eq!(
+            params.lfo_patch.depth(Source::Macro(0), T::Tempo),
+            Some(0.25)
+        );
+        assert!(host.take().is_empty(), "patch state: no host gesture");
+        // Hovered: its rails, the pop-up under them, its tip beside the screen.
+        go(&mut e, Point { x: 5.0, y: 5.0 });
+        go(&mut e, screen);
+        e.draw();
+        let k = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| k.control == TEMPO_CONTROL)
+            .cloned()
+            .expect("its rails");
+        assert_eq!(k.bar, Some(w / 2.0));
+        assert!((k.travel - 1.0 / 3.0).abs() < 1e-9, "120 BPM along 30..300");
+        let popup = e.mod_scene.popup.clone().expect("its pop-up");
+        assert!(popup.knob.0.1 >= y + h, "under the screen");
+        assert_eq!(popup.dials[0].label, "MACRO 1");
+        let (tip, tx, _) = e.scene.tip.clone().expect("a tip");
+        assert_eq!(tip, "TEMPO: 120 BPM \u{b7} MACRO 1 +25 %");
+        assert!(tx > x + w, "beside it");
+        // A rail's end dragged further: a deeper depth.
+        let (ex, ey) = ca72_panel::modulation::ring_end(&k, 0);
+        let end = at(&e, (ex, ey));
+        go(&mut e, end);
+        press(&mut e);
+        let further = at(&e, (ex + w / 4.0, ey));
+        go(&mut e, further);
+        release(&mut e);
+        let d = params.lfo_patch.depth(Source::Macro(0), T::Tempo).unwrap();
+        assert!((d - 0.5).abs() < 0.02, "{d}");
+        // Its menu: what moves it, and the sources that can.
+        right_click(&mut e, screen);
+        let items: Vec<String> = menu_items(&e).into_iter().map(|(t, _)| t).collect();
+        for want in ["DEPTH\u{2026}", "REMOVE", "LFO 1", "MACRO 2"] {
+            assert!(items.iter().any(|t| t == want), "{want} in {items:?}");
+        }
+        menu_item(&mut e, "REMOVE");
+        assert_eq!(params.lfo_patch.depth(Source::Macro(0), T::Tempo), None);
+        // The screen reads the moving tempo while a source moves it, its own while dragged.
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Tempo, 0.3)
+            .unwrap();
+        e.meters.publish_tempo(151.4);
+        e.live_due = None;
+        e.update_scene();
+        assert_eq!(e.scene.tempo.as_deref(), Some("151 BPM"));
+        go(&mut e, screen);
+        e.last_tempo_press = None;
+        press(&mut e);
+        e.update_scene();
+        assert_eq!(e.scene.tempo.as_deref(), Some("120 BPM"), "dragged: as set");
+        release(&mut e);
+        e.update_scene();
+        assert_eq!(e.scene.tempo.as_deref(), Some("151 BPM"));
+        params.lfo_patch.remove(Source::Lfo(0), T::Tempo);
+        e.update_scene();
+        assert_eq!(
+            e.scene.tempo.as_deref(),
+            Some("120 BPM"),
+            "none on it: as set"
+        );
+        // In a plug-in: no target, the LFO's screen dim, its menu and tip saying why.
+        let (p, _, params) = editing();
+        params
+            .lfo_patch
+            .assign(Source::Lfo(1), T::Tempo, 0.4)
+            .unwrap();
+        assert_eq!(p.mod_target(TEMPO_CONTROL), None);
+        assert_eq!(
+            lfo_page::screen_text(&params.lfo_patch, 1, true, false),
+            ("TEMPO".to_owned(), false)
+        );
+        assert_eq!(p.standalone_only(T::Tempo), " (STANDALONE ONLY)");
+    }
+
+    /// The strip's screens follow a source moving their controls (decisions.md R-LFO: the owner,
+    /// "that screen should represent where the modulator currently is based on modulation
+    /// position. Not the position of the static knob"): DRIVE at 0 with an LFO on it reads and
+    /// is lit where the engine has it (AUTO GAIN's too), its own value while it is turned, and
+    /// its own again once the LFO is taken off; the screens of controls nothing moves as set.
+    #[test]
+    fn a_modulated_screen_reads_where_its_source_has_the_control() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _, params) = editing();
+        let drive = Readout::ALL
+            .iter()
+            .position(|&r| r == Readout::Drive)
+            .unwrap();
+        let width = Readout::ALL
+            .iter()
+            .position(|&r| r == Readout::Width)
+            .unwrap();
+        e.update_scene();
+        let still = e.strip_scene.readouts.clone();
+        assert!(!still[drive].1, "DRIVE at 0: dark");
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Drive, 0.5)
+            .unwrap();
+        let mut c = params.controls();
+        c.drive = 1.3;
+        c.spread = 0.9;
+        e.meters.publish_live(&c);
+        e.update_scene();
+        assert_eq!(e.strip_scene.readouts[drive], ("1.3".to_owned(), true));
+        assert_eq!(
+            e.strip_scene.readouts[width], still[width],
+            "nothing on WIDTH"
+        );
+        // Read again only once a thirtieth has passed.
+        c.drive = 2.0;
+        e.meters.publish_live(&c);
+        e.update_scene();
+        assert_eq!(e.strip_scene.readouts[drive].0, "1.3");
+        e.live_due = None;
+        e.update_scene();
+        assert_eq!(e.strip_scene.readouts[drive].0, "2.0");
+        // Turned: its own value.
+        let i = ca72_panel::controls::index("drive").unwrap();
+        e.scroll = None;
+        assert!(e.live_shown()[3].is_some());
+        e.knob_entry = None;
+        let k = at(&e, centre("drive"));
+        go(&mut e, k);
+        press(&mut e);
+        assert!(e.operated_now(i));
+        e.update_scene();
+        assert_eq!(
+            e.strip_scene.readouts[drive], still[drive],
+            "its own while turned"
+        );
+        release(&mut e);
+        e.live_due = None;
+        e.update_scene();
+        assert_eq!(e.strip_scene.readouts[drive].0, "2.0");
+        // Taken off: as set again.
+        params.lfo_patch.remove(Source::Lfo(0), T::Drive);
+        e.update_scene();
+        assert_eq!(e.strip_scene.readouts[drive], still[drive]);
+    }
+
     /// A macro's name is typed on its screen, double-clicked (or RENAME… from its menu):
     /// capitals, seven at most, Enter keeping it, Escape leaving it as it was, a press elsewhere
     /// keeping it; it then names the macro in its screen, the pop-up, the tips and the menus.
@@ -15768,6 +16133,7 @@ mod tests {
                 since: i as f32 * 0.05,
                 rise: 1.0,
                 moving: true,
+                ..Reading::default()
             };
             params.lfo_scope.publish(&[r; 4]);
             e.modulating.due = None;

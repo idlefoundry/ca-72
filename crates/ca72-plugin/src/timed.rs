@@ -119,6 +119,8 @@ pub fn per_sample(tempo: f64, rate: f64) -> f64 {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Clock {
     next_bars: Option<f64>,
+    /// The block's place as last given ([`Clock::begin`], [`Clock::retime`]).
+    last: Option<Position>,
 }
 
 impl Clock {
@@ -140,17 +142,40 @@ impl Clock {
             self.next_bars.unwrap_or(beats / bar)
         };
         self.next_bars = Some(bars + len as f64 * per / bar);
-        Position {
+        let p = Position {
             beats,
             bars,
             per,
             bar,
-        }
+        };
+        self.last = Some(p);
+        p
+    }
+
+    /// The tempo changed `at` samples into the block of `len` (the standalone's TEMPO moved by a
+    /// modulation source: decisions.md R-LFO), to `per` quarter notes a sample: the block's
+    /// place as the samples from here have it, the beats and bars going on from where they had
+    /// come at the new tempo (the block's start as it would have been, so that a sample's place
+    /// is still the block's start's and its offset), as the arpeggiator's
+    /// ([`crate::arp::Arp::retime`]). None before a block has begun.
+    pub fn retime(&mut self, at: usize, per: f64, len: usize) -> Option<Position> {
+        let p = self.last?;
+        let moved = at as f64 * (p.per - per);
+        let q = Position {
+            beats: p.beats + moved,
+            bars: p.bars + moved / p.bar,
+            per,
+            bar: p.bar,
+        };
+        self.next_bars = Some(q.bars + len as f64 * per / q.bar);
+        self.last = Some(q);
+        Some(q)
     }
 
     /// Forgets the bars run on (a reset): the next block's counted from its beats.
     pub fn clear(&mut self) {
         self.next_bars = None;
+        self.last = None;
     }
 }
 
