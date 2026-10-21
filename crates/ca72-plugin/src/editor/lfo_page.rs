@@ -251,7 +251,7 @@ pub(super) fn lfo_param<'a>(
     n: usize,
     part: &str,
 ) -> Option<&'a dyn Operated> {
-    let q = p.lfo(n);
+    let (q, keys) = (p.lfo(n), p.lfo_keys(n));
     Some(match part {
         "waveform" => &q.waveform,
         "shape_mode" => &q.shape_mode,
@@ -263,6 +263,9 @@ pub(super) fn lfo_param<'a>(
         "rise" => &q.rise,
         "mode" => &q.mode,
         "mono" => &q.mono,
+        "polarity" => &keys.polarity,
+        "reverse" => &keys.reverse,
+        "on" => &keys.on,
         _ => return None,
     })
 }
@@ -279,8 +282,12 @@ pub(super) fn control_of(t: ModTarget) -> Option<usize> {
 }
 
 /// What an LFO's MODULATES screen reads (its ten characters): the one knob and its depth, the
-/// count, or NOT IN USE (dim).
-pub(super) fn screen_text(patch: &lfo::Patch, n: usize) -> (String, bool) {
+/// count, or NOT IN USE (dim); MUTED (dim) while its ON is off, whatever it modulates (R-LFO's
+/// corrections).
+pub(super) fn screen_text(patch: &lfo::Patch, n: usize, on: bool) -> (String, bool) {
+    if !on {
+        return ("MUTED".into(), false);
+    }
     let a: Vec<_> = patch
         .assignments(Source::Lfo(n))
         .into_iter()
@@ -426,7 +433,9 @@ impl Editing {
             };
             let v = |k: usize| self.scene.values[lfo_index(n, k)];
             let continuous = q.shape_mode.value() == WaveMode::Continuous;
-            let (screen, in_use) = screen_text(&self.params.lfo_patch, n);
+            let keys = self.params.lfo_keys(n);
+            let on = keys.on.value();
+            let (screen, in_use) = screen_text(&self.params.lfo_patch, n, on);
             *col = Column {
                 colour: colour(&self.settings, Source::Lfo(n)),
                 wave: if continuous {
@@ -448,7 +457,10 @@ impl Editing {
                 mode: v(5),
                 mono: q.mono.value(),
                 trace,
-                orb: Some((x, y)),
+                // (Muted and faded out: none.)
+                orb: (on || r.moving).then_some((x, y)),
+                uni: keys.polarity.value() == lfo::Polarity::Uni,
+                on,
                 orb_rise: gain,
                 screen,
                 in_use,
@@ -529,13 +541,14 @@ impl Editing {
                 .iter()
                 .map(|&(s, d)| {
                     let (value, moving) = self.reading_of(s);
-                    let one_way = s.macro_n().is_some();
+                    let one_way = self.one_way(s);
                     Ring {
                         colour: colour(&self.settings, s),
                         depth: f64::from(d),
-                        point: ((page || one_way) && moving)
+                        point: ((page || s.macro_n().is_some()) && moving)
                             .then(|| (travel + f64::from(d) * value).clamp(0.0, 1.0)),
                         one_way,
+                        dim: self.muted(s),
                     }
                 })
                 .collect();
@@ -585,6 +598,8 @@ impl Editing {
                             depth: f64::from(d),
                             shared: !t.per_voice()
                                 && s.lfo().is_some_and(|n| !self.params.lfo(n).mono.value()),
+                            uni: s.lfo().is_some() && self.one_way(s),
+                            muted: self.muted(s),
                         })
                         .collect(),
                     hover: self.modulating.popup_hover,
@@ -603,13 +618,33 @@ impl Editing {
         self.sources_on(t)
             .iter()
             .map(|&(s, d)| {
+                let uni = if s.lfo().is_some() && self.one_way(s) {
+                    " UNI"
+                } else {
+                    ""
+                };
+                let muted = if self.muted(s) { " MUTED" } else { "" };
                 format!(
-                    " \u{b7} {} {}",
+                    " \u{b7} {} {}{uni}{muted}",
                     label(&self.params.lfo_patch, s),
                     mods::percent(f64::from(d))
                 )
             })
             .collect()
+    }
+
+    /// Whether source `s` moves its knobs one way: a macro, or an LFO whose POLARITY is UNI
+    /// (R-LFO's corrections).
+    pub(super) fn one_way(&self, s: Source) -> bool {
+        match s {
+            Source::Lfo(n) => self.params.lfo_keys(n).polarity.value() == lfo::Polarity::Uni,
+            Source::Macro(_) => true,
+        }
+    }
+
+    /// Whether source `s` is an LFO turned off (ON off: R-LFO's corrections).
+    pub(super) fn muted(&self, s: Source) -> bool {
+        s.lfo().is_some_and(|n| !self.params.lfo_keys(n).on.value())
     }
 
     /// The tip of the page's part under the pointer (its controls' are the panel's): what an
@@ -642,6 +677,14 @@ impl Editing {
                 }
             }
             LfoTarget::Jack(_) => format!("LFO {} OUT: DRAG TO A KNOB TO MODULATE IT", n + 1),
+            LfoTarget::Title(_) => {
+                let on = self.params.lfo_keys(n).on.value();
+                format!(
+                    "LFO {} ON: {}",
+                    n + 1,
+                    if on { "ON" } else { "OFF (MUTED)" }
+                )
+            }
             _ => return None,
         };
         Some((text, x, y - 30.0))
@@ -691,6 +734,8 @@ impl Editing {
                 self.modulating.popup = None;
             }
             LfoTarget::Screen(_) => self.open_modulates_menu(n),
+            // (The title is ON's key's word: pressed as the key is.)
+            LfoTarget::Title(_) => self.press_target(Target::Control(lfo_index(n, 8)), modifiers),
             _ => {}
         }
     }
@@ -881,6 +926,14 @@ impl Editing {
                 !continuous,
                 continuous,
             ));
+            // (Read backwards, STEPPED or CONTINUOUS: R-LFO's corrections.)
+            let reverse = self.params.lfo_keys(n).reverse.value();
+            rows.push(Row::Item(
+                ModItem::Reverse(n),
+                "REVERSE".into(),
+                true,
+                reverse,
+            ));
             return rows;
         }
         let Some(t) = self.mod_target(i) else {
@@ -1036,6 +1089,13 @@ impl Editing {
             ModItem::Color(n, p) => self.keep_settings(Change::LfoColor(n, p)),
             ModItem::Edges(n, e) => patch.set_edges(n, e),
             ModItem::Wave(n, continuous) => self.set_lfo_wave_mode(n, continuous),
+            ModItem::Reverse(n) => {
+                let p = &self.params.lfo_keys(n).reverse;
+                let s = self.setter();
+                s.begin_set_parameter(p);
+                s.set_parameter(p, !p.value());
+                s.end_set_parameter(p);
+            }
             ModItem::MacroColor(n, c) => self.keep_settings(Change::MacroColor(n, c)),
             ModItem::Rename(n) => self.start_rename(n),
             ModItem::RemoveAll(s) => {

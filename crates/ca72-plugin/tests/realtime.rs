@@ -1211,8 +1211,8 @@ fn the_oscillators_timed_neither_allocate_nor_free() {
 }
 
 /// The LFOs (decisions.md R-LFO) modulating eight knobs each, MONO off on POLY's ten voices,
-/// their settings automated (MODE, MONO, RATE, timed), QUALITY LO, HI and ULTRA, and the patch
-/// changed between blocks as the editor changes it: no allocation, no free.
+/// their settings automated (MODE, MONO, RATE, timed, POLARITY, REVERSE, ON), QUALITY LO, HI and
+/// ULTRA, and the patch changed between blocks as the editor changes it: no allocation, no free.
 #[test]
 fn the_lfos_neither_allocate_nor_free() {
     use ca72_plugin::Ca72;
@@ -1327,6 +1327,11 @@ fn the_lfos_neither_allocate_nor_free() {
         c.automate(q.timed.as_ptr(), if b % 90 < 45 { 1.0 } else { 0.0 });
         c.automate(q.rise.as_ptr(), (b % 7) as f32 / 6.0);
         c.automate(q.mono.as_ptr(), if b % 130 < 100 { 0.0 } else { 1.0 });
+        // (POLARITY, REVERSE and ON: R-LFO's corrections; ON's fade through.)
+        let keys = a.lfo_keys(n);
+        c.automate(keys.polarity.as_ptr(), if b % 70 < 35 { 1.0 } else { 0.0 });
+        c.automate(keys.reverse.as_ptr(), if b % 110 < 55 { 1.0 } else { 0.0 });
+        c.automate(keys.on.as_ptr(), if b % 60 < 40 { 1.0 } else { 0.0 });
         c.automate(a.quality.as_ptr(), (b / 300) as f32 / 2.0);
         // (A macro turned, gliding there; one renamed, between blocks, by the editor.)
         c.automate(a.macro_param(b % 6).as_ptr(), (b % 33) as f32 / 32.0);

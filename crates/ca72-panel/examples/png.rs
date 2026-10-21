@@ -18,7 +18,7 @@
 //! 50 % and 1.0 OCT, TIMBRE -30 % and 2.5 OCT (the mock-up's), INPUT reading MPE, the MPE key
 //! lit; `CA72_MPE_INPUT=channel` or `none` INPUT so.
 //! `CA72_LFO=1` the LFO page over the lower page (decisions.md R-LFO), the round-2 mock-ups'
-//! four LFOs, the LFO key lit; `CA72_LFO_COLORS=amber,green,blue,red` other phosphors;
+//! four LFOs, the LFO key lit (`CA72_LFO_KEYS=1` LFO 2 UNI and LFO 3 muted); `CA72_LFO_COLORS=amber,green,blue,red` other phosphors;
 //! `CA72_LFO_RINGS=1` the mock-ups' rings on CUTOFF, OSCILLATOR-2 FREQUENCY and VOLUME (each
 //! LFO's point on them), `CA72_LFO_CORD=<param>` an assignment from LFO 1's jack dragged over
 //! that knob, `CA72_LFO_POPUP=1` CUTOFF's hover pop-up.
@@ -847,6 +847,20 @@ pub fn lfo_example() -> ca72_panel::strip::lfo::LfoScene {
         c.in_use = screen != "NOT IN USE";
         let _ = Column::default;
     }
+    // (`CA72_LFO_KEYS=1`: LFO 2 UNI, its trace 0..1; LFO 3 off, MUTED: R-LFO's corrections.)
+    if std::env::var("CA72_LFO_KEYS").is_ok_and(|v| v == "1") {
+        let c = &mut scene.columns[1];
+        c.uni = true;
+        for v in &mut c.trace {
+            *v = 0.5 * (*v + 1.0);
+        }
+        c.orb = c.orb.map(|(x, v)| (x, 0.5 * (v + 1.0)));
+        let c = &mut scene.columns[2];
+        c.on = false;
+        c.orb = None;
+        c.screen = "MUTED".into();
+        c.in_use = false;
+    }
     scene
 }
 
@@ -918,6 +932,7 @@ fn lfo_overlay(all: &mut ca72_panel::Pixmap, r: &Renderer, scale: f64, values: &
                             .orb
                             .map(|(_, v)| (travel + depth * v).clamp(0.0, 1.0)),
                         one_way: false,
+                        dim: false,
                     })
                     .collect(),
             });
@@ -972,12 +987,16 @@ fn lfo_overlay(all: &mut ca72_panel::Pixmap, r: &Renderer, scale: f64, values: &
                     label: "LFO 1".into(),
                     depth: 0.4,
                     shared: false,
+                    uni: false,
+                    muted: false,
                 },
                 PopDial {
                     colour: colour(1),
                     label: "LFO 2".into(),
                     depth: -0.25,
                     shared: true,
+                    uni: false,
+                    muted: false,
                 },
             ],
             hover: Some(0),

@@ -170,6 +170,8 @@ pub enum ModItem {
     Edges(usize, crate::lfo::Edges),
     /// LFO `n`'s waveform STEPPED (false) or CONTINUOUS.
     Wave(usize, bool),
+    /// LFO `n`'s REVERSE turned (R-LFO's corrections).
+    Reverse(usize),
     /// Macro `n`'s colour (decisions.md R-MACROS).
     MacroColor(usize, crate::lfo::MacroColor),
     /// Macro `n`'s name typed on its screen.

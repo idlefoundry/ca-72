@@ -355,16 +355,22 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   keyboard's place (the wheels stay at its left); pressed again, it puts it away. Four LFOs
   side by side, each with:
   - its **scope**, in its own phosphor colour (LFO 1 amber, LFO 2 green, LFO 3 blue, LFO 4 red
-    at first): two cycles of its output from a note's start, so PHASE, RISE and ENV show, and an
-    orb where the LFO is now. Right-click the scope for its **COLOR** (amber, green, blue, red,
+    at first): one cycle of its waveform from PHASE, and an orb where the LFO is in it now, at its
+    output (under the trace while RISE fades it in; at the cycle's end once ENV holds). Right-click the scope for its **COLOR** (amber, green, blue, red,
     violet or white; kept on this computer, not in the patch) and its **EDGES**: SOFT (the
     default, a jump eased over about 2 ms) or SHARP;
   - **MODE**: FREE runs on; RETRIG starts again at PHASE with a new note; ENV runs one cycle from
     PHASE and holds (a new note follows the left hand's RETRIGGER switch, as the contours do);
     and **MONO** (on: one LFO every voice shares; off: one a voice, except on the knobs every
     voice shares, VOLUME and the strip's, which take the shared one);
+  - its **ON** key, just left of its title (press the key or the title): off, the LFO is muted,
+    fading out over 10 ms with what it modulates kept, its scope and rings dimmed and MODULATES
+    reading MUTED; on again, it fades back in. Its **UNI** key, right of the title: off (BI), the
+    LFO swings its knobs both ways about where they are set; on (UNI), it runs from 0 to 1, so a
+    positive depth moves a knob up from its setting and a negative one down;
   - **WAVEFORM**, the oscillators' six shapes, STEPPED or CONTINUOUS (right-click it, as an
-    oscillator's); **RATE**, 0.01 to 50 Hz, or with its timed key (the note beside it shows the
+    oscillator's), and **REVERSE** in the same menu, which reads the waveform backwards (a
+    sawtooth falls); **RATE**, 0.01 to 50 Hz, or with its timed key (the note beside it shows the
     value) a note value locked to the host's tempo, as the timed oscillators' dials; **PHASE**,
     0 to 360°, where the cycle starts (a negative depth inverts the LFO exactly); **RISE**, 0 to
     10 s, how long it fades in after a new note;

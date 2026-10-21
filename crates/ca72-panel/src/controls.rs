@@ -373,12 +373,12 @@ const fn lfo_knob(dial: Dial) -> Kind {
     Kind::Knob { dial, big: false }
 }
 
-/// LFO `n`'s (0 to 3) seven controls, in the order [`LFO_PARTS`] names them.
+/// LFO `n`'s (0 to 3) nine controls, in the order [`LFO_PARTS`] names them.
 const fn lfo_column(
     n: usize,
-    params: [&'static str; 7],
-    labels: [&'static str; 7],
-) -> [Control; 7] {
+    params: [&'static str; 9],
+    labels: [&'static str; 9],
+) -> [Control; 9] {
     let p = crate::strip::lfo::places(n);
     [
         lfo(
@@ -402,13 +402,17 @@ const fn lfo_column(
             },
         ),
         lfo(params[6], labels[6], p.mono, Kind::Key),
+        lfo(params[7], labels[7], p.polarity, Kind::Key),
+        lfo(params[8], labels[8], p.on, Kind::Key),
     ]
 }
 
 /// The parts of an LFO's column that are controls, their parameters' IDs' last parts.
-pub const LFO_PARTS: [&str; 7] = ["waveform", "rate", "timed", "phase", "rise", "mode", "mono"];
+pub const LFO_PARTS: [&str; 9] = [
+    "waveform", "rate", "timed", "phase", "rise", "mode", "mono", "polarity", "on",
+];
 
-const LFO_COLUMNS: [[Control; 7]; 4] = [
+const LFO_COLUMNS: [[Control; 9]; 4] = [
     lfo_column(
         0,
         [
@@ -419,6 +423,8 @@ const LFO_COLUMNS: [[Control; 7]; 4] = [
             "lfo1_rise",
             "lfo1_mode",
             "lfo1_mono",
+            "lfo1_polarity",
+            "lfo1_on",
         ],
         [
             "LFO 1 WAVEFORM",
@@ -428,6 +434,8 @@ const LFO_COLUMNS: [[Control; 7]; 4] = [
             "LFO 1 RISE",
             "LFO 1 MODE (FREE, RETRIG or ENV)",
             "LFO 1 MONO",
+            "LFO 1 POLARITY (BI or UNI)",
+            "LFO 1 ON",
         ],
     ),
     lfo_column(
@@ -440,6 +448,8 @@ const LFO_COLUMNS: [[Control; 7]; 4] = [
             "lfo2_rise",
             "lfo2_mode",
             "lfo2_mono",
+            "lfo2_polarity",
+            "lfo2_on",
         ],
         [
             "LFO 2 WAVEFORM",
@@ -449,6 +459,8 @@ const LFO_COLUMNS: [[Control; 7]; 4] = [
             "LFO 2 RISE",
             "LFO 2 MODE (FREE, RETRIG or ENV)",
             "LFO 2 MONO",
+            "LFO 2 POLARITY (BI or UNI)",
+            "LFO 2 ON",
         ],
     ),
     lfo_column(
@@ -461,6 +473,8 @@ const LFO_COLUMNS: [[Control; 7]; 4] = [
             "lfo3_rise",
             "lfo3_mode",
             "lfo3_mono",
+            "lfo3_polarity",
+            "lfo3_on",
         ],
         [
             "LFO 3 WAVEFORM",
@@ -470,6 +484,8 @@ const LFO_COLUMNS: [[Control; 7]; 4] = [
             "LFO 3 RISE",
             "LFO 3 MODE (FREE, RETRIG or ENV)",
             "LFO 3 MONO",
+            "LFO 3 POLARITY (BI or UNI)",
+            "LFO 3 ON",
         ],
     ),
     lfo_column(
@@ -482,6 +498,8 @@ const LFO_COLUMNS: [[Control; 7]; 4] = [
             "lfo4_rise",
             "lfo4_mode",
             "lfo4_mono",
+            "lfo4_polarity",
+            "lfo4_on",
         ],
         [
             "LFO 4 WAVEFORM",
@@ -491,6 +509,8 @@ const LFO_COLUMNS: [[Control; 7]; 4] = [
             "LFO 4 RISE",
             "LFO 4 MODE (FREE, RETRIG or ENV)",
             "LFO 4 MONO",
+            "LFO 4 POLARITY (BI or UNI)",
+            "LFO 4 ON",
         ],
     ),
 ];
@@ -514,10 +534,19 @@ const fn macro_knob(param: &'static str, label: &'static str, n: usize) -> Contr
 /// Where the macros' knobs begin in [`CONTROLS`] (macro `n`'s is `MACRO_FIRST + n`).
 pub const MACRO_FIRST: usize = 96;
 
-/// The index in [`CONTROLS`] of LFO `n`'s (0 to 3) part `k` ([`LFO_PARTS`]' order).
+/// The index in [`CONTROLS`] of LFO `n`'s (0 to 3) part `k` ([`LFO_PARTS`]' order): its first
+/// seven together, its POLARITY and ON keys after the macros' (R-LFO's corrections: so that no
+/// control moves).
 pub const fn lfo_index(n: usize, k: usize) -> usize {
-    LFO_FIRST + 7 * n + k
+    if k < 7 {
+        LFO_FIRST + 7 * n + k
+    } else {
+        LFO_KEYS_FIRST + 2 * n + (k - 7)
+    }
 }
+
+/// Where the LFOs' POLARITY and ON keys begin in [`CONTROLS`]: after the macros' knobs.
+pub const LFO_KEYS_FIRST: usize = MACRO_FIRST + 6;
 
 /// Where the LFO page's controls begin in [`CONTROLS`].
 pub const LFO_FIRST: usize = 68;
@@ -530,7 +559,7 @@ pub const KEY_BELOW_RANGE: f64 = 84.0;
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 102] = [
+pub const CONTROLS: [Control; 110] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -956,6 +985,16 @@ pub const CONTROLS: [Control; 102] = [
     macro_knob("macro4", "MACRO 4", 3),
     macro_knob("macro5", "MACRO 5", 4),
     macro_knob("macro6", "MACRO 6", 5),
+    // Each LFO's POLARITY and ON keys (R-LFO's corrections), after the macros', so that no
+    // control moves.
+    LFO_COLUMNS[0][7],
+    LFO_COLUMNS[0][8],
+    LFO_COLUMNS[1][7],
+    LFO_COLUMNS[1][8],
+    LFO_COLUMNS[2][7],
+    LFO_COLUMNS[2][8],
+    LFO_COLUMNS[3][7],
+    LFO_COLUMNS[3][8],
 ];
 
 /// The panel's controls' history (decisions.md R-SKIN-PACKS), so that a skin pack's layout made
@@ -980,10 +1019,11 @@ pub struct ControlSet {
 /// the second (decisions.md R-OSC-TIMED), each oscillator's MOD key in the third
 /// (R-CONTINUOUS-WAVE), the LFO page's in the fourth (R-LFO: the plug-in's own, on its lower
 /// page, which a layout does not place, as the strip's), the six macros in the fifth (R-MACROS:
-/// in the left hand's area, which a layout does not place either). Never edit an entry once
+/// in the left hand's area, which a layout does not place either), each LFO's POLARITY (UNI) and
+/// ON keys in the sixth (R-LFO's corrections). Never edit an entry once
 /// released: add to it (and raise `revision`) as controls come, go, or change.
 pub const CONTROL_SET: ControlSet = ControlSet {
-    revision: 5,
+    revision: 6,
     added: &[
         ("osc2_timed", 2),
         ("osc3_timed", 2),
@@ -1024,6 +1064,14 @@ pub const CONTROL_SET: ControlSet = ControlSet {
         ("macro4", 5),
         ("macro5", 5),
         ("macro6", 5),
+        ("lfo1_polarity", 6),
+        ("lfo1_on", 6),
+        ("lfo2_polarity", 6),
+        ("lfo2_on", 6),
+        ("lfo3_polarity", 6),
+        ("lfo3_on", 6),
+        ("lfo4_polarity", 6),
+        ("lfo4_on", 6),
     ],
     renamed: &[],
     retired: &[],

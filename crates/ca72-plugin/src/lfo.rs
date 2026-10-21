@@ -1259,7 +1259,19 @@ fn place(k: usize, p: f64) -> f64 {
 /// six exactly, or between two blended as R-CONTINUOUS-WAVE's oscillators are, past SQUARE the
 /// rectangle at its [`duty`]) at `phase` (cycles; its fraction is where in the cycle): -1 to 1.
 pub fn wave(at: f64, phase: f64) -> f64 {
+    shape(at, phase - phase.floor())
+}
+
+/// The waveform as an LFO reads it at `phase` (cycles): forwards, or with REVERSE backwards,
+/// its place in its cycle `p` read at 1 − p (decisions.md R-LFO's corrections), so that a
+/// sawtooth falls (+1 at its cycle's start).
+pub fn read(at: f64, phase: f64, reverse: bool) -> f64 {
     let p = phase - phase.floor();
+    shape(at, if reverse { 1.0 - p } else { p })
+}
+
+/// The waveform at `at` at `p` (0..1 of its cycle; 1 its end, as REVERSE reads 0).
+fn shape(at: f64, p: f64) -> f64 {
     let at = at.clamp(0.0, SHAPE_PLACES);
     if at >= 3.0 {
         return if p < duty(at) { 1.0 } else { -1.0 };
@@ -1289,6 +1301,12 @@ pub struct Settings {
     pub mode: Mode,
     pub mono: bool,
     pub edges: Edges,
+    /// POLARITY UNI: its output 0..1 rather than -1..1, so that its knobs move one way.
+    pub uni: bool,
+    /// REVERSE: its waveform read backwards.
+    pub reverse: bool,
+    /// ON (off: muted, faded to nothing and back over [`MUTE_FADE`]).
+    pub on: bool,
 }
 
 impl Default for Settings {
@@ -1302,6 +1320,9 @@ impl Default for Settings {
             mode: Mode::Free,
             mono: true,
             edges: Edges::Soft,
+            uni: false,
+            reverse: false,
+            on: true,
         }
     }
 }
@@ -1321,7 +1342,14 @@ impl Settings {
     /// the scope's trace, one cycle across its width whatever the rate (timed, one note value).
     /// At 1 it is the cycle's last value, just short of the next one's start, as ENV holds.
     pub fn cycle_at(&self, x: f64) -> f64 {
-        wave(self.at, self.phase + x.clamp(0.0, 1.0) * ENV_END)
+        self.shaped(self.phase + x.clamp(0.0, 1.0) * ENV_END)
+    }
+
+    /// Its waveform at `phase` (cycles, PHASE included), REVERSE and POLARITY as set: -1..1,
+    /// or 0..1 UNI.
+    pub fn shaped(&self, phase: f64) -> f64 {
+        let x = read(self.at, phase, self.reverse);
+        if self.uni { 0.5 * (x + 1.0) } else { x }
     }
 
     fn rise_gain(&self, since: f64) -> f64 {
@@ -1336,6 +1364,11 @@ impl Settings {
 /// Where ENV's one cycle holds: its last value, just short of the next cycle's start.
 const ENV_END: f64 = 1.0 - 1e-9;
 
+/// How long ON's fade takes (s): an LFO turned off fades to nothing, and back on from nothing,
+/// in a straight line over 10 ms, so that its knobs do not jump (the owner, 2026-10-20: "we
+/// need to be able to mute the LFO").
+pub const MUTE_FADE: f64 = 0.010;
+
 /// One generator: its own cycles since it last started (RETRIG and ENV) or running on (FREE),
 /// the time since the note that last started it, whether a note has, and its output.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -1346,6 +1379,10 @@ pub struct Gen {
     out: f64,
     /// Where it was in its cycle at its last value (PHASE included), for the scope.
     at: f64,
+    /// How far ON's fade has it muted: 0 sounding (its output as it is, to the bit), 1 off.
+    muted: f64,
+    /// Its output after ON's fade.
+    heard: f64,
 }
 
 impl Gen {
@@ -1373,7 +1410,7 @@ impl Gen {
         } else {
             s.rise_gain(self.since)
         };
-        let x = wave(s.at, self.at) * gain;
+        let x = s.shaped(self.at) * gain;
         self.out = match s.edges {
             Edges::Sharp => x,
             Edges::Soft => {
@@ -1381,7 +1418,19 @@ impl Gen {
                 self.out + (x - self.out) * (1.0 - (-dt / tau).exp())
             }
         };
-        self.out
+        // (ON's fade: straight to 1 off, to 0 on; while on and faded in, its output untouched.)
+        let step = dt / MUTE_FADE;
+        self.muted = if s.on {
+            (self.muted - step).max(0.0)
+        } else {
+            (self.muted + step).min(1.0)
+        };
+        self.heard = if self.muted == 0.0 {
+            self.out
+        } else {
+            self.out * (1.0 - self.muted)
+        };
+        self.heard
     }
 
     /// Moved on by `n` samples of `per` cycles each and `dt` s each.
@@ -1395,15 +1444,16 @@ impl Gen {
         self.since += dt * n as f64;
     }
 
-    /// Whether it moves: not an ENV whose cycle is over (nor one never started).
+    /// Whether it moves: not an ENV whose cycle is over (nor one never started), nor off and
+    /// faded out.
     pub fn moving(&self, s: &Settings) -> bool {
-        s.mode != Mode::Env || (self.started && self.cycles < 1.0)
+        (s.on || self.muted < 1.0) && (s.mode != Mode::Env || (self.started && self.cycles < 1.0))
     }
 
     /// The scope's reading of it.
     pub fn reading(&self, s: &Settings, moving: bool) -> Reading {
         Reading {
-            value: self.out as f32,
+            value: self.heard as f32,
             phase: self.at as f32,
             since: self.since as f32,
             rise: if s.rise > 0.0 && !self.started {
@@ -1682,6 +1732,9 @@ pub fn settings(p: &Ca72Params, n: usize, edges: Edges) -> Settings {
         mode: q.mode.value().into(),
         mono: q.mono.value(),
         edges,
+        uni: p.lfo_keys(n).polarity.value() == Polarity::Uni,
+        reverse: p.lfo_keys(n).reverse.value(),
+        on: p.lfo_keys(n).on.value(),
     }
 }
 
@@ -1735,6 +1788,20 @@ pub enum LfoMode {
     Env,
 }
 
+/// An LFO's POLARITY (decisions.md R-LFO's corrections; the owner, 2026-10-20: "yes, bipolar is
+/// exactly the right idea here. either a switch or a polarity knob. probably a switch would be
+/// sufficient"): BI swings its knobs both ways about their settings, UNI one way, by the sign
+/// of their depths.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Polarity {
+    #[id = "bi"]
+    #[name = "Bipolar"]
+    Bi,
+    #[id = "uni"]
+    #[name = "Unipolar"]
+    Uni,
+}
+
 impl From<LfoMode> for Mode {
     fn from(m: LfoMode) -> Mode {
         match m {
@@ -1753,7 +1820,8 @@ impl std::fmt::Debug for LfoParams {
 
 /// One LFO's host parameters (IDs `lfoN_waveform` and so on, N 1 to 4): WAVEFORM (the six
 /// positions), its STEPPED or CONTINUOUS mode and CONTINUOUS's shape (0..1 of the travel),
-/// RATE (Hz), TIMED and DIVISION, PHASE (degrees), RISE (s), MODE and MONO.
+/// RATE (Hz), TIMED and DIVISION, PHASE (degrees), RISE (s), MODE and MONO (its POLARITY,
+/// REVERSE and ON are [`LfoKeys`]').
 #[derive(Params)]
 pub struct LfoParams {
     #[id = "waveform"]
@@ -1776,6 +1844,37 @@ pub struct LfoParams {
     pub mode: EnumParam<LfoMode>,
     #[id = "mono"]
     pub mono: BoolParam,
+}
+
+impl std::fmt::Debug for LfoKeys {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LfoKeys").finish_non_exhaustive()
+    }
+}
+
+/// One LFO's POLARITY, REVERSE and ON (decisions.md R-LFO's corrections; IDs `lfoN_polarity`,
+/// `lfoN_reverse` and `lfoN_on`): a nest of their own after the macros, so that no parameter
+/// before them moves. A preset or a session saved before reads BI, not reversed and ON.
+#[derive(Params)]
+pub struct LfoKeys {
+    #[id = "polarity"]
+    pub polarity: EnumParam<Polarity>,
+    #[id = "reverse"]
+    pub reverse: BoolParam,
+    #[id = "on"]
+    pub on: BoolParam,
+}
+
+impl LfoKeys {
+    /// LFO `n`'s (1 to 4): BI, not reversed, ON.
+    pub fn new(n: usize) -> LfoKeys {
+        let name = |what: &str| format!("LFO {n} {what}");
+        LfoKeys {
+            polarity: EnumParam::new(name("Polarity"), Polarity::Bi),
+            reverse: BoolParam::new(name("Reverse"), false),
+            on: BoolParam::new(name("On"), true),
+        }
+    }
 }
 
 impl LfoParams {
@@ -1854,6 +1953,17 @@ impl LfoParams {
     }
 }
 
+/// How many parameters an LFO has: [`LfoParams`]' ten and [`LfoKeys`]' three.
+pub const PARTS: usize = 13;
+
+/// LFO `n`'s (0 to 3) parameters as a preset sets them, [`PARAM_IDS`]' order: its
+/// [`LfoParams`]', then its POLARITY, REVERSE and ON.
+pub fn sound_params(p: &Ca72Params, n: usize) -> [&dyn crate::presets::SoundParam; PARTS] {
+    let (q, k) = (p.lfo(n), p.lfo_keys(n));
+    let [a, b, c, d, e, f, g, h, i, j] = q.sound_params().map(|(_, v)| v);
+    [a, b, c, d, e, f, g, h, i, j, &k.polarity, &k.reverse, &k.on]
+}
+
 /// RATE as the host shows it: Hz to two figures under 1 Hz, else to a tenth or whole.
 pub fn rate_text(hz: f32) -> String {
     if hz < 1.0 {
@@ -1865,8 +1975,8 @@ pub fn rate_text(hz: f32) -> String {
     }
 }
 
-/// Each LFO's parameters' IDs, in [`LfoParams::sound_params`]' order.
-pub const PARAM_IDS: [[&str; 10]; LFOS] = [
+/// Each LFO's parameters' IDs, in [`sound_params`]' order.
+pub const PARAM_IDS: [[&str; PARTS]; LFOS] = [
     [
         "lfo1_waveform",
         "lfo1_shape_mode",
@@ -1878,6 +1988,9 @@ pub const PARAM_IDS: [[&str; 10]; LFOS] = [
         "lfo1_rise",
         "lfo1_mode",
         "lfo1_mono",
+        "lfo1_polarity",
+        "lfo1_reverse",
+        "lfo1_on",
     ],
     [
         "lfo2_waveform",
@@ -1890,6 +2003,9 @@ pub const PARAM_IDS: [[&str; 10]; LFOS] = [
         "lfo2_rise",
         "lfo2_mode",
         "lfo2_mono",
+        "lfo2_polarity",
+        "lfo2_reverse",
+        "lfo2_on",
     ],
     [
         "lfo3_waveform",
@@ -1902,6 +2018,9 @@ pub const PARAM_IDS: [[&str; 10]; LFOS] = [
         "lfo3_rise",
         "lfo3_mode",
         "lfo3_mono",
+        "lfo3_polarity",
+        "lfo3_reverse",
+        "lfo3_on",
     ],
     [
         "lfo4_waveform",
@@ -1914,12 +2033,15 @@ pub const PARAM_IDS: [[&str; 10]; LFOS] = [
         "lfo4_rise",
         "lfo4_mode",
         "lfo4_mono",
+        "lfo4_polarity",
+        "lfo4_reverse",
+        "lfo4_on",
     ],
 ];
 
 /// Each LFO's parameters' labels for the agents (docs/mcp.md), [`PARAM_IDS`]' order, and
 /// each LFO's section.
-pub const PARAM_LABELS: [[&str; 10]; LFOS] = [
+pub const PARAM_LABELS: [[&str; PARTS]; LFOS] = [
     [
         "LFO 1 WAVEFORM",
         "LFO 1 WAVEFORM MODE",
@@ -1931,6 +2053,9 @@ pub const PARAM_LABELS: [[&str; 10]; LFOS] = [
         "LFO 1 RISE",
         "LFO 1 MODE",
         "LFO 1 MONO",
+        "LFO 1 POLARITY",
+        "LFO 1 REVERSE",
+        "LFO 1 ON",
     ],
     [
         "LFO 2 WAVEFORM",
@@ -1943,6 +2068,9 @@ pub const PARAM_LABELS: [[&str; 10]; LFOS] = [
         "LFO 2 RISE",
         "LFO 2 MODE",
         "LFO 2 MONO",
+        "LFO 2 POLARITY",
+        "LFO 2 REVERSE",
+        "LFO 2 ON",
     ],
     [
         "LFO 3 WAVEFORM",
@@ -1955,6 +2083,9 @@ pub const PARAM_LABELS: [[&str; 10]; LFOS] = [
         "LFO 3 RISE",
         "LFO 3 MODE",
         "LFO 3 MONO",
+        "LFO 3 POLARITY",
+        "LFO 3 REVERSE",
+        "LFO 3 ON",
     ],
     [
         "LFO 4 WAVEFORM",
@@ -1967,6 +2098,9 @@ pub const PARAM_LABELS: [[&str; 10]; LFOS] = [
         "LFO 4 RISE",
         "LFO 4 MODE",
         "LFO 4 MONO",
+        "LFO 4 POLARITY",
+        "LFO 4 REVERSE",
+        "LFO 4 ON",
     ],
 ];
 pub const SECTIONS: [&str; LFOS] = ["LFO 1", "LFO 2", "LFO 3", "LFO 4"];
@@ -1983,6 +2117,7 @@ fn param_place(id: &str) -> Option<(usize, usize)> {
 pub fn learn_target<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn crate::learn::Target> {
     let (n, k) = param_place(id)?;
     let q = p.lfo(n);
+    let keys = p.lfo_keys(n);
     Some(match k {
         0 => &q.waveform,
         1 => &q.shape_mode,
@@ -1993,7 +2128,10 @@ pub fn learn_target<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn crate::le
         6 => &q.phase,
         7 => &q.rise,
         8 => &q.mode,
-        _ => &q.mono,
+        9 => &q.mono,
+        10 => &keys.polarity,
+        11 => &keys.reverse,
+        _ => &keys.on,
     })
 }
 
@@ -2016,21 +2154,10 @@ pub fn is_knob_id(id: &str) -> bool {
     param_place(id).is_some_and(|(_, k)| matches!(k, 2 | 3 | 6 | 7))
 }
 
-/// The IDs of each LFO's parameters, `lfoN_<part>`, in the order the host lists them.
+/// The IDs of each LFO's parameters, `lfoN_<part>`, LFO by LFO ([`PARAM_IDS`]' order; the host
+/// lists each LFO's POLARITY, REVERSE and ON after the macros).
 pub fn param_ids() -> impl Iterator<Item = String> {
-    const PARTS: [&str; 10] = [
-        "waveform",
-        "shape_mode",
-        "shape",
-        "rate",
-        "timed",
-        "division",
-        "phase",
-        "rise",
-        "mode",
-        "mono",
-    ];
-    (1..=LFOS).flat_map(|n| PARTS.iter().map(move |p| format!("lfo{n}_{p}")))
+    PARAM_IDS.iter().flatten().map(|id| (*id).to_owned())
 }
 
 #[cfg(test)]

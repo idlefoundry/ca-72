@@ -501,8 +501,8 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
     ];
     // The LFOs' (decisions.md R-LFO): what they modulate is `modulation.*`'s, not a parameter.
     for n in 0..crate::lfo::LFOS {
-        let q = p.lfo(n);
-        let params: [&dyn Agentic; 10] = [
+        let (q, keys) = (p.lfo(n), p.lfo_keys(n));
+        let params: [&dyn Agentic; crate::lfo::PARTS] = [
             &q.waveform,
             &q.shape_mode,
             &q.shape,
@@ -513,6 +513,9 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
             &q.rise,
             &q.mode,
             &q.mono,
+            &keys.polarity,
+            &keys.reverse,
+            &keys.on,
         ];
         for (k, param) in params.into_iter().enumerate() {
             all.push(e(

@@ -122,7 +122,8 @@ fn live(p: &Ca72Params, t: Target) -> bool {
 }
 
 /// `modulation.list`: every source with what it modulates (each knob's id, label, depth in %,
-/// and whether it takes the LFO's shared copy with MONO off), its EDGES and MONO; the most a
+/// and whether it takes the LFO's shared copy with MONO off), its EDGES, MONO, POLARITY, REVERSE
+/// and ON; the most a
 /// source takes; and the knobs that can take one now.
 pub fn list(p: &Ca72Params) -> Value {
     let table = values::table(p);
@@ -151,6 +152,15 @@ pub fn list(p: &Ca72Params) -> Value {
                     Edges::Sharp => "SHARP",
                 });
                 v["mono"] = json!(p.lfo(n).mono.value());
+                // (R-LFO's corrections: BI or UNI, REVERSE, ON; the parameters
+                // `lfoN_polarity`, `lfoN_reverse` and `lfoN_on` set them.)
+                let keys = p.lfo_keys(n);
+                v["polarity"] = json!(match keys.polarity.value() {
+                    lfo::Polarity::Bi => "BI",
+                    lfo::Polarity::Uni => "UNI",
+                });
+                v["reverse"] = json!(keys.reverse.value());
+                v["on"] = json!(keys.on.value());
             }
             if let Some(n) = s.macro_n() {
                 v["name"] = json!(p.lfo_patch.name(n));
@@ -279,6 +289,20 @@ mod tests {
             empty["sources"].as_array().map(Vec::len),
             Some(lfo::SOURCES)
         );
+        // (R-LFO's corrections: each LFO's POLARITY, REVERSE and ON, as parameters too.)
+        let first = &empty["sources"][0];
+        assert_eq!(
+            (&first["polarity"], &first["reverse"], &first["on"]),
+            (&json!("BI"), &json!(false), &json!(true))
+        );
+        assert!(
+            empty["sources"][lfo::LFOS].get("polarity").is_none(),
+            "a macro's: none"
+        );
+        let table = values::table(&p);
+        for id in ["lfo1_polarity", "lfo2_reverse", "lfo4_on"] {
+            assert!(values::find(&table, id).is_some(), "{id}");
+        }
         assert!(
             empty["targets"]
                 .as_array()

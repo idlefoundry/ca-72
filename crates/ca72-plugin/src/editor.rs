@@ -14563,6 +14563,109 @@ mod tests {
         );
     }
 
+    /// Each LFO's POLARITY, REVERSE and ON (R-LFO's corrections): UNI's key and ON's key (and
+    /// the title, ON's word) flip their parameters by a click; REVERSE is WAVEFORM's menu's,
+    /// marked while on. UNI, the trace runs 0..1 and its rings one way; reversed, the trace is
+    /// the cycle backwards; off, MODULATES reads MUTED, the orb goes, its rings dim, and the
+    /// tip and the pop-up say UNI and MUTED.
+    #[test]
+    fn an_lfos_polarity_reverse_and_on_show_and_operate() {
+        use crate::learning::{ModItem, Row};
+        use crate::lfo::{LfoKeys, Polarity, Source, Target as T};
+        use ca72_panel::strip::lfo::{LfoTarget, target_centre};
+        let (mut e, host, params) = editing();
+        lfo_open(&mut e);
+        host.take();
+        let k = params.lfo_keys(1);
+        for (place, ptr, to) in [
+            (lfo_centre(1, 7), k.polarity.as_ptr(), 1.0),
+            (lfo_centre(1, 8), k.on.as_ptr(), 0.0),
+            (target_centre(LfoTarget::Title(1)), k.on.as_ptr(), 0.0),
+        ] {
+            let p = at(&e, place);
+            click(&mut e, p);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(ptr), Call::Set(ptr, to), Call::End(ptr)]
+            );
+        }
+        let wave = ca72_panel::controls::lfo_index(1, 0);
+        let reverse = |e: &Editing| {
+            e.knob_rows(wave).into_iter().find_map(|r| match r {
+                Row::Item(ModItem::Reverse(1), t, true, marked) if t == "REVERSE" => Some(marked),
+                _ => None,
+            })
+        };
+        assert_eq!(reverse(&e), Some(false), "WAVEFORM's menu offers it");
+        e.mod_item(ModItem::Reverse(1));
+        let r = k.reverse.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(r), Call::Set(r, 1.0), Call::End(r)]
+        );
+        // As shown: LFO 2 UNI, reversed and off, on CUTOFF; LFO 1 as it was.
+        let (mut e, _, params) = editing_of(
+            Ca72Params {
+                lfo2_keys: LfoKeys {
+                    polarity: EnumParam::new("LFO 2 Polarity", Polarity::Uni),
+                    reverse: BoolParam::new("LFO 2 Reverse", true),
+                    on: BoolParam::new("LFO 2 On", false),
+                },
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        params
+            .lfo_patch
+            .assign(Source::Lfo(1), T::Cutoff, 0.25)
+            .expect("room");
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Cutoff, 0.4)
+            .expect("room");
+        assert_eq!(reverse(&e), Some(true), "marked");
+        lfo_open(&mut e);
+        let col = &e.lfo_scene.columns[1];
+        assert!(col.uni && !col.on);
+        assert_eq!(col.screen, "MUTED");
+        assert!(!col.in_use && col.orb.is_none());
+        assert!(
+            col.trace.iter().all(|v| (0.0..=1.0).contains(v)),
+            "UNI: 0..1"
+        );
+        // (TRIANGLE backwards from PHASE 0: from its top, the mirror of forwards.)
+        let set = crate::lfo::settings(&params, 1, crate::lfo::Edges::Soft);
+        let fwd = crate::lfo::Settings {
+            reverse: false,
+            ..set
+        };
+        for (i, v) in col.trace.iter().enumerate().skip(1) {
+            let x = i as f64 / (col.trace.len() - 1) as f64;
+            assert!((f64::from(*v) - fwd.cycle_at(1.0 - x)).abs() < 1e-3, "{i}");
+        }
+        let other = &e.lfo_scene.columns[0];
+        assert!(!other.uni && other.on && other.screen != "MUTED");
+        let cutoff = ca72_panel::controls::index("cutoff").expect("CUTOFF");
+        let k = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| k.control == cutoff)
+            .expect("its rings")
+            .clone();
+        assert!(!k.rings[0].one_way && !k.rings[0].dim, "LFO 1's");
+        assert!(k.rings[1].one_way && k.rings[1].dim, "LFO 2's");
+        let p = at(&e, centre("cutoff"));
+        go(&mut e, p);
+        e.draw();
+        let tip = e.scene.tip.clone().expect("a tip").0;
+        assert!(tip.ends_with("\u{b7} LFO 2 +25 % UNI MUTED"), "{tip}");
+        let popup = e.mod_scene.popup.clone().expect("its pop-up");
+        assert!(popup.dials[1].uni && popup.dials[1].muted);
+        assert_eq!(popup.dials[1].note(), "UNI \u{b7} MUTED");
+        assert_eq!(popup.dials[0].note(), "");
+    }
+
     /// The page's controls operate their LFO's parameters as the panel's do: a knob dragged in
     /// one gesture, MONO and the timed key flipped by a click, MODE's toggle to the place
     /// clicked; RATE timed turns its DIVISION, stepped.

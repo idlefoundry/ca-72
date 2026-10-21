@@ -649,12 +649,17 @@ them, and a layout does not place them either: a layout naming one is refused, a
 for revisions 1 to 4 loads as it did. Their area is drawn on the strip's bare face in the pack's
 base look; a macro's rings on a knob follow the knob to the layout's place and size, as an LFO's.
 
+Revision 6 of the controls (0.3.0) adds each LFO's UNI and ON keys (`lfo1_polarity`, `lfo1_on`,
+and the same for LFOs 2 to 4), on the LFO page beside each column's title. A layout does not place
+them, as it does not place the page's others: a layout naming one is refused, and a layout made
+for revisions 1 to 5 loads as it did.
+
 ## Compatibility: packs keep working as the CA-72 changes
 
 A pack made today must keep working on later CA-72s, and a pack made for a later one should do
 its best on an earlier one.
 
-- **Each layout says which revision of the CA-72's controls it was made for** (`controls = 4`
+- **Each layout says which revision of the CA-72's controls it was made for** (`controls = 6`
   today; a layout without it is made for the first). The plug-in keeps a record of its controls over
   time: when each arrived, and any rename, retirement or change of kind since.
 - **A control added after the pack was made** is placed by the plug-in: at its official place if

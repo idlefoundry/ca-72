@@ -29,15 +29,20 @@ use crate::glow::{self, Coverage, Phosphor, hex};
 use crate::svg::{N, Svg, colour, put};
 
 /// One source's ring on a knob: its colour, its depth (-1..1, a share of the knob's travel
-/// either way), where it has the knob now (its travel, 0..1), if shown, and whether it moves the
-/// knob one way only (a macro's: unipolar).
+/// either way), where it has the knob now (its travel, 0..1), if shown, whether it moves the
+/// knob one way only (a macro's, or an LFO's UNI: unipolar), and whether it is dimmed (its LFO
+/// muted: R-LFO's corrections).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ring {
     pub colour: [u8; 3],
     pub depth: f64,
     pub point: Option<f64>,
     pub one_way: bool,
+    pub dim: bool,
 }
+
+/// How much of its light a dimmed ring (its LFO muted) or pop-up dial keeps.
+const DIMMED: f64 = 0.35;
 
 /// A knob's rings: the control's index (`controls::CONTROLS`), its centre and its skirt's radius
 /// (the drawing's units, as the look places it), where its pointer stands at its travel's ends
@@ -77,14 +82,33 @@ pub struct Cord {
     pub over: Option<((f64, f64), f64)>,
 }
 
-/// One of the pop-up's dials: its source's colour and label, its depth (-1..1), and whether
-/// every voice takes one copy of it here (MONO off on a target the voices share).
+/// One of the pop-up's dials: its source's colour and label, its depth (-1..1), whether every
+/// voice takes one copy of it here (MONO off on a target the voices share), whether its LFO is
+/// UNI (it moves the knob one way) and muted (R-LFO's corrections): marked under its depth.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PopDial {
     pub colour: [u8; 3],
     pub label: String,
     pub depth: f64,
     pub shared: bool,
+    pub uni: bool,
+    pub muted: bool,
+}
+
+impl PopDial {
+    /// What is marked under its depth: SHARED, UNI, MUTED, as they are so.
+    pub fn note(&self) -> String {
+        [
+            (self.shared, "SHARED"),
+            (self.uni, "UNI"),
+            (self.muted, "MUTED"),
+        ]
+        .iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, w)| *w)
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ")
+    }
 }
 
 /// The hover pop-up: under the knob at `knob` (its centre and skirt), how far that knob turns
@@ -418,13 +442,15 @@ impl ModRenderer {
             let glow_c = mix(ring.colour, ph.halo, 0.5);
             let (lo, hi, end) = swing(k, ring);
             let arc = |a0: f64, a1: f64| arc_path(k.at, r, a0, a1, &local);
+            // (Its LFO muted: all of it dimmed.)
+            let light = if ring.dim { DIMMED } else { 1.0 };
             // The whole swing, faint (one way: to where 100 % takes the knob).
             if let Some(path) = arc(lo, hi) {
                 stroke(
                     &mut p,
                     &path,
                     line,
-                    if ring.one_way { 0.4 } else { 0.38 },
+                    light * if ring.one_way { 0.4 } else { 0.38 },
                     2.2 * s,
                     None,
                 );
@@ -438,10 +464,10 @@ impl ModRenderer {
             };
             if let Some(path) = bright.and_then(|b| arc(base, b)) {
                 let mut g = Coverage::new(w, h);
-                g.stroke(&path, (5.0 * s) as f32, 0.55);
+                g.stroke(&path, (5.0 * s) as f32, (0.55 * light) as f32);
                 g.blur((2.2 * s) as f32);
                 g.tint(&mut p, glow_c, 1.0, (0, 0));
-                stroke(&mut p, &path, line, 1.0, 2.6 * s, None);
+                stroke(&mut p, &path, line, light, 2.6 * s, None);
             }
             let (ex0, ey0) = art::polar(r - 3.5, end);
             let (ex1, ey1) = art::polar(r + 3.5, end);
@@ -453,7 +479,7 @@ impl ModRenderer {
             pb.move_to(a.0, a.1);
             pb.line_to(b.0, b.1);
             if let Some(path) = pb.finish() {
-                stroke(&mut p, &path, ph.core, 1.0, 2.2 * s, None);
+                stroke(&mut p, &path, ph.core, light, 2.2 * s, None);
             }
             // Where the source has the knob now.
             if let Some(t) = ring.point {
@@ -616,13 +642,15 @@ impl ModRenderer {
                 N(0.1 * size)
             );
             let a = dial_angle(d.depth, pp.span);
+            // (Its LFO muted: its arc and pointer dimmed.)
+            let light = if d.muted { DIMMED } else { 1.0 };
             if a.abs() > 0.5 {
                 let rr = r - 0.25 * size;
                 let (x0, y0) = art::polar(rr, 0.0);
                 let (x1, y1) = art::polar(rr, a);
                 put!(
                     o,
-                    "<path d='M {} {} A {} {} 0 {} {} {} {}' fill='none' stroke='{c}' stroke-width='{}' stroke-linecap='round'/>",
+                    "<path d='M {} {} A {} {} 0 {} {} {} {}' fill='none' stroke='{c}' stroke-opacity='{}' stroke-width='{}' stroke-linecap='round'/>",
                     N(cx + x0),
                     N(cy + y0),
                     N(rr),
@@ -631,17 +659,19 @@ impl ModRenderer {
                     u8::from(a > 0.0),
                     N(cx + x1),
                     N(cy + y1),
+                    N(light),
                     N(0.32 * size)
                 );
             }
             let (px, py) = art::polar(r * 0.55, a);
             put!(
                 o,
-                "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{core}' stroke-width='{}' stroke-linecap='round'/>",
+                "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{core}' stroke-opacity='{}' stroke-width='{}' stroke-linecap='round'/>",
                 N(cx),
                 N(cy),
                 N(cx + px),
                 N(cy + py),
+                N(light),
                 N(0.18 * size)
             );
             let label = |o: &mut Svg, ty: f64, t: &str, fill: &str, k: f64| {
@@ -662,8 +692,9 @@ impl ModRenderer {
                 colour::LEGEND,
                 0.82,
             );
-            if d.shared {
-                label(&mut o, cy + r + 1.9 * size, "SHARED", "#8a909c", 0.62);
+            let note = d.note();
+            if !note.is_empty() {
+                label(&mut o, cy + r + 1.9 * size, &note, "#8a909c", 0.62);
             }
         }
         self.svg_on(&mut p, &o.0);
@@ -798,12 +829,14 @@ mod tests {
                     depth: 0.4,
                     point: Some(0.6),
                     one_way: false,
+                    dim: false,
                 },
                 Ring {
                     colour: [0x3c, 0xe8, 0xa0],
                     depth: -0.25,
                     point: None,
                     one_way: true,
+                    dim: false,
                 },
             ],
         }
@@ -966,12 +999,16 @@ mod tests {
                     label: "LFO 1".into(),
                     depth: 0.4,
                     shared: false,
+                    uni: false,
+                    muted: false,
                 },
                 PopDial {
                     colour: [0x3c, 0xe8, 0xa0],
                     label: "LFO 2".into(),
                     depth: -0.25,
                     shared: true,
+                    uni: false,
+                    muted: false,
                 },
             ],
             hover: None,

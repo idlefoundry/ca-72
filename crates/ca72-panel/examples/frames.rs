@@ -676,6 +676,7 @@ fn lfo(s: f64, panel: &mut Renderer) {
                         depth: 0.3,
                         point: Some(0.5 + 0.3 * (k + n as f64).sin()),
                         one_way: false,
+                        dim: false,
                     }],
                 }
             })
@@ -759,12 +760,16 @@ fn lfo(s: f64, panel: &mut Renderer) {
                     label: "LFO 1".into(),
                     depth: 0.4,
                     shared: false,
+                    uni: false,
+                    muted: false,
                 },
                 PopDial {
                     colour: colours[1],
                     label: "LFO 2".into(),
                     depth: -0.25,
                     shared: false,
+                    uni: false,
+                    muted: false,
                 },
             ],
             hover: None,

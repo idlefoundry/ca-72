@@ -231,7 +231,7 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
     // The LFOs (decisions.md R-LFO): a preset that does not name them has each at its default;
     // what they modulate is the preset's too (`lfo::Patch::values`), none where it names none.
     for (n, ids) in crate::lfo::PARAM_IDS.iter().enumerate() {
-        for (id, (_, q)) in ids.iter().zip(p.lfo(n).sound_params()) {
+        for (id, q) in ids.iter().zip(crate::lfo::sound_params(p, n)) {
             all.push((id, q));
         }
     }
@@ -1546,6 +1546,19 @@ mod tests {
             .find(|(k, _)| *k == "lfo3_rate")
             .map(|(_, v)| v);
         assert_eq!(rate, Some(p.lfo3.rate.default_normalized_value()));
+        // Each LFO's POLARITY, REVERSE and ON (R-LFO's corrections) are a preset's, and one
+        // saved before them reads BI, forwards and ON.
+        for n in 1..=crate::lfo::LFOS {
+            for part in ["polarity", "reverse", "on"] {
+                let id = format!("lfo{n}_{part}");
+                assert!(values_now(&p).iter().any(|(k, _)| *k == id), "{id} saved");
+                let old = targets(&p, &felt)
+                    .into_iter()
+                    .find(|(k, _)| **k == id)
+                    .map(|(_, v)| v);
+                assert_eq!(old, Some(if part == "on" { 1.0 } else { 0.0 }), "{id}");
+            }
+        }
     }
 
     /// The MIDI assignments (decisions.md R34) are the instance's, not a sound's: choosing,

@@ -319,10 +319,13 @@ set with the `modulation` tools (saved with presets and sessions, not a host par
 | RISE | knob | 0 to 10 s (0) | `lfoN_rise` |
 | MODE | toggle | Free, Retrig, Env (Free) | `lfoN_mode` |
 | MONO | key | on/off (on) | `lfoN_mono` |
+| UNI (POLARITY: R-LFO's corrections) | key | Bipolar, Unipolar (Bipolar) | `lfoN_polarity` |
+| WAVEFORM's menu: REVERSE | menu | on/off (off) | `lfoN_reverse` |
+| ON (the key at its title: muted while off) | key | on/off (on) | `lfoN_on` |
 | EDGES (the LFO's menu) | menu | SOFT, SHARP (SOFT) | `ca72_modulation_set {source, edges}` |
 | OUT jack: a drag to a knob | | a knob and a depth, -100 to 100 % (25) | `ca72_modulation_set {source, target, depth}` |
 | A knob's menu: DEPTH…, REMOVE | | | `ca72_modulation_set`, `ca72_modulation_remove` |
-| MODULATES | screen | | `ca72_modulations` |
+| MODULATES | screen | | `ca72_modulations` (each LFO's `polarity`, `reverse` and `on` too) |
 
 ### The macros (decisions.md R-MACROS)
 

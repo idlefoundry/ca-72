@@ -22,6 +22,17 @@ the IDs are `lfo::PARAM_IDS[n]`.
 | `lfoN_rise` | `FloatParam` | 0..10 s, cube-root travel (factor 1/3: 1 s at 0.46), 0 | RISE |
 | `lfoN_mode` | `EnumParam<lfo::LfoMode>` | FREE, RETRIG, ENV; FREE | MODE (three-position toggle) |
 | `lfoN_mono` | `BoolParam` | on | MONO |
+| `lfoN_polarity` | `EnumParam<lfo::Polarity>` | BI (Bipolar), UNI (Unipolar); BI | UNI's key |
+| `lfoN_reverse` | `BoolParam` | off | WAVEFORM's menu: REVERSE |
+| `lfoN_on` | `BoolParam` | on | ON's key (its word the title) |
+
+POLARITY, REVERSE and ON (R-LFO's corrections) are `lfo::LfoKeys`, nested after the macros so
+that no parameter before them moves (`params.lfo_keys(n)`, `params.lfo1_keys` to `lfo4_keys`);
+`lfo::sound_params(p, n)` gives all thirteen of an LFO's in `lfo::PARAM_IDS[n]`'s order. UNI's
+output runs 0..1 (BI's -1..1), so its knobs move one way, by the sign of their depths; REVERSE
+reads the waveform's cycle at 1 − its place; ON off fades the output to nothing in a straight
+line over `lfo::MUTE_FADE` (10 ms) and back, the generator running on underneath, its
+assignments kept, and the LFO no longer moving (the rail's glow, the orb's frame).
 
 They are a preset's and a session's like any sound parameter; a preset or session saved before
 reads each at its default. They do not glide (they are not knobs on the audio path).
@@ -106,18 +117,18 @@ which the hover pop-up marks "shared").
 `params.lfo_scope: Arc<lfo::Scope>`, published after each block while an editor is open.
 `Scope::read(lfo) -> Reading { value, phase, since, rise, moving }`:
 
-- `value`: the output, -1..1, after RISE and EDGES (the latest voice's where MONO is off): a
-  knob's present point is `travel + depth × value`, clamped.
+- `value`: the output, -1..1 (0..1 UNI), after RISE, EDGES and ON's fade (the latest voice's
+  where MONO is off): a knob's present point is `travel + depth × value`, clamped.
 - `phase`: where in its cycle (0..1, PHASE included).
 - `since`: seconds since the note that last started it (how far an ENV is through its cycle).
 - `rise`: RISE's gain now (0..1).
-- `moving`: assigned, running and not an ENV whose cycle is over (the orb's frame runs only
-  while some LFO moves). `Scope::any_moving()`: the rail key's faint glow.
+- `moving`: assigned, running, not an ENV whose cycle is over, and not muted and faded out (the
+  orb's frame runs only while some LFO moves). `Scope::any_moving()`: the rail key's faint glow.
 
 For the still trace: `lfo::settings(params, n, edges) -> Settings`, and
-`Settings::cycle_at(x)` (the waveform `x` of the way through one cycle from PHASE, before RISE
-and EDGES; at 1 the cycle's last value), `Settings::hz_at(tempo)`, `lfo::wave(at, phase)` (the
-shapes).
+`Settings::cycle_at(x)` (the waveform `x` of the way through one cycle from PHASE, REVERSE and
+POLARITY as set, before RISE and EDGES; at 1 the cycle's last value), `Settings::hz_at(tempo)`,
+`lfo::wave(at, phase)` (the shapes), `lfo::read(at, phase, reverse)`.
 
 ## Colours: the computer's (the macros' too)
 
@@ -169,7 +180,12 @@ table.
   second, only while the page shows) along that cycle by `phase` less PHASE (`lfo_page::orb_at`;
   an ENV at the cycle's end once over); at `value`, its wake at `rise`'s gain (RISE shows as the
   orb under the trace), or on the trace while it does not move. MODULATES from
-  `Patch::assignments(Source::Lfo(n))`.
+  `Patch::assignments(Source::Lfo(n))`. UNI's trace and orb lie above the centre line (0..1);
+  muted (`Column::on` off), the trace is drawn at about a third, the orb goes once faded out,
+  and MODULATES reads MUTED, dim. A UNI LFO's rings run one way (`Ring::one_way`, as a macro's),
+  a muted one's are dimmed (`Ring::dim`); the pop-up marks a dial UNI and MUTED
+  (`PopDial::note`), and the knob's tip adds them after the depth. The title is ON's word: a press
+  on it (`LfoTarget::Title`) is a press on the key.
 - **The overlay** is `ca72_panel::modulation` (`ModRenderer`, `ModScene`): knobs' rings, a
   dragged assignment's cord and targets, the hover pop-up. Nothing in it names an LFO: a ring, a
   dial and a cord each take a colour and (the pop-up's) a label. A knob's rings are on its own

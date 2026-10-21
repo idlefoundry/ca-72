@@ -93,7 +93,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 134] = [
+pub const LEARNABLE: [Learnable; 146] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -249,6 +249,19 @@ pub const LEARNABLE: [Learnable; 134] = [
     knob("macro4", "MACRO 4"),
     knob("macro5", "MACRO 5"),
     knob("macro6", "MACRO 6"),
+    // Each LFO's POLARITY, REVERSE and ON (decisions.md R-LFO's corrections).
+    switch("lfo1_polarity", "LFO 1 POLARITY (BI or UNI)"),
+    switch("lfo1_reverse", "LFO 1 REVERSE"),
+    switch("lfo1_on", "LFO 1 ON"),
+    switch("lfo2_polarity", "LFO 2 POLARITY (BI or UNI)"),
+    switch("lfo2_reverse", "LFO 2 REVERSE"),
+    switch("lfo2_on", "LFO 2 ON"),
+    switch("lfo3_polarity", "LFO 3 POLARITY (BI or UNI)"),
+    switch("lfo3_reverse", "LFO 3 REVERSE"),
+    switch("lfo3_on", "LFO 3 ON"),
+    switch("lfo4_polarity", "LFO 4 POLARITY (BI or UNI)"),
+    switch("lfo4_reverse", "LFO 4 REVERSE"),
+    switch("lfo4_on", "LFO 4 ON"),
     Learnable {
         id: "previous_preset",
         label: "PREVIOUS PRESET",
@@ -1279,8 +1292,9 @@ mod tests {
             // its STEPPED or CONTINUOUS and its MOD switches, its MOD DIRECTION stepped;
             // GLIDE RANGE, a switch; each LFO's SHAPE, RATE, PHASE and RISE knobs, WAVEFORM,
             // DIVISION and MODE selectors, STEPPED or CONTINUOUS, TIMED and MONO switches: R-LFO;
-            // the six macros, knobs: R-MACROS.)
-            (58, 28, 46)
+            // the six macros, knobs: R-MACROS; each LFO's POLARITY, REVERSE and ON switches:
+            // R-LFO's corrections.)
+            (58, 28, 58)
         );
     }
 

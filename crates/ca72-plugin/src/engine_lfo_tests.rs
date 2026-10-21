@@ -99,6 +99,10 @@ fn nothing_assigned_plays_as_before_to_the_bit() {
                 mode: Mode::Retrig,
                 mono: false,
                 rise: 0.3,
+                // (And POLARITY UNI, REVERSE and ON off: R-LFO's corrections.)
+                uni: k % 2 == 0,
+                reverse: k < 2,
+                on: k != 3,
                 ..Settings::default()
             };
         }
@@ -200,6 +204,158 @@ fn a_depth_is_so_much_of_the_knobs_travel_each_way() {
                 "{t:?}: a macro at 100 % by {depth}: {got}"
             );
         }
+    }
+}
+
+/// POLARITY UNI (R-LFO's corrections; the owner, 2026-10-20: "yes, bipolar is exactly the right
+/// idea here ... probably a switch would be sufficient"): the LFO runs 0..1, so at +25 % its knob
+/// moves from its setting up to 0.25 above it, at −25 % down to 0.25 below, never the other way;
+/// BI swings both ways.
+#[test]
+fn a_unipolar_lfo_moves_its_knob_one_way() {
+    for (depth, lo, hi) in [(0.25f32, 0.5, 0.75), (-0.25, 0.25, 0.5)] {
+        let s = Settings {
+            uni: true,
+            ..sharp(Mode::Free, 0.0, 5.0)
+        };
+        let c = with(controls(), 0, s, Target::Cutoff, depth, 0.5);
+        let mut e = engine(&c);
+        key(&mut e, 60, true);
+        let (mut min, mut max) = (f64::MAX, f64::MIN);
+        for _ in 0..(secs(0.25) / lfo::STEP) {
+            run(&mut e, lfo::STEP);
+            let v = e.bank.shared_values[0];
+            assert!((0.0..=1.0).contains(&v), "UNI's output 0..1: {v}");
+            let got = panel(&e, 0).cutoff;
+            assert!((got - (0.5 + f64::from(depth) * v)).abs() < 1e-6);
+            (min, max) = (min.min(got), max.max(got));
+        }
+        assert!(
+            (min - lo).abs() < 0.002 && (max - hi).abs() < 0.002,
+            "UNI at {depth}: {min}..{max}, not {lo}..{hi}"
+        );
+    }
+}
+
+/// REVERSE (R-LFO's corrections): the waveform read backwards, its place in its cycle p at
+/// 1 − p, so that a reversed SAWTOOTH is a falling sawtooth, 1 − 2p, sample for sample; every
+/// shape, STEPPED and CONTINUOUS, is its own mirror; and a timed LFO reversed is the mirror of
+/// it forwards, step for step.
+#[test]
+fn a_reversed_lfo_reads_its_waveform_backwards() {
+    let s = Settings {
+        reverse: true,
+        ..sharp(Mode::Free, 2.0, 3.7)
+    };
+    let mut g = lfo::Gen::default();
+    let per = s.hz / RATE;
+    let mut cycles = 0.0f64;
+    for _ in 0..4000 {
+        let v = g.value(&s, None, lfo::STEP as f64 / RATE);
+        let falling = 1.0 - 2.0 * cycles;
+        assert!(
+            (v - falling).abs() < 1e-12,
+            "at {cycles}: {v}, not {falling}"
+        );
+        g.advance(&s, per, lfo::STEP, 1.0 / RATE);
+        let c = cycles + per * lfo::STEP as f64;
+        cycles = c - c.floor();
+    }
+    for at in [0.0, 1.0, 1.5, 2.0, 2.6, 3.0, 4.0, 5.0, 5.95] {
+        // (From just after a cycle's start: at 0 a reversed read is the cycle's end, where a
+        // forward read at 1 is the next cycle's start.)
+        for k in 1..=64 {
+            let p = f64::from(k) / 64.0 * 0.999;
+            assert_eq!(
+                lfo::read(at, p, true),
+                lfo::read(at, 1.0 - p, false),
+                "{at} {p}"
+            );
+        }
+    }
+    let timed = |reverse: bool| {
+        let s = Settings {
+            reverse,
+            timed: Some(Length::Beats(0.25)),
+            ..sharp(Mode::Free, 2.0, 1.0)
+        };
+        let c = with(controls(), 0, s, Target::Cutoff, 0.25, 0.5);
+        let mut e = engine(&c);
+        e.set_position(Position::start(123.0, RATE));
+        key(&mut e, 60, true);
+        (0..200)
+            .map(|_| {
+                run(&mut e, lfo::STEP);
+                e.bank.shared_values[0]
+            })
+            .collect::<Vec<_>>()
+    };
+    let (fwd, rev) = (timed(false), timed(true));
+    for (k, (f, r)) in fwd.iter().zip(&rev).enumerate() {
+        // (A sawtooth's mirror is its negative, but at its cycle's start, where both are at 1
+        // or -1 a sample apart.)
+        assert!(
+            (f + r).abs() < 1e-9 || (f.abs() > 0.99 && r.abs() > 0.99),
+            "{k}: {f} {r}"
+        );
+    }
+    assert!(rev.iter().any(|v| *v > 0.5) && rev.iter().any(|v| *v < -0.5));
+}
+
+/// ON (R-LFO's corrections; the owner, 2026-10-20: "we need to be able to mute the LFO"): off,
+/// the LFO fades out in a straight line over 10 ms, its knob never stepping more than the fade
+/// and its own movement take it, then contributes exactly nothing (its knob at its setting);
+/// on again, it fades back in over 10 ms and is then exactly the output of the same LFO never
+/// turned off. Its assignments and depths stay.
+#[test]
+fn a_muted_lfo_fades_to_nothing_and_back() {
+    let s = sharp(Mode::Free, 0.0, 2.0);
+    let c = with(controls(), 0, s, Target::Cutoff, 0.25, 0.5);
+    let (mut a, mut b) = (engine(&c), engine(&c));
+    for e in [&mut a, &mut b] {
+        key(e, 60, true);
+        run(e, secs(0.1));
+    }
+    let both = |a: &mut Engine, b: &mut Engine| {
+        run(a, lfo::STEP);
+        run(b, lfo::STEP);
+    };
+    let mut off = c;
+    off.lfo.lfo[0].on = false;
+    a.set(&off);
+    let fade = secs(lfo::MUTE_FADE) / lfo::STEP + 1;
+    let step = 0.25 * lfo::STEP as f64 / RATE / lfo::MUTE_FADE;
+    let mut was = panel(&a, 0).cutoff;
+    for _ in 0..fade {
+        both(&mut a, &mut b);
+        let now = panel(&a, 0).cutoff;
+        assert!((now - was).abs() <= step + 0.002, "no jump: {was} to {now}");
+        was = now;
+    }
+    for _ in 0..50 {
+        both(&mut a, &mut b);
+        assert_eq!(a.bank.shared_values[0], 0.0, "exactly nothing");
+        assert!((panel(&a, 0).cutoff - 0.5).abs() < 1e-12, "at its setting");
+        assert!(!a.lfo_readings()[0].moving, "nor the LFO key's glow");
+    }
+    assert_eq!(a.controls.lfo.to[0][0].map(|x| x.depth), Some(0.25), "kept");
+    a.set(&c);
+    for _ in 0..fade {
+        both(&mut a, &mut b);
+        let now = panel(&a, 0).cutoff;
+        assert!(
+            (now - was).abs() <= step + 0.002,
+            "no jump back: {was} to {now}"
+        );
+        was = now;
+    }
+    for _ in 0..50 {
+        both(&mut a, &mut b);
+        assert_eq!(
+            a.bank.shared_values[0], b.bank.shared_values[0],
+            "the same output"
+        );
+        assert_eq!(panel(&a, 0).cutoff, panel(&b, 0).cutoff);
     }
 }
 

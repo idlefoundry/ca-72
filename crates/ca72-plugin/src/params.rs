@@ -880,6 +880,17 @@ pub struct Ca72Params {
     pub macro5: FloatParam,
     #[id = "macro6"]
     pub macro6: FloatParam,
+    // Each LFO's POLARITY, REVERSE and ON (decisions.md R-LFO's corrections), after the macros,
+    // so that no parameter before them moves: `lfo1_polarity` to `lfo4_on`. A preset or a
+    // session saved before reads BI, not reversed and ON.
+    #[nested(id_prefix = "lfo1", group = "LFO 1")]
+    pub lfo1_keys: crate::lfo::LfoKeys,
+    #[nested(id_prefix = "lfo2", group = "LFO 2")]
+    pub lfo2_keys: crate::lfo::LfoKeys,
+    #[nested(id_prefix = "lfo3", group = "LFO 3")]
+    pub lfo3_keys: crate::lfo::LfoKeys,
+    #[nested(id_prefix = "lfo4", group = "LFO 4")]
+    pub lfo4_keys: crate::lfo::LfoKeys,
 }
 
 /// How far PRESSURE and TIMBRE move a voice's cutoff at most, either way, octaves.
@@ -1238,6 +1249,10 @@ impl Default for Ca72Params {
             macro4: crate::lfo::macro_param(4),
             macro5: crate::lfo::macro_param(5),
             macro6: crate::lfo::macro_param(6),
+            lfo1_keys: crate::lfo::LfoKeys::new(1),
+            lfo2_keys: crate::lfo::LfoKeys::new(2),
+            lfo3_keys: crate::lfo::LfoKeys::new(3),
+            lfo4_keys: crate::lfo::LfoKeys::new(4),
         }
     }
 }
@@ -1397,6 +1412,16 @@ impl Ca72Params {
             1 => &self.lfo2,
             2 => &self.lfo3,
             _ => &self.lfo4,
+        }
+    }
+
+    /// LFO `n`'s (0 to 3; past 3, the fourth) POLARITY, REVERSE and ON (R-LFO's corrections).
+    pub fn lfo_keys(&self, n: usize) -> &crate::lfo::LfoKeys {
+        match n {
+            0 => &self.lfo1_keys,
+            1 => &self.lfo2_keys,
+            2 => &self.lfo3_keys,
+            _ => &self.lfo4_keys,
         }
     }
 

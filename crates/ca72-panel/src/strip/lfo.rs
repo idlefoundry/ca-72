@@ -61,10 +61,22 @@ const GLASS_RX: f64 = 22.0;
 /// MODE's toggle and MONO's key (about the column's middle).
 const MODE_AT: (f64, f64) = (228.0, 1152.0);
 const MONO_AT: (f64, f64) = (176.0, 1214.0);
+/// The ON key and POLARITY's UNI key (R-LFO's corrections), in the foot's band beside the
+/// title (round 2's budget: the title 644–774 of a column 370–1047.5, about its middle ±65;
+/// RISE's numbers down to 1704, the screen's surround to 1643, the foot 1769). ON's cap just
+/// left of the title, as far from it as a key's word is from its cap, so that the title is its
+/// word (the title is pressed as the key is); UNI's to the title's right, under the screen.
+const TITLE_HALF: f64 = 65.0;
+const ON_AT: (f64, f64) = (-TITLE_HALF - art::KEY_SIGN, TITLE_Y);
+const UNI_AT: (f64, f64) = (128.0, TITLE_Y);
 /// The jack and the screen (about the column's middle; the screen ten characters).
 const JACK_AT: (f64, f64) = (-66.0, ROW2);
 pub const JACK_R: f64 = 20.0;
 const SCREEN: (f64, f64, f64, f64) = (-20.0, ROW2 - 25.0, 332.0, 50.0);
+/// The jack's place among a column's drawn parts, after its controls ([`LFO_PARTS`]' order).
+const JACK: usize = crate::controls::LFO_PARTS.len();
+/// A muted LFO's trace's light (of 255).
+const MUTED_TRACE: u16 = 90;
 /// The samples a scope's trace is drawn through, across its one cycle.
 pub const TRACE_POINTS: usize = 480;
 /// The trace's margin from the glass's ends and its height's from top and foot.
@@ -85,6 +97,8 @@ pub struct Places {
     pub scope: (f64, f64, f64, f64),
     pub mode: (f64, f64),
     pub mono: (f64, f64),
+    pub polarity: (f64, f64),
+    pub on: (f64, f64),
     pub wave: (f64, f64),
     pub rate: (f64, f64),
     pub phase: (f64, f64),
@@ -101,6 +115,8 @@ pub const fn places(n: usize) -> Places {
         scope: (c + SCOPE.0, SCOPE.1, SCOPE.2, SCOPE.3),
         mode: (c + MODE_AT.0, MODE_AT.1),
         mono: (c + MONO_AT.0, MONO_AT.1),
+        polarity: (c + UNI_AT.0, UNI_AT.1),
+        on: (c + ON_AT.0, ON_AT.1),
         wave: (c - PITCH, ROW1),
         rate: (c, ROW1),
         phase: (c + PITCH, ROW1),
@@ -131,6 +147,8 @@ pub enum LfoTarget {
     Jack(usize),
     /// Its MODULATES screen: a tip listing what it modulates, a click its menu.
     Screen(usize),
+    /// Its title, ON's key's word: pressed, ON turned (R-LFO's corrections).
+    Title(usize),
     /// Anywhere else in its column.
     Column(usize),
 }
@@ -142,6 +160,7 @@ impl LfoTarget {
             LfoTarget::Scope(n)
             | LfoTarget::Jack(n)
             | LfoTarget::Screen(n)
+            | LfoTarget::Title(n)
             | LfoTarget::Column(n) => n,
         }
     }
@@ -168,9 +187,22 @@ pub fn hit(x: f64, y: f64) -> Option<LfoTarget> {
         LfoTarget::Scope(n)
     } else if within(p.screen) {
         LfoTarget::Screen(n)
+    } else if within(title(n)) {
+        LfoTarget::Title(n)
     } else {
         LfoTarget::Column(n)
     })
+}
+
+/// Column `n`'s title's box (left, top, width, height): the title's print and a little round it.
+pub fn title(n: usize) -> (f64, f64, f64, f64) {
+    let h = TITLE * 0.8;
+    (
+        centre(n) - TITLE_HALF - 4.0,
+        TITLE_Y - h / 2.0,
+        2.0 * TITLE_HALF + 8.0,
+        h,
+    )
 }
 
 /// A target's middle (the tests', and where a menu opens).
@@ -181,7 +213,8 @@ pub fn target_centre(t: LfoTarget) -> (f64, f64) {
         LfoTarget::Scope(_) => mid(p.scope),
         LfoTarget::Jack(_) => p.jack,
         LfoTarget::Screen(_) => mid(p.screen),
-        LfoTarget::Column(n) => (centre(n), TITLE_Y),
+        LfoTarget::Title(n) => mid(title(n)),
+        LfoTarget::Column(n) => (centre(n), TITLE_Y + 30.0),
     }
 }
 
@@ -208,8 +241,12 @@ pub struct Column {
     pub timed: bool,
     pub division: usize,
     pub mono: bool,
-    /// The trace: the waveform (-1..1) at [`TRACE_POINTS`] even steps over one cycle from
-    /// PHASE.
+    /// POLARITY UNI (its key lit; the trace then 0..1, above the centre line), and ON (its key
+    /// lit; off, its trace dims and it has no orb).
+    pub uni: bool,
+    pub on: bool,
+    /// The trace: the waveform (-1..1; 0..1 UNI) at [`TRACE_POINTS`] even steps over one cycle
+    /// from PHASE.
     pub trace: Vec<f32>,
     /// The orb: how far along the trace (0..1), and the output there (-1..1); none, no orb.
     pub orb: Option<(f64, f64)>,
@@ -235,6 +272,8 @@ impl Default for Column {
             timed: false,
             division: 8,
             mono: true,
+            uni: false,
+            on: true,
             trace: vec![0.0; TRACE_POINTS],
             orb: None,
             orb_rise: 1.0,
@@ -292,7 +331,7 @@ struct Tube {
 /// A column's scope as drawn: its trace and colour, the face with the trace on it (the orb's
 /// patches are cut from it), and that with the glass over it (what is laid).
 struct Screen {
-    key: (Vec<f32>, [u8; 3]),
+    key: (Vec<f32>, [u8; 3], bool),
     lit: Pixmap,
     shown: Pixmap,
 }
@@ -315,7 +354,7 @@ pub struct LfoRenderer {
     orbs: [Option<(Key, Patch)>; 4],
     texts: [Option<(Key, Patch)>; 4],
     /// Each column's controls and jack ([`LFO_PARTS`]' order, then the jack), as drawn.
-    controls: [[Option<(Key, Patch)>; 8]; 4],
+    controls: [[Option<(Key, Patch)>; JACK + 1]; 4],
     shown: Option<LfoScene>,
     damages: Vec<[i32; 4]>,
 }
@@ -440,7 +479,7 @@ impl LfoRenderer {
             }
             dirty.extend(self.orb_for(n, col));
             dirty.extend(self.text_for(n, col));
-            for k in 0..8 {
+            for k in 0..=JACK {
                 dirty.extend(self.control_for(n, k, col, panel));
             }
         }
@@ -493,7 +532,7 @@ impl LfoRenderer {
     /// Column `n`'s scope's still screen drawn again if its trace or colour changed: whether it
     /// was.
     fn screen_for(&mut self, n: usize, col: &Column) -> bool {
-        let key = (col.trace.clone(), col.colour);
+        let key = (col.trace.clone(), col.colour, col.on);
         if self.screens[n].as_ref().is_some_and(|s| s.key == key) {
             return false;
         }
@@ -504,7 +543,7 @@ impl LfoRenderer {
         let mut lit = tube.base.clone();
         let mut trace = Pixmap::new(w, h).expect("a scope's size");
         draw_trace(&mut trace, &col.trace, s, col.colour, glass(n));
-        // (Inside the glass's rounded corners only.)
+        // (Inside the glass's rounded corners only; muted, at a third.)
         for (d, b) in trace
             .data_mut()
             .chunks_exact_mut(4)
@@ -513,6 +552,11 @@ impl LfoRenderer {
             if b[3] < 255 {
                 for c in d.iter_mut() {
                     *c = (u16::from(*c) * u16::from(b[3]) / 255) as u8;
+                }
+            }
+            if !col.on {
+                for c in d.iter_mut() {
+                    *c = (u16::from(*c) * MUTED_TRACE / 255) as u8;
                 }
             }
         }
@@ -723,7 +767,7 @@ impl LfoRenderer {
         out
     }
 
-    /// Column `n`'s control `k` ([`LFO_PARTS`]' order; 7 its jack) drawn again if it changed:
+    /// Column `n`'s control `k` ([`LFO_PARTS`]' order; [`JACK`] its jack) drawn again if it changed:
     /// where it was and is.
     fn control_for(
         &mut self,
@@ -747,6 +791,8 @@ impl LfoRenderer {
             4 => vec![word(col.rise)],
             5 => vec![word(col.mode)],
             6 => vec![u64::from(col.mono)],
+            7 => vec![u64::from(col.uni)],
+            8 => vec![u64::from(col.on)],
             _ => vec![],
         };
         if self.controls[n][k]
@@ -757,7 +803,7 @@ impl LfoRenderer {
         }
         let worn = self.skin == Skin::Worn;
         let top = top_px(self.scale);
-        let painted = if k == 7 {
+        let painted = if k == JACK {
             panel.paint_layer(&art::jack_layer(
                 places(n).jack.0,
                 places(n).jack.1,
@@ -774,13 +820,20 @@ impl LfoRenderer {
                     worn,
                 )),
                 0 => panel.paint_control(i, col.wave),
-                2 | 6 => {
+                2 | 6..=8 => {
+                    let (on, word) = match k {
+                        2 => (col.timed, None),
+                        6 => (col.mono, Some("MONO")),
+                        7 => (col.uni, Some("UNI")),
+                        // (Its word is the title, printed beside it.)
+                        _ => (col.on, Some("")),
+                    };
                     let mut layer = art::key(
                         &c,
                         Keyed {
-                            on: if k == 2 { col.timed } else { col.mono },
+                            on,
                             division: col.division,
-                            word: (k == 6).then_some("MONO"),
+                            word,
                             way: ModWay::Clockwise,
                             ..Keyed::default()
                         },

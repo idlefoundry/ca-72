@@ -13103,6 +13103,79 @@ turns between its travel's ends (`art::sweep`, which the knobs' pointers are dra
   pointer, a quarter of 199.325 degrees, the pop-up's span the same). The knobs' pictures are
   unchanged to the bit (the same sum, `examples/golden`).
 
+**POLARITY: BI or UNI.** The owner, of a bipolar and a one-way LFO: "yes, bipolar is exactly the
+right idea here. either a switch or a polarity knob. probably a switch would be sufficient." Each
+LFO has a POLARITY (`lfoN_polarity`, Bipolar or Unipolar, BI by default and in every patch saved
+before it). BI is as before: the LFO runs −1 to 1, so a depth swings its knob both ways about its
+setting. UNI: the LFO runs 0 to 1 (`(x + 1) / 2`, before RISE, EDGES and ON's fade), so a positive
+depth moves its knob from its setting up to +depth and a negative one down to −depth.
+- **The switch** (an agent's choice of place and kind): a key worded UNI, lit for UNI, the column's
+  own kind of two-position switch (MONO's), in the column's foot right of the title, under the
+  MODULATES screen (its cap from 98 to 158 right of the column's middle, at the title's height;
+  the title is ±65, the screen's surround ends 63 above it). The panel's toggles are three-way only
+  and its rockers twice a key's size; a key fits the foot's band without crowding.
+- **What shows it:** the scope's trace and orb lie above the centre line (0 to 1, the scale BI's
+  is on); the rings run one way, as a macro's (`Ring::one_way`: faint from the setting to the
+  ticked end, bright to where the LFO has the knob now); the pop-up marks the dial UNI; the tip
+  adds UNI after the depth ("LFO 2 +25 % UNI"); `ca72_modulations` gives each LFO's `polarity`.
+- Automatable and MIDI-learnable (a switch), a preset's and a session's.
+
+**REVERSE.** Each LFO's WAVEFORM menu has REVERSE beside STEPPED and CONTINUOUS (`lfoN_reverse`,
+off by default and in every patch saved before it, automatable and MIDI-learnable as a switch):
+the LFO reads its waveform backwards, its place in its cycle p at 1 − p (`lfo::read`), STEPPED
+and CONTINUOUS, free or timed, so a reversed SAWTOOTH falls and a reversed shark tooth leans the
+other way. At a cycle's start a reversed LFO reads the cycle's end (the mirror's limit), so its
+first value is where the forward one's last was. The scope shows the cycle mirrored
+(`Settings::cycle_at` reads as the engine does).
+
+**ON: muting an LFO.** The owner: "we need to be able to mute the LFO." Each LFO has an ON
+(`lfoN_on`, on by default and in every patch saved before it, automatable and MIDI-learnable).
+Off, the LFO's output fades to nothing in a straight line over 10 ms (`lfo::MUTE_FADE`, after
+RISE and EDGES), so no knob jumps and nothing clicks; it then contributes exactly 0, its knobs at
+their settings. On again, it fades back in over 10 ms, to exactly what the same LFO never muted
+gives: its generator runs on underneath (FREE keeps its phase, RETRIG and ENV their notes). Its
+assignments and depths stay.
+- **The key** (an agent's choice, as the brief suggested): the title is the key's word. ON's cap
+  (the column's keys' size) stands just left of the title "LFO n", as far from it as a key's word
+  is from its cap, lit while on; a press on the cap or on the title turns it. So each column's
+  foot reads, left to right, the lit ON cap, the title, the UNI key.
+- **Muted:** the scope's trace is drawn at about a third of its light and its orb goes once the
+  fade is over; MODULATES reads MUTED, dim; the rings and the pop-up's dial are dimmed (to 35 %),
+  the pop-up marks MUTED, the tip adds MUTED; the LFO no longer moves (`Gen::moving`), so it
+  stops counting towards the rail's LFO key's glow and the orbs' frame, as an ENV whose cycle is
+  over does. `ca72_modulations` gives each LFO's `on`.
+- **An agent's choice:** a patch loaded with an LFO off starts its generator at full and fades it
+  out in its first 10 ms (the generators' fade is theirs, not the patch's); with RISE or
+  silence at a load, that is not heard, and it is never a jump.
+
+**The three, saved and found** (all three): POLARITY, REVERSE and ON are a nest of their own,
+`lfo::LfoKeys`, after the macros, so that no parameter before them moves (the host lists them
+under each LFO's group); a preset's sound parameters (`lfo::sound_params`, `PARAM_IDS`' thirteen
+an LFO) and a session's; MIDI Learn's list after the macros (58 knobs, 28 selectors, 58 switches);
+the agents' parameters' table. The panel's CONTROL_SET is revision 6 (`lfoN_polarity` and
+`lfoN_on` added; REVERSE is a menu's, not a control), its new controls after the macros' so that
+none moves (`controls::lfo_index(n, 7)` and `(n, 8)`, from `LFO_KEYS_FIRST`).
+
+**Evidence (three items):** the engine's `a_unipolar_lfo_moves_its_knob_one_way` (CUTOFF at 0.5:
+UNI at +25 % from 0.5 to 0.75, at −25 % from 0.25 to 0.5, every step its setting + depth × an
+output within 0..1), `a_reversed_lfo_reads_its_waveform_backwards` (a reversed SAWTOOTH against
+1 − 2p, 4000 steps, within 1e-12; every place of the travel, STEPPED and CONTINUOUS, its own
+mirror; a timed reversed sawtooth the forward one's negative step for step at 123 BPM),
+`a_muted_lfo_fades_to_nothing_and_back` (no step larger than the fade's 1.7 % and the LFO's own;
+then exactly 0 and CUTOFF at its setting for 50 steps, not moving, the depth kept; back on, the
+same output as an LFO never muted, to the bit), and `nothing_assigned_plays_as_before_to_the_bit`
+with UNI, REVERSE and ON off among the settings; presets'
+`a_preset_keeps_what_the_lfos_modulate` (the three saved, an old preset's BI, off and on); the
+editor's `an_lfos_polarity_reverse_and_on_show_and_operate` (UNI's key, ON's key and the title
+flip their parameters in one gesture each; REVERSE in WAVEFORM's menu, marked; UNI's trace in
+0..1, a reversed TRIANGLE's the forward one mirrored; MUTED, no orb; LFO 2's ring one way and
+dim, LFO 1's not; the tip's "LFO 2 +25 % UNI MUTED"; the pop-up's notes) and its tips' test over
+the page's every control, now nine a column (none over a scope); the agents'
+`agents_assign_and_remove_as_the_page_does` (each LFO's `polarity`, `reverse`, `on`; the
+parameters in the table); MIDI Learn's counts; `tests/realtime.rs`'
+`the_lfos_neither_allocate_nor_free` with POLARITY, REVERSE and ON automated too (release: no
+allocation, no free).
+
 ## R-LFO-PAGE. The LFO page and drag-to-knob modulation: the panel and the editor
 
 The page, the rings and the drag of R-LFO (whose record has the owner's decisions of 2026-10-20,
