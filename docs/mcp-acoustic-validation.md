@@ -47,7 +47,7 @@ cents error is reported independently. A 50 ms-smoothed RMS envelope is sampled 
 Flute E4/A4 select controls; ornaments and final F4 remain excluded. New phrases from the
 exported files demonstrate playability, without an acoustic reference for those new notes.
 
-## Flute: repeating modulation with RISE
+## Flute: first repeating-modulation study (superseded trigger behavior)
 
 The first pass only tried strong slow one-shot amplitude/brightness envelopes and retained
 a static patch. The owner's feedback exposed that this missed the flute's growing vibrato
@@ -111,7 +111,7 @@ The prior `Accordion Study` is replayed with each crop's identical MIDI/gates fo
 These aggregate chord-band improvements are modest, not exact acoustic matches. Individual
 reed balance/tuning, bellows motion, stereo microphone perspective and room still differ.
 
-## Delivery, replay and checks
+## Delivery, replay and checks for the register/phrase-wide study
 
 `Flute Rise Study.toml`, `Accordion Register 1.toml` and `Accordion Register 2.toml`, plus both
 flute alternatives, were exported normally and reloaded by exact file path. All revised
@@ -134,7 +134,49 @@ No EQ, denoising or room effects. The complete source and new phrases are normal
 separately and labelled. The old report is archived with its validation assumption withdrawn.
 No merge, release, library installation or video upload is performed.
 
-This revision changes settings, artifacts and guidance, not the previously tested Rust/DSP
+That revision changed settings, artifacts and guidance, not the previously tested Rust/DSP
 source. A read-only critic verified sample-exact source crops, distinct preset files/hashes,
 render hashes, declared listening gains, held-note ratios, 44 local links and byte-identical
 served assets. All 15 browser audio elements load with expected durations and no errors.
+
+## Follow-up: individual LFO RETRIG, legato main contours
+
+The owner clarified that the flute should restart each LFO's RISE on new notes through its
+own RETRIG mode, independently of the main envelope's RETRIGGER. The integrated 0.3.0 engine
+had intentionally coupled them in the earlier R-LFO design. R-LFO-NOTE-RETRIG supersedes
+that coupling for RETRIG sources: every note-on resets their phase and RISE. Shared ENV and
+FREE's RISE retain their existing phrase/main-switch behavior, and newly assigned polyphonic
+voices still start their own generators. The circuit contours and voice placement retain
+the main switch's behavior. No analogue model was retuned.
+
+The current delivery is `Flute Note Rise Study.toml`: individual LFO 1 RETRIG, 4.2 Hz,
+1.2 s RISE, main RETRIGGER **off**. The original 7.7-second phrase ENV and legato contours
+remain intact. A second exported file changes only RISE to 0.9 s. Global-RETRIGGER auditions
+were discarded, not published as the correction. These preset files need the corrected
+development engine; earlier 0.3 builds with coupled triggering behave differently.
+
+The revised original/prior/new comparison uses the actual archived prior-engine replay for
+B, and exact exported-file replay from the new engine for C. Whole-phrase slow-envelope RMS
+error is slightly higher, 2.580 to 2.691 dB, while harmonic-band error is 3.914 to 3.919 dB.
+The requested note articulation takes precedence over the aggregate objective. RISE is a
+ramp, not a hard vibrato delay: brief notes still receive shallow movement.
+
+A new audition uses A4 0.25 s, G4 0.55 s, F4 0.8 s and E4 2.4 s with 10 ms key overlaps.
+Individual note resets therefore cannot be explained by silence between keys. On the long
+note, the actual pitch contribution relative to the same preset at LFO 1 LEVEL zero grows
+from approximately 1.72 cents early to 5.00 cents late; short-window periodic descriptors
+remain approximate. Both RISE versions are rendered from their exported files and gain
+matched together. Main-file export/reload spectral MAE is 0.189/0.125/0.083 dB and envelope
+MAE 0.0058 dB. Source fingerprint:
+`c182626605628a35e3c8d3844961d92b2d42c0be1bfaf960dcb22f5483913365`.
+
+Both accordion presets regenerate with identical WAV hashes under the new engine; their
+settings, published audio and report sections remain unchanged. The previous report is
+archived. The personal library and installed application were not changed.
+
+Validation: 572 plug-in library tests pass (28 existing ignored tests); all 5 production
+stdio audio tests pass; default/all-feature workspace/all-target Clippy with warnings
+denied; formatting and matching-skill validation. Tests cover independent phase/RISE,
+mixed FREE/ENV/RETRIG sources, shared/voice-owned and mono/unison/poly paths, exact LO/HI
+main-contour preservation, cross-modulation loop resets, and real offline RISE attenuation
+then audible rebuilding after export/reload with overlapping keys and main RETRIGGER off.

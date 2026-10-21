@@ -2372,22 +2372,21 @@ impl Engine {
                     self.presses += 1;
                     self.pressed[usize::from(key)] = self.presses;
                 }
-                // (A new note for the LFOs: a key from silence, or any with RETRIGGER on;
-                // decisions.md R-LFO. On their ticks, they are first brought up to now.)
+                // (Each LFO's RETRIG resets on every key, independently of the contours.
+                // FREE's RISE and shared ENV still follow the main trigger. Bring the
+                // generators up to this event before restarting: R-LFO-NOTE-RETRIG.)
                 let new = on && (phrase || self.controls.panel.retrigger);
                 if on {
                     self.lfo_catch_up();
-                }
-                if new {
-                    self.bank.start_shared(&self.base.lfo);
+                    self.bank.start_shared(&self.base.lfo, new);
                 }
                 if self.slots.is_empty() {
                     return;
                 }
                 if self.controls.unison || !self.controls.poly {
-                    if new {
+                    if on {
                         for k in 0..self.instruments() {
-                            self.bank.start_voice(&self.base.lfo, k);
+                            self.bank.start_voice(&self.base.lfo, k, new);
                         }
                     }
                     self.one_note(i32::from(key), on);
@@ -2657,7 +2656,7 @@ impl Engine {
         (s.note, s.gate, s.age, s.active, s.peak) = (key, true, self.counter, true, 0.0);
         (s.expression, s.fresh) = (e, true);
         // (Its own LFOs start with each note it takes: decisions.md R-LFO.)
-        self.bank.start_voice(&self.base.lfo, pick);
+        self.bank.start_voice(&self.base.lfo, pick, true);
     }
 
     /// The voices POLY plays.

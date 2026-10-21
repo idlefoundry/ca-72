@@ -100,8 +100,11 @@ Fit the audible structure, using a small number of changes each iteration:
   that a static contour is the best match. Try shallow volume, loudness-sustain and mixer
   modulation as well as pitch; measure both AM and FM depth over early/late note windows.
   Average harmonic spectra alone miss missing movement. RISE fades modulation in over its
-  duration; it is not a fixed delay. With RETRIGGER off, overlapping monophonic notes keep
-  one continuous phrase's RISE running. Rate estimates from short windows can be imprecise;
+  duration; it is not a fixed delay. Each LFO's `Retrig` mode resets phase and RISE on every
+  note-on independently of the main `retrigger` switch: keep that switch off for legato
+  loudness/filter contours. Shared ENV and FREE's RISE still follow the main switch's phrase
+  trigger, so a separate phrase envelope can continue while vibrato resets. Rate estimates
+  from short windows can be imprecise;
   removing a polynomial trend does not fully reject slower expression. Do not claim matched
   AM/FM phase coupling from a phase-independent modulation objective.
 - Use the four LFOs as secondary envelopes when the main contours are insufficient.

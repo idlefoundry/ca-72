@@ -218,8 +218,9 @@ one a session brought there listed `inert`).
   places as the oscillators do; past SQUARE the duty narrows from exactly 50 % through the
   circuit's 30 and 17.9 % to the floor (about 6.4 %).
 - FREE runs on (timed: its phase from the host's place each block, never drifting); RETRIG
-  starts at PHASE at each new note; ENV runs one cycle from PHASE and holds. A new note follows
-  RETRIGGER: off, a key pressed with none held; on, every key. A POLY voice's own LFOs start
+  starts at PHASE and resets RISE at every note-on, independently of the main contour's
+  RETRIGGER switch (R-LFO-NOTE-RETRIG). ENV runs one cycle from PHASE and holds. Shared ENV
+  and FREE's RISE follow main RETRIGGER: off, a key from silence; on, every key. A POLY voice's own LFOs start
   with each note it takes.
 - RISE fades the output in from the new note. EDGES SOFT slews it (10 to 90 % in 2 ms).
 - Modulation every 32 samples, where the voices are given their panel: travel after the glide

@@ -338,15 +338,15 @@ fn live_and_offline_play_a_loop_alike() {
     assert!(offline.0 == live.0, "the sound");
 }
 
-/// Every LFO of a loop RETRIG, RETRIGGER on: each note starts the loop again, its every LFO's
+/// Every LFO of a loop RETRIG, either main RETRIGGER setting: each note starts the loop again, its every LFO's
 /// value the same to the bit tick by tick after it, whatever came before and wherever in a tick
 /// the note falls; a FREE LFO in the loop runs on (not the same).
 #[test]
 fn retrig_starts_a_loop_again_note_for_note() {
     // (Tick by tick, 24 samples at 48 kHz, each note where it falls; every tick recorded.)
-    let record = |mode: Mode| {
+    let record = |mode: Mode, retrigger: bool| {
         let mut c = looped(mode);
-        c.panel.retrigger = true;
+        c.panel.retrigger = retrigger;
         let mut e = engine(&c, 48_000.0);
         let notes = [14_462usize, 52_813, 98_407, 140_011];
         let end = 170_011usize;
@@ -381,16 +381,21 @@ fn retrig_starts_a_loop_again_note_for_note() {
             })
             .collect::<Vec<_>>()
     };
-    let (starts, by) = record(Mode::Retrig);
-    let first = after(&starts, &by, 0);
-    assert!(
-        first.windows(2).filter(|w| w[0] != w[1]).count() > 1000,
-        "it moves"
-    );
-    for k in 1..starts.len() {
-        assert!(after(&starts, &by, k) == first, "note {k} as note 0");
+    for retrigger in [false, true] {
+        let (starts, by) = record(Mode::Retrig, retrigger);
+        let first = after(&starts, &by, 0);
+        assert!(
+            first.windows(2).filter(|w| w[0] != w[1]).count() > 1000,
+            "it moves"
+        );
+        for k in 1..starts.len() {
+            assert!(
+                after(&starts, &by, k) == first,
+                "main retrigger {retrigger}, note {k} as note 0"
+            );
+        }
     }
-    let (starts, by) = record(Mode::Free);
+    let (starts, by) = record(Mode::Free, false);
     assert!(
         after(&starts, &by, 1) != after(&starts, &by, 0),
         "FREE runs on"

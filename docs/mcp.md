@@ -542,7 +542,10 @@ the standard loudness contour:
 MONO off gives each voice its own copy for per-voice targets such as oscillator mixer
 volumes and cutoff. Main `volume` and strip `level` are shared targets even with MONO off.
 For a breath envelope, route the relevant oscillator/noise volumes and filter, rather than
-assuming main VOLUME is per voice. Note triggering follows RETRIGGER, as in playback.
+assuming main VOLUME is per voice. Each LFO's `Retrig` mode restarts phase and RISE on every
+note-on, independently of the main `retrigger` switch. This permits note-reset vibrato with
+legato loudness/filter contours. Shared ENV and FREE's RISE retain the main switch's phrase
+triggering; newly allocated polyphonic voices start their own generators, as in playback.
 Saved presets retain the routing and LFO parameters; export and reload the file to verify it.
 
 The snapshot carries the frequency-dial law because it affects frequency modulation, though

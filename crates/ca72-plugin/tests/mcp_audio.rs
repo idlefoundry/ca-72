@@ -320,3 +320,75 @@ fn offline_env_routing_retriggers_per_voice_and_survives_preset_export() {
     let removed = ok(c.tool("ca72_render", args));
     assert_ne!(removed["wav_sha256"], rendered["wav_sha256"]);
 }
+
+/// A held first key makes the second key legato. Individual RETRIG must restart RISE in
+/// the actual shipped bridge with the main envelope RETRIGGER off, including file replay.
+#[test]
+fn offline_individual_retrig_restarts_rise_on_legato_notes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = Client::new(dir.path());
+    let notes = json!([
+        {"note":60,"start":0,"duration":0.9},
+        {"note":48,"start":0.5,"duration":0.4}
+    ]);
+    let mut args = json!({"preset":"White Lotus","effects":"dry",
+        "values":{"quality":"LO","poly":false,"osc1_on":true,"osc2_on":false,
+        "osc3_on":false,"noise_on":false,"emphasis":0,"contour_amount":0,
+        "osc1_volume":10,"loudness_attack":0,"loudness_sustain":10,"volume":0,
+        "lfo1_on":true,"lfo1_mode":"Retrig","lfo1_waveform":"Square",
+        "lfo1_polarity":"Unipolar","lfo1_rate":0.01,"lfo1_mono":true,
+        "lfo1_phase":0,"lfo1_rise":0.4,"retrigger":false},
+        "modulations":[{"source":"lfo1","target":"volume","depth":100}],
+        "notes":notes,"seconds":0.95,"sample_rate":48000,
+        "output_dir":dir.path().join("individual")});
+    let rendered = ok(c.tool("ca72_render", args.clone()));
+    assert_eq!(rendered["snapshot"]["parameters"]["retrigger"], 0.0);
+    let rms = |path: &Value, start: f64, end: f64| {
+        let bytes = std::fs::read(path.as_str().unwrap()).unwrap();
+        let (rate, audio) = ca72_analysis::wav::read(&bytes).unwrap();
+        let a = (start * f64::from(rate)) as usize;
+        let b = (end * f64::from(rate)) as usize;
+        let mean = audio[0][a..b].iter().map(|x| f64::from(*x)).sum::<f64>() / (b - a) as f64;
+        (audio[0][a..b]
+            .iter()
+            .map(|x| (f64::from(*x) - mean).powi(2))
+            .sum::<f64>()
+            / (b - a) as f64)
+            .sqrt()
+    };
+    let late_first = rms(&rendered["path"], 0.32, 0.40);
+    let reset = rms(&rendered["path"], 0.52, 0.56);
+    assert!(late_first > 1e-4);
+    assert!(
+        reset < late_first * 0.2,
+        "individual RISE restarts on the overlapping key"
+    );
+    assert!(
+        rms(&rendered["path"], 0.82, 0.88) > reset * 4.0,
+        "RISE builds again"
+    );
+    args["values"]["lfo1_mode"] = json!("Free");
+    args["output_dir"] = json!(dir.path().join("free"));
+    let free = ok(c.tool("ca72_render", args));
+    assert!(
+        rms(&free["path"], 0.52, 0.56) > reset * 4.0,
+        "FREE keeps running through legato"
+    );
+    let e = ok(c.tool(
+        "ca72_preset_export",
+        json!({"snapshot":rendered["snapshot"],
+        "name":"Individual Retrig","output_dir":dir.path().join("export")}),
+    ));
+    let mut replay = e["render_conditions"].clone();
+    replay["preset_file"] = e["preset_file"].clone();
+    replay["effects"] = json!("dry");
+    replay["notes"] = notes;
+    replay["seconds"] = json!(0.95);
+    replay["output_dir"] = json!(dir.path().join("replay"));
+    let reloaded = ok(c.tool("ca72_render", replay));
+    assert_eq!(reloaded["snapshot"]["parameters"]["retrigger"], 0.0);
+    let reload_reset = rms(&reloaded["path"], 0.52, 0.56);
+    let reload_late = rms(&reloaded["path"], 0.82, 0.88);
+    assert!(reload_reset < late_first * 0.2);
+    assert!(reload_late > 1e-4 && reload_late > reload_reset * 4.0);
+}

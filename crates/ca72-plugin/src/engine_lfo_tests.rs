@@ -1,6 +1,7 @@
 //! The LFOs in the engine (decisions.md R-LFO): nothing assigned is the engine as before to the
 //! bit; an assigned knob moved by depth × LFO after its glide, clamped to its travel, through
-//! its law; RETRIG, ENV and RISE against RETRIGGER; each voice its own with MONO off, the
+//! its law; RETRIG independent of the main RETRIGGER, ENV and FREE's RISE against it;
+//! each voice its own with MONO off, the
 //! shared targets the shared copy; the timed lock; the sleep.
 
 use super::*;
@@ -530,10 +531,10 @@ fn a_knob_is_moved_through_its_own_law() {
     assert!((e.controls.feedback - ca72::voice::feedback_law((0.2 * v).max(0.0))).abs() < 1e-6);
 }
 
-/// RETRIG starts again with a new note: with RETRIGGER off, a key from silence (a legato key
-/// does not); with it on, every key. So for RISE. The one instrument and POLY's shared LFO.
+/// Each LFO's RETRIG starts phase and RISE again on a legato key independently of the main
+/// contours' RETRIGGER. The one instrument and POLY's shared LFO.
 #[test]
-fn retrig_and_rise_start_again_with_a_new_note_as_retrigger_says() {
+fn retrig_and_rise_start_on_every_note_independently_of_main_retrigger() {
     for poly in [false, true] {
         for retrigger in [false, true] {
             let mut c = controls();
@@ -558,7 +559,7 @@ fn retrig_and_rise_start_again_with_a_new_note_as_retrigger_says() {
             key(&mut e, 64, true);
             run(&mut e, secs(0.1));
             let r = e.lfo_readings()[0];
-            let since = if retrigger { 0.1 } else { 0.4 };
+            let since = 0.1;
             assert!((r.since - since).abs() < 0.002, "{poly} {retrigger} {r:?}");
             assert!((r.phase - since).abs() < 0.002);
             key(&mut e, 60, false);
@@ -570,6 +571,96 @@ fn retrig_and_rise_start_again_with_a_new_note_as_retrigger_says() {
                 (e.lfo_readings()[0].since - 0.05).abs() < 0.002,
                 "from silence"
             );
+        }
+    }
+}
+
+/// A mixed patch can restart its vibrato while its phrase ENV and FREE source carry on.
+/// Both shared and voice-owned generators, including UNISON, follow their own mode.
+#[test]
+fn only_retrig_sources_restart_on_a_legato_key() {
+    for unison in [false, true] {
+        for mono in [false, true] {
+            for retrigger in [false, true] {
+                let mut c = controls();
+                c.unison = unison;
+                c.voices = 2;
+                c.panel.retrigger = retrigger;
+                for (j, mode) in [Mode::Retrig, Mode::Env, Mode::Free, Mode::Retrig]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let s = Settings {
+                        mono,
+                        rise: 1.0,
+                        phase: 0.15,
+                        ..sharp(mode, 2.0, 1.0)
+                    };
+                    c = with(c, j, s, Target::Tune, 0.001, 0.5);
+                }
+                let mut e = engine(&c);
+                key(&mut e, 60, true);
+                run(&mut e, secs(0.3));
+                key(&mut e, 64, true);
+                run(&mut e, secs(0.1));
+                for (j, r) in e.lfo_readings().iter().enumerate() {
+                    let reset = retrigger || matches!(j, 0 | 3);
+                    let since = if reset { 0.1 } else { 0.4 };
+                    let phase = if reset && j != 2 { 0.25 } else { 0.55 };
+                    assert!(
+                        (r.since - since).abs() < 0.002
+                            && (r.rise - since).abs() < 0.002
+                            && (r.phase - phase).abs() < 0.002,
+                        "unison {unison}, mono {mono}, main retrigger {retrigger}, source {j}: {r:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Restarting an individual LFO must not open the physical trigger contact or restart the
+/// loudness/filter contours. Compare their actual states with the same legato performance
+/// without an assignment, throughout the transition, at LO and HI.
+#[test]
+fn individual_retrig_keeps_the_main_contours_legato() {
+    for potato in [false, true] {
+        let mut c = Controls {
+            potato,
+            ..controls()
+        };
+        c.panel.retrigger = false;
+        c.panel.priority = ca72::voice::Priority::Last;
+        let set = with(
+            c,
+            0,
+            Settings {
+                rise: 0.9,
+                ..sharp(Mode::Retrig, 0.0, 4.2)
+            },
+            Target::Tune,
+            0.012,
+            0.5,
+        );
+        let (mut plain, mut vibrato) = (engine(&c), engine(&set));
+        for key_number in [60, 64, 67] {
+            key(&mut plain, key_number, true);
+            key(&mut vibrato, key_number, true);
+            for _ in 0..100 {
+                run(&mut plain, 48);
+                run(&mut vibrato, 48);
+                let envelopes = |e: &Engine| {
+                    let p = e.slots[0].play.lock().expect("idle voice");
+                    if potato {
+                        p.light.contours()
+                    } else {
+                        let (f, l, _) = p.voice.envelopes();
+                        (f, l)
+                    }
+                };
+                assert_eq!(envelopes(&plain), envelopes(&vibrato));
+            }
+            assert!(vibrato.lfo_readings()[0].since < 0.102);
         }
     }
 }

@@ -14457,3 +14457,37 @@ remaining differences. No new code/DSP, merge, release or personal-library insta
 **Shared skill lesson:** repeated pitches do not imply a shared timbre/register. Growing
 vibrato requires testing repeating LFOs with RISE and measuring AM/FM over time; static
 harmonic averages and slow one-shot envelopes can miss the movement the listener hears.
+
+## R-LFO-NOTE-RETRIG. Each LFO's RETRIG resets independently of the main contours
+
+**Owner clarification, 2026-10-21:** the flute's growing vibrato should start again at every
+new note through its individual LFO's RETRIG mode, not by enabling the main envelope's
+RETRIGGER switch. This is the integrated 0.3.0 engine with all four additional LFOs.
+
+This supersedes R-LFO's original coupling for RETRIG sources. On every note-on, a RETRIG
+LFO starts at PHASE and resets RISE, even while another key is held and main RETRIGGER is
+off. FREE and shared ENV retain their existing phrase/global-trigger behaviour, so a
+separate phrase ENV can continue through legato notes. A polyphonic voice's own generators
+still start when that voice receives a note. The physical loudness/filter contours, note
+priority and voice placement continue to follow the main RETRIGGER switch.
+
+The discarded global-RETRIGGER flute auditions remain diagnostic artifacts, not the
+published correction. `Flute Note Rise Study` keeps main RETRIGGER off and the original
+phrase ENV, with individual LFO 1 RETRIG and 1.2 s RISE (0.9 s alternative). Every revised
+audition uses exported-file replay from the rebuilt engine. A 10 ms-overlap short/long-note
+probe verifies that resets are not caused by gaps; measured long-note pitch depth grows
+from about 1.72 to 5.00 cents. The whole-reference envelope error is slightly worse
+(2.580 to 2.691 dB), disclosed instead of letting that metric override the requested
+articulation. Both accordion files regenerate with identical WAV hashes.
+
+Validation: 572 plug-in library tests pass, 28 existing ignored; all 5 production stdio
+audio tests; default/all-feature workspace/all-target Clippy with warnings denied; fmt and
+matching-skill validation. Regression coverage checks independent mode/RISE resets,
+mono/unison/poly shared and per-voice paths, mixed modes and cross-feedback, bit-identical
+unassigned audio, actual LO/HI contour preservation, and offline attenuation followed by
+audible rebuilding after export/reload with main RETRIGGER off. The source-specific trigger
+dispatch and final artifacts receive independent read-only review.
+
+**Shared skill lesson:** distinguish an LFO's RETRIG mode from the physical contours'
+RETRIGGER switch. For growing vibrato, phase/RISE must restart without forcing envelope
+rearticulation. Acceptance tests must exercise overlapping keys, not silence between notes.
