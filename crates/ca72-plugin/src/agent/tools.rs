@@ -283,6 +283,7 @@ pub fn tools() -> Vec<Tool> {
                         "look": {"type": "string", "enum": ["REALISTIC", "CLASSIC"]},
                         "lettering": {"type": "string", "enum": ["STANDARD", "LARGE"]},
                         "frequency_dials": {"type": "string", "enum": ["SEMITONES", "HARDWARE"]},
+                        "tempo": {"type": "number", "minimum": 30, "maximum": 300, "description": "Standalone TEMPO in BPM; follows the screen's own path."},
                         "quality_indicator": {"type": "boolean"},
                         "mod_wheel_source": {"type": "string", "description": "CC 1 (the default) or another CC by number (\"CC 11\"), CHANNEL AFTERTOUCH or POLYPHONIC AFTERTOUCH."},
                         "mpe_input": {"type": "string", "enum": ["AUTO", "LOWER ZONE", "OFF"]},
@@ -370,19 +371,8 @@ pub fn tools() -> Vec<Tool> {
         t(
             "ca72_modulation_set",
             "modulation.set",
-            "Make a source modulate a knob, as dragging from an LFO's OUT jack or a macro's jack does, or change its depth: `source` (lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name), `target` (a continuous knob of the panel or the strip by id or label; an oscillator's WAVEFORM only while CONTINUOUS; not a switch, selector, wheel, VOICES, a timed dial, an LFO's own knob or a macro) and `depth` in % of the knob's travel, -100 to 100 (25 if a new one is given none). `edges` (SOFT or SHARP) sets an LFO's EDGES; `name` (at most 7 characters, capitals; \"\" for none) a macro's name. A source takes at most 8 knobs. Patch state, saved with presets and sessions. Returns what every source modulates.",
-            |p| {
-                obj(
-                    json!({
-                        "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name."},
-                        "target": param_key(p),
-                        "depth": {"type": "number", "minimum": -100, "maximum": 100},
-                        "edges": {"type": "string", "enum": ["SOFT", "SHARP"]},
-                        "name": {"type": "string", "maxLength": 7, "description": "A macro's name (\"\" for none)."},
-                    }),
-                    &["source"],
-                )
-            },
+            "Make a source modulate a knob, as dragging from an LFO's OUT jack or a macro's jack does, or change its depth: `source` (lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name), `target` (a continuous knob of the panel or the strip by id or label; an oscillator's WAVEFORM only while CONTINUOUS; including an LFO's own RATE (while untimed), PHASE, RISE, continuous shape and LEVEL; not a switch, selector, wheel, VOICES, a timed dial or a macro) and `depth` in % of the knob's travel, -100 to 100 (25 if a new one is given none). `edges` (SOFT or SHARP) sets an LFO's EDGES; `name` (at most 7 characters, capitals; \"\" for none) a macro's name. A source takes at most 8 knobs. Patch state, saved with presets and sessions. Returns what every source modulates.",
+            modulation_set_schema,
             false,
             false,
             Instance,
@@ -491,6 +481,60 @@ pub fn tools() -> Vec<Tool> {
             Instance,
         ),
         t(
+            "ca72_snapshot",
+            "render.snapshot",
+            "Capture every current parameter, unsaved edits, LFO and macro assignments, AUTO GAIN curve, tempo and random seed for a detached offline render. Returns a snapshot for ca72_render; does not copy notes held or oscillator phase. Does not change the live sound.",
+            none,
+            true,
+            false,
+            Instance,
+        ),
+        t(
+            "ca72_preset_export",
+            "audio.preset_export",
+            "Export a fitted candidate snapshot as a normal user-preset TOML into a new absolute output_dir. Does not need the app or install into the player's library. Preserves assignments, macro names and AUTO GAIN with the normal four-decimal preset serialization. Returns the exact preset_file, hash and render_conditions (quality, player controls, tempo, frequency-dial law, seed). Reload using ca72_render with preset_file and those conditions to verify the delivered file.",
+            super::audio::export_schema,
+            false,
+            false,
+            Bridge,
+        ),
+        t(
+            "ca72_render",
+            "audio.render",
+            "Render the current sound, a named library preset, or a previous snapshot through the same synth process as playback, without an audio device or changing the live instrument. Supply MIDI notes with start and duration in seconds, total seconds including the release tail, and a new absolute output_dir. A preset or snapshot also works with no application open. effects must explicitly be dry: third-party effects are excluded and external input is silent. Returns a float WAV, exact snapshot, hashes and manifest. Fixed seed and settings repeat the render; latency is compensated. Optional values use ca72_set's parameter IDs and panel units, including all four LFOs' Env modes. Optional modulations edits their routing after values, including secondary envelopes, with no app. Only this candidate changes; routing is preserved by snapshot/export/reload.",
+            super::audio::render_schema,
+            false,
+            false,
+            Bridge,
+        ),
+        t(
+            "ca72_analyze",
+            "audio.analyze",
+            "Optionally supply named regions for separate notes/chords/attacks/releases, several known fundamentals and approximate modulation depth. Decode once per call. Measure a local WAV reference or candidate: pitch track, loudness, 10 ms RMS envelope, onsets, harmonics and optional modulation sidebands, plus a log-frequency spectrogram PNG. Works without the app. Supply a new output_dir, optional start and seconds (up to 60), fundamental_hz for a selected held note, modulation_hz for its sidebands. No upload or source separation. A full mix's measurements include its other parts; isolate notes to interpret harmonics. Full metrics are written to JSON; PNG returned inline unless include_image=false.",
+            super::audio::analyze_schema,
+            false,
+            false,
+            Bridge,
+        ),
+        t(
+            "ca72_compare",
+            "audio.compare",
+            "Optional named regions return separate harmonic/full-spectrum/peak diagnostics. Optional approved audio and explicit preservation_limits check actual expression separately; unresolved requested measurements cannot pass. Compare a reference WAV and candidate WAV locally at the same rate and duration, with explicit crop starts and optional seconds. Level matches by LUFS (RMS for short clips), compares time-varying spectra at three resolutions, envelopes, pitch and selected-note harmonics/sidebands. Writes full metrics, two spectrograms on one colour scale and level-matched A/B WAVs to a new output_dir. No hidden time/pitch alignment, truncation or similarity percentage. Choose matching notes/timing first, inspect individual notes, and listen. Works without the app.",
+            super::audio::compare_schema,
+            false,
+            false,
+            Bridge,
+        ),
+        t(
+            "ca72_experiment",
+            "audio.experiment",
+            "Run 1 to 8 independent offline candidate variations against named regions of an original local WAV, with optional approved-expression baseline and explicit preservation limits. Decode/analyze reference regions once per batch, validate all candidates before output, retain exact render manifests/snapshots and separate timbre/peak/expression diagnostics. Bounded to 120 rendered seconds/12 million frames. Write a common-level audition report and complete experiment.json; no automatic winner, preset installation or live-state changes. Use the chosen manifest's snapshot with ca72_preset_export, then reload the exact file for delivery.",
+            super::audio::experiment::schema,
+            false,
+            false,
+            Bridge,
+        ),
+        t(
             "ca72_audio",
             "audio.get",
             "The standalone's audio and MIDI (AUDIO & MIDI…): the output device, sample rate and buffer, the external input, the MIDI inputs and channel, the devices there are, its state and any error. Read only in this version.",
@@ -509,6 +553,20 @@ pub fn tools() -> Vec<Tool> {
             Instance,
         ),
     ]
+}
+
+/// Shared routing schema for live edits and detached render candidates.
+pub(crate) fn modulation_set_schema(p: &Ca72Params) -> Value {
+    obj(
+        json!({
+            "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name."},
+            "target": param_key(p),
+            "depth": {"type": "number", "minimum": -100, "maximum": 100},
+            "edges": {"type": "string", "enum": ["SOFT", "SHARP"]},
+            "name": {"type": "string", "maxLength": 7, "description": "A macro's name (\"\" for none)."},
+        }),
+        &["source"],
+    )
 }
 
 /// `parameters.set`'s schema: a value for any parameter, each typed by its shape.

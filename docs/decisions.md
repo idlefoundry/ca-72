@@ -14268,3 +14268,356 @@ locked writes them as heard. The parameter list shares the effects' chooser's tw
 (the title, then FIND): ten parameters show, as before. Held by
 `pins_and_what_moves_them_travel_with_a_preset_and_under_lock` (ca72-fx-helper, real test
 CLAP effect).
+
+
+## R-REFERENCE-AUDIO. Reference matching through measured offline renders (#77)
+
+**The owner, 2026-10-21.** White Lotus (R43) is the example of what the MCP must allow an
+agent to reproduce for 0.3: a user supplies audio, the agent fits a usable preset and tests
+it with spectrograms and other measurements. Offline rendering is needed so the agent can
+calibrate against its settings. The owner authorised building this workflow.
+
+**Agent implementation choices (not separately approved).**
+
+- Four tools: `ca72_snapshot` captures the selected live sound; `ca72_render` renders that
+  snapshot, a library preset or the current sound; `ca72_analyze` measures a local WAV;
+  `ca72_compare` compares a reference and candidate and writes a level-matched listening pair.
+  The fitting skill is `docs/agent-skills/ca72-match-reference/SKILL.md`, also supplied by the
+  MCP prompt `ca72_match_reference`. Transcription, source separation and a parameter
+  optimiser are not claimed. The agent performs the iterative fitting.
+- Only the capture goes through the editor. The bridge owns a fresh `Ca72`, calls the same
+  `Ca72::process` as playback, and does rendering/FFT/file work without a device, live worker,
+  audio deadline or change to the user's sound. Arpeggiator, timed oscillators, LFOs, macros,
+  stereo, DRIVE, LEVEL and captured AUTO GAIN are included. The existing framework FTZ guard
+  is exposed for parity on the detached thread; no DSP law is retuned.
+- Snapshots retain every parameter, modulation patch, macro names, curve, seed, tempo and
+  frequency-dial law. That preference changes frequency modulation despite normally being a
+  computer setting. The version and engine-source SHA-256 must match the bridge. Manifests
+  retain the snapshot, gates, rate, block size, compensated latency and output hash. Settings
+  repeat on the tested build; cross-target floating point identity is not promised.
+- Rendering explicitly requests `effects: "dry"`. Hosted effects, external audio, already
+  sounding oscillator/LFO phase, MIDI wheel offsets, pressure and pedals are excluded.
+  A preset-only render uses 120 BPM, semitone frequency dials and seed 72. Live captures keep
+  theirs. `ca72_settings_set` now offers the standalone TEMPO through the screen's own path,
+  with its whole-BPM rounding. Candidate overrides retain the captured AUTO GAIN curve;
+  recalibration after DRIVE/AUTO GAIN changes goes through the live controls. A snapshot
+  returns BUSY while the curve is being measured, and the workflow verifies it before saving.
+- WAV first, local processing only, no upload, download or source separation. Inputs are
+  complete mono/stereo PCM or float WAVs up to 128 MiB, 8 to 192 kHz, with 1024 samples to
+  60 s selected. Reject invalid/truncated containers, partial frames, non-finite audio,
+  unsupported state, silent comparisons and mismatched rates/lengths. New output folders
+  only; the manifest/metrics file is the completion marker. A failed/interrupted call may
+  leave an incomplete folder, never overwrite an earlier result.
+- Measurements retain time: three spectral resolutions, 10 ms envelope, pitch and onsets,
+  held-note harmonic levels and optional modulation sidebands. Spectra average channel
+  powers to preserve anti-phase material. LUFS matching canonicalises mono to stereo, with
+  RMS for short clips. Both signals' audible bins/windows count, including extra candidate
+  harmonics, noise and tails. No hidden time/pitch alignment, correlation score, similarity
+  percentage or automatic perceptual pass. Spectrograms have labelled axes and a shared
+  colour scale; listening files share any attenuation needed to keep peaks below 0.9.
+- Typed/bounded AUTO GAIN fields and per-block engine diagnostics reject invalid curves,
+  recovered broken voices and sanitised output, even if the final samples are finite.
+- The build and installer scripts now carry the bridge on Linux, Windows and macOS. On
+  macOS its nested executable is signed before the application. The feature branch starts
+  from `test-v03-21oct` to retain its LFO/macros/effects-pin changes.
+
+**Evidence, Linux x86-64, 2026-10-21.**
+
+- Analysis library: 14 tests passed, including level-only changes, mono/stereo layout,
+  anti-phase input, missing and extra harmonics, pitch, attack/release, resolved/unresolved
+  sidebands, silence and invalid audio.
+- Agents: 32 tests passed, including a real editor/socket/bridge save and reload with LFO
+  assignments, HARDWARE frequency dials and TEMPO retained. The reloaded sound's rendered
+  level changes less than 0.1 dB and each spectral error less than 0.5 dB.
+- Offline filter: 6 tests passed, including seeded noise, dial-law modulation, invalid
+  curves/source hashes, zero-sample gates, fault visibility and existing clock/loop parity.
+- Built bridge: the 2 existing integration tests and the new stdio fitting test passed. The
+  latter renders a synthetic White Lotus held-bass reference, measures it, chooses the
+  matching cutoff from three candidates and checks exact same-snapshot reproduction,
+  manifests and overwrite refusal, with no live application or device.
+- `scripts/reference-audio-demo.py` retains a listening report. A controlled four-second,
+  two-note White Lotus fixture at QUALITY HI, reference seed 271, candidates seed 72,
+  recovers CUTOFF -2.14 from five choices. Mean spectral error across the three resolutions:
+  3.105 dB at -2.14, versus 7.595 to 20.456 dB for the other candidates. A held D2 measures
+  H3 6.07 dB over H1 and its lower/upper 11.3 Hz sidebands -14.50/-16.50 dB relative to H3.
+  This is one-parameter synthetic recovery, not a fit to the original studio recording or
+  a listening judgement. The source hashes, metrics, WAVs, plots and report are retained in
+  the worktree's `target/reference-audio-demo`.
+- Clippy with `-D warnings` passes for the analysis and plug-in libraries, binaries and
+  tests. Linux production-standalone feature checking and Windows GNU bridge checking pass.
+  Installer tests pass (10), shell syntax and notices checks pass, and the skill validates.
+- A read-only critic reviewed the implementation twice; its findings about channel layout,
+  dial law, extra candidate energy, quantised gates, FTZ, internal fault detection and
+  fixture isolation were addressed.
+
+**Not yet verified.** The original White Lotus recording, an independent representative
+reference corpus, macOS runtime/packaging and Windows runtime. Existing live-control MCP
+transport remains Unix-only; Windows can use the headless preset/snapshot file tools.
+No release was tagged, published or installed on the player's machine for this change.
+
+**Shared skill lesson.** Offline parity includes DSP-affecting preferences, the wrapper's
+floating point mode and internal recovery diagnostics. Calling the same process function
+and checking finite WAV samples alone does not establish a valid calibration render.
+
+## R-REFERENCE-RECORDING. Fit the actual original excerpt and deliver a preset file
+
+**Owner decision, 2026-10-21:** use the original track excerpt which the agent used to
+create White Lotus. A synthetic render of that preset does not validate this use case.
+
+**Implementation and evidence:** [the recording validation](mcp-recording-validation.md)
+records the original file's hash, matching the October 9 session, and its first 52 seconds.
+A neutral single-saw patch, without loading White Lotus, was fitted through the MCP bridge:
+112 tonal/modulation candidates, 9 envelope candidates and a measured tuning adjustment.
+The earlier MIDI transcription was reused with pitches rechecked and the opening onset
+corrected; no fresh transcription or source separation is claimed. D2/C2 guide the fit,
+G2/B2 are held out. Weighted harmonic error falls from 11.412 to 2.510 dB in the final
+phrase; held-out errors are 3.300/4.740 dB, with differences left for listening review.
+Sideband spacing is 11.25 Hz in both recording and candidate. Listening gain is calibrated
+on the clearest bass note; full-mix LUFS/spectral error is diagnostic only.
+
+The full test exposed a headless delivery gap. `ca72_preset_export` now restores the exact
+snapshot and uses the normal library serializer to write a preset only into a fresh output
+directory. It returns player render conditions. `ca72_render.preset_file` reloads that exact
+file with the browser's parser, without installation or name/overlay lookup. Frequency
+values are correctly serialized as pot positions, LFO/macros and AUTO GAIN retained, and
+player settings recorded separately. Re-export/reload of the selected 52-second candidate
+has spectral errors 0.06360/0.03358/0.06395 dB and an envelope error of 0.01462 dB, consistent
+with four-decimal preset quantization. Regenerating it after review fixes leaves the selected
+WAV hash identical; no snapshot fingerprint was rewritten.
+
+A fresh read-only critic found two defects: named/file presets selected LO's AUTO GAIN curve
+before a requested HI/ULTRA override; computer MIDI note shortcuts could consume offline
+performance notes. Both are fixed and have regressions, including production-binary tests.
+The old binary was demonstrated to render a bound D2 silently; the new binary renders the
+same audible waveform with or without that setting. Offline construction now also keeps
+all internal handles on the restored parameters and resets the physical wheel source.
+
+**Local checks:** 33 agent, 6 offline, 22 library unit tests; 3 audio-bridge and 2 existing
+bridge integration tests; clippy with warnings denied; skill validation. The private
+listening report includes original/candidate audio, bass-band aids, spectrograms, the
+exported preset, all trials and source/reload manifests. It is a measured file-delivery
+test, not installation into the personal library, perceptual approval, or validation of
+every recording and platform. No release or merge is performed by this follow-up.
+
+**Shared skill lesson:** a real recording is the acceptance target when one is supplied;
+synthetic preset recovery is a regression fixture. Offline rendering must exclude computer
+MIDI preset-action bindings as well as live controllers, and whole-mix loudness is not a
+bass-only calibration metric.
+
+## R-REFERENCE-LFO-ENVELOPES. Offline routing and acoustic/polyphonic studies
+
+**The owner, 2026-10-21.** Keep the selected real flute excerpt, attempt a different
+polyphonic instrument, and make use of the four LFOs as secondary envelopes; add any missing
+MCP access. Live parameter/modulation tools already cover their ENV controls, but detached
+rendering could only retain existing assignments.
+
+**Implemented:** optional ordered `ca72_render.modulations` set/remove edits after parameter
+overrides, through the existing modulation rules on a disposable patch. Invalid batches
+reject before output; snapshots and normal preset export/reload retain routing. Per-voice
+mixer/filter targets and shared VOLUME/LEVEL are documented. Regression coverage verifies
+actual ENV completion and a later overlapping polyphonic voice, export/reload, malformed
+input and bridge liveness. Numeric source zero and late macro EDGES validation were fixed
+in the shared live parser. No DSP changes.
+
+Real flute and unprocessed accordion recordings were fitted and new phrases rendered from
+delivered files. The first acoustic pass is superseded by the owner's register and vibrato
+corrections below. The accordion retains per-voice rising ENV saws for its bellows attacks.
+Source permissions, methods, measurements, quantized reload differences and remaining
+acoustic limitations: [acoustic validation](mcp-acoustic-validation.md). These are working
+studies for the owner's listening review, not a release or an exact-reproduction claim.
+
+## R-REFERENCE-REGISTERS-RISE. Separate C-major registers and growing flute vibrato
+
+**Owner corrections, 2026-10-21:** the two chords within the same 7.662-second accordion
+reference are both C major with different reed/register settings. Fit each separately;
+do not interpret this as major versus minor or validation of one shared preset. For flute,
+try harder with volume/loudness-sustain modulation and use LFO RISE for growing vibrato.
+
+The original is preserved; sample-exact cuts at 0–3.34 and 3.37–7.661979 s now select distinct
+`Accordion Register 1` and `Accordion Register 2` files. Oscillator reed layers, filter,
+keyboard tracking and attack differ. Prior/revised aggregate chord-band error is
+5.895/5.413 and 4.805/4.424 dB, with fixed gates and no DSP changes. The former take-2
+validation claim is withdrawn. New chords demonstrate each delivered preset's playability;
+they are not additional acoustic matching references.
+
+Sixty new full-phrase flute trials explicitly test shallow looping AM/FM and RISE, rather
+than only slow strong ENV shapes. `Flute Rise Study` uses a 4.2 Hz bipolar triangle, 0.9 s
+RISE, VOLUME depth 3%, TUNE depth 1.2%, and a separate gentle phrase ENV. RETRIGGER off keeps
+the rise running through the continuous legato breath. Slow-envelope error improves from
+about 3.47 to 2.58 dB while average harmonic error stays essentially unchanged. AM-only and
+loudness-sustain alternatives are supplied for listening. Short-window modulation rates
+remain approximate; phase coupling is unverified; the short G4 and acoustic details still
+differ. All comparisons use actual exported-file replay and one common audition gain.
+
+A read-only critic verified original/crop hashes, distinct presets, rendered hashes, levels,
+held-chord checks, links and served assets. Browser checks confirm 15 audio players load.
+The [validation record](mcp-acoustic-validation.md) includes quantized reload errors and
+remaining differences. No new code/DSP, merge, release or personal-library installation.
+
+**Shared skill lesson:** repeated pitches do not imply a shared timbre/register. Growing
+vibrato requires testing repeating LFOs with RISE and measuring AM/FM over time; static
+harmonic averages and slow one-shot envelopes can miss the movement the listener hears.
+
+## R-LFO-NOTE-RETRIG. Each LFO's RETRIG resets independently of the main contours
+
+**Owner clarification, 2026-10-21:** the flute's growing vibrato should start again at every
+new note through its individual LFO's RETRIG mode, not by enabling the main envelope's
+RETRIGGER switch. This is the integrated 0.3.0 engine with all four additional LFOs.
+
+This supersedes R-LFO's original coupling for RETRIG sources. On every note-on, a RETRIG
+LFO starts at PHASE and resets RISE, even while another key is held and main RETRIGGER is
+off. FREE and shared ENV retain their existing phrase/global-trigger behaviour, so a
+separate phrase ENV can continue through legato notes. A polyphonic voice's own generators
+still start when that voice receives a note. The physical loudness/filter contours, note
+priority and voice placement continue to follow the main RETRIGGER switch.
+
+The discarded global-RETRIGGER flute auditions remain diagnostic artifacts, not the
+published correction. `Flute Note Rise Study` keeps main RETRIGGER off and the original
+phrase ENV, with individual LFO 1 RETRIG and 1.2 s RISE (0.9 s alternative). Every revised
+audition uses exported-file replay from the rebuilt engine. A 10 ms-overlap short/long-note
+probe verifies that resets are not caused by gaps; measured long-note pitch depth grows
+from about 1.72 to 5.00 cents. The whole-reference envelope error is slightly worse
+(2.580 to 2.691 dB), disclosed instead of letting that metric override the requested
+articulation. Both accordion files regenerate with identical WAV hashes.
+
+Validation: 572 plug-in library tests pass, 28 existing ignored; all 5 production stdio
+audio tests; default/all-feature workspace/all-target Clippy with warnings denied; fmt and
+matching-skill validation. Regression coverage checks independent mode/RISE resets,
+mono/unison/poly shared and per-voice paths, mixed modes and cross-feedback, bit-identical
+unassigned audio, actual LO/HI contour preservation, and offline attenuation followed by
+audible rebuilding after export/reload with main RETRIGGER off. The source-specific trigger
+dispatch and final artifacts receive independent read-only review.
+
+**Shared skill lesson:** distinguish an LFO's RETRIG mode from the physical contours'
+RETRIGGER switch. For growing vibrato, phase/RISE must restart without forcing envelope
+rearticulation. Acceptance tests must exercise overlapping keys, not silence between notes.
+
+## R-REFERENCE-UNSUPPORTED-TONES. Reject the second accordion's high resonance
+
+**Owner listening feedback, 2026-10-21:** the first accordion register is approved; the
+second has an awful added high pitch absent from the reference. Preserve the first and
+correct the second.
+
+The second preset's EMPHASIS 9 generated dominant narrow tones at roughly 8.9/11/13 kHz,
+outside most H1–H8 fitting bands. Removing its upper reed layer alone did not fix them;
+lower emphasis did. Its lower harmonic-band score was not a valid acceptance criterion.
+Full-spectrum checks should have rejected this candidate before delivery.
+
+Twenty-three lower-resonance/cutoff/reed-layer candidates were evaluated over 146 Hz–18.7 kHz
+power bands and separate 6–20 kHz energy/peak checks, normalized once to the chord's low
+band so whole-signal LUFS cannot conceal the whistle. The replacement exported preset
+uses CUTOFF +0.5, EMPHASIS 2.5 and two same-octave saw layers, slight detuning and the
+existing per-voice ENV attack. Its 6–20 kHz power is -23.81 dB relative to 150–1000 Hz,
+against original -21.12 and rejected +15.16 dB. The old whistle bands now approximate or
+fall below the original. Attacks, release and new chords are checked as well as the fit
+window. The slightly worse H1–H8 error (about 4.57 versus 4.42 dB) is disclosed.
+
+Actual exported-file replay supplies the listening pair and new chords. No source, Rust,
+analogue DSP or accepted first-register/flute changes. The rejected second version remains
+archived; the corrected sound awaits listening judgement. [Evidence](mcp-acoustic-validation.md).
+
+**Shared skill lesson:** a harmonic-only objective can reward a resonant patch which adds
+an unrelated high tone. Check candidate-only peaks across the full measured spectrum,
+including attacks/releases/new notes, before accepting its local harmonic score.
+
+## R-REFERENCE-PRESERVE-EXPRESSION. Flute harmonics without losing the approved articulation
+
+**Owner feedback, 2026-10-21:** the flute's envelopes and other expression are good; improve
+its harmonic match to the original acoustic recording.
+
+The refit retains the approved notes, pitch, contours, individual LFO 1 RETRIG/1.2 s RISE
+and existing modulation. A small continuous waveform blend, fixed filter and gentle phrase
+ENV-to-waveform route with mixer compensation improve the E4/A4 harmonic diagnostic from
+3.919 to 3.212 dB. Other-note results remain close to the approved tone; the all-note
+gate-duration-weighted diagnostic improves from 4.775 to 4.458 dB. Larger held-note gains
+were rejected when they worsened the short ornaments/F4 or approved expression. The G4
+ornament remains a poor absolute match, and the interharmonic-air diagnostic is slightly
+worse. Inspected acceptance notes are not presented as untouched validation.
+
+Unchanged expression knobs are insufficient evidence: tone controls can change the actual
+envelope and beating. Relative to the approved replay after one common gain, actual audible
+AC-RMS frames differ by 0.112 dB RMS, including separate onset, each short note and release;
+the worst interval RMS difference is 0.247 dB. Approximate maximum AM/FM-depth changes are
+0.012 dB/0.025 cents. Two alternate seeds retain the improvement. Saved-file replay, full
+spectra/peak checks and the same overlapping-note performance supply the final evidence.
+
+`Flute Harmonic Study` replaces the current flute download; the previous study and RISE
+alternative remain archived. Both accordion presets, audio and report sections are
+unchanged. No Rust, circuit model or installed library changes. See the detailed
+[validation record](mcp-acoustic-validation.md).
+
+**Shared skill lesson:** preserve approved expression in the rendered result, not merely
+the controls. Check each short note and audible attack/release with a common gain, and
+measure AM/FM as well as slow amplitude. Reject a locally better sustained-note timbre
+when it makes the rest of the phrase worse.
+
+## R-MCP-EXPERIMENTS. Reusable regional evidence and bounded offline batches
+
+**Owner direction, 2026-10-21:** implement the general lessons from the reference-matching
+studies, improve the skill, exercise the tools on the same examples and merge when ready.
+The target is a repeatable recording-to-preset workflow across sound sources, not recipes
+for a particular acoustic instrument.
+
+`ca72_experiment` renders up to eight independent candidates from one captured base with
+named note/chord/attack/release windows. Original/approved region measurements are cached
+once per batch; all candidates preflight before output creation. Its compact MCP summaries,
+exact snapshot files, per-candidate evidence and common-level HTML audition replace custom
+render/analysis/report loops. Batch work is bounded to 120 rendered seconds and 12 million
+frames. `init:true` works without an app or library; snapshot-file continuation/export avoids
+copying large state through agent context. The normal preset serializer/replay remains the
+final delivery gate.
+
+Region-aware analyze/compare and explicit preservation budgets keep harmonic balance,
+full-spectrum bands, excess peaks, pitch and actual approved expression separate. DC-safe
+common-gain envelopes include added tails and isolated short notes. Approximate known-rate
+AM/FM requires a resolved monophonic carrier, sufficient cycles and a reliable window
+response; weak leakage is refused and ambiguous competing peaks yield nullable carrier
+measurements. These are disclosed engineering diagnostics, not a universal perceptual
+score or automatic candidate acceptance.
+
+The rewritten matching skill establishes the original recording and sound setting, separates
+performance from patch/effects, chooses purposeful experiments, preserves approved rendered
+behavior, checks other notes/phrasing/seeds and exports/replays the exact deliverable.
+No analogue DSP changes are made to improve a recording match. See
+[mcp-experiments.md](mcp-experiments.md) for the API, methods and acceptance matrix, and
+[mcp-acoustic-validation.md](mcp-acoustic-validation.md) for the actual recordings exercise.
+
+## R-HOST-STACK-ENGINE. Keep the engine out of wrapper construction copies
+
+2026-10-21: PR #135's Windows CI exposed a regression in the existing 256 KB CLAP host-thread
+lifecycle test after the expanded 0.3 parameter/control state. A separate source build on
+Windows 11, MSVC 1.97.1, reproduces `STATUS_STACK_OVERFLOW` (0xc00000fd). Instrumenting only
+that disposable checkout locates the deepest failure while reading computer settings during
+parameter construction; wrapper/default construction keeps repeated inline engine copies
+on the caller stack at the same time.
+
+`Ca72` now holds `Box<Engine>`, allocated once at construction. The engine, its processing,
+parameter defaults, state serialization and thread lifecycle are otherwise unchanged. The
+same source build passes the unchanged 256 KB test with this change alone, then all 13 CLAP
+host tests with `standalone-production` (one existing manual stress test ignored). The Linux
+build passes the same suite and all 572 plug-in library tests (28 existing ignored).
+Native reference-experiment controls are checked against the previous exact WAV hashes.
+No larger stack allowance, ignored guard, installed plug-in or open audio device is used.
+
+The Linux CI installer-identity fixture also needed the newly required `ca72-mcp` binary in
+its synthetic payload. Supplying both executable fixtures restores all three checks; the
+installer's required-payload check remains intact.
+
+
+## R-HOST-PARAM-TEXT. Round-trip waveform labels and LFO rate displays
+
+2026-10-21: the completed macOS CI run for PR #135 failed CLAP `param-conversions` on the
+expanded 0.3 parameter set. Oscillator continuous shapes lacked blend/rectangle-label
+parsing, LFO shapes lacked any display inverse, and LFO RATE appended Hz twice. Near rate
+formatting boundaries, normal host float conversion could also turn displayed "10" into
+"10.0" after parsing.
+
+Use a shared waveform display inverse with finite percent bounds and oscillator-specific
+names. Preserve oscillator numeric duty units and LFO bare numeric 0..1 travel. Rounded
+blend endpoints/rectangle aliases choose a representative within the shown precision so
+the original label remains stable. LFO rate precision accounts for rounding across tiers;
+the parameter appends its Hz unit once. No defaults, stored values or audio paths change.
+A real-CLAP regression fails on the prior implementation, then checks all host parameters
+and 10,001 values per shape; the official script-pinned conversion validator passes locally.
+An independent dense shape sweep also passes. This fixes host-typed controls as well as the
+validation gate; no validator is disabled or weakened.

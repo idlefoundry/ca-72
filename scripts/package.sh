@@ -137,6 +137,12 @@ macos() {
             --sign - "$host"
     fi
     codesign --verify --strict "$host"
+    # The MCP bridge is a nested executable and must be signed before its app bundle.
+    if [ -n "${CA72_MACOS_SIGN_APP:-}" ]; then
+        codesign --force --timestamp --options runtime --sign "$CA72_MACOS_SIGN_APP" "$app/Contents/MacOS/ca72-mcp"
+    else
+        codesign --force --sign - "$app/Contents/MacOS/ca72-mcp"
+    fi
     if [ -n "${CA72_MACOS_SIGN_APP:-}" ]; then
         codesign --force --timestamp --options runtime \
             --entitlements "$root/scripts/standalone/entitlements.plist" \
@@ -147,6 +153,7 @@ macos() {
     codesign --verify --deep --strict "$app"
     for arch in arm64 x86_64; do
         lipo "$app/Contents/MacOS/ca72-standalone" -verify_arch "$arch"
+        lipo "$app/Contents/MacOS/ca72-mcp" -verify_arch "$arch"
         lipo "$host/Contents/MacOS/ca72-fx-helper" -verify_arch "$arch"
     done
     pkgbuild --analyze --root "$stage/Applications" "$work/standalone.plist" > /dev/null
@@ -218,7 +225,7 @@ windows() {
     local stage="$work/stage"
     mkdir -p "$stage"
     cp -R "$bundles/CA-72.vst3" "$bundles/CA-72.clap" "$stage/"
-    cp "$bundles/CA-72.exe" "$bundles/CA-72.ico" "$stage/"
+    cp "$bundles/CA-72.exe" "$bundles/CA-72.ico" "$bundles/ca72-mcp.exe" "$stage/"
     mkdir -p "$stage/CA-72.vst3/Contents/Resources"
     docs "$stage/CA-72.vst3/Contents/Resources"
     docs "$stage"
@@ -280,7 +287,7 @@ linux() {
     local stage="$work/$name"
     mkdir -p "$stage"
     cp -R "$bundles/CA-72.vst3" "$bundles/CA-72.clap" "$stage/"
-    cp "$bundles/ca72-standalone" "$bundles/CA-72.desktop" "$bundles/com.idlefoundry.ca72.png" "$stage/"
+    cp "$bundles/ca72-standalone" "$bundles/ca72-mcp" "$bundles/CA-72.desktop" "$bundles/com.idlefoundry.ca72.png" "$stage/"
     mkdir -p "$stage/CA-72.vst3/Contents/Resources"
     docs "$stage/CA-72.vst3/Contents/Resources"
     docs "$stage"

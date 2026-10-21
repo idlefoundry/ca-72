@@ -126,6 +126,12 @@ pub struct Entry {
     file: Option<PathBuf>,
 }
 
+impl Entry {
+    pub(crate) fn file(&self) -> Option<&Path> {
+        self.file.as_deref()
+    }
+}
+
 fn same(a: &str, b: &str) -> bool {
     a.to_lowercase() == b.to_lowercase()
 }
@@ -537,25 +543,7 @@ impl Library {
             {
                 continue;
             }
-            let read = std::fs::read_to_string(&f)
-                .map_err(|e| e.to_string())
-                .and_then(|s| {
-                    let t = s.parse::<toml::Table>().map_err(|e| e.to_string())?;
-                    Ok((t, effects_section(&s)))
-                })
-                .and_then(|(t, effects)| {
-                    match t.get("format").and_then(Value::as_integer) {
-                        Some(FORMAT) | None => {}
-                        Some(other) => return Err(format!("format {other}")),
-                    }
-                    let mut sound = sound_of(&t)?;
-                    sound.effects = effects;
-                    // A name another program wrote is checked as one typed here.
-                    check_name(&sound.name).map_err(|e| format!("{:?}: {e}", sound.name))?;
-                    let fav = t.get("favorite").and_then(Value::as_bool).unwrap_or(false);
-                    let rep = t.get("replaces").and_then(Value::as_str).map(str::to_owned);
-                    Ok((sound, fav, rep))
-                });
+            let read = read_user(&f);
             match read {
                 Ok((s, fav, rep)) => out.push((f, s, fav, rep)),
                 Err(e) => bad.push(format!("{}: {e}", f.display())),
@@ -1002,6 +990,31 @@ impl Library {
         })?;
         Ok(restored)
     }
+}
+
+/// Read this exact user-preset file with the browser's parser, without searching its
+/// directory or resolving factory overlays or another preset with the same name.
+pub(crate) fn parse_user_sound(text: &str) -> Result<Sound, String> {
+    parse_user(text).map(|(sound, ..)| sound)
+}
+
+fn read_user(path: &Path) -> Result<(Sound, bool, Option<String>), String> {
+    let s = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    parse_user(&s)
+}
+
+fn parse_user(s: &str) -> Result<(Sound, bool, Option<String>), String> {
+    let t = s.parse::<toml::Table>().map_err(|e| e.to_string())?;
+    match t.get("format").and_then(Value::as_integer) {
+        Some(FORMAT) | None => {}
+        Some(other) => return Err(format!("format {other}")),
+    }
+    let mut sound = sound_of(&t)?;
+    sound.effects = effects_section(s);
+    check_name(&sound.name).map_err(|e| format!("{:?}: {e}", sound.name))?;
+    let fav = t.get("favorite").and_then(Value::as_bool).unwrap_or(false);
+    let rep = t.get("replaces").and_then(Value::as_str).map(str::to_owned);
+    Ok((sound, fav, rep))
 }
 
 /// The presets of `list` that match: each of `query`'s words in the name, the description or

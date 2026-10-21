@@ -13,8 +13,9 @@
 //!   clock as the timed oscillators' (R-OSC-TIMED): FREE timed takes its phase from the host's
 //!   place every block, never drifting.
 //! - **MODE**: FREE runs on; RETRIG starts again at PHASE at a new note; ENV runs one cycle
-//!   from PHASE and holds its last value (timed, one note value long). A new note follows the
-//!   panel's RETRIGGER switch: off, only a key pressed with none held; on, every key.
+//!   from PHASE and holds its last value (timed, one note value long). RETRIG starts phase and
+//!   RISE on every note-on, independently of the panel's main RETRIGGER. Shared ENV and FREE's
+//!   RISE follow that main switch: off, a key from silence; on, every key.
 //! - **RISE** fades the output in from a new note over 0 to 10 s.
 //! - **MONO** on: one LFO every voice shares. Off: one a voice for the targets each voice has
 //!   of its own (its panel); a target the voices share ([`Target::per_voice`] false: VOLUME,
@@ -2186,14 +2187,17 @@ pub struct Bank {
 }
 
 impl Bank {
-    /// A new note for the shared LFOs (a key pressed with none held, or any with RETRIGGER on).
-    pub fn start_shared(&mut self, l: &Lfos) {
+    /// Every key starts RETRIG's phase and RISE. `full` is the main contours' trigger:
+    /// from silence or RETRIGGER on, FREE's RISE and ENV start too (R-LFO-NOTE-RETRIG).
+    pub fn start_shared(&mut self, l: &Lfos, full: bool) {
         for (g, s) in self.shared.iter_mut().zip(&l.lfo) {
-            g.start(s);
+            if full || s.mode == Mode::Retrig {
+                g.start(s);
+            }
         }
         if self.cross.on {
             for (j, s) in l.lfo.iter().enumerate() {
-                if s.mode != Mode::Free {
+                if s.mode != Mode::Free && (full || s.mode == Mode::Retrig) {
                     self.cross.shared[j] = *s;
                     self.cross.shared_out[j] = self.shared[j].fresh(s);
                 }
@@ -2201,16 +2205,19 @@ impl Bank {
         }
     }
 
-    /// A new note for voice `k`'s own LFOs.
-    pub fn start_voice(&mut self, l: &Lfos, k: usize) {
+    /// Every key starts voice `k`'s RETRIG sources; `full` starts its other sources too.
+    /// Newly assigned polyphonic voices always receive a full trigger.
+    pub fn start_voice(&mut self, l: &Lfos, k: usize, full: bool) {
         if let Some(v) = self.voices.get_mut(k) {
             for (g, s) in v.iter_mut().zip(&l.lfo) {
-                g.start(s);
+                if full || s.mode == Mode::Retrig {
+                    g.start(s);
+                }
             }
             self.latest = k;
             if self.cross.on {
                 for (j, s) in l.lfo.iter().enumerate() {
-                    if s.mode != Mode::Free {
+                    if s.mode != Mode::Free && (full || s.mode == Mode::Retrig) {
                         self.cross.voices[k][j] = *s;
                         self.cross.voice_out[k][j] = v[j].fresh(s);
                     }
@@ -2959,7 +2966,15 @@ impl LfoParams {
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|t| crate::params::shape_text(0, f64::from(t)))),
+            .with_value_to_string(Arc::new(|t| crate::params::shape_text(0, f64::from(t))))
+            .with_string_to_value(Arc::new(|s| {
+                // Retain the LFO's existing bare numeric travel (0..1); named waveform
+                // displays and explicitly suffixed duties use the shared inverse.
+                match s.trim().parse::<f32>() {
+                    Ok(v) => (v.is_finite() && (0.0..=1.0).contains(&v)).then_some(v),
+                    Err(_) => crate::params::parse_shape_text(0, s),
+                }
+            })),
             // (Its travel nearly logarithmic: about 1.6 Hz at its middle.)
             rate: FloatParam::new(name("Rate"), DEFAULT_RATE, RATE_RANGE)
                 .with_unit(" Hz")
@@ -3075,14 +3090,16 @@ pub fn sound_params(p: &Ca72Params, n: usize) -> [&dyn crate::presets::SoundPara
     ]
 }
 
-/// RATE as the host shows it: Hz to two figures under 1 Hz, else to a tenth or whole.
+/// RATE before the host appends its Hz unit: two figures under 1 Hz, else a tenth or whole.
 pub fn rate_text(hz: f32) -> String {
-    if hz < 1.0 {
-        format!("{hz:.2} Hz")
-    } else if hz < 10.0 {
-        format!("{hz:.1} Hz")
+    // Choose precision after rounding across a tier boundary. Otherwise a displayed
+    // "10" can parse as 9.999999 after host normalization and redisplay as "10.0".
+    if hz < 0.995 {
+        format!("{hz:.2}")
+    } else if hz < 9.95 {
+        format!("{hz:.1}")
     } else {
-        format!("{hz:.0} Hz")
+        format!("{hz:.0}")
     }
 }
 

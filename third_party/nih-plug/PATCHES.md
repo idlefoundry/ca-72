@@ -238,3 +238,11 @@ and per-block adapter metadata carry the exact token captured by plugin-kit's
 panic flag. Read the token before consuming the panic; direct, untagged and hosted
 callbacks retain their existing behavior. Adapter metadata is consumed even if a
 malformed block is rejected, preventing stale acknowledgements on later calls.
+
+
+## Detached offline rendering (R-REFERENCE-AUDIO, 2026-10-21)
+
+`util::with_flush_to_zero` exposes the wrappers' existing scoped FTZ guard for detached
+offline processing. It restores the caller's previous FP mode and permits output-buffer
+allocation, so the MCP renderer can use the same processing environment without a live host.
+The live wrappers' processing path is unchanged.

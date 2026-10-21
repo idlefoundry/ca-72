@@ -20,6 +20,7 @@ pub mod lfo;
 pub mod library;
 pub mod local_notes;
 pub mod mod_wheel;
+pub mod offline;
 pub mod opening;
 pub mod params;
 pub mod playing;
@@ -63,7 +64,9 @@ pub fn identify_standalone() {
 
 pub struct Ca72 {
     params: Arc<Ca72Params>,
-    engine: Engine,
+    // Keep the engine out of the wrapper's repeated by-value construction frames. The
+    // Windows debug build must also fit a host's 256 KB thread (R-HOST-STACK).
+    engine: Box<Engine>,
     meters: Arc<Meters>,
     local_notes: Arc<local_notes::LocalNotes>,
     note_sources: local_notes::Sources,
@@ -141,7 +144,7 @@ impl Ca72 {
         }
         Ca72 {
             params,
-            engine: Engine::new(),
+            engine: Box::new(Engine::new()),
             meters: Arc::new(Meters::default()),
             local_notes: Arc::new(local_notes::LocalNotes::default()),
             note_sources: local_notes::Sources::default(),

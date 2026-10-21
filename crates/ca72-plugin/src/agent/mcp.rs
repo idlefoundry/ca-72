@@ -25,7 +25,7 @@ pub trait Backend {
     fn client(&mut self, _name: &str) {}
 }
 
-const INSTRUCTIONS: &str = "Tools for the CA-72, a synthesizer modelled from its circuit, open on this computer (its standalone application, with SETTINGS > AGENTS allowed). Start with ca72_describe: every parameter's value in the units its panel prints (knobs in their dials' numbers, FREQUENCY in semitones, the strip in %, cents and dB), its range or choices. Change them with ca72_set (refused, not clamped, outside their range), choose and save presets with the ca72_preset tools, play notes with ca72_play or ca72_note_on/ca72_note_off. Every change goes through the panel's own paths and shows on it at once; the player sees what you do.";
+const INSTRUCTIONS: &str = "Tools for the CA-72, a synthesizer modelled from its circuit, open on this computer (its standalone application, with SETTINGS > AGENTS allowed). For the full fitting workflow use the ca72_match_reference prompt. For reference matching use ca72_analyze on a local WAV, ca72_render for detached candidates, and ca72_compare for measurements and level-matched A/B audio; ca72_snapshot captures the live sound. ca72_experiment evaluates bounded candidate batches over named note/chord/attack/release regions, caches reference measurements, checks preservation of approved expression and writes a level-matched audition report. Start offline with init:true, a preset, or a snapshot_file; no app is needed. Preset/snapshot rendering and analysis also work without a running application. Start live control with ca72_describe: every parameter's value in the units its panel prints (knobs in their dials' numbers, FREQUENCY in semitones, the strip in %, cents and dB), its range or choices. Change them with ca72_set (refused, not clamped, outside their range), choose and save presets with the ca72_preset tools, play notes with ca72_play or ca72_note_on/ca72_note_off. Every change goes through the panel's own paths and shows on it at once; the player sees what you do.";
 
 fn reply(id: Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
@@ -38,7 +38,7 @@ fn error(id: Value, code: i64, message: &str) -> Value {
 /// A tool's outcome as `tools/call`'s result: its JSON as text, and structured; a failure
 /// with `isError`.
 pub fn tool_result(result: Reply) -> Value {
-    let (body, is_error) = match result {
+    let (mut body, is_error) = match result {
         Ok(r) => (r, false),
         Err(ApiError {
             message,
@@ -52,14 +52,21 @@ pub fn tool_result(result: Reply) -> Value {
             (e, true)
         }
     };
+    // Offline measurements can return PNGs as native MCP image content. Keep base64 out
+    // of text and structuredContent so a client does not receive it three times.
+    let images = body.as_object_mut().and_then(|b| b.remove("__mcp_images"));
     let text = serde_json::to_string_pretty(&body).unwrap_or_default();
+    let mut content = vec![json!({"type": "text", "text": text})];
+    if let Some(Value::Array(images)) = images {
+        content.extend(images);
+    }
     let structured = if body.is_object() {
         body
     } else {
         json!({"result": body})
     };
     json!({
-        "content": [{"type": "text", "text": text}],
+        "content": content,
         "structuredContent": structured,
         "isError": is_error,
     })
@@ -97,7 +104,7 @@ pub fn handle(backend: &mut dyn Backend, params: &Ca72Params, msg: &Value) -> Op
                 id,
                 json!({
                     "protocolVersion": version,
-                    "capabilities": {"tools": {"listChanged": false}},
+                    "capabilities": {"tools": {"listChanged": false}, "prompts": {"listChanged": false}},
                     "serverInfo": {"name": "ca-72", "title": "CA-72", "version": env!("CARGO_PKG_VERSION")},
                     "instructions": INSTRUCTIONS,
                 }),
@@ -118,7 +125,34 @@ pub fn handle(backend: &mut dyn Backend, params: &Ca72Params, msg: &Value) -> Op
         }
         "resources/list" => reply(id, json!({"resources": []})),
         "resources/templates/list" => reply(id, json!({"resourceTemplates": []})),
-        "prompts/list" => reply(id, json!({"prompts": []})),
+        "prompts/list" => reply(
+            id,
+            json!({"prompts": [{
+                "name":"ca72_match_reference", "description":"Fit a saved CA-72 preset to a local audio reference using measured offline renders and level-matched listening.",
+                "arguments":[{"name":"reference","description":"Absolute local reference audio path and the part/passage to reproduce.","required":true}]
+            }]}),
+        ),
+        "prompts/get" => {
+            match (
+                args.get("name").and_then(Value::as_str),
+                args.pointer("/arguments/reference").and_then(Value::as_str),
+            ) {
+                (Some("ca72_match_reference"), Some(reference)) if !reference.trim().is_empty() => {
+                    reply(
+                        id,
+                        json!({
+                            "description":"CA-72 reference matching",
+                            "messages":[{"role":"user","content":{"type":"text","text":format!("{}\n\nReference supplied by the user: {}",include_str!("../../../../docs/agent-skills/ca72-match-reference/SKILL.md"),reference)}}]
+                        }),
+                    )
+                }
+                _ => error(
+                    id,
+                    codes::INVALID_PARAMS,
+                    "use prompt ca72_match_reference with arguments.reference",
+                ),
+            }
+        }
         other => error(
             id,
             codes::METHOD_NOT_FOUND,

@@ -253,13 +253,14 @@ pub const PLAYERS: &[&str] = &["midi_bend_range"];
 /// any other (decisions.md R12; R10 had left POLY and VOICES as they were when a preset did not
 /// name them).
 pub(crate) fn targets(p: &Ca72Params, e: &Entry) -> Vec<(&'static str, f32)> {
-    let value = |id: &str| {
-        e.sound
-            .values
-            .iter()
-            .find(|(k, _)| k == id)
-            .map(|(_, v)| *v)
-    };
+    targets_for_sound(p, &e.sound)
+}
+
+pub(crate) fn targets_for_sound(
+    p: &Ca72Params,
+    sound: &crate::library::Sound,
+) -> Vec<(&'static str, f32)> {
+    let value = |id: &str| sound.values.iter().find(|(k, _)| k == id).map(|(_, v)| *v);
     sound_params(p)
         .into_iter()
         .filter_map(|(id, q)| match value(id) {

@@ -18,6 +18,7 @@ fn git(args: &[&str]) -> Option<String> {
 }
 
 fn main() {
+    engine_fingerprint();
     let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
     let tag = format!("v{version}");
     let ci_tag = std::env::var("GITHUB_REF").is_ok_and(|r| r == format!("refs/tags/{tag}"));
@@ -42,4 +43,62 @@ fn main() {
     {
         println!("cargo:rerun-if-changed={p}");
     }
+}
+
+// A render records the source it used, including work not committed yet. This is a source
+// fingerprint, not a promise of bit-identical floating point between different CPUs.
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
+
+fn sources(root: &Path, paths: &mut Vec<PathBuf>) {
+    let mut children: Vec<_> = std::fs::read_dir(root)
+        .expect("source directory")
+        .map(|p| p.expect("source file").path())
+        .collect();
+    children.sort();
+    for p in children {
+        if p.is_dir() {
+            sources(&p, paths);
+        } else if p.extension().is_some_and(|e| e == "rs") {
+            paths.push(p);
+        }
+    }
+}
+fn engine_fingerprint() {
+    let base = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("manifest"));
+    let root = base.parent().expect("crates").parent().expect("workspace");
+    let mut paths = Vec::new();
+    for part in [
+        "crates/ca72/src",
+        "crates/ca72-plugin/src",
+        "third_party/nih-plug/src",
+    ] {
+        sources(&root.join(part), &mut paths);
+    }
+    for part in [
+        "Cargo.lock",
+        "Cargo.toml",
+        "crates/ca72/Cargo.toml",
+        "crates/ca72-plugin/Cargo.toml",
+    ] {
+        paths.push(root.join(part));
+    }
+    paths.sort();
+    let mut hash = Sha256::new();
+    for path in paths {
+        println!("cargo:rerun-if-changed={}", path.display());
+        hash.update(
+            path.strip_prefix(root)
+                .expect("relative")
+                .to_string_lossy()
+                .replace('\\', "/"),
+        );
+        hash.update([0]);
+        hash.update(std::fs::read(path).expect("source bytes"));
+        hash.update([0]);
+    }
+    println!(
+        "cargo:rustc-env=CA72_ENGINE_SOURCE_SHA256={:x}",
+        hash.finalize()
+    );
 }
