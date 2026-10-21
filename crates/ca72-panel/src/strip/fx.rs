@@ -83,6 +83,10 @@ pub enum FxTarget {
     Tab(usize),
     /// The list's line for its row `i` (counted from its first row, not the first in view).
     Row(usize),
+    /// A grouping word on FIND’s line.
+    Order(FxOrder),
+    /// FIND, including a character’s place in its visible text.
+    Find(usize),
     /// The list, but none of its rows.
     List,
 }
@@ -97,7 +101,7 @@ pub fn hit(x: f64, y: f64, list: Option<&FxList>) -> Option<FxTarget> {
     if let Some(l) = list
         && let Some(row) = list_hit(l, x, y)
     {
-        return Some(row.map_or(FxTarget::List, FxTarget::Row));
+        return Some(row);
     }
     if !inside(x, y) {
         return None;
@@ -125,7 +129,7 @@ pub fn centre(t: FxTarget) -> (f64, f64) {
             (x + w / 2.0, y + h / 2.0)
         }
         FxTarget::Tab(i) => tab(i),
-        FxTarget::Row(_) | FxTarget::List => (0.0, 0.0),
+        FxTarget::Row(_) | FxTarget::List | FxTarget::Find(_) | FxTarget::Order(_) => (0.0, 0.0),
     }
 }
 
@@ -184,6 +188,29 @@ pub struct FxSlot {
     pub word: Option<FxWord>,
 }
 
+/// The effects’ order, NAME unless the player chooses another word (R-FX-SEARCH).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FxOrder {
+    #[default]
+    Name,
+    Maker,
+    Type,
+    Recent,
+}
+
+impl FxOrder {
+    pub const ALL: [Self; 4] = [Self::Name, Self::Maker, Self::Type, Self::Recent];
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Name => "NAME",
+            Self::Maker => "MAKER",
+            Self::Type => "TYPE",
+            Self::Recent => "RECENT",
+        }
+    }
+}
+
 /// A line of the effects' list: an effect's name, its maker and its format; or something to do
 /// (scan again), its words in the name's place.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -192,6 +219,9 @@ pub struct FxRow {
     pub maker: String,
     pub format: String,
     pub action: bool,
+    pub kind: String,
+    /// A group’s count, only on a head (heads cannot be chosen).
+    pub count: Option<usize>,
 }
 
 /// The effects' list, dropped for slot `slot`: its title and what it says at the title's right
@@ -204,6 +234,9 @@ pub struct FxList {
     pub rows: Vec<FxRow>,
     pub first: usize,
     pub hover: Option<usize>,
+    pub chosen: Option<usize>,
+    pub query: crate::presets::Field,
+    pub order: FxOrder,
 }
 
 /// What the drawer shows: its slots; the pointer's part; while a slot is dragged, which it came
@@ -220,23 +253,24 @@ pub struct FxScene {
 
 /// How many rows it shows (the rest scrolled to): always as many, as the presets' list does, so
 /// that its plate is made once, as the editor opens.
-pub const LIST_ROWS: usize = 11;
+pub const LIST_ROWS: usize = 10;
 /// Its plate's width, the margin round its display, the display's own inside its glass, a line's
 /// height and its dots' pitch.
-const LIST_W: f64 = 1240.0;
+const LIST_W: f64 = 1480.0;
 const MARGIN: f64 = 20.0;
 const PAD: f64 = 10.0;
 pub const LINE: f64 = 40.0;
 const LIST_DOT: f64 = 4.0;
 /// Its columns, in characters: the pointer's mark, the name, the maker, the format (the arrows
 /// for more above and below in the last).
-const COLS: (usize, usize, usize, usize) = (0, 2, 27, 43);
+const COLS: (usize, usize, usize, usize, usize) = (0, 2, 27, 42, 53);
 const NAME_CHARS: usize = 24;
-const MAKER_CHARS: usize = 15;
+const MAKER_CHARS: usize = 14;
+const TYPE_CHARS: usize = 10;
 const FORMAT_CHARS: usize = 4;
 
 /// Its plate's height.
-const LIST_H: f64 = 2.0 * (MARGIN + PAD) + LINE * (1 + LIST_ROWS) as f64;
+const LIST_H: f64 = 2.0 * (MARGIN + PAD) + LINE * (2 + LIST_ROWS) as f64;
 /// How many characters a line holds.
 const LIST_CHARS: usize = ((LIST_W - 2.0 * (MARGIN + PAD)) / (6.0 * LIST_DOT)) as usize;
 
@@ -256,19 +290,41 @@ fn line_y(k: usize) -> f64 {
     DISPLAY.1 + PAD + LINE * (k as f64 + 0.5)
 }
 
-/// What a pointer at (`x`, `y`) finds on the list: `Some(Some(row))` a row, `Some(None)` the list
-/// but no row, `None` outside it.
-pub fn list_hit(list: &FxList, x: f64, y: f64) -> Option<Option<usize>> {
+/// The grouping words’ first character on FIND’s line, matching mock-up A.
+pub fn order_col(order: FxOrder) -> usize {
+    match order {
+        FxOrder::Name => 34,
+        FxOrder::Maker => 40,
+        FxOrder::Type => 47,
+        FxOrder::Recent => 53,
+    }
+}
+
+/// What a pointer finds on the list; heads and blank lines are inert.
+pub fn list_hit(list: &FxList, x: f64, y: f64) -> Option<FxTarget> {
     let (lx, ly, lw, lh) = list_rect(list);
     if !(lx..lx + lw).contains(&x) || !(ly..ly + lh).contains(&y) {
         return None;
     }
     let k = ((y - ly - DISPLAY.1 - PAD) / LINE).floor();
-    if k < 1.0 {
-        return Some(None);
+    if k == 1.0 {
+        let col = (x - lx - DISPLAY.0 - PAD) / (6.0 * LIST_DOT);
+        for order in FxOrder::ALL {
+            let start = order_col(order) as f64;
+            if (start..start + order.word().len() as f64).contains(&col) {
+                return Some(FxTarget::Order(order));
+            }
+        }
+        return Some(FxTarget::Find((col - 5.0).round().max(0.0) as usize));
     }
-    let row = list.first + k as usize - 1;
-    Some((k as usize <= LIST_ROWS && row < list.rows.len()).then_some(row))
+    if k < 2.0 || k as usize >= LIST_ROWS + 2 {
+        return Some(FxTarget::List);
+    }
+    let row = list.first + k as usize - 2;
+    Some(match list.rows.get(row) {
+        Some(r) if r.count.is_none() && !r.name.is_empty() => FxTarget::Row(row),
+        _ => FxTarget::List,
+    })
 }
 
 /// Row `row`'s middle, in view (the tests').
@@ -276,7 +332,7 @@ pub fn row_centre(list: &FxList, row: usize) -> (f64, f64) {
     let (x, y, _, _) = list_rect(list);
     (
         x + DISPLAY.0 + DISPLAY.2 / 2.0,
-        y + line_y(row.saturating_sub(list.first) + 1),
+        y + line_y(row.saturating_sub(list.first) + 2),
     )
 }
 
@@ -624,55 +680,125 @@ impl FxRenderer {
                 line_y(k) - CAP_LIFT - 3.0 * LIST_DOT,
             )
         };
-        let mut line = |frame: &mut Pixmap, (lx, ly): (f64, f64), text: &[char], level: f64| {
-            text_dots(frame, &mut cover, s, (lx, ly, LIST_DOT), text, level);
-        };
-        // The title, dim; what the list says at its right.
-        let (tx, ty) = at(0, 0);
-        line(&mut frame, (tx, ty), &fit(&list.title, LIST_CHARS), 0.55);
-        let note = fit(&list.note, LIST_CHARS);
-        line(
+        let first = list.query.caret.saturating_sub(FIND_CHARS - 1);
+        {
+            let mut line = |frame: &mut Pixmap, (lx, ly): (f64, f64), text: &[char], level: f64| {
+                text_dots(frame, &mut cover, s, (lx, ly, LIST_DOT), text, level);
+            };
+            // The title, dim; what the list says at its right.
+            let (tx, ty) = at(0, 0);
+            line(&mut frame, (tx, ty), &fit(&list.title, LIST_CHARS), 0.55);
+            let note = fit(&list.note, LIST_CHARS);
+            line(
+                &mut frame,
+                (at(LIST_CHARS - note.len(), 0).0, ty),
+                &note,
+                0.55,
+            );
+            line(&mut frame, at(0, 1), &fit("FIND", 4), 0.55);
+            let chars: Vec<char> = list.query.text.chars().collect();
+            if chars.is_empty() {
+                line(
+                    &mut frame,
+                    at(5, 1),
+                    &fit("A NAME, MAKER OR TYPE", FIND_CHARS),
+                    0.22,
+                );
+            } else {
+                let text: Vec<char> = chars.iter().skip(first).take(FIND_CHARS).copied().collect();
+                line(&mut frame, at(5, 1), &text, 1.0);
+            }
+        }
+        underline(
             &mut frame,
-            (at(LIST_CHARS - note.len(), 0).0, ty),
-            &note,
-            0.55,
+            &mut cover,
+            s,
+            at(5 + list.query.caret - first, 1),
+            1,
+            1.0,
         );
+        for order in FxOrder::ALL {
+            let on = list.order == order;
+            let pos = at(order_col(order), 1);
+            text_dots(
+                &mut frame,
+                &mut cover,
+                s,
+                (pos.0, pos.1, LIST_DOT),
+                &fit(order.word(), order.word().len()),
+                if on { 1.0 } else { 0.45 },
+            );
+            if on {
+                underline(&mut frame, &mut cover, s, pos, order.word().len(), 1.0);
+            }
+        }
         for k in 0..LIST_ROWS {
             let Some(row) = list.rows.get(list.first + k) else {
                 break;
             };
-            let pointed = list.hover == Some(list.first + k);
+            let index = list.first + k;
+            let pointed = list.hover == Some(index) || list.chosen == Some(index);
             let level = if pointed { 1.0 } else { 0.72 };
-            if pointed {
-                line(&mut frame, at(COLS.0, k + 1), &['>'], 1.0);
+            let mut draw = |col, text: &str, width, level, query: &str| {
+                matched(
+                    &mut frame,
+                    &mut cover,
+                    s,
+                    at(col, k + 2),
+                    text,
+                    width,
+                    level,
+                    query,
+                );
+            };
+            if let Some(count) = row.count {
+                let name: String = fit(&row.name.to_uppercase(), LIST_CHARS - 8)
+                    .into_iter()
+                    .collect();
+                let n = name.chars().count();
+                draw(0, &name, n, 0.9, "");
+                draw(
+                    n + 1,
+                    &"·".repeat(LIST_CHARS.saturating_sub(n + 8)),
+                    LIST_CHARS - n - 1,
+                    0.22,
+                    "",
+                );
+                let count = count.to_string();
+                draw(LIST_CHARS - 3 - count.len(), &count, count.len(), 0.55, "");
+                continue;
             }
-            line(
-                &mut frame,
-                at(COLS.1, k + 1),
-                &fit(&row.name, NAME_CHARS),
-                level,
-            );
+            if list.chosen.or(list.hover) == Some(index) && !row.name.is_empty() {
+                draw(COLS.0, ">", 1, 1.0, "");
+            }
+            draw(COLS.1, &row.name, NAME_CHARS, level, &list.query.text);
             if !row.action {
-                line(
-                    &mut frame,
-                    at(COLS.2, k + 1),
-                    &fit(&row.maker, MAKER_CHARS),
-                    level * 0.75,
-                );
-                line(
-                    &mut frame,
-                    at(COLS.3, k + 1),
-                    &fit(&row.format, FORMAT_CHARS),
-                    level * 0.6,
-                );
+                if list.order != FxOrder::Maker {
+                    draw(
+                        COLS.2,
+                        &row.maker,
+                        MAKER_CHARS,
+                        level * 0.75,
+                        &list.query.text,
+                    );
+                }
+                if list.order != FxOrder::Type {
+                    let col = if list.order == FxOrder::Maker {
+                        COLS.2
+                    } else {
+                        COLS.3
+                    };
+                    draw(col, &row.kind, TYPE_CHARS, level * 0.75, &list.query.text);
+                }
+                draw(COLS.4, &row.format, FORMAT_CHARS, level * 0.6, "");
             }
         }
         // More above or below: the presets' list's arrows, at the lines' right end.
         let more = [
-            (list.first > 0, 1, crate::presets::UP),
+            (list.first > 0, 2, crate::presets::UP),
             (
                 list.first + LIST_ROWS < list.rows.len(),
-                LIST_ROWS,
+                LIST_ROWS + 1,
                 crate::presets::DOWN,
             ),
         ];
@@ -783,6 +909,81 @@ fn text_dots(
     let glow: Vec<Disc> = core.iter().map(|&(x, y, r)| (x, y, r * 2.1)).collect();
     discs(frame, cover, &glow, ORANGE_GLOW, (0.16 * level) as f32);
     discs(frame, cover, &core, ORANGE, (0.25 + 0.75 * level) as f32);
+}
+
+const FIND_CHARS: usize = 28;
+
+fn underline(
+    frame: &mut Pixmap,
+    cover: &mut [u8],
+    s: f64,
+    (x, y): (f64, f64),
+    n: usize,
+    level: f64,
+) {
+    let dots: Vec<Disc> = (0..6 * n - 1)
+        .map(|c| {
+            (
+                ((x + c as f64 * LIST_DOT) * s) as f32,
+                ((y + 8.0 * LIST_DOT) * s) as f32,
+                (LIST_DOT * 0.36 * s) as f32,
+            )
+        })
+        .collect();
+    discs(frame, cover, &dots, ORANGE, (0.25 + 0.75 * level) as f32);
+}
+
+/// Lit, underlined matches at character boundaries, including non-ASCII case folding.
+#[allow(clippy::too_many_arguments)]
+fn matched(
+    frame: &mut Pixmap,
+    cover: &mut [u8],
+    s: f64,
+    (x, y): (f64, f64),
+    text: &str,
+    width: usize,
+    level: f64,
+    query: &str,
+) {
+    let chars = fit(text, width);
+    let mut lit = vec![false; chars.len()];
+    let mut lower = String::new();
+    let mut owners = Vec::new();
+    for (i, c) in chars.iter().enumerate() {
+        let folded = c.to_lowercase().collect::<String>();
+        owners.extend(std::iter::repeat_n(i, folded.len()));
+        lower.push_str(&folded);
+    }
+    for word in query.split_whitespace().map(str::to_lowercase) {
+        for (at, _) in lower
+            .char_indices()
+            .filter(|(at, _)| lower[*at..].starts_with(&word))
+        {
+            for &i in &owners[at..at + word.len()] {
+                lit[i] = true;
+            }
+        }
+    }
+    let mut first = 0;
+    while first < chars.len() {
+        let mut end = first + 1;
+        while end < chars.len() && lit[end] == lit[first] {
+            end += 1;
+        }
+        let pos = (x + (6 * first) as f64 * LIST_DOT, y);
+        text_dots(
+            frame,
+            cover,
+            s,
+            (pos.0, pos.1, LIST_DOT),
+            &chars[first..end],
+            if lit[first] { 1.0 } else { level },
+        );
+        if lit[first] {
+            underline(frame, cover, s, pos, end - first, 1.0);
+        }
+        first = end;
+    }
 }
 
 /// Every dot of `places` characters on each line (`lines`: each line's top's offset) from
@@ -982,7 +1183,7 @@ fn list_plate(s: f64, skin: Skin, glass_picture: &Pixmap) -> Pixmap {
         (dx, dy, dw, dh),
     );
     // Every dot faintly there.
-    let lines: Vec<f64> = (0..=LIST_ROWS).map(|k| LINE * k as f64).collect();
+    let lines: Vec<f64> = (0..LIST_ROWS + 2).map(|k| LINE * k as f64).collect();
     let mut cover = vec![0; (pw * ph) as usize];
     unlit_dots(
         &mut face,
@@ -1021,10 +1222,12 @@ mod tests {
                     maker: "Maker".into(),
                     format: "CLAP".into(),
                     action: false,
+                    ..FxRow::default()
                 })
                 .collect(),
             first: 0,
             hover: None,
+            ..FxList::default()
         }
     }
 
@@ -1078,8 +1281,64 @@ mod tests {
             );
         }
         // Every column inside the line, the arrows' place apart.
-        assert!(COLS.3 + FORMAT_CHARS < LIST_CHARS - 1);
-        assert!(COLS.1 + NAME_CHARS < COLS.2 && COLS.2 + MAKER_CHARS < COLS.3);
+        assert!(COLS.4 + FORMAT_CHARS < LIST_CHARS - 1);
+        assert!(
+            COLS.1 + NAME_CHARS < COLS.2
+                && COLS.2 + MAKER_CHARS < COLS.3
+                && COLS.3 + TYPE_CHARS < COLS.4
+        );
+    }
+
+    #[test]
+    fn find_and_group_words_are_found_and_heads_cannot_be_chosen() {
+        let mut l = list(3, 12);
+        let (x, y, w, h) = list_rect(&l);
+        assert_eq!((w, h), (1480.0, 540.0));
+        for order in FxOrder::ALL {
+            let px = x + DISPLAY.0 + PAD + (order_col(order) as f64 + 0.5) * 6.0 * LIST_DOT;
+            assert_eq!(
+                hit(px, y + line_y(1), Some(&l)),
+                Some(FxTarget::Order(order))
+            );
+        }
+        let px = x + DISPLAY.0 + PAD + 7.0 * 6.0 * LIST_DOT;
+        assert_eq!(hit(px, y + line_y(1), Some(&l)), Some(FxTarget::Find(2)));
+        l.rows[0].count = Some(10);
+        let (rx, ry) = row_centre(&l, 0);
+        assert_eq!(hit(rx, ry, Some(&l)), Some(FxTarget::List));
+        l.rows[1].name.clear();
+        let (rx, ry) = row_centre(&l, 1);
+        assert_eq!(hit(rx, ry, Some(&l)), Some(FxTarget::List));
+    }
+
+    #[test]
+    fn all_occurrences_of_each_word_are_underlined_at_character_boundaries() {
+        let mut p = Pixmap::new(600, 60).expect("pixels");
+        let mut cover = vec![0; 600 * 60];
+        matched(
+            &mut p,
+            &mut cover,
+            1.0,
+            (4.0, 4.0),
+            "Écho Echo",
+            24,
+            0.4,
+            "ÉC ec",
+        );
+        // The underline is eight dot rows below the letters, with a gap at the space.
+        let alpha = |col: usize| p.pixel((4 + col * 24) as u32, 36).expect("dot").alpha();
+        for col in [0, 1, 5, 6] {
+            assert!(alpha(col) > 0, "matched character {col}");
+        }
+        for col in [2, 3, 4, 7, 8] {
+            assert_eq!(alpha(col), 0, "unmatched character {col}");
+        }
+        let mut p = Pixmap::new(240, 60).expect("pixels");
+        let mut cover = vec![0; 240 * 60];
+        matched(&mut p, &mut cover, 1.0, (4.0, 4.0), "Banana", 6, 0.4, "ana");
+        for col in 1..6 {
+            assert!(p.pixel(4 + col * 24, 36).expect("underline").alpha() > 0);
+        }
     }
 
     /// A name longer than the screen's twelve places ends in an ellipsis; a short one is centred.
@@ -1122,7 +1381,7 @@ mod tests {
             let mut r = FxRenderer::new(scale, skin, Lettering::Standard);
             let mut scene = scene();
             assert!(r.render(&scene));
-            let steps: [&dyn Fn(&mut FxScene); 8] = [
+            let steps: [&dyn Fn(&mut FxScene); 11] = [
                 &|s| s.slots[1].lit = false,
                 &|s| {
                     s.slots[0].dim = true;
@@ -1141,6 +1400,23 @@ mod tests {
                         l.first = 2;
                         l.hover = Some(4);
                     }
+                },
+                &|s| {
+                    let l = s.list.as_mut().expect("list");
+                    l.query = crate::presets::Field::new("Ef 4");
+                    l.chosen = Some(4);
+                },
+                &|s| {
+                    let l = s.list.as_mut().expect("list");
+                    l.order = FxOrder::Maker;
+                    l.rows[2].count = Some(10);
+                },
+                &|s| {
+                    let l = s.list.as_mut().expect("list");
+                    l.query = crate::presets::Field::new(
+                        "a very long query to scroll beyond the visible field é",
+                    );
+                    l.order = FxOrder::Type;
                 },
                 &|s| s.list = None,
             ];

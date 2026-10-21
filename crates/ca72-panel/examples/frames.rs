@@ -269,7 +269,8 @@ fn fx(s: f64, panel: &Renderer) {
             name: format!("Effect number {i}"),
             maker: "A Maker".into(),
             format: if i % 2 == 0 { "CLAP" } else { "VST3" }.into(),
-            action: false,
+            kind: "Reverb".into(),
+            ..FxRow::default()
         })
         .collect();
     let list = FxList {
@@ -279,6 +280,7 @@ fn fx(s: f64, panel: &Renderer) {
         rows,
         first: 0,
         hover: None,
+        ..FxList::default()
     };
     times("the effects' list dropped", &mut |i, sc| {
         sc.drag = None;
@@ -292,6 +294,12 @@ fn fx(s: f64, panel: &Renderer) {
     times("the effects' list scrolled", &mut |i, sc| {
         let mut l = list.clone();
         l.first = i % 19;
+        sc.list = Some(l);
+    });
+    times("typing in the effects’ FIND", &mut |i, sc| {
+        let mut l = list.clone();
+        l.query = ca72_panel::presets::Field::new(if i % 2 == 0 { "rev" } else { "reve" });
+        l.chosen = Some(0);
         sc.list = Some(l);
     });
     times("the effects open, nothing changed", &mut |_, _| {});

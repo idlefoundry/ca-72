@@ -224,8 +224,20 @@ impl crate::fx_view::Effects for Host {
                     name: e.desc.name.clone(),
                     vendor: e.desc.vendor.clone(),
                     format: e.desc.format.clone(),
+                    features: e.desc.features.clone(),
+                    key: effect_id(e),
                 })
                 .collect(),
+        }
+    }
+
+    fn preferences(&self) -> crate::fx_view::Preferences {
+        crate::settings::fx_preferences(&crate::settings::file())
+    }
+
+    fn set_order(&self, order: ca72_panel::strip::fx::FxOrder) {
+        if let Err(e) = crate::settings::keep_fx_order(&crate::settings::file(), order) {
+            eprintln!("CA-72 effects: {e}");
         }
     }
 
@@ -287,12 +299,16 @@ impl crate::fx_view::Effects for Host {
 
     fn add(&self, generation: u64, effect: usize) -> Result<(), String> {
         let found = self.found(generation, effect)?;
-        self.chain.add(&found).map(|_| ())
+        self.chain.add(&found)?;
+        remember(&found);
+        Ok(())
     }
 
     fn replace(&self, slot: usize, generation: u64, effect: usize) -> Result<(), String> {
         let found = self.found(generation, effect)?;
-        self.chain.replace(slot, &found)
+        self.chain.replace(slot, &found)?;
+        remember(&found);
+        Ok(())
     }
 
     fn remove(&self, slot: usize) -> Result<(), String> {
@@ -330,5 +346,19 @@ impl crate::fx_view::Effects for Host {
 
     fn safe_start(&self) -> Option<crate::fx_view::SafeStart> {
         *locked(&self.safe)
+    }
+}
+
+fn effect_id(found: &ca72_fx::Found) -> crate::fx_view::EffectId {
+    crate::fx_view::EffectId {
+        format: found.desc.format.clone(),
+        path: found.path.clone(),
+        id: found.desc.id.clone(),
+    }
+}
+
+fn remember(found: &ca72_fx::Found) {
+    if let Err(e) = crate::settings::keep_fx_choice(&crate::settings::file(), effect_id(found)) {
+        eprintln!("CA-72 effects: {e}");
     }
 }

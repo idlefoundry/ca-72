@@ -5386,8 +5386,7 @@ impl Editing {
             self.learning.close_menu();
             return true;
         }
-        if down && k.key == Key::Escape && self.fx_view.list_open() {
-            self.fx_view.close_list();
+        if self.fx_view.key(k) {
             return true;
         }
         if self.browser.open && self.learning.list {
@@ -9905,7 +9904,7 @@ mod tests {
         e.update_scene();
         let list = e.fx_scene.list.clone().expect("the list");
         let names: Vec<&str> = list.rows.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(names, ["Delay", "Plate", "Flanger", "SCAN AGAIN"]);
+        assert_eq!(names, ["Delay", "Flanger", "Plate", "SCAN AGAIN"]);
         assert_eq!(list.title, "ADD TO SLOT 3");
         e.draw();
         let mut whole = None;
@@ -9927,7 +9926,7 @@ mod tests {
         );
         assert!(e.composed == whole, "the list as put together whole");
         // (The wheel over it scrolls it; three effects and SCAN AGAIN all show, so it stays.)
-        let p = at(&e, fx_ui::row_centre(&list, 1));
+        let p = at(&e, fx_ui::row_centre(&list, 2));
         go(&mut e, p);
         wheel(&mut e, -2.0);
         e.update_scene();
@@ -9951,7 +9950,7 @@ mod tests {
         e.update_scene();
         let list = e.fx_scene.list.clone().expect("the list");
         assert_eq!(list.title, "REPLACE SLOT 1");
-        let p = at(&e, fx_ui::row_centre(&list, 2));
+        let p = at(&e, fx_ui::row_centre(&list, 1));
         click(&mut e, p);
         assert_eq!(effects_done(&mut e, &fake, 1), ["replace 0 Flanger"]);
         let p = name(&e, 1);
@@ -9979,6 +9978,45 @@ mod tests {
             "nothing under the drawer"
         );
         assert!(fake.take().is_empty());
+    }
+
+    #[test]
+    fn the_fx_chooser_takes_typing_and_arrows_and_escape_clears_before_closing() {
+        let (mut e, fake) = editing_effects();
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        e.playing.typing = true;
+        e.fx_view.open_list(2, false);
+        let preset = e.browser.bar.name.clone();
+        for c in ["l", "a", "t"] {
+            assert!(keyed(&mut e, Key::Character(c.into())));
+        }
+        assert!(keyed(&mut e, Key::ArrowLeft));
+        assert!(keyed(&mut e, Key::ArrowRight));
+        assert!(!e.playing.active());
+        e.update_scene();
+        assert_eq!(
+            e.fx_scene.list.as_ref().expect("list").rows[0].name,
+            "Plate"
+        );
+        assert_eq!(e.browser.bar.name, preset);
+        assert!(keyed(&mut e, Key::Escape));
+        e.update_scene();
+        assert!(e.fx_view.list_open());
+        assert!(
+            e.fx_scene
+                .list
+                .as_ref()
+                .expect("list")
+                .query
+                .text
+                .is_empty()
+        );
+        assert!(keyed(&mut e, Key::Escape));
+        assert!(!e.fx_view.list_open());
+        e.fx_view.open_list(2, false);
+        assert!(keyed(&mut e, Key::Character("lat".into())));
+        assert!(keyed(&mut e, Key::Enter));
+        assert_eq!(effects_done(&mut e, &fake, 1), ["add Plate"]);
     }
 
     /// A slot's name clicked again opens its effect's window again (decisions.md R-FX-MAC): after

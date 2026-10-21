@@ -18,12 +18,18 @@
 //! TURN EFFECTS BACK ON and TURN THIS ONE ON. One running without its settings offers TRY ITS OLD
 //! SETTINGS. The tip over a slot says why, in a line.
 
+mod search;
+use search::{Choice, rows};
+pub use search::{EffectId, Preferences};
+
+use ca72_panel::presets::Field;
+use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ca72_panel::strip::fx::{
-    self as fx_ui, FxList, FxRow, FxScene, FxSlot, FxTarget, FxWord, LIST_ROWS, SLOTS,
+    self as fx_ui, FxList, FxOrder, FxRow, FxScene, FxSlot, FxTarget, FxWord, LIST_ROWS, SLOTS,
 };
 
 /// How an effect in the chain is.
@@ -108,6 +114,8 @@ pub struct Listing {
     pub name: String,
     pub vendor: String,
     pub format: String,
+    pub features: Vec<String>,
+    pub key: EffectId,
 }
 
 /// The effects found: whether a scan is under way, whether one has finished, which scan this
@@ -132,6 +140,8 @@ pub trait Effects: Send + Sync {
     fn active(&self) -> Option<bool>;
     /// The effects found so far.
     fn catalogue(&self) -> Catalogue;
+    fn preferences(&self) -> Preferences;
+    fn set_order(&self, order: FxOrder);
     /// A scan begun on a thread of its own, unless one is under way, or (unless `again`) one
     /// has finished.
     fn scan(&self, again: bool);
@@ -179,6 +189,7 @@ enum Job {
     Bypass(usize, bool),
     Window(usize),
     Act(FxAction),
+    Order(FxOrder),
 }
 
 /// What the drawer's threads are doing and have done: an effect being loaded (its slot and
@@ -205,6 +216,7 @@ struct Open {
     replace: bool,
     first: usize,
     hover: Option<usize>,
+    chosen: Option<usize>,
 }
 
 /// A slot's name pressed: which, where (drawing units), whether it is being carried, and the slot
@@ -229,6 +241,9 @@ pub struct FxView {
     seen: u64,
     catalogue: Catalogue,
     open: Option<Open>,
+    query: Field,
+    preferences: Preferences,
+    rows: Vec<(FxRow, Choice)>,
     press: Option<Press>,
     pub hover: Option<FxTarget>,
 }
@@ -265,6 +280,10 @@ impl FxView {
             Some(tx)
         };
         let (loads, quick) = (worker("ca72-fx-loads"), worker("ca72-fx-quick"));
+        let preferences = effects
+            .as_ref()
+            .map(|e| e.preferences())
+            .unwrap_or_default();
         FxView {
             effects,
             loads,
@@ -276,6 +295,9 @@ impl FxView {
             seen: 0,
             catalogue: Catalogue::default(),
             open: None,
+            query: Field::default(),
+            preferences,
+            rows: Vec::new(),
             press: None,
             hover: None,
         }
@@ -303,9 +325,10 @@ impl FxView {
             self.active = a;
         }
         if self.open.is_some() {
-            self.catalogue = e.catalogue();
-            if let Some(o) = &mut self.open {
-                o.first = o.first.min(rows(&self.catalogue).saturating_sub(LIST_ROWS));
+            let catalogue = e.catalogue();
+            if self.catalogue != catalogue {
+                self.catalogue = catalogue;
+                self.refilter();
             }
         }
     }
@@ -399,24 +422,11 @@ impl FxView {
     /// The list as it shows for `o`.
     fn list(&self, o: Open) -> FxList {
         let c = &self.catalogue;
-        let mut rows: Vec<FxRow> = c
-            .effects
+        let n = self
+            .rows
             .iter()
-            .map(|l| FxRow {
-                name: l.name.clone(),
-                maker: l.vendor.clone(),
-                format: l.format.to_uppercase(),
-                action: false,
-            })
-            .collect();
-        if !c.scanning {
-            rows.push(FxRow {
-                name: "SCAN AGAIN".into(),
-                action: true,
-                ..FxRow::default()
-            });
-        }
-        let n = c.effects.len();
+            .filter(|(_, c)| matches!(c, Choice::Effect(_)))
+            .count();
         FxList {
             slot: o.slot,
             title: if o.replace {
@@ -434,14 +444,24 @@ impl FxView {
                     1 => "1 EFFECT".to_owned(),
                     _ => format!("{n} EFFECTS"),
                 };
+                let found = if !self.query.text.is_empty() {
+                    format!("{n} OF {} EFFECTS", c.effects.len())
+                } else if self.preferences.order == FxOrder::Recent {
+                    format!("{n} RECENT")
+                } else {
+                    found
+                };
                 match c.unlisted {
                     0 => found,
                     u => format!("{found}, {u} NOT LISTED"),
                 }
             },
-            rows,
+            rows: self.rows.iter().map(|(r, _)| r.clone()).collect(),
             first: o.first,
             hover: o.hover,
+            chosen: o.chosen,
+            query: self.query.clone(),
+            order: self.preferences.order,
         }
     }
 
@@ -459,11 +479,15 @@ impl FxView {
             replace,
             first: 0,
             hover: None,
+            chosen: None,
         });
+        self.query = Field::default();
         if let Some(e) = &self.effects {
             e.scan(false);
             self.catalogue = e.catalogue();
+            self.preferences = e.preferences();
         }
+        self.refilter();
     }
 
     pub fn close_list(&mut self) {
@@ -472,10 +496,103 @@ impl FxView {
 
     /// The list scrolled by `rows` (+ down).
     pub fn scroll(&mut self, rows_by: i32) {
-        let last = rows(&self.catalogue).saturating_sub(LIST_ROWS);
+        let last = self.rows.len().saturating_sub(LIST_ROWS);
         if let Some(o) = &mut self.open {
             o.first = o.first.saturating_add_signed(rows_by as isize).min(last);
         }
+    }
+
+    fn set_order(&mut self, order: FxOrder) {
+        self.preferences.order = order;
+        self.submit(Job::Order(order));
+        self.refilter();
+    }
+
+    fn refilter(&mut self) {
+        self.rows = rows(
+            &self.catalogue.effects,
+            &self.query.text,
+            &self.preferences,
+            self.catalogue.scanning,
+        );
+        let chosen = self
+            .rows
+            .iter()
+            .position(|(_, c)| !matches!(c, Choice::Head | Choice::Blank));
+        if let Some(o) = &mut self.open {
+            o.first = 0;
+            o.hover = None;
+            o.chosen = chosen;
+        }
+    }
+
+    fn navigate(&mut self, by: i32) {
+        let choices: Vec<usize> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (_, c))| (!matches!(c, Choice::Head | Choice::Blank)).then_some(i))
+            .collect();
+        let Some(o) = &mut self.open else { return };
+        if choices.is_empty() {
+            o.chosen = None;
+            return;
+        }
+        let at = choices
+            .iter()
+            .position(|i| Some(*i) == o.chosen)
+            .unwrap_or(0);
+        let at = at.saturating_add_signed(by as isize).min(choices.len() - 1);
+        let row = choices[at];
+        o.chosen = Some(row);
+        o.hover = None;
+        if row < o.first {
+            o.first = row;
+        }
+        if row >= o.first + LIST_ROWS {
+            o.first = row + 1 - LIST_ROWS;
+        }
+        o.first = o.first.min(self.rows.len().saturating_sub(LIST_ROWS));
+    }
+
+    /// The list takes typing and navigation while open, including releases, so notes and
+    /// preset stepping cannot start beneath it. FIND uses the presets’ own field editor.
+    pub fn key(&mut self, e: &KeyboardEvent) -> bool {
+        if self.open.is_none() {
+            return false;
+        }
+        if e.state != KeyState::Down {
+            return true;
+        }
+        if e.modifiers.intersects(Modifiers::META | Modifiers::CONTROL) || e.is_composing {
+            return true;
+        }
+        let was = self.query.text.clone();
+        match &e.key {
+            Key::Escape if self.query.text.is_empty() => self.close_list(),
+            Key::Escape => self.query = Field::default(),
+            Key::ArrowUp => self.navigate(-1),
+            Key::ArrowDown => self.navigate(1),
+            Key::PageUp => self.navigate(-(LIST_ROWS as i32)),
+            Key::PageDown => self.navigate(LIST_ROWS as i32),
+            Key::Enter => {
+                if let Some(row) = self.open.and_then(|o| o.chosen) {
+                    self.choose(row);
+                }
+            }
+            Key::Character(c) => self.query.insert(c),
+            Key::Backspace => self.query.backspace(),
+            Key::Delete => self.query.delete(),
+            Key::ArrowLeft => self.query.left(),
+            Key::ArrowRight => self.query.right(),
+            Key::Home => self.query.home(),
+            Key::End => self.query.end(),
+            _ => {}
+        }
+        if was != self.query.text {
+            self.refilter();
+        }
+        true
     }
 
     /// The list as it shows (for the hit test).
@@ -489,6 +606,11 @@ impl FxView {
         if let Some(l) = &list {
             match fx_ui::hit(x, y, Some(l)) {
                 Some(FxTarget::Row(r)) => self.choose(r),
+                Some(FxTarget::Order(order)) => self.set_order(order),
+                Some(FxTarget::Find(col)) => {
+                    let first = self.query.caret.saturating_sub(27);
+                    self.query.caret = (first + col).min(self.query.text.chars().count());
+                }
                 Some(FxTarget::List) => {}
                 _ => self.open = None,
             }
@@ -694,23 +816,37 @@ impl FxView {
     /// scanned again.
     fn choose(&mut self, row: usize) {
         let Some(o) = self.open else { return };
-        let c = &self.catalogue;
-        if row == c.effects.len() && !c.scanning {
-            if let Some(e) = &self.effects {
-                e.scan(true);
-                self.catalogue = e.catalogue();
-            }
+        let Some((_, choice)) = self.rows.get(row) else {
             return;
-        }
-        let Some(l) = c.effects.get(row) else { return };
+        };
+        let index = match *choice {
+            Choice::Effect(i) => i,
+            Choice::Scan => {
+                if let Some(e) = &self.effects {
+                    e.scan(true);
+                    self.catalogue = e.catalogue();
+                    self.refilter();
+                }
+                return;
+            }
+            Choice::All => {
+                self.set_order(FxOrder::Name);
+                return;
+            }
+            Choice::Head | Choice::Blank => return,
+        };
+        let c = &self.catalogue;
+        let Some(l) = c.effects.get(index) else {
+            return;
+        };
         let (generation, name) = (c.generation, l.name.clone());
         self.open = None;
         let at = if o.replace { o.slot } else { self.slots.len() };
         lock(&self.pending).loading = Some((at, name));
         if o.replace {
-            self.submit(Job::Replace(o.slot, generation, row));
+            self.submit(Job::Replace(o.slot, generation, index));
         } else {
-            self.submit(Job::Add(generation, row));
+            self.submit(Job::Add(generation, index));
         }
     }
 
@@ -729,11 +865,6 @@ impl FxView {
     }
 }
 
-/// How many rows the list has: the effects, and SCAN AGAIN.
-fn rows(c: &Catalogue) -> usize {
-    c.effects.len() + usize::from(!c.scanning)
-}
-
 /// `job` done to `effects`, on one of the drawer's threads; what it did kept in `pending`.
 fn run(effects: &dyn Effects, pending: &Mutex<Pending>, job: Job) {
     let result = match &job {
@@ -746,6 +877,10 @@ fn run(effects: &dyn Effects, pending: &Mutex<Pending>, job: Job) {
         Job::Act(FxAction::Retry(s)) => effects.retry(*s),
         Job::Act(FxAction::WithoutSettings(s)) => effects.without_settings(*s),
         Job::Act(FxAction::OldSettings(s)) => effects.old_settings(*s),
+        Job::Order(order) => {
+            effects.set_order(*order);
+            Ok(())
+        }
         Job::Act(FxAction::AllOn) => {
             effects.turn_on();
             Ok(())
@@ -782,6 +917,7 @@ pub(crate) mod fake {
         pub scans: Mutex<u32>,
         pub safe: Mutex<Option<SafeStart>>,
         pub unlisted: Mutex<usize>,
+        pub preferences: Mutex<Preferences>,
     }
 
     impl Fake {
@@ -801,6 +937,12 @@ pub(crate) mod fake {
                         name: (*n).into(),
                         vendor: "Maker".into(),
                         format: "vst3".into(),
+                        features: vec!["reverb".into()],
+                        key: EffectId {
+                            format: "vst3".into(),
+                            path: (*n).into(),
+                            id: (*n).into(),
+                        },
                     })
                     .collect(),
                 ..Fake::default()
@@ -836,6 +978,12 @@ pub(crate) mod fake {
                 effects: self.found.clone(),
             }
         }
+        fn preferences(&self) -> Preferences {
+            lock(&self.preferences).clone()
+        }
+        fn set_order(&self, order: FxOrder) {
+            lock(&self.preferences).order = order;
+        }
         fn scan(&self, again: bool) {
             let mut n = lock(&self.scans);
             if *n == 0 || again {
@@ -844,6 +992,7 @@ pub(crate) mod fake {
         }
         fn add(&self, _: u64, effect: usize) -> Result<(), String> {
             let l = self.found.get(effect).ok_or("no such effect")?;
+            lock(&self.preferences).chosen(l.key.clone());
             self.note(format!("add {}", l.name));
             lock(&self.slots).push(SlotInfo {
                 name: l.name.clone(),
@@ -855,6 +1004,7 @@ pub(crate) mod fake {
         }
         fn replace(&self, slot: usize, _: u64, effect: usize) -> Result<(), String> {
             let l = self.found.get(effect).ok_or("no such effect")?;
+            lock(&self.preferences).chosen(l.key.clone());
             self.note(format!("replace {slot} {}", l.name));
             lock(&self.slots)[slot].name = l.name.clone();
             Ok(())
@@ -916,6 +1066,182 @@ pub(crate) mod fake {
 mod tests {
     use super::fake::Fake;
     use super::*;
+
+    fn key(v: &mut FxView, key: Key) {
+        assert!(v.key(&KeyboardEvent {
+            key,
+            state: KeyState::Down,
+            ..KeyboardEvent::default()
+        }));
+    }
+
+    fn wait(v: &mut FxView, fake: &Fake, jobs: u64) {
+        let start = Instant::now();
+        while lock(&v.pending).done < jobs && start.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(lock(&v.pending).done >= jobs);
+        v.poll(Instant::now());
+        assert!(!lock(&fake.done).is_empty());
+    }
+
+    #[test]
+    fn find_edits_with_the_presets_field_and_escape_clears_then_closes() {
+        let fake = Fake::with(&[], &["Hall", "Delay"]);
+        let mut v = FxView::new(Some(fake));
+        v.open_list(0, false);
+        key(&mut v, Key::Character("réverb".into()));
+        key(&mut v, Key::Home);
+        key(&mut v, Key::Delete);
+        key(&mut v, Key::ArrowRight);
+        key(&mut v, Key::Backspace);
+        assert_eq!(
+            v.query,
+            Field {
+                text: "verb".into(),
+                caret: 0
+            }
+        );
+        key(&mut v, Key::End);
+        key(&mut v, Key::ArrowLeft);
+        key(&mut v, Key::Character("X".into()));
+        assert_eq!(v.query.text, "verXb");
+        key(&mut v, Key::Escape);
+        assert!(v.list_open() && v.query.text.is_empty());
+        key(&mut v, Key::Escape);
+        assert!(!v.list_open());
+        assert!(!v.key(&KeyboardEvent::default()));
+    }
+
+    #[test]
+    fn keys_move_past_heads_scroll_and_pick_the_original_effect_index() {
+        let names: Vec<_> = (0..25).map(|i| format!("Effect {i:02}")).collect();
+        let refs: Vec<_> = names.iter().map(String::as_str).collect();
+        let fake = Fake::with(&["Old"], &refs);
+        let mut v = FxView::new(Some(fake.clone()));
+        v.poll(Instant::now());
+        v.open_list(0, true);
+        v.set_order(FxOrder::Type);
+        assert_eq!(v.open.and_then(|o| o.chosen), Some(1), "past the head");
+        key(&mut v, Key::PageDown);
+        assert_eq!(v.open.and_then(|o| o.chosen), Some(11));
+        assert_eq!(v.open.map(|o| o.first), Some(2));
+        key(&mut v, Key::PageUp);
+        key(&mut v, Key::ArrowUp);
+        assert_eq!(v.open.and_then(|o| o.chosen), Some(1));
+        key(&mut v, Key::Character("17".into()));
+        assert_eq!(v.rows[1].1, Choice::Effect(17));
+        key(&mut v, Key::Enter);
+        assert!(!v.list_open());
+        wait(&mut v, &fake, 2);
+        assert_eq!(fake.take(), ["replace 0 Effect 17"]);
+        v.open_list(1, false);
+        v.set_order(FxOrder::Recent);
+        assert_eq!(v.rows[0].1, Choice::Effect(17));
+        key(&mut v, Key::Enter);
+        wait(&mut v, &fake, 4);
+        assert_eq!(fake.take(), ["add Effect 17"]);
+    }
+
+    #[test]
+    fn an_empty_scan_and_recent_actions_remain_keyboard_accessible() {
+        let fake = Fake::with(&[], &[]);
+        let mut v = FxView::new(Some(fake.clone()));
+        v.open_list(0, false);
+        key(&mut v, Key::Enter);
+        assert_eq!(*lock(&fake.scans), 2);
+        v.set_order(FxOrder::Recent);
+        assert_eq!(
+            v.open.and_then(|o| o.chosen),
+            Some(1),
+            "ALL EFFECTS past the blank"
+        );
+        key(&mut v, Key::Enter);
+        assert_eq!(v.preferences.order, FxOrder::Name);
+        assert!(v.list_open());
+    }
+
+    /// The real chooser’s renderer, using the approved mock-up’s effects, for visual review.
+    /// `CA72_FX_SEARCH_PNG=<folder> cargo test -p ca72-plugin the_fx_search_pngs -- --ignored`.
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_fx_search_pngs() {
+        use ca72_panel::strip::fx::FxRenderer;
+        use ca72_panel::{Lettering, Skin};
+        let out =
+            std::path::PathBuf::from(std::env::var_os("CA72_FX_SEARCH_PNG").expect("image folder"));
+        std::fs::create_dir_all(&out).expect("image folder");
+        let entries = [
+            ("Airwindows Consolidated", "Airwindows", "utility", "vst3"),
+            ("ChowMatrix", "chowdsp", "delay", "vst3"),
+            ("ChowTapeModel", "chowdsp", "distortion", "clap"),
+            (
+                "Dragonfly Early Reflections",
+                "Michael Willis",
+                "reverb",
+                "clap",
+            ),
+            ("Dragonfly Hall Reverb", "Michael Willis", "reverb", "clap"),
+            ("Dragonfly Plate Reverb", "Michael Willis", "reverb", "vst3"),
+            ("Dragonfly Room Reverb", "Michael Willis", "reverb", "clap"),
+            ("kHs Chorus", "Kilohearts", "chorus", "vst3"),
+            ("kHs Distortion", "Kilohearts", "distortion", "vst3"),
+            ("kHs Gain", "Kilohearts", "utility", "vst3"),
+            ("OTT", "Xfer Records", "compressor", "vst3"),
+            ("TAL-Chorus-LX", "TAL Software", "chorus", "vst3"),
+            ("ValhallaDelay", "Valhalla DSP", "delay", "vst3"),
+            ("ValhallaRoom", "Valhalla DSP", "reverb", "vst3"),
+            ("ValhallaSupermassive", "Valhalla DSP", "reverb", "vst3"),
+            ("ValhallaVintageVerb", "Valhalla DSP", "reverb", "vst3"),
+        ];
+        let fake = Arc::new(Fake {
+            found: entries
+                .iter()
+                .map(|(name, maker, kind, format)| Listing {
+                    name: (*name).into(),
+                    vendor: (*maker).into(),
+                    format: (*format).into(),
+                    features: vec![(*kind).into()],
+                    key: EffectId {
+                        format: (*format).into(),
+                        path: (*name).into(),
+                        id: (*name).into(),
+                    },
+                })
+                .collect(),
+            ..Fake::default()
+        });
+        for i in [10, 11, 2, 9, 12, 4] {
+            lock(&fake.preferences).chosen(fake.found[i].key.clone());
+        }
+        let mut v = FxView::new(Some(fake));
+        v.open_list(3, false);
+        for (skin, name) in [(Skin::Worn, "worn"), (Skin::Drawn, "drawn")] {
+            for scale in [0.44, 1.0] {
+                let mut r = FxRenderer::new(scale, skin, Lettering::Standard);
+                for (state, order, query) in [
+                    ("search", FxOrder::Name, "rev"),
+                    ("maker", FxOrder::Maker, ""),
+                    ("type", FxOrder::Type, ""),
+                    ("recent", FxOrder::Recent, ""),
+                ] {
+                    v.preferences.order = order;
+                    v.query = Field::new(query);
+                    v.refilter();
+                    if state == "search" {
+                        v.navigate(1);
+                    }
+                    r.render(&v.scene());
+                    r.under()
+                        .last()
+                        .expect("list")
+                        .0
+                        .save_png(out.join(format!("{state}-{name}-{scale}.png")))
+                        .expect("image");
+                }
+            }
+        }
+    }
 
     /// The slots show the chain: an effect's name lit, its tab lit while it plays; one bypassed,
     /// its tab dark; one given up on, restarting or missing, its name dimmed and the reason
