@@ -30,7 +30,10 @@ Pitch tracking assumes a predominant monophonic part. For polyphonic references,
 simultaneous fundamentals independently from spectral spacing; do not interpret monophonic
 YIN or every reed register/harmonic as a played note. Use overlapping MIDI gates with POLY on,
 retain the chord's relative balance in measurements, and validate another chord/take with
-the patch frozen. Overlapping harmonic bands describe aggregate chord energy. Check uncertain octaves and transients
+the patch frozen only when its timbre/register setting is the same. Two repetitions of the
+same chord may use different reed/register settings: split and fit separate presets when
+they do. Matching pitches alone do not establish a shared sound. Overlapping harmonic bands
+describe aggregate chord energy. Check uncertain octaves and transients
 by ear and the harmonic spacing; a full mix does not become a trustworthy transcription.
 If using an existing transcription, identify its provenance and recheck pitches and timing
 against the recording. Reserve some notes or passages for validation after fitting.
@@ -93,6 +96,14 @@ Fit the audible structure, using a small number of changes each iteration:
   note to resolve it. Compare sidebands around several harmonics. Unresolved sidebands are
   null, not proof of absent modulation. Test whether detuned oscillators explain beating
   across several notes; avoid a pair which fits only at one locked phase.
+- For vibrato which grows into a held note, test a repeating LFO with RISE before concluding
+  that a static contour is the best match. Try shallow volume, loudness-sustain and mixer
+  modulation as well as pitch; measure both AM and FM depth over early/late note windows.
+  Average harmonic spectra alone miss missing movement. RISE fades modulation in over its
+  duration; it is not a fixed delay. With RETRIGGER off, overlapping monophonic notes keep
+  one continuous phrase's RISE running. Rate estimates from short windows can be imprecise;
+  removing a polynomial trend does not fully reject slower expression. Do not claim matched
+  AM/FM phase coupling from a phase-independent modulation objective.
 - Use the four LFOs as secondary envelopes when the main contours are insufficient.
   Configure `lfoN_mode: "Env"`, waveform, rate (one cycle's inverse duration), phase, rise,
   polarity, reverse, mono and level through `values`; supply `ca72_render.modulations`

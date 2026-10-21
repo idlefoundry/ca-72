@@ -14419,9 +14419,41 @@ actual ENV completion and a later overlapping polyphonic voice, export/reload, m
 input and bridge liveness. Numeric source zero and late macro EDGES validation were fixed
 in the shared live parser. No DSP changes.
 
-Real flute and unprocessed accordion recordings were fitted, with excluded notes/takes and
-new phrases checked from delivered preset files. The accordion retains a per-voice rising
-ENV saw for its bellows attack; flute LFO trials did not improve the overall selection.
+Real flute and unprocessed accordion recordings were fitted and new phrases rendered from
+delivered files. The first acoustic pass is superseded by the owner's register and vibrato
+corrections below. The accordion retains per-voice rising ENV saws for its bellows attacks.
 Source permissions, methods, measurements, quantized reload differences and remaining
 acoustic limitations: [acoustic validation](mcp-acoustic-validation.md). These are working
 studies for the owner's listening review, not a release or an exact-reproduction claim.
+
+## R-REFERENCE-REGISTERS-RISE. Separate C-major registers and growing flute vibrato
+
+**Owner corrections, 2026-10-21:** the two chords within the same 7.662-second accordion
+reference are both C major with different reed/register settings. Fit each separately;
+do not interpret this as major versus minor or validation of one shared preset. For flute,
+try harder with volume/loudness-sustain modulation and use LFO RISE for growing vibrato.
+
+The original is preserved; sample-exact cuts at 0–3.34 and 3.37–7.661979 s now select distinct
+`Accordion Register 1` and `Accordion Register 2` files. Oscillator reed layers, filter,
+keyboard tracking and attack differ. Prior/revised aggregate chord-band error is
+5.895/5.413 and 4.805/4.424 dB, with fixed gates and no DSP changes. The former take-2
+validation claim is withdrawn. New chords demonstrate each delivered preset's playability;
+they are not additional acoustic matching references.
+
+Sixty new full-phrase flute trials explicitly test shallow looping AM/FM and RISE, rather
+than only slow strong ENV shapes. `Flute Rise Study` uses a 4.2 Hz bipolar triangle, 0.9 s
+RISE, VOLUME depth 3%, TUNE depth 1.2%, and a separate gentle phrase ENV. RETRIGGER off keeps
+the rise running through the continuous legato breath. Slow-envelope error improves from
+about 3.47 to 2.58 dB while average harmonic error stays essentially unchanged. AM-only and
+loudness-sustain alternatives are supplied for listening. Short-window modulation rates
+remain approximate; phase coupling is unverified; the short G4 and acoustic details still
+differ. All comparisons use actual exported-file replay and one common audition gain.
+
+A read-only critic verified original/crop hashes, distinct presets, rendered hashes, levels,
+held-chord checks, links and served assets. Browser checks confirm 15 audio players load.
+The [validation record](mcp-acoustic-validation.md) includes quantized reload errors and
+remaining differences. No new code/DSP, merge, release or personal-library installation.
+
+**Shared skill lesson:** repeated pitches do not imply a shared timbre/register. Growing
+vibrato requires testing repeating LFOs with RISE and measuring AM/FM over time; static
+harmonic averages and slow one-shot envelopes can miss the movement the listener hears.
