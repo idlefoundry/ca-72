@@ -2289,6 +2289,9 @@ pub const fn tempo_window(plate: (f64, f64)) -> (f64, f64, f64, f64) {
     )
 }
 
+/// How wide the TEMPO screen's surround is round its window (the name plate's).
+pub const TEMPO_SURROUND: f64 = crate::strip::NAME_SURROUND;
+
 /// Whether (`x`, `y`) is on the TEMPO screen, its surround included, the panel laid out as
 /// `arrangement` has it.
 pub fn tempo_hit(arrangement: &Arrangement, x: f64, y: f64) -> bool {

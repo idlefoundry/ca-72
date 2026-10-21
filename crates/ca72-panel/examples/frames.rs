@@ -652,6 +652,38 @@ fn lfo(s: f64, panel: &mut Renderer) {
             })
             .collect();
     });
+    // (R-LFO's corrections: every scope's trace moved by a source each frame, as an LFO's
+    // shape or PHASE under modulation is, drawn by the cheaper glow; then by the still one's.)
+    let moved = |i: usize, sc: &mut LfoScene, live: bool| {
+        for (n, c) in sc.columns.iter_mut().enumerate() {
+            c.live = live;
+            let k = 0.07 * i as f64 + n as f64;
+            c.trace = (0..TRACE_POINTS)
+                .map(|j| {
+                    let x = j as f64 / TRACE_POINTS as f64;
+                    let tri = 1.0 - 4.0 * (x - (x + 0.25).floor() + 0.25 - 0.5).abs();
+                    ((1.0 - k.sin().abs()) * (x * 2.0 * std::f64::consts::PI + k).sin()
+                        + k.sin().abs() * tri) as f32
+                })
+                .collect();
+            c.orb = Some(((i as f64 * 0.013 + n as f64 * 0.2) % 1.0, 0.0));
+        }
+    };
+    times("LFO: four traces moved (live glow)", &mut |i, sc| {
+        moved(i, sc, true)
+    });
+    times("LFO: four traces moved (still glow)", &mut |i, sc| {
+        moved(i, sc, false)
+    });
+    times("LFO: one trace moved (live glow)", &mut |i, sc| {
+        sc.columns[2].live = true;
+        let k = 0.07 * i as f64;
+        sc.columns[2].trace = (0..TRACE_POINTS)
+            .map(|j| {
+                ((j as f64 / TRACE_POINTS as f64 * 2.0 * std::f64::consts::PI + k).sin()) as f32
+            })
+            .collect();
+    });
     times("LFO: the page open, nothing changed", &mut |_, _| {});
     // Modulation's overlay over the panel.
     let knob = |p: &str| {
@@ -666,6 +698,7 @@ fn lfo(s: f64, panel: &mut Renderer) {
             .map(|(n, p)| {
                 let (control, at, skirt) = knob(p);
                 KnobRings {
+                    bar: None,
                     control,
                     at,
                     skirt,
@@ -741,6 +774,8 @@ fn lfo(s: f64, panel: &mut Renderer) {
     .collect();
     mtimes("drag: the cord following the pointer", &mut |i, sc| {
         sc.cord = Some(Cord {
+            boxes: Vec::new(),
+            over_box: None,
             from: lfo::places(0).jack,
             to: (1800.0 + 10.0 * i as f64, 300.0 + 4.0 * i as f64),
             colour: colours[0],

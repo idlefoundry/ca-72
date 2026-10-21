@@ -245,6 +245,9 @@ pub struct Column {
     /// lit; off, its trace dims and it has no orb).
     pub uni: bool,
     pub on: bool,
+    /// Its trace drawn from settings a source moves now (decisions.md R-LFO's corrections): drawn
+    /// again whenever they move, by the cheaper glow ([`draw_trace_live`]).
+    pub live: bool,
     /// The trace: the waveform (-1..1; 0..1 UNI) at [`TRACE_POINTS`] even steps over one cycle
     /// from PHASE.
     pub trace: Vec<f32>,
@@ -279,6 +282,7 @@ impl Default for Column {
             orb_rise: 1.0,
             screen: "NOT IN USE".into(),
             in_use: false,
+            live: false,
         }
     }
 }
@@ -331,7 +335,7 @@ struct Tube {
 /// A column's scope as drawn: its trace and colour, the face with the trace on it (the orb's
 /// patches are cut from it), and that with the glass over it (what is laid).
 struct Screen {
-    key: (Vec<f32>, [u8; 3], bool),
+    key: (Vec<f32>, [u8; 3], bool, bool),
     lit: Pixmap,
     shown: Pixmap,
 }
@@ -532,7 +536,7 @@ impl LfoRenderer {
     /// Column `n`'s scope's still screen drawn again if its trace or colour changed: whether it
     /// was.
     fn screen_for(&mut self, n: usize, col: &Column) -> bool {
-        let key = (col.trace.clone(), col.colour, col.on);
+        let key = (col.trace.clone(), col.colour, col.on, col.live);
         if self.screens[n].as_ref().is_some_and(|s| s.key == key) {
             return false;
         }
@@ -542,7 +546,13 @@ impl LfoRenderer {
         let tube = self.tube(col.colour, (w, h));
         let mut lit = tube.base.clone();
         let mut trace = Pixmap::new(w, h).expect("a scope's size");
-        draw_trace(&mut trace, &col.trace, s, col.colour, glass(n));
+        // (A trace a source moves, drawn again as it moves: the glow's layers stroked straight,
+        // without the still trace's blurs, R-LFO's corrections.)
+        if col.live {
+            draw_trace_live(&mut trace, &col.trace, s, col.colour, glass(n));
+        } else {
+            draw_trace(&mut trace, &col.trace, s, col.colour, glass(n));
+        }
         // (Inside the glass's rounded corners only; muted, at a third.)
         for (d, b) in trace
             .data_mut()
@@ -968,6 +978,11 @@ fn merged(mut rects: Vec<[i32; 4]>) -> Vec<[i32; 4]> {
     out
 }
 
+/// How far the trace swings from the glass's middle to a peak (1 or -1), the drawing's units.
+pub fn trace_amplitude() -> f64 {
+    glass(0).3 / 2.0 - TRACE_TOP
+}
+
 /// The trace's point `i` of `k` at `value` (-1..1), in a glass `glass` units in size drawn
 /// `px` pixels in size: its pixels.
 fn trace_point(i: usize, k: usize, value: f64, glass: (f64, f64), px: (u32, u32)) -> (f32, f32) {
@@ -1037,6 +1052,70 @@ fn draw_trace(
         let mut c = Coverage::new(w, h);
         c.stroke(&fast, (1.1 * s32).max(0.6), 0.3);
         c.tint(p, ph.core, 1.0, (0, 0));
+    }
+}
+
+/// [`draw_trace`]'s trace drawn cheaply enough to be drawn again up to 30 times a second while a
+/// source moves what it is drawn from (decisions.md R-LFO's corrections): its halo and bloom
+/// each a few wide strokes of falling light (a brush blurred beforehand, in effect) rather than
+/// a coverage blurred; its core and its jumps as the still one's.
+fn draw_trace_live(
+    p: &mut Pixmap,
+    trace: &[f32],
+    s: f64,
+    colour: [u8; 3],
+    (_, _, gw, gh): (f64, f64, f64, f64),
+) {
+    let k = trace.len();
+    if k < 2 {
+        return;
+    }
+    let (w, h) = (p.width(), p.height());
+    let pts: Vec<(f32, f32)> = (0..k)
+        .map(|i| trace_point(i, k, f64::from(trace[i]), (gw, gh), (w, h)))
+        .collect();
+    let (mut slow, mut fast) = (PathBuilder::new(), PathBuilder::new());
+    let mut open = false;
+    for win in pts.windows(2) {
+        let ((x0, y0), (x1, y1)) = (win[0], win[1]);
+        if (y1 - y0).abs() > 6.0 * (x1 - x0).abs().max(0.01) {
+            fast.move_to(x0, y0);
+            fast.line_to(x0, y1);
+            open = false;
+            continue;
+        }
+        if !open {
+            slow.move_to(x0, y0);
+            open = true;
+        }
+        slow.line_to(x1, y1);
+    }
+    let ph = Phosphor::of(colour);
+    let s32 = s as f32;
+    let line = |p: &mut Pixmap, path: &resvg::tiny_skia::Path, rgb: [u8; 3], width: f32, a: f32| {
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(rgb[0], rgb[1], rgb[2], (a.clamp(0.0, 1.0) * 255.0) as u8);
+        paint.anti_alias = true;
+        let stroke = Stroke {
+            width,
+            line_cap: LineCap::Round,
+            line_join: LineJoin::Round,
+            ..Stroke::default()
+        };
+        p.stroke_path(path, &paint, &stroke, Transform::identity(), None);
+    };
+    if let Some(slow) = slow.finish() {
+        for (width, a) in [(22.0, 0.05), (15.0, 0.07), (9.0, 0.09)] {
+            line(p, &slow, ph.halo, width * s32, a);
+        }
+        for (width, a) in [(6.0, 0.25), (3.6, 0.45)] {
+            line(p, &slow, ph.bloom, width * s32, a);
+        }
+        line(p, &slow, ph.core, (1.9 * s32).max(0.8), 1.0);
+    }
+    if let Some(fast) = fast.finish() {
+        line(p, &fast, ph.bloom, 3.4 * s32, 0.15);
+        line(p, &fast, ph.core, (1.1 * s32).max(0.6), 0.3);
     }
 }
 

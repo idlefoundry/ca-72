@@ -875,7 +875,15 @@ fn lfo_page(
     use ca72_panel::strip::lfo::{self, LfoRenderer};
     let t = std::time::Instant::now();
     let mut page = LfoRenderer::new(scale, skin, lettering);
-    page.render(&lfo_example(), r);
+    let mut scene = lfo_example();
+    // (`CA72_LFO_LIVE=1`: every scope's trace drawn as a moved one's, its cheaper glow:
+    // decisions.md R-LFO's corrections.)
+    if std::env::var("CA72_LFO_LIVE").is_ok_and(|v| v == "1") {
+        for c in &mut scene.columns {
+            c.live = true;
+        }
+    }
+    page.render(&scene, r);
     eprintln!("the LFO page {:?}", t.elapsed());
     let (w, f) = (all.width() as usize, page.frame());
     let top = (lfo::top_px(scale) - r.top_px()) as usize;
@@ -918,6 +926,7 @@ fn lfo_overlay(all: &mut ca72_panel::Pixmap, r: &Renderer, scale: f64, values: &
                 continue;
             };
             scene.knobs.push(KnobRings {
+                bar: None,
                 control,
                 at,
                 skirt,
@@ -964,6 +973,8 @@ fn lfo_overlay(all: &mut ca72_panel::Pixmap, r: &Renderer, scale: f64, values: &
         ];
         let over = knob(&to).map(|(_, at, skirt, _)| (at, skirt));
         scene.cord = Some(Cord {
+            boxes: Vec::new(),
+            over_box: None,
             from: ca72_panel::strip::lfo::places(0).jack,
             to: over.map_or((2281.0, 170.0), |(at, _)| at),
             colour: colour(0),

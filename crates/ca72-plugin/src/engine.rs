@@ -2009,6 +2009,18 @@ impl Engine {
         self.position = p;
     }
 
+    /// The controls with the sources' moves in them now (their shared copies'): what the
+    /// strip's screens read (decisions.md R-LFO). Asleep too (R68), when the voices' are not
+    /// moved but the generators run on.
+    pub fn controls_now(&self) -> Controls {
+        let l = &self.base.lfo;
+        if l.active() {
+            l.modulated(&self.base, &l.source_values(&self.bank.shared_values))
+        } else {
+            self.base
+        }
+    }
+
     /// The tempo the modulation sources have the standalone's TEMPO at now (BPM: in force since
     /// the latest of the LFOs' ticks), if any moves it (decisions.md R-LFO). Never in a plug-in,
     /// whose controls leave TEMPO's assignments out.

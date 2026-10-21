@@ -1034,6 +1034,8 @@ impl Plugin for Ca72 {
             // and the TEMPO screen: moved by a source, where the sources have it now (R-LFO).
             self.meters
                 .publish_tempo(self.engine.tempo().unwrap_or(clock.tempo));
+            // The strip's screens' controls as they play, modulated (R-LFO).
+            self.meters.publish_live(&self.engine.controls_now());
         }
         // The standalone's effects, after the synth and its meters: each effect's block is
         // waited for until a share of the period from the block's start, then the effect

@@ -1273,13 +1273,21 @@ pub struct Scope {
     since: [AtomicU32; LFOS],
     rise: [AtomicU32; LFOS],
     moving: AtomicU8,
+    shape: [AtomicU32; LFOS],
+    offset: [AtomicU32; LFOS],
+    level: [AtomicU32; LFOS],
+    moved: AtomicU8,
 }
 
 /// An LFO as the audio thread last had it: its output (-1..1, after RISE and EDGES, as it
 /// moves its knobs: the latest voice's where MONO is off), where it is in its cycle (0..1,
 /// PHASE included: the scope's trace at `phase` is the waveform there), how long since the
 /// note that last started it (s; the scope's time base starts there), RISE's gain then (0..1),
-/// and whether it moves (assigned, running, not an ENV whose cycle is over).
+/// and whether it moves (assigned, running, not an ENV whose cycle is over); and the settings
+/// its trace is drawn from as they are in force (its WAVEFORM's place along the switch's
+/// travel, PHASE in cycles, LEVEL 0..1), whether a source moves them (R-LFO's corrections: the
+/// owner, 2026-10-20, "the oscilloscope wave isn't changing to match the actual pattern that's
+/// happening at the moment").
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Reading {
     pub value: f32,
@@ -1287,6 +1295,10 @@ pub struct Reading {
     pub since: f32,
     pub rise: f32,
     pub moving: bool,
+    pub shape: f32,
+    pub offset: f32,
+    pub level: f32,
+    pub moved: bool,
 }
 
 impl Scope {
@@ -1299,6 +1311,10 @@ impl Scope {
             since: f(&self.since),
             rise: f(&self.rise),
             moving: self.moving.load(Ordering::Relaxed) & (1 << lfo.min(7)) != 0,
+            shape: f(&self.shape),
+            offset: f(&self.offset),
+            level: f(&self.level),
+            moved: self.moved.load(Ordering::Relaxed) & (1 << lfo.min(7)) != 0,
         }
     }
 
@@ -1308,15 +1324,20 @@ impl Scope {
     }
 
     pub fn publish(&self, r: &[Reading; LFOS]) {
-        let mut moving = 0u8;
+        let (mut moving, mut moved) = (0u8, 0u8);
         for (k, r) in r.iter().enumerate() {
             self.value[k].store(r.value.to_bits(), Ordering::Relaxed);
             self.phase[k].store(r.phase.to_bits(), Ordering::Relaxed);
             self.since[k].store(r.since.to_bits(), Ordering::Relaxed);
             self.rise[k].store(r.rise.to_bits(), Ordering::Relaxed);
+            self.shape[k].store(r.shape.to_bits(), Ordering::Relaxed);
+            self.offset[k].store(r.offset.to_bits(), Ordering::Relaxed);
+            self.level[k].store(r.level.to_bits(), Ordering::Relaxed);
             moving |= u8::from(r.moving) << k;
+            moved |= u8::from(r.moved) << k;
         }
         self.moving.store(moving, Ordering::Relaxed);
+        self.moved.store(moved, Ordering::Relaxed);
     }
 }
 
@@ -1786,6 +1807,10 @@ impl Gen {
                 s.rise_gain(self.since) as f32
             },
             moving,
+            shape: s.at as f32,
+            offset: s.phase as f32,
+            level: s.level as f32,
+            moved: false,
         }
     }
 }
@@ -1877,6 +1902,15 @@ impl Lfos {
             .flatten()
             .flatten()
             .any(|a| a.depth != 0.0 && a.target.ticks())
+    }
+
+    /// Whether a source moves LFO `k`'s knobs its trace is drawn from: PHASE, its CONTINUOUS
+    /// shape, LEVEL.
+    pub fn trace_moved(&self, k: usize) -> bool {
+        self.to.iter().flatten().flatten().any(|a| {
+            a.depth != 0.0
+                && matches!(a.target.lfo_knob(), Some((n, LfoKnob::Phase | LfoKnob::Shape | LfoKnob::Level)) if n == k)
+        })
     }
 
     /// Whether any source moves TEMPO.
@@ -2091,6 +2125,9 @@ impl Bank {
             let mut r = g.reading(s, assigned && g.moving(s));
             r.value *= s.level as f32;
             r.rise *= s.level as f32;
+            // (What its trace is drawn from, as in force; moved where a source moves them.)
+            (r.shape, r.offset, r.level) = (s.at as f32, s.phase as f32, s.level as f32);
+            r.moved = self.cross.on && l.trace_moved(k);
             r
         })
     }
