@@ -385,7 +385,6 @@ impl Ca72 {
         });
     }
 
-    /// What the arpeggiator has due by the block's sample `at` played.
     /// The tempo `bpm` from sample `at` of a block of `len` (TEMPO moved by a modulation
     /// source, decisions.md R-LFO): the arpeggiator's beats, oscillators 2's and 3's and the
     /// timed LFOs' clock go on from where they were at it.
@@ -397,6 +396,7 @@ impl Ca72 {
         }
     }
 
+    /// What the arpeggiator has due by the block's sample `at` played.
     fn arp_until(&mut self, at: usize) {
         let engine = &mut self.engine;
         self.arp
