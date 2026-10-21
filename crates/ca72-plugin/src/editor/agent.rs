@@ -143,6 +143,10 @@ impl Editing {
             "modulation.list" => Ok(crate::agent::modulation::list(&self.params)),
             "modulation.set" => crate::agent::modulation::set(&self.params, args),
             "modulation.remove" => crate::agent::modulation::remove(&self.params, args),
+            // (The standalone's effects' parameters and pins: R-FX-PARAMS.)
+            "effects.parameters" => crate::agent::modulation::effect_params(&self.params, args),
+            "effects.pin" => crate::agent::modulation::pin(&self.params, args),
+            "effects.unpin" => crate::agent::modulation::unpin(&self.params, args),
             "audio.get" => Ok(audio_state()),
             "version" => self.version(args),
             other => Err(ApiError::new(
@@ -161,6 +165,7 @@ impl Editing {
                     | "settings.get"
                     | "midi.list"
                     | "modulation.list"
+                    | "effects.parameters"
                     | "audio.get"
                     | "presets.list"
             )

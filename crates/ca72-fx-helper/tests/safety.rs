@@ -94,6 +94,7 @@ fn slot(path: &Path, format: &str, plugin: &str, name: &str) -> SavedSlot {
         state: None,
         disabled: None,
         set_aside: None,
+        pins: Vec::new(),
     }
 }
 

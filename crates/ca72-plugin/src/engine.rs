@@ -1624,6 +1624,8 @@ pub struct Engine {
     base: Controls,
     bank: Box<crate::lfo::Bank>,
     lfo_dt: f64,
+    /// The present block's points for the effects' pins (decisions.md R-FX-PARAMS).
+    fx: Box<FxPoints>,
     /// The host samples played since the engine was prepared at its rate, and where the
     /// present block began among them: the time the LFOs' ticks keep (R-LFO's addendum).
     played: u64,
@@ -1661,6 +1663,7 @@ impl Engine {
             base: controls,
             bank: Box::default(),
             lfo_dt: 0.0,
+            fx: Box::default(),
             played: 0,
             block_from: 0,
             controls,
@@ -1999,6 +2002,13 @@ impl Engine {
         self.position = p;
         (self.since, self.cursor) = (0.0, 0.0);
         self.block_from = self.played;
+        self.fx.clear();
+    }
+
+    /// The present block's points for the effects' pins (decisions.md R-FX-PARAMS): where the
+    /// sources moving them were read, and each pin's offset there.
+    pub fn fx_points(&self) -> &FxPoints {
+        &self.fx
     }
 
     /// Each oscillator's place on the clock `at` host samples after the block's start, and its
@@ -2131,6 +2141,14 @@ impl Engine {
             self.bank.advance(l, &per, n, rate, voices);
         }
         self.lfo_dt = n as f64 / rate;
+        // The effects' pins' offsets at this step, the sources' shared values (an effect has
+        // no voices), asleep or not: an effect's tail plays on (R-FX-PARAMS).
+        let moved = l.fx_moved();
+        if moved != 0 {
+            let values = l.source_values(&self.bank.shared_values);
+            let at = self.played.saturating_sub(self.block_from) as u32;
+            self.fx.push(moved, at, l.fx_offsets(&values));
+        }
         if self.rest.asleep {
             return;
         }
@@ -6885,3 +6903,45 @@ mod lfo_tests;
 #[cfg(test)]
 #[path = "engine_lfo_cross_tests.rs"]
 mod lfo_cross_tests;
+
+/// The most points a block keeps for the effects' pins: one each [`crate::lfo::STEP`] samples
+/// of an 8192-sample block.
+pub const FX_POINTS: usize = 256;
+
+/// A block's points for the effects' pins (decisions.md R-FX-PARAMS): at each step of the LFOs,
+/// its frame in the block and each pin's offset on its travel (the sum of depth × source), and
+/// which pins some source moves. Fixed in size: nothing is allocated on the audio thread.
+#[derive(Clone, Debug)]
+pub struct FxPoints {
+    pub n: usize,
+    pub moved: u32,
+    pub at: [u32; FX_POINTS],
+    pub offsets: [[f32; crate::lfo::FX_PINS]; FX_POINTS],
+}
+
+impl Default for FxPoints {
+    fn default() -> Self {
+        FxPoints {
+            n: 0,
+            moved: 0,
+            at: [0; FX_POINTS],
+            offsets: [[0.0; crate::lfo::FX_PINS]; FX_POINTS],
+        }
+    }
+}
+
+impl FxPoints {
+    fn clear(&mut self) {
+        self.n = 0;
+        self.moved = 0;
+    }
+
+    fn push(&mut self, moved: u32, at: u32, offsets: [f32; crate::lfo::FX_PINS]) {
+        self.moved |= moved;
+        if self.n < FX_POINTS {
+            self.at[self.n] = at;
+            self.offsets[self.n] = offsets;
+            self.n += 1;
+        }
+    }
+}

@@ -26,10 +26,11 @@ use clap_sys::ext::note_name::{
 };
 use clap_sys::ext::note_ports::{CLAP_EXT_NOTE_PORTS, clap_plugin_note_ports};
 use clap_sys::ext::params::{
-    CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_ENUM, CLAP_PARAM_IS_HIDDEN,
-    CLAP_PARAM_IS_MODULATABLE, CLAP_PARAM_IS_READONLY, CLAP_PARAM_IS_STEPPED,
-    CLAP_PARAM_RESCAN_ALL, CLAP_PARAM_RESCAN_INFO, CLAP_PARAM_RESCAN_VALUES, clap_host_params,
-    clap_param_clear_flags, clap_param_info, clap_param_rescan_flags, clap_plugin_params,
+    CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_BYPASS, CLAP_PARAM_IS_ENUM,
+    CLAP_PARAM_IS_HIDDEN, CLAP_PARAM_IS_MODULATABLE, CLAP_PARAM_IS_READONLY, CLAP_PARAM_IS_STEPPED,
+    CLAP_PARAM_RESCAN_ALL, CLAP_PARAM_RESCAN_INFO, CLAP_PARAM_RESCAN_TEXT,
+    CLAP_PARAM_RESCAN_VALUES, clap_host_params, clap_param_clear_flags, clap_param_info,
+    clap_param_rescan_flags, clap_plugin_params,
 };
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_host_state, clap_plugin_state};
 use clap_sys::ext::tail::{CLAP_EXT_TAIL, clap_plugin_tail};
@@ -194,6 +195,7 @@ impl Library {
             restart: AtomicBool::new(false),
             dirty: AtomicBool::new(false),
             values: AtomicBool::new(false),
+            infos: AtomicBool::new(false),
             names: Arc::new(AtomicBool::new(false)),
             edits: Arc::new(std::sync::Mutex::new(Vec::with_capacity(EDITS_SHARED))),
             flush: Arc::new(AtomicBool::new(false)),
@@ -269,6 +271,9 @@ struct HostData {
     /// its editor): it rescanned their values (`clap_host_params.rescan`) or marked its
     /// state dirty (`clap_host_state.mark_dirty`). Read again for the project.
     values: AtomicBool,
+    /// Its parameters' descriptions or texts changed (`clap_host_params.rescan` of info, text
+    /// or all): listed again by the host (PATCHES.md change 5).
+    infos: AtomicBool,
     /// Its names for its keys may have changed (D216): the plugin said so
     /// (`clap_host_note_name.changed`, a parameter rescan) or edited a parameter itself
     /// (an output parameter event, as its editor sends). Shared with its processor.
@@ -403,6 +408,9 @@ unsafe extern "C" fn host_params_rescan(h: *const clap_host, flags: clap_param_r
     }
     if flags & (CLAP_PARAM_RESCAN_VALUES | CLAP_PARAM_RESCAN_ALL) != 0 {
         d.values.store(true, Ordering::Release);
+    }
+    if flags & (CLAP_PARAM_RESCAN_INFO | CLAP_PARAM_RESCAN_TEXT | CLAP_PARAM_RESCAN_ALL) != 0 {
+        d.infos.store(true, Ordering::Release);
     }
 }
 
@@ -540,9 +548,19 @@ impl Instance {
             if !ok {
                 continue;
             }
+            let stepped = info.flags & CLAP_PARAM_IS_STEPPED != 0;
             out.push(ParamInfo {
                 id: info.id,
                 name: array_str(&info.name),
+                short: String::new(),
+                units: String::new(),
+                steps: if stepped {
+                    (info.max_value - info.min_value).round().max(0.0) as u32
+                } else {
+                    0
+                },
+                read_only: info.flags & CLAP_PARAM_IS_READONLY != 0,
+                bypass: info.flags & CLAP_PARAM_IS_BYPASS != 0,
                 module: array_str(&info.module),
                 min: info.min_value,
                 max: info.max_value,
@@ -783,6 +801,31 @@ impl Instance {
     /// its own doing (D228: a rescan of values, its state marked dirty).
     pub fn take_values_changed(&self) -> bool {
         self.host.values.swap(false, Ordering::AcqRel)
+    }
+
+    /// Whether it rescanned its parameters' descriptions or texts since the last call
+    /// (PATCHES.md change 5).
+    pub fn take_params_changed(&self) -> bool {
+        self.host.infos.swap(false, Ordering::AcqRel)
+    }
+
+    /// Its text for each value (plain; PATCHES.md change 5): `value_to_text`.
+    pub fn param_text(&self, values: &[(u32, f64)]) -> Vec<Option<String>> {
+        let Some(f) = self
+            .ext::<clap_plugin_params>(CLAP_EXT_PARAMS)
+            .and_then(|e| e.value_to_text)
+        else {
+            return vec![None; values.len()];
+        };
+        values
+            .iter()
+            .map(|(id, v)| {
+                let mut buf = [0 as c_char; 256];
+                // SAFETY: a parameter query on the main thread; `buf` holds its capacity.
+                let ok = unsafe { f(self.plugin, *id, *v, buf.as_mut_ptr(), buf.len() as u32) };
+                ok.then(|| array_str(&buf).trim().to_owned())
+            })
+            .collect()
     }
 
     /// Every parameter's value as it has it now (D228), plain (its units); not those it

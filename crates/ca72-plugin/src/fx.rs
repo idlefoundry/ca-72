@@ -79,6 +79,10 @@ pub fn install_host(
     cache: Option<std::path::PathBuf>,
     safe: Option<ca72_fx::launch::SafeStart>,
 ) {
+    let patch = locked(&PATCH).clone();
+    if let Some(p) = patch {
+        chain.set_pin_mods(std::sync::Arc::new(PatchMods(p)));
+    }
     *locked(&HOST) = Some(std::sync::Arc::new(Host {
         chain,
         helper,
@@ -331,4 +335,127 @@ impl crate::fx_view::Effects for Host {
     fn safe_start(&self) -> Option<crate::fx_view::SafeStart> {
         *locked(&self.safe)
     }
+
+    fn params(&self, slot: usize) -> Result<Vec<crate::fx_view::ParamRow>, String> {
+        let pins = self.chain.pins();
+        Ok(self
+            .chain
+            .list_params(slot)?
+            .into_iter()
+            .filter(ca72_fx::pinnable)
+            .map(|p| crate::fx_view::ParamRow {
+                pinned: pins
+                    .iter()
+                    .find(|x| x.slot == slot && x.id == p.id)
+                    .map(|x| x.target),
+                value: p.value.map_or(0.0, |v| p.normalized(v)),
+                plain: p.value.unwrap_or(p.default),
+                id: p.id,
+                name: p.name,
+                short: p.short,
+                units: p.units,
+                steps: p.steps,
+            })
+            .collect())
+    }
+
+    fn param_text(&self, slot: usize, values: &[(u32, f64)]) -> Vec<Option<String>> {
+        self.chain
+            .param_text(slot, values)
+            .unwrap_or_else(|_| vec![None; values.len()])
+    }
+
+    fn pins(&self) -> Option<Vec<crate::fx_view::PinInfo>> {
+        let pins = self.chain.try_pins()?;
+        publish_pinned(&pins);
+        Some(pins.into_iter().map(pin_info).collect())
+    }
+
+    fn pin(&self, slot: usize, id: u32) -> Result<usize, String> {
+        let t = self.chain.pin(slot, id);
+        publish_pinned(&self.chain.pins());
+        t
+    }
+
+    fn unpin(&self, target: usize) -> Result<(), String> {
+        let r = self.chain.unpin(target);
+        publish_pinned(&self.chain.pins());
+        r
+    }
+
+    fn set_pin_value(&self, target: usize, travel: f64) -> Result<(), String> {
+        self.chain.set_pin_value(target, travel)
+    }
 }
+
+fn pin_info(p: ca72_fx::PinStatus) -> crate::fx_view::PinInfo {
+    crate::fx_view::PinInfo {
+        target: p.target,
+        slot: p.slot,
+        effect: p.effect,
+        id: p.id,
+        name: p.name,
+        short: p.short,
+        value: p.value,
+        plain: p.base,
+        steps: p.steps,
+        live: p.live,
+        missing: p.missing,
+    }
+}
+
+/// Which pin targets can take a source now ([`crate::lfo::FX_PINNED`]): those of effects
+/// that run and have the parameter.
+fn publish_pinned(pins: &[ca72_fx::PinStatus]) {
+    let bits = pins
+        .iter()
+        .filter(|p| p.live)
+        .fold(0u32, |b, p| b | 1 << p.target);
+    crate::lfo::FX_PINNED.store(bits, std::sync::atomic::Ordering::Release);
+}
+
+/// The patch's side of the pins' assignments (decisions.md R-FX-PARAMS): the chain reads what
+/// moves each pin from the patch when it is saved, and gives it back when it is restored.
+struct PatchMods(std::sync::Arc<crate::lfo::Patch>);
+
+impl ca72_fx::PinMods for PatchMods {
+    fn get(&self, target: usize) -> Vec<(String, f32)> {
+        crate::lfo::Source::all()
+            .filter_map(|s| {
+                self.0
+                    .depth(s, crate::lfo::Target::Fx(target))
+                    .map(|d| (s.id(), d))
+            })
+            .collect()
+    }
+
+    fn set(&self, target: usize, mods: &[(String, f32)]) {
+        let t = crate::lfo::Target::Fx(target.min(crate::lfo::FX_PINS - 1));
+        for s in crate::lfo::Source::all() {
+            self.0.remove(s, t);
+        }
+        for (id, depth) in mods {
+            if let Some(s) = crate::lfo::Source::of_id(id) {
+                let _ = self.0.assign(s, t, *depth);
+            }
+        }
+    }
+
+    fn revision(&self) -> u64 {
+        u64::from(self.0.fx_changes())
+    }
+}
+
+static PATCH: Mutex<Option<std::sync::Arc<crate::lfo::Patch>>> = Mutex::new(None);
+
+/// The synth instance's patch, whose assignments move the pins: given to the chain (now, or
+/// when it is installed).
+pub(crate) fn bind_patch(patch: std::sync::Arc<crate::lfo::Patch>) {
+    *locked(&PATCH) = Some(patch.clone());
+    if let Some(h) = host() {
+        h.chain.set_pin_mods(std::sync::Arc::new(PatchMods(patch)));
+        publish_pinned(&h.chain.pins());
+    }
+}
+
+const _: () = assert!(ca72_fx::MAX_PINS == crate::lfo::FX_PINS);

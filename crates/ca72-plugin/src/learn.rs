@@ -93,7 +93,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 150] = [
+pub const LEARNABLE: [Learnable; 166] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -267,6 +267,24 @@ pub const LEARNABLE: [Learnable; 150] = [
     knob("lfo2_level", "LFO 2 LEVEL"),
     knob("lfo3_level", "LFO 3 LEVEL"),
     knob("lfo4_level", "LFO 4 LEVEL"),
+    // The standalone's effects' pins, learned by the pin (decisions.md R-FX-PARAMS): the
+    // controller follows the pin, not its slot.
+    knob("fx1", "EFFECT PIN 1"),
+    knob("fx2", "EFFECT PIN 2"),
+    knob("fx3", "EFFECT PIN 3"),
+    knob("fx4", "EFFECT PIN 4"),
+    knob("fx5", "EFFECT PIN 5"),
+    knob("fx6", "EFFECT PIN 6"),
+    knob("fx7", "EFFECT PIN 7"),
+    knob("fx8", "EFFECT PIN 8"),
+    knob("fx9", "EFFECT PIN 9"),
+    knob("fx10", "EFFECT PIN 10"),
+    knob("fx11", "EFFECT PIN 11"),
+    knob("fx12", "EFFECT PIN 12"),
+    knob("fx13", "EFFECT PIN 13"),
+    knob("fx14", "EFFECT PIN 14"),
+    knob("fx15", "EFFECT PIN 15"),
+    knob("fx16", "EFFECT PIN 16"),
     Learnable {
         id: "previous_preset",
         label: "PREVIOUS PRESET",
@@ -278,6 +296,18 @@ pub const LEARNABLE: [Learnable; 150] = [
         kind: Kind::Action,
     },
 ];
+
+/// The effects' pin (0 to 15) a learnable id is, if it is one (`fx1` to `fx16`: R-FX-PARAMS).
+pub fn fx_pin(id: &str) -> Option<usize> {
+    let k: usize = id.strip_prefix("fx")?.parse().ok()?;
+    (1..=crate::lfo::FX_PINS).contains(&k).then(|| k - 1)
+}
+
+/// Whether learnable `i` is an effects' pin: the standalone's alone (its learning list leaves
+/// them out where there are no effects).
+pub fn is_fx_pin(i: usize) -> bool {
+    LEARNABLE.get(i).is_some_and(|l| fx_pin(l.id).is_some())
+}
 
 pub fn action(i: usize) -> Option<i32> {
     match LEARNABLE.get(i)?.id {

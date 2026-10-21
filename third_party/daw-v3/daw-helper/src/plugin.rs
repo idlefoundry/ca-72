@@ -177,6 +177,24 @@ impl Instance {
         }
     }
 
+    /// Whether it said since the last call that its parameters' names or list changed
+    /// (PATCHES.md change 5).
+    pub fn take_params_changed(&self) -> bool {
+        match self {
+            Instance::Clap(i) => i.take_params_changed(),
+            Instance::Vst3(i) => i.take_params_changed(),
+        }
+    }
+
+    /// The plugin's own text for each (parameter, value in its units) pair (PATCHES.md
+    /// change 5); `None` where it gave none.
+    pub fn param_text(&self, values: &[(u32, f64)]) -> Vec<Option<String>> {
+        match self {
+            Instance::Clap(i) => i.param_text(values),
+            Instance::Vst3(i) => i.param_text(values),
+        }
+    }
+
     /// Every parameter's value now (D228), in its units.
     pub fn param_values(&self) -> Vec<(u32, f64)> {
         match self {

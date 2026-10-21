@@ -16,11 +16,21 @@
 //! ([`Disabled`]), and is not loaded at the next start until the player tries it again; one
 //! whose saved settings crash it can be loaded without them, the settings kept
 //! ([`SavedSlot::set_aside`]). A safe start puts the chain in place without loading any of it.
+//!
+//! **Pinned parameters** (decisions.md R-FX-PARAMS): up to [`PINS_PER_SLOT`] of an effect's
+//! parameters are pinned, each to one of [`MAX_PINS`] fixed targets (the synth's `fx1` to
+//! `fx16`) that stays its own while its effect moves, so that what moves it is saved with it.
+//! A pin's base is the plug-in's own value (its window's edits, the drawer's knob, a learned
+//! controller), saved with the slot ([`SavedPin`]) and given back after every load and restore.
+//! The synth's modulation reaches a pin as timed points ([`Runner::process_modulated`]):
+//! CLAP's own modulation where the parameter takes it, else base plus offset (VST3: to its
+//! processor only). A pin of an effect missing, turned off or restarting does nothing, kept.
 
 use crate::node::Node;
 use crate::sandbox::{self, Fault, Instance, LoadError, Sandbox, SandboxOptions, lock};
 use crate::{Mode, catalog};
 use daw_ipc::MAX_BLOCK;
+use daw_ipc::layout::{EV_PARAM, EV_PARAM_MOD};
 use daw_ipc::protocol::{self, Op};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -30,6 +40,15 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The chain's length (the owner, 2026-10-18).
 pub const MAX_SLOTS: usize = 4;
+
+/// The parameters an effect pins at most (the owner, 2026-10-20: B1, "up to 4 pinned
+/// parameters per effect"), and the pins' fixed targets: four an effect.
+pub const PINS_PER_SLOT: usize = 4;
+pub const MAX_PINS: usize = MAX_SLOTS * PINS_PER_SLOT;
+
+/// A pin's modulation points a block sends at most: one every 32 samples, thinned past
+/// 1024-sample blocks (R-FX-PARAMS).
+pub const PIN_POINTS: usize = 32;
 
 /// The saved file's format.
 pub const FORMAT: u32 = 1;
@@ -61,8 +80,71 @@ fn one() -> u32 {
     1
 }
 
+/// A pinned parameter as the session keeps it, beside its effect's state (decisions.md
+/// R-FX-PARAMS): what a preset that carries the chain carries of it too.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedPin {
+    /// The plug-in's parameter ID.
+    pub id: u32,
+    /// Its name as the plug-in last gave it (shown while the effect is missing).
+    pub name: String,
+    /// Its base: its value as the player set it, in the plug-in's units (a VST3 parameter's
+    /// normalized, a CLAP parameter's plain); given to the plug-in after its state.
+    #[serde(default)]
+    pub base: Option<f64>,
+    /// Its target, 0 to [`MAX_PINS`] less 1 (the synth's `fx1` to `fx16`).
+    #[serde(default)]
+    pub target: Option<usize>,
+    /// What moves it: each source's ID and depth (the synth's assignments, -1..1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mods: Vec<(String, f32)>,
+}
+
+/// The synth's side of the pins' assignments (decisions.md R-FX-PARAMS): the chain knows its
+/// pins, the synth what moves them. Read when the chain is saved, given when it is restored.
+pub trait PinMods: Send + Sync {
+    /// The assignments to target `target`: each source's ID and depth.
+    fn get(&self, target: usize) -> Vec<(String, f32)>;
+    /// These in place of target `target`'s (none: it is moved by nothing).
+    fn set(&self, target: usize, mods: &[(String, f32)]);
+    /// Moves whenever any pin's assignments change (the chain is saved again).
+    fn revision(&self) -> u64;
+}
+
+/// Whether a player may pin a parameter: one a player could automate, not hidden, read-only,
+/// a program change or the plug-in's bypass (its slot's ON tab is the bypass).
+pub fn pinnable(p: &protocol::ParamInfo) -> bool {
+    p.automatable && !p.hidden && !p.read_only && !p.bypass && !p.program
+}
+
+/// A pinned parameter as the drawer, the editor and the agents see it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PinStatus {
+    /// Its target, 0 to [`MAX_PINS`] less 1.
+    pub target: usize,
+    /// Its effect's place now, and name.
+    pub slot: usize,
+    pub effect: String,
+    pub id: u32,
+    /// The plug-in's name for it (its last listing's, else the saved one), and short name.
+    pub name: String,
+    pub short: String,
+    /// Its base, in the plug-in's units, and as a share of its travel (0..1).
+    pub base: Option<f64>,
+    pub value: f64,
+    /// Its steps past its first value (0: continuous).
+    pub steps: u32,
+    /// Its effect runs and has it: it takes modulation now. Not: dimmed and inert, its
+    /// assignments kept.
+    pub live: bool,
+    /// Its effect runs but no longer has it (a plug-in updated): MISSING.
+    pub missing: bool,
+    /// The plug-in's description of it, if its effect was listed here.
+    pub info: Option<protocol::ParamInfo>,
+}
+
 /// An effect as the session keeps it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SavedSlot {
     /// `clap` or `vst3`.
     pub format: String,
@@ -86,10 +168,13 @@ pub struct SavedSlot {
     /// may take it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub set_aside: Option<String>,
+    /// Its pinned parameters, in the order pinned (decisions.md R-FX-PARAMS).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pins: Vec<SavedPin>,
 }
 
 /// The chain as the session keeps it: `effects.json` in the standalone's session folder.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SavedChain {
     pub format: u32,
     pub slots: Vec<SavedSlot>,
@@ -209,11 +294,55 @@ pub struct SlotStatus {
     pub position: i64,
 }
 
-/// A slot on the audio thread.
+/// A slot on the audio thread: its slot's own number, which its pins name.
 #[derive(Debug)]
 pub struct Stage {
+    id: u64,
     node: Option<Box<Node>>,
     bypass: Arc<AtomicBool>,
+}
+
+/// How a pin's modulation reaches its plug-in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum How {
+    /// Not pinned, or its effect not listed.
+    #[default]
+    None,
+    /// VST3: an `EV_PARAM_MOD` amount on the normalized travel, which the helper adds to
+    /// the base for the processor alone.
+    Normalized,
+    /// CLAP, a modulatable parameter: its own modulation, an amount in its units.
+    Plain,
+    /// CLAP, not modulatable: base plus offset as its value (`EV_PARAM`).
+    Value,
+}
+
+/// A pin as the audio thread has it.
+#[derive(Debug, Clone, Copy, Default)]
+struct PinRt {
+    /// Its stage's ([`Stage::id`]; 0: none).
+    stage: u64,
+    param: u32,
+    how: How,
+    min: f64,
+    max: f64,
+    stepped: bool,
+    /// Its base, a share of its travel.
+    base: f64,
+}
+
+impl PinRt {
+    /// Its plain value at `travel` (0..1).
+    fn plain(&self, travel: f64) -> f64 {
+        let t = travel.clamp(0.0, 1.0);
+        match self.how {
+            How::Normalized => t,
+            _ => {
+                let v = self.min + (self.max - self.min) * t;
+                if self.stepped { v.round() } else { v }
+            }
+        }
+    }
 }
 
 enum Msg {
@@ -237,6 +366,11 @@ enum Msg {
     Node {
         at: usize,
         stage: Stage,
+    },
+    /// Pin target `target` as this (R-FX-PARAMS).
+    Pin {
+        target: usize,
+        pin: PinRt,
     },
 }
 
@@ -272,10 +406,21 @@ struct Slot {
     error: Option<String>,
     phase: Phase,
     try_failed: Option<Instant>,
+    /// Its parameters as it last listed them (none until it is loaded here).
+    params: Vec<protocol::ParamInfo>,
+}
+
+/// Which slot and parameter a pin target is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PinRef {
+    slot: u64,
+    id: u32,
 }
 
 struct Core {
     slots: Vec<Slot>,
+    /// Each pin target's slot and parameter (R-FX-PARAMS).
+    pins: [Option<PinRef>; MAX_PINS],
     /// The sample rate and largest block effects run at now, and whether an audio device
     /// has given them.
     rate: f64,
@@ -285,6 +430,57 @@ struct Core {
 impl Core {
     fn find(&self, id: u64) -> Option<usize> {
         self.slots.iter().position(|s| s.id == id)
+    }
+
+    /// The target slot `slot`'s parameter `id` is pinned to.
+    fn target_of(&self, slot: u64, id: u32) -> Option<usize> {
+        self.pins
+            .iter()
+            .position(|p| *p == Some(PinRef { slot, id }))
+    }
+
+    /// Pin target `target`'s slot's place, and its saved pin there.
+    fn pin(&self, target: usize) -> Option<(usize, &SavedPin)> {
+        let r = (*self.pins.get(target)?)?;
+        let at = self.find(r.slot)?;
+        let pin = self.slots[at].saved.pins.iter().find(|p| p.id == r.id)?;
+        Some((at, pin))
+    }
+
+    fn pin_mut(&mut self, target: usize) -> Option<(usize, &mut SavedPin)> {
+        let r = (*self.pins.get(target)?)?;
+        let at = self.find(r.slot)?;
+        let pin = self.slots[at]
+            .saved
+            .pins
+            .iter_mut()
+            .find(|p| p.id == r.id)?;
+        Some((at, pin))
+    }
+
+    /// Pin target `target` as the audio thread is to have it.
+    fn pin_rt(&self, target: usize) -> PinRt {
+        let Some((at, pin)) = self.pin(target) else {
+            return PinRt::default();
+        };
+        let slot = &self.slots[at];
+        let Some(info) = slot.params.iter().find(|p| p.id == pin.id) else {
+            return PinRt::default();
+        };
+        let how = match slot.saved.format.as_str() {
+            "vst3" => How::Normalized,
+            _ if info.modulatable => How::Plain,
+            _ => How::Value,
+        };
+        PinRt {
+            stage: slot.id,
+            param: pin.id,
+            how,
+            min: info.min,
+            max: info.max,
+            stepped: info.stepped,
+            base: pin.base.map_or(0.0, |b| info.normalized(b)),
+        }
     }
 }
 
@@ -305,6 +501,16 @@ struct Shared {
     /// The application is closing: nothing is loaded from now on.
     closing: AtomicBool,
     next_id: AtomicU64,
+    /// The synth's side of the pins' assignments, once it has given it.
+    mods: Mutex<Option<Arc<dyn PinMods>>>,
+    /// Moves when a pin's base, name or list changes; the revisions last saved, of it and of
+    /// the assignments.
+    pins_rev: AtomicU64,
+    saved_pins: AtomicU64,
+    saved_mods: AtomicU64,
+    /// The bases a learned controller gave the pins on the audio thread (plain bits;
+    /// `u64::MAX`: none), until the housekeeping takes them.
+    learnt: Arc<[AtomicU64; MAX_PINS]>,
 }
 
 /// The chain's control side.
@@ -326,6 +532,10 @@ pub struct Runner {
     to_control: rtrb::Producer<Stage>,
     stages: Vec<Stage>,
     frame: i64,
+    /// The pins (R-FX-PARAMS), and those that were moved in the last block.
+    pins: [PinRt; MAX_PINS],
+    moved: u32,
+    learnt: Arc<[AtomicU64; MAX_PINS]>,
 }
 
 impl std::fmt::Debug for Runner {
@@ -354,6 +564,7 @@ impl Chain {
             sandbox: Sandbox::new(opts.sandbox.clone()),
             core: Mutex::new(Core {
                 slots: Vec::new(),
+                pins: [None; MAX_PINS],
                 rate: opts.provisional_rate,
                 block: MAX_BLOCK,
             }),
@@ -366,6 +577,11 @@ impl Chain {
             keep_file: AtomicBool::new(false),
             closing: AtomicBool::new(false),
             next_id: AtomicU64::new(1),
+            mods: Mutex::new(None),
+            pins_rev: AtomicU64::new(0),
+            saved_pins: AtomicU64::new(0),
+            saved_mods: AtomicU64::new(0),
+            learnt: Arc::new(std::array::from_fn(|_| AtomicU64::new(u64::MAX))),
         });
         let weak = Arc::downgrade(&shared);
         let _ = std::thread::Builder::new()
@@ -377,6 +593,9 @@ impl Chain {
             to_control,
             stages: Vec::with_capacity(MAX_SLOTS),
             frame: 0,
+            pins: [PinRt::default(); MAX_PINS],
+            moved: 0,
+            learnt: shared.learnt.clone(),
         };
         (Chain { shared }, runner)
     }
@@ -428,7 +647,7 @@ impl Chain {
         };
         let label = saved.name.clone();
         // Loaded at the rate the chain runs at, again if the device changed it meanwhile.
-        let (mut core, inst) = loop {
+        let (mut core, inst, listed) = loop {
             let rate = {
                 let core = lock(&shared.core);
                 fits(&core)?;
@@ -446,6 +665,8 @@ impl Chain {
                     MAX_BLOCK as u32,
                 )
                 .map_err(|e| e.message)?;
+            // (Listed again with its values as its state left them: R-FX-PARAMS.)
+            let listed = inst.list_params().ok();
             let core = lock(&shared.core);
             if let Err(e) = fits(&core) {
                 shared.sandbox.unload(&inst);
@@ -456,16 +677,19 @@ impl Chain {
                 shared.sandbox.unload(&inst);
                 continue;
             }
-            break (core, inst);
+            break (core, inst, listed);
         };
         let at = replace.unwrap_or(core.slots.len());
+        let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
         let stage = Stage {
+            id,
             node: Some(Box::new(shared.node(&inst, core.block))),
             bypass: bypass.clone(),
         };
         let slot = Slot {
-            id: shared.next_id.fetch_add(1, Ordering::Relaxed),
+            id,
             saved,
+            params: listed.unwrap_or_else(|| inst.info.params.clone()),
             inst: Some(inst),
             bypass,
             error: None,
@@ -499,6 +723,10 @@ impl Chain {
                 None
             }
         };
+        // (The effect replaced takes its pins with it.)
+        if let Some(o) = &old {
+            shared.free_pins(&mut core, o.id);
+        }
         drop(core);
         if let Some(i) = old.as_ref().and_then(|o| o.inst.as_ref()) {
             shared.sandbox.unload(i);
@@ -519,6 +747,7 @@ impl Chain {
             .push(Msg::Remove { at })
             .map_err(|_| "the audio thread is not taking changes")?;
         let slot = core.slots.remove(at);
+        shared.free_pins(&mut core, slot.id);
         drop(core);
         // Unloading marks it gone first: if the audio thread is in its block now, the block
         // ends at once, dry. (One still loading is let go of by its thread, which finds it
@@ -815,6 +1044,207 @@ impl Chain {
             .unwrap_or_default()
     }
 
+    /// The parameters of the effect at `at` as it lists them now, with their values, asked of
+    /// its helper (decisions.md R-FX-PARAMS); the plug-in's own order. Its pins follow the
+    /// listing's names. An effect not running has none to give.
+    pub fn list_params(&self, at: usize) -> Result<Vec<protocol::ParamInfo>, String> {
+        let (inst, slot) = {
+            let core = lock(&self.shared.core);
+            let s = core
+                .slots
+                .get(at)
+                .ok_or_else(|| format!("there is no effect {}", at + 1))?;
+            (s.inst.clone().ok_or("the effect is not loaded")?, s.id)
+        };
+        let params = inst.list_params()?;
+        let mut core = lock(&self.shared.core);
+        if let Some(i) = core.find(slot) {
+            core.slots[i].params = params.clone();
+            self.shared.refresh_pins(&mut core, slot);
+        }
+        Ok(params)
+    }
+
+    /// The effect at `at`'s own text for each (parameter, value in its units) pair: `None`
+    /// where it gave none (R-FX-PARAMS).
+    pub fn param_text(
+        &self,
+        at: usize,
+        values: &[(u32, f64)],
+    ) -> Result<Vec<Option<String>>, String> {
+        let (inst, _) = self.running(at)?;
+        inst.param_text(values)
+    }
+
+    /// Pins parameter `id` of the effect at `at` (R-FX-PARAMS): its target (0 to
+    /// [`MAX_PINS`] less 1), on which the synth's sources can move it. Its base is its value
+    /// now. One the effect does not list as a player's ([`pinnable`]), one pinned already, a
+    /// fifth of an effect, or one of an effect not loaded, is refused.
+    pub fn pin(&self, at: usize, id: u32) -> Result<usize, String> {
+        let shared = &self.shared;
+        let listed = self.list_params(at).ok();
+        let mut core = lock(&shared.core);
+        let slot = core
+            .slots
+            .get(at)
+            .ok_or_else(|| format!("there is no effect {}", at + 1))?;
+        let params = listed.as_deref().unwrap_or(&slot.params);
+        let info = params
+            .iter()
+            .find(|p| p.id == id)
+            .cloned()
+            .ok_or_else(|| format!("{} has no parameter {id}", slot.saved.name))?;
+        if !pinnable(&info) {
+            return Err(format!(
+                "{}'s {} cannot be pinned",
+                slot.saved.name, info.name
+            ));
+        }
+        if slot.saved.pins.iter().any(|p| p.id == id) {
+            return Err(format!(
+                "{}'s {} is pinned already",
+                slot.saved.name, info.name
+            ));
+        }
+        if slot.saved.pins.len() >= PINS_PER_SLOT {
+            return Err(format!(
+                "{} has {PINS_PER_SLOT} parameters pinned: unpin one first",
+                slot.saved.name
+            ));
+        }
+        let target = core
+            .pins
+            .iter()
+            .position(Option::is_none)
+            .ok_or("every pin is taken")?;
+        let slot_id = slot.id;
+        core.slots[at].saved.pins.push(SavedPin {
+            id,
+            name: info.name.clone(),
+            base: info.value,
+            target: Some(target),
+            mods: Vec::new(),
+        });
+        core.pins[target] = Some(PinRef { slot: slot_id, id });
+        if let (Some(inst), Some(v)) = (&core.slots[at].inst, info.value) {
+            inst.record_value(id, v);
+        }
+        shared.send_pin(&core, target);
+        if let Some(m) = lock(&shared.mods).clone() {
+            m.set(target, &[]);
+        }
+        shared.pins_rev.fetch_add(1, Ordering::AcqRel);
+        shared.save_in(&core);
+        Ok(target)
+    }
+
+    /// Pin target `target` unpinned: what moved it let go of, its parameter left at its base.
+    pub fn unpin(&self, target: usize) -> Result<(), String> {
+        let shared = &self.shared;
+        let mut core = lock(&shared.core);
+        let r = core
+            .pins
+            .get(target)
+            .copied()
+            .flatten()
+            .ok_or_else(|| format!("nothing is pinned to fx{}", target + 1))?;
+        if let Some(at) = core.find(r.slot) {
+            core.slots[at].saved.pins.retain(|p| p.id != r.id);
+        }
+        core.pins[target] = None;
+        shared.send_pin(&core, target);
+        if let Some(m) = lock(&shared.mods).clone() {
+            m.set(target, &[]);
+        }
+        shared.pins_rev.fetch_add(1, Ordering::AcqRel);
+        shared.save_in(&core);
+        Ok(())
+    }
+
+    /// Every pin, by target (R-FX-PARAMS).
+    pub fn pins(&self) -> Vec<PinStatus> {
+        self.pins_of(&lock(&self.shared.core))
+    }
+
+    /// Every pin, unless the chain is busy: for the drawer, which never waits on it.
+    pub fn try_pins(&self) -> Option<Vec<PinStatus>> {
+        try_lock(&self.shared.core).map(|core| self.pins_of(&core))
+    }
+
+    fn pins_of(&self, core: &Core) -> Vec<PinStatus> {
+        (0..MAX_PINS)
+            .filter_map(|t| {
+                let (at, pin) = core.pin(t)?;
+                let s = &core.slots[at];
+                let info = s.params.iter().find(|p| p.id == pin.id).cloned();
+                let running = s.phase == Phase::Ready
+                    && s.saved.disabled.is_none()
+                    && s.inst
+                        .as_ref()
+                        .is_some_and(|i| i.status() == sandbox::RUNNING);
+                let listed = !s.params.is_empty();
+                Some(PinStatus {
+                    target: t,
+                    slot: at,
+                    effect: s.saved.name.clone(),
+                    id: pin.id,
+                    name: info.as_ref().map_or(pin.name.clone(), |i| i.name.clone()),
+                    short: info.as_ref().map_or(String::new(), |i| i.short.clone()),
+                    base: pin.base,
+                    value: match (&info, pin.base) {
+                        (Some(i), Some(b)) => i.normalized(b),
+                        _ => 0.0,
+                    },
+                    steps: info.as_ref().map_or(0, |i| i.steps),
+                    live: running && info.is_some(),
+                    missing: running && listed && info.is_none(),
+                    info,
+                })
+            })
+            .collect()
+    }
+
+    /// Pin target `target`'s base set to `travel` (0..1 of its travel: the drawer's knob):
+    /// its plug-in's value from the next block, its window following (R-FX-PARAMS).
+    pub fn set_pin_value(&self, target: usize, travel: f64) -> Result<(), String> {
+        let shared = &self.shared;
+        let mut core = lock(&shared.core);
+        let rt = core.pin_rt(target);
+        let (at, id) = match core.pin(target) {
+            Some((at, pin)) if rt.how != How::None => (at, pin.id),
+            Some(_) => return Err("the effect is not loaded".into()),
+            None => return Err(format!("nothing is pinned to fx{}", target + 1)),
+        };
+        let plain = rt.plain(travel);
+        if let Some((_, pin)) = core.pin_mut(target) {
+            pin.base = Some(plain);
+        }
+        lock(&shared.to_audio)
+            .push(Msg::Param {
+                at,
+                id,
+                value: plain,
+            })
+            .map_err(|_| "the audio thread is not taking changes")?;
+        shared.send_pin(&core, target);
+        shared.pins_rev.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+
+    /// The synth's side of the pins' assignments (R-FX-PARAMS): given what moves each pin
+    /// now (a chain restored before the synth was made gives it then), read when saved.
+    pub fn set_pin_mods(&self, mods: Arc<dyn PinMods>) {
+        let core = lock(&self.shared.core);
+        for t in 0..MAX_PINS {
+            let saved = core.pin(t).map(|(_, p)| p.mods.clone()).unwrap_or_default();
+            mods.set(t, &saved);
+        }
+        self.shared
+            .saved_mods
+            .store(mods.revision(), Ordering::Release);
+        *lock(&self.shared.mods) = Some(mods);
+    }
+
     /// Whether any effect is playing (loaded, not bypassed): the FX key's light.
     pub fn active(&self) -> bool {
         active(&lock(&self.shared.core))
@@ -869,7 +1299,9 @@ impl Chain {
             let mut q = lock(&shared.to_audio);
             for s in chain.slots.iter().take(MAX_SLOTS) {
                 let bypass = Arc::new(AtomicBool::new(s.bypass));
+                let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
                 let stage = Stage {
+                    id,
                     node: None,
                     bypass: bypass.clone(),
                 };
@@ -881,7 +1313,6 @@ impl Chain {
                     ));
                     continue;
                 }
-                let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
                 let phase = match how {
                     _ if s.disabled.is_some() => Phase::Ready,
                     Restore::Off => Phase::Off,
@@ -901,8 +1332,12 @@ impl Chain {
                         .map(|d| format!("turned off: {}", d.detail)),
                     phase,
                     try_failed: None,
+                    params: Vec::new(),
                 });
             }
+            drop(q);
+            // Its pins on the targets they had, where they are free (R-FX-PARAMS).
+            shared.bind_pins(&mut core);
         }
         for id in started {
             self.shared.spawn_load(id, Attempt::Saved);
@@ -1018,6 +1453,7 @@ fn new_slot(found: &catalog::Found) -> Result<SavedSlot, String> {
         state: None,
         disabled: None,
         set_aside: None,
+        pins: Vec::new(),
     })
 }
 
@@ -1064,6 +1500,147 @@ fn disabled_by_load(e: &LoadError, before: Option<&Disabled>) -> Disabled {
 }
 
 impl Shared {
+    /// Pin target `target` sent to the audio thread as `core` has it.
+    fn send_pin(&self, core: &Core, target: usize) {
+        let pin = core.pin_rt(target);
+        let _ = lock(&self.to_audio).push(Msg::Pin { target, pin });
+    }
+
+    /// Slot `slot`'s pins let go of (it left the chain): their targets free, moved by nothing.
+    fn free_pins(&self, core: &mut Core, slot: u64) {
+        let mods = lock(&self.mods).clone();
+        for t in 0..MAX_PINS {
+            if core.pins[t].is_some_and(|p| p.slot == slot) {
+                core.pins[t] = None;
+                self.send_pin(core, t);
+                if let Some(m) = &mods {
+                    m.set(t, &[]);
+                }
+            }
+        }
+        self.pins_rev.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Every slot's saved pins put on targets: each on the one it had, if free, else the first
+    /// free; what moved each given to the synth. Targets with no pin are moved by nothing.
+    fn bind_pins(&self, core: &mut Core) {
+        let mut wanted: Vec<(u64, u32, Option<usize>)> = Vec::new();
+        for s in &core.slots {
+            for p in s.saved.pins.iter().take(PINS_PER_SLOT) {
+                wanted.push((s.id, p.id, p.target.filter(|t| *t < MAX_PINS)));
+            }
+        }
+        core.pins = [None; MAX_PINS];
+        let mut later = Vec::new();
+        for (slot, id, target) in wanted {
+            match target {
+                Some(t) if core.pins[t].is_none() => core.pins[t] = Some(PinRef { slot, id }),
+                _ => later.push(PinRef { slot, id }),
+            }
+        }
+        for r in later {
+            if let Some(t) = core.pins.iter().position(Option::is_none) {
+                core.pins[t] = Some(r);
+            }
+        }
+        let mods = lock(&self.mods).clone();
+        for t in 0..MAX_PINS {
+            self.send_pin(core, t);
+            if let Some(m) = &mods {
+                let saved = core.pin(t).map(|(_, p)| p.mods.clone()).unwrap_or_default();
+                m.set(t, &saved);
+            }
+        }
+        self.pins_rev.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Slot `slot`'s pins after it was listed: names from its listing, a base where none was
+    /// known (its value now), each sent to the audio thread.
+    fn refresh_pins(&self, core: &mut Core, slot: u64) {
+        let Some(at) = core.find(slot) else { return };
+        let s = &mut core.slots[at];
+        for pin in &mut s.saved.pins {
+            if let Some(info) = s.params.iter().find(|p| p.id == pin.id) {
+                if !info.name.is_empty() {
+                    pin.name = info.name.clone();
+                }
+                if pin.base.is_none() {
+                    pin.base = info.value;
+                }
+            }
+        }
+        for t in 0..MAX_PINS {
+            if core.pins[t].is_some_and(|p| p.slot == slot) {
+                self.send_pin(core, t);
+            }
+        }
+        self.pins_rev.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// The pins followed (the housekeeping's): the values the effects' windows gave pinned
+    /// parameters and the learned controllers' become their bases (given again after a
+    /// restore), effects whose parameters changed are listed again, and the chain is saved
+    /// when its pins or their assignments changed, at most once a second.
+    fn follow_pins(&self, may_save: bool) -> bool {
+        let mut relist = Vec::new();
+        {
+            let mut core = lock(&self.core);
+            let mut changed = Vec::new();
+            for t in 0..MAX_PINS {
+                let bits = self.learnt[t].swap(u64::MAX, Ordering::AcqRel);
+                if bits != u64::MAX
+                    && let Some((_, pin)) = core.pin_mut(t)
+                {
+                    pin.base = Some(f64::from_bits(bits));
+                    changed.push(t);
+                }
+            }
+            for at in 0..core.slots.len() {
+                let Some(inst) = core.slots[at].inst.clone() else {
+                    continue;
+                };
+                if inst.take_relist() {
+                    relist.push((core.slots[at].id, inst.clone()));
+                }
+                let slot = core.slots[at].id;
+                for (id, v) in inst.take_edits() {
+                    let Some(t) = core.target_of(slot, id) else {
+                        continue;
+                    };
+                    if let Some(pin) = core.slots[at].saved.pins.iter_mut().find(|p| p.id == id) {
+                        pin.base = Some(v);
+                        inst.record_value(id, v);
+                        changed.push(t);
+                    }
+                }
+            }
+            for t in changed {
+                self.send_pin(&core, t);
+                self.pins_rev.fetch_add(1, Ordering::AcqRel);
+            }
+        }
+        for (slot, inst) in relist {
+            if let Ok(params) = inst.list_params() {
+                let mut core = lock(&self.core);
+                if let Some(at) = core.find(slot) {
+                    core.slots[at].params = params;
+                    self.refresh_pins(&mut core, slot);
+                }
+            }
+        }
+        let pins = self.pins_rev.load(Ordering::Acquire);
+        let mods = lock(&self.mods).as_ref().map_or(0, |m| m.revision());
+        let due = pins != self.saved_pins.load(Ordering::Acquire)
+            || mods != self.saved_mods.load(Ordering::Acquire);
+        if due && may_save {
+            self.saved_pins.store(pins, Ordering::Release);
+            self.saved_mods.store(mods, Ordering::Release);
+            self.save();
+            return true;
+        }
+        false
+    }
+
     fn node(&self, inst: &Arc<Instance>, block: usize) -> Node {
         Node::new(
             inst.clone(),
@@ -1117,13 +1694,20 @@ impl Shared {
                 Attempt::Fresh => None,
                 Attempt::SetAside => saved.set_aside.clone(),
             };
+            // Its pins' bases given after its state (R-FX-PARAMS: the state may hold a
+            // modulated instant).
+            let bases: Vec<(u32, f64)> = saved
+                .pins
+                .iter()
+                .filter_map(|p| p.base.map(|b| (p.id, b)))
+                .collect();
             let result = match hex.as_deref().map(protocol::unhex).transpose() {
                 Ok(state) => self.sandbox.load(
                     &saved.name,
                     &saved.path,
                     &saved.plugin,
                     state.as_deref(),
-                    &[],
+                    &bases,
                     rate,
                     MAX_BLOCK as u32,
                 ),
@@ -1133,6 +1717,7 @@ impl Shared {
                     message: format!("its saved state is damaged: {e}"),
                 }),
             };
+            let listed = result.as_ref().ok().and_then(|i| i.list_params().ok());
             let mut core = lock(&self.core);
             let at = core.find(id);
             let closing = self.closing.load(Ordering::Acquire);
@@ -1156,6 +1741,7 @@ impl Shared {
             match result {
                 Ok(inst) => {
                     let stage = Stage {
+                        id: slot.id,
                         node: Some(Box::new(self.node(&inst, block))),
                         bypass: slot.bypass.clone(),
                     };
@@ -1185,6 +1771,7 @@ impl Shared {
                             "tried again: it loaded".into(),
                         );
                     }
+                    slot.params = listed.unwrap_or_else(|| inst.info.params.clone());
                     retired = slot.inst.replace(inst);
                     slot.error = None;
                     slot.phase = Phase::Ready;
@@ -1228,6 +1815,7 @@ impl Shared {
             if again.is_some() {
                 slot.phase = Phase::Loading;
             }
+            self.refresh_pins(&mut core, id);
             self.save_in(&core);
             drop(core);
             if let Some(old) = retired {
@@ -1262,6 +1850,7 @@ impl Shared {
                 return;
             }
             let result = self.sandbox.reload(&old, rate, MAX_BLOCK as u32);
+            let listed = result.as_ref().ok().and_then(|i| i.list_params().ok());
             let mut core = lock(&self.core);
             let Some(at) = core
                 .find(id)
@@ -1288,9 +1877,13 @@ impl Shared {
             match result {
                 Ok(inst) => {
                     let stage = Stage {
+                        id: slot.id,
                         node: Some(Box::new(self.node(&inst, block))),
                         bypass: slot.bypass.clone(),
                     };
+                    if let Some(l) = listed {
+                        slot.params = l;
+                    }
                     slot.inst = Some(inst);
                     let _ = lock(&self.to_audio).push(Msg::Node { at, stage });
                 }
@@ -1309,6 +1902,7 @@ impl Shared {
                     failed = true;
                 }
             }
+            self.refresh_pins(&mut core, id);
             self.save_in(&core);
             drop(core);
             if failed {
@@ -1357,6 +1951,7 @@ impl Shared {
                 let _ = q.push(Msg::Node {
                     at,
                     stage: Stage {
+                        id: slot.id,
                         node: None,
                         bypass: slot.bypass.clone(),
                     },
@@ -1378,12 +1973,30 @@ impl Shared {
     }
 
     fn saved_of(&self, core: &Core) -> SavedChain {
+        let mods = lock(&self.mods).clone();
         SavedChain {
             format: FORMAT,
             slots: core
                 .slots
                 .iter()
                 .map(|s| SavedSlot {
+                    // Each pin with its target and what moves it now (R-FX-PARAMS).
+                    pins: s
+                        .saved
+                        .pins
+                        .iter()
+                        .map(|p| {
+                            let target = core.target_of(s.id, p.id);
+                            SavedPin {
+                                target,
+                                mods: match (&mods, target) {
+                                    (Some(m), Some(t)) => m.get(t),
+                                    _ => p.mods.clone(),
+                                },
+                                ..p.clone()
+                            }
+                        })
+                        .collect(),
                     bypass: s.bypass.load(Ordering::Acquire),
                     state: s
                         .inst
@@ -1459,10 +2072,11 @@ fn housekeeping(shared: &Weak<Shared>) {
         }
         *lock(&s.logged) = n;
         // At most a save a second: a plug-in whose state changes at every change of a knob.
-        if s.sandbox.state_rev() != s.saved_rev.load(Ordering::Acquire)
-            && last_save.elapsed() >= Duration::from_secs(1)
-        {
+        let may_save = last_save.elapsed() >= Duration::from_secs(1);
+        if s.sandbox.state_rev() != s.saved_rev.load(Ordering::Acquire) && may_save {
             s.save();
+            last_save = Instant::now();
+        } else if !s.closing.load(Ordering::Acquire) && s.follow_pins(may_save) {
             last_save = Instant::now();
         }
     }
@@ -1547,6 +2161,11 @@ impl Runner {
                     // (It holds the old node now, or the new one that found no stage.)
                     self.retire(stage);
                 }
+                Msg::Pin { target, pin } => {
+                    if let Some(p) = self.pins.get_mut(target) {
+                        *p = pin;
+                    }
+                }
             }
         }
     }
@@ -1563,8 +2182,31 @@ impl Runner {
     /// effect's block is waited for until `deadline` at the latest; past it, and for any
     /// effect not running, its input goes on untouched.
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32], deadline: Option<Instant>) {
+        self.process_modulated(left, right, deadline, 0, &[], &[]);
+    }
+
+    /// As [`Runner::process`], the pins moved by the synth's sources (decisions.md
+    /// R-FX-PARAMS): `moved`, a bit for each pin target that some source moves; `at`, the
+    /// block's frames where the sources were read (each step of 32 samples); `offsets`, each
+    /// pin's offset there on its travel (the sum of depth × source). A pin moved goes to its
+    /// effect as one point for each step, at most [`PIN_POINTS`] a block (every other step
+    /// past 1024 samples, and so on), and a pin no longer moved goes back to its base once.
+    /// Nothing is sent for a pin that nothing moves. Never allocates or waits.
+    pub fn process_modulated(
+        &mut self,
+        left: &mut [f32],
+        right: &mut [f32],
+        deadline: Option<Instant>,
+        moved: u32,
+        at: &[u32],
+        offsets: &[[f32; MAX_PINS]],
+    ) {
         self.take_changes();
         let n = left.len().min(right.len());
+        let points = at.len().min(offsets.len());
+        let stride = points.div_ceil(PIN_POINTS).max(1);
+        // (Those no longer moved, owed a point at their base.)
+        let mut owed = self.moved & !moved;
         let mut off = 0;
         while off < n {
             let end = (off + MAX_BLOCK).min(n);
@@ -1573,6 +2215,34 @@ impl Runner {
                     continue;
                 }
                 if let Some(node) = &mut stage.node {
+                    for (t, pin) in self.pins.iter().enumerate() {
+                        if pin.stage != stage.id || pin.how == How::None {
+                            continue;
+                        }
+                        let bit = 1u32 << t;
+                        if moved & bit != 0 {
+                            for k in (0..points).step_by(stride) {
+                                let a = at[k] as usize;
+                                if a < off || a >= end {
+                                    continue;
+                                }
+                                let o = f64::from(offsets[k][t]);
+                                let (kind, value) = match pin.how {
+                                    How::Normalized => (EV_PARAM_MOD, o),
+                                    How::Plain => (EV_PARAM_MOD, o * (pin.max - pin.min)),
+                                    _ => (EV_PARAM, pin.plain(pin.base + o)),
+                                };
+                                node.push_mod(self.frame + a as i64, kind, pin.param, value);
+                            }
+                        } else if owed & bit != 0 {
+                            let (kind, value) = match pin.how {
+                                How::Value => (EV_PARAM, pin.plain(pin.base)),
+                                _ => (EV_PARAM_MOD, 0.0),
+                            };
+                            node.push_mod(self.frame + off as i64, kind, pin.param, value);
+                            owed &= !bit;
+                        }
+                    }
                     node.process(
                         self.frame + off as i64,
                         &mut left[off..end],
@@ -1584,6 +2254,36 @@ impl Runner {
             off = end;
         }
         self.frame += n as i64;
+        // (A pin whose effect was bypassed or down is still owed its base.)
+        self.moved = moved | owed;
+    }
+
+    /// Pin target `target` set to `travel` (0..1) by a learned controller (audio thread: no
+    /// allocation, no locks): its plug-in's value from the next block, its base as the chain
+    /// keeps it within a tenth of a second (R-FX-PARAMS). Nothing for a target not pinned.
+    pub fn set_pin_value(&mut self, target: usize, travel: f64) {
+        let Some(pin) = self.pins.get_mut(target) else {
+            return;
+        };
+        if pin.how == How::None {
+            return;
+        }
+        pin.base = travel.clamp(0.0, 1.0);
+        let (id, plain) = (pin.param, pin.plain(travel));
+        if let Some(node) = self
+            .stages
+            .iter_mut()
+            .find(|s| s.id == pin.stage)
+            .and_then(|s| s.node.as_mut())
+        {
+            node.set_param(id, plain);
+        }
+        self.learnt[target].store(plain.to_bits(), Ordering::Release);
+    }
+
+    /// Whether pin target `target` is pinned to an effect listed here.
+    pub fn is_pinned(&self, target: usize) -> bool {
+        self.pins.get(target).is_some_and(|p| p.how != How::None)
     }
 
     /// Whether there are effects to run (a bypassed one counts), the chain's changes taken

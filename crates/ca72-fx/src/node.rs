@@ -12,7 +12,13 @@
 //!
 //! The processing path does not allocate: every buffer is sized when the node is made.
 //! DAW-v3's `daw-sandbox/src/node.rs` (commit cb15558, its D19 and D25), effects only: no
-//! notes, modulation or fault injection (the test plug-ins' crash and hang are parameters).
+//! notes or fault injection (the test plug-ins' crash and hang are parameters).
+//!
+//! **Modulation** (decisions.md R-FX-PARAMS): the chain's runner gives a node the points of
+//! its pinned parameters' modulation for each block ([`Node::push_mod`]), at their frames;
+//! they go to the helper after the block's values, at their offsets in it. They are never
+//! counted as values the host set ([`Node::delivered`]): a restore does not give them again,
+//! and they never mark the effect's state changed (no snapshot for a moving LFO).
 
 use crate::sandbox::{Instance, RUNNING};
 use daw_ipc::layout::{EV_PARAM, SEQ_MASK, STATUS_OK};
@@ -95,8 +101,14 @@ struct Flight {
     len: usize,
     l: Vec<f32>,
     r: Vec<f32>,
+    /// Its parameter values (the first `values`), then its modulation's points.
     events: Vec<Event>,
+    values: usize,
 }
+
+/// Modulation points a node holds at once, at most (four pins' worth of every block's 32
+/// points, twice: a pipelined chunk may straddle blocks).
+pub const MOD_POINTS: usize = 256;
 
 /// An effect's node.
 pub struct Node {
@@ -112,6 +124,8 @@ pub struct Node {
     recovering: bool,
     /// Parameter changes not yet delivered: (parameter ID, plain value).
     pending: Vec<(u32, f64)>,
+    /// Modulation points not yet sent: (the chain's frame, event).
+    mods: Vec<(i64, Event)>,
     flight: Flight,
     out_l: Vec<f32>,
     out_r: Vec<f32>,
@@ -163,6 +177,7 @@ impl Node {
             recovering: false,
             // Room for every parameter's value at once, besides a block's events.
             pending: Vec::with_capacity(MAX_EVENTS + n_params),
+            mods: Vec::with_capacity(MOD_POINTS),
             flight: Flight {
                 active: false,
                 seq: 0,
@@ -171,6 +186,7 @@ impl Node {
                 l: vec![0.0; MAX_BLOCK],
                 r: vec![0.0; MAX_BLOCK],
                 events: Vec::with_capacity(MAX_EVENTS),
+                values: 0,
             },
             out_l: vec![0.0; MAX_BLOCK],
             out_r: vec![0.0; MAX_BLOCK],
@@ -214,6 +230,23 @@ impl Node {
         }
     }
 
+    /// A modulation point for the helper at the chain's frame `frame`: an `EV_PARAM_MOD`
+    /// amount, or (a CLAP parameter that is not modulatable) an `EV_PARAM` value. Never
+    /// allocates: one that does not fit is dropped. Not counted as a value the host set.
+    pub fn push_mod(&mut self, frame: i64, kind: u32, param: u32, value: f64) {
+        if self.mods.len() < self.mods.capacity() {
+            self.mods.push((
+                frame,
+                Event {
+                    kind,
+                    param,
+                    value,
+                    ..Event::default()
+                },
+            ));
+        }
+    }
+
     fn next_seq(&mut self) -> u32 {
         self.seq = (self.seq + 1) & SEQ_MASK;
         if self.seq == 0 {
@@ -236,7 +269,9 @@ impl Node {
                         // waited is dropped: a change the helper died or hung on (the test
                         // plug-ins' crash and hang) would only take it down again.
                         self.pending.clear();
+                        self.mods.clear();
                         self.flight.events.clear();
+                        self.flight.values = 0;
                     }
                     return true;
                 }
@@ -250,7 +285,8 @@ impl Node {
         }
     }
 
-    /// The pending parameter changes, at the block's start, as many as fit.
+    /// The pending parameter changes, at the block's start, as many as fit; then the
+    /// modulation's points within the block, at their offsets in it (those past it wait).
     fn build_events(&mut self) {
         let ev = &mut self.flight.events;
         ev.clear();
@@ -271,6 +307,22 @@ impl Node {
             }
         }
         self.pending.truncate(kept);
+        self.flight.values = ev.len();
+        let (from, len) = (self.flight.frame, self.flight.len as i64);
+        let mut kept = 0;
+        for k in 0..self.mods.len() {
+            let (at, e) = self.mods[k];
+            if at >= from + len {
+                self.mods[kept] = (at, e);
+                kept += 1;
+            } else if ev.len() < ev.capacity() {
+                ev.push(Event {
+                    time: (at - from).clamp(0, (len - 1).max(0)) as u32,
+                    ..e
+                });
+            }
+        }
+        self.mods.truncate(kept);
     }
 
     fn submit_flight(&mut self) {
@@ -304,7 +356,7 @@ impl Node {
     /// effect again; a hidden parameter's is not (the test plug-ins' crash and hang, which
     /// the plug-in takes a block later, would take the restored one down again).
     fn delivered(&mut self) {
-        for e in &self.flight.events {
+        for e in &self.flight.events[..self.flight.values] {
             if e.kind == EV_PARAM
                 && let Some(i) = self.inst.param_index(e.param)
                 && !self.inst.info.params[i].hidden
@@ -412,7 +464,7 @@ impl Node {
     /// The flight was not processed: its input goes out instead, and its parameter changes
     /// wait for the next block (a newer pending value wins).
     fn lost(&mut self) {
-        for k in 0..self.flight.events.len() {
+        for k in 0..self.flight.values {
             let e = self.flight.events[k];
             if e.kind == EV_PARAM
                 && !self.pending.iter().any(|(id, _)| *id == e.param)

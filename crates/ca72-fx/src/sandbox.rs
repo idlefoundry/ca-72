@@ -217,7 +217,15 @@ pub struct Instance {
     pub(crate) group: Weak<Group>,
     pub(crate) epoch: Instant,
     pub(crate) state_rev: Arc<AtomicU64>,
+    /// The values its editor gave its parameters (ID, value in its units), the latest of
+    /// each, until the chain takes them: a pinned parameter's base (decisions.md R-FX-PARAMS).
+    pub(crate) edits: Mutex<Vec<(u32, f64)>>,
+    /// Its parameters' names or list changed: the chain lists them again (R-FX-PARAMS).
+    pub(crate) relist: AtomicBool,
 }
+
+/// How long a parameter request (a listing, value texts) may take.
+const ASK: Duration = Duration::from_secs(5);
 
 impl Instance {
     pub fn param_index(&self, id: u32) -> Option<usize> {
@@ -230,6 +238,56 @@ impl Instance {
             v.store(plain.to_bits(), Ordering::Relaxed);
             self.mark_dirty();
         }
+    }
+
+    /// Records the value a parameter has (its editor's), for a restore to give it again,
+    /// without marking its state changed: the edit that gave it did (R-FX-PARAMS).
+    pub fn record_value(&self, id: u32, plain: f64) {
+        if let Some(v) = self.param_index(id).and_then(|i| self.values.get(i)) {
+            v.store(plain.to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    /// Its parameters as it lists them now, with their values (`Op::Params`, R-FX-PARAMS).
+    pub fn list_params(&self) -> Result<Vec<protocol::ParamInfo>, String> {
+        if self.status() != RUNNING {
+            return Err("the effect is not running".into());
+        }
+        let p = self.helper().ok_or("the effect's helper is not running")?;
+        let v = p.request(
+            Op::Params {
+                instance: self.number,
+            },
+            ASK,
+        )?;
+        serde_json::from_value(v).map_err(|e| e.to_string())
+    }
+
+    /// The plug-in's own text for each (parameter, value in its units) pair (`Op::ParamText`,
+    /// R-FX-PARAMS): `None` where it gave none.
+    pub fn param_text(&self, values: &[(u32, f64)]) -> Result<Vec<Option<String>>, String> {
+        if self.status() != RUNNING {
+            return Err("the effect is not running".into());
+        }
+        let p = self.helper().ok_or("the effect's helper is not running")?;
+        let v = p.request(
+            Op::ParamText {
+                instance: self.number,
+                values: values.to_vec(),
+            },
+            ASK,
+        )?;
+        serde_json::from_value(v).map_err(|e| e.to_string())
+    }
+
+    /// The values its editor gave its parameters since the last call, the latest of each.
+    pub fn take_edits(&self) -> Vec<(u32, f64)> {
+        std::mem::take(&mut *lock(&self.edits))
+    }
+
+    /// Whether its parameters' names or list changed since the last call.
+    pub fn take_relist(&self) -> bool {
+        self.relist.swap(false, Ordering::AcqRel)
     }
 
     pub(crate) fn mark_dirty(&self) {
@@ -620,6 +678,8 @@ impl Sandbox {
             group: Arc::downgrade(group),
             epoch: self.inner.epoch,
             state_rev: self.inner.state_rev.clone(),
+            edits: Mutex::new(Vec::new()),
+            relist: AtomicBool::new(false),
         });
         for (id, plain) in params {
             match inst.param_index(*id) {
@@ -1035,6 +1095,22 @@ fn monitor(inner: &Weak<Inner>) {
             for number in p.take_edited() {
                 if let Some(i) = instances.iter().find(|i| i.number == number) {
                     i.mark_dirty();
+                }
+            }
+            // Its editor's values (a pinned parameter's base) and a word that its parameters
+            // changed, for the chain (decisions.md R-FX-PARAMS).
+            for (number, id, value) in p.take_param_edits() {
+                if let Some(i) = instances.iter().find(|i| i.number == number) {
+                    let mut e = lock(&i.edits);
+                    match e.iter_mut().find(|x| x.0 == id) {
+                        Some(x) => x.1 = value,
+                        None => e.push((id, value)),
+                    }
+                }
+            }
+            for number in p.take_relist() {
+                if let Some(i) = instances.iter().find(|i| i.number == number) {
+                    i.relist.store(true, Ordering::Release);
                 }
             }
             for inst in instances {

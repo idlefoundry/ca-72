@@ -7,8 +7,9 @@ use crate::layout::TransportName;
 use serde::{Deserialize, Serialize};
 
 /// Protocol version; the helper refuses a host with another version (3: `LoadState`, a
-/// running plugin's state in `param_values`, D234).
-pub const VERSION: u32 = 3;
+/// running plugin's state in `param_values`, D234; 4: `Params`, `ParamText`, the
+/// `params_changed` notice and `ParamInfo`'s new fields, the CA-72's PATCHES.md change 5).
+pub const VERSION: u32 = 4;
 
 /// Starts every protocol line in both directions.
 pub const PREFIX: &str = "\u{1e}DAW1 ";
@@ -68,6 +69,16 @@ pub enum Op {
         x: Option<i32>,
         #[serde(default)]
         y: Option<i32>,
+    },
+    /// Lists the instance's parameters again, with their values now: a list of
+    /// [`ParamInfo`] (PATCHES.md change 5).
+    Params { instance: u32 },
+    /// The plugin's own text for each (parameter ID, value) pair, the value in its units
+    /// (`ParamInfo`'s): VST3's `getParamStringByValue` (with its units after a bare number),
+    /// CLAP's `value_to_text`. A list as long as `values`, `null` where it gave none.
+    ParamText {
+        instance: u32,
+        values: Vec<(u32, f64)>,
     },
     /// Moves the instance's GUI window.
     GuiMove { instance: u32, x: i32, y: i32 },
@@ -134,6 +145,23 @@ pub struct ParamInfo {
     /// (`kIsProgramChange`), a CLAP enumeration (`CLAP_PARAM_IS_ENUM`).
     #[serde(default)]
     pub program: bool,
+    /// Its short name (VST3's `shortTitle`; CLAP has none: empty).
+    #[serde(default)]
+    pub short: String,
+    /// Its units (VST3's `units`, "dB"; CLAP has none: empty).
+    #[serde(default)]
+    pub units: String,
+    /// How many steps it has past its first value (VST3's `stepCount`, a CLAP stepped
+    /// parameter's range); 0 continuous. A VST3 parameter stays normalized (`stepped`
+    /// false): the plugin quantizes its own value.
+    #[serde(default)]
+    pub steps: u32,
+    /// Shown, not taken (VST3's `kIsReadOnly`, CLAP's `CLAP_PARAM_IS_READONLY`: a meter).
+    #[serde(default)]
+    pub read_only: bool,
+    /// The plugin's own bypass (VST3's `kIsBypass`, CLAP's `CLAP_PARAM_IS_BYPASS`).
+    #[serde(default)]
+    pub bypass: bool,
 }
 
 /// The steps of [`ParamInfo::plain`].
@@ -209,6 +237,12 @@ pub const NOTICE_PARAM_CLEAR: &str = "param_clear";
 /// edit changed since its state was last read); `host`: within a second of a program or a
 /// state the host gave it (the host's doing, D228's window as the helper sees it).
 pub const NOTICE_PARAM_VALUES: &str = "param_values";
+
+/// A notice the helper sends on its own when a running plugin said its parameters' names,
+/// ranges or list changed (VST3's `restartComponent(kParamTitlesChanged)`, CLAP's
+/// `clap_host_params.rescan` of info, text or all): `{"notice": "params_changed",
+/// "instance"}`. The host lists them again ([`Op::Params`]; PATCHES.md change 5).
+pub const NOTICE_PARAMS_CHANGED: &str = "params_changed";
 
 /// What a plugin's own edit of a parameter is (D222): a gesture's beginning or end (VST3's
 /// `beginEdit` and `endEdit`, CLAP's gesture events), or a value (`performEdit`, a CLAP

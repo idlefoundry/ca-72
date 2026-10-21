@@ -13,8 +13,11 @@
 //!   and stores. Changes reach the processor as parameter changes in the block, at their
 //!   frame, and the controller as `setParamNormalized`.
 //! - **Modulation** is destructive (DESIGN 11.4): VST3 has no modulation of its own, so a
-//!   modulated parameter is sent its base value plus the modulation amount as its value,
-//!   which the plugin stores (and its editor shows) as if a person had set it.
+//!   modulated parameter's processor is sent its base value plus the modulation amount as
+//!   its value. Its controller (its editor) is told the base alone (the CA-72's PATCHES.md
+//!   change 5: the window neither chases the modulation nor fights a drag there); the
+//!   processor's own state may hold a modulated instant, so the host gives the base back
+//!   after a state is loaded.
 //! - **State** is the processor's (`IComponent::getState`) and the controller's, in one
 //!   blob: `VST3` then each part's length and bytes.
 //!
@@ -803,6 +806,12 @@ impl IHostApplicationTrait for Host {
     }
 }
 
+/// Whether `text` is a number alone (no units of its own): digits, a sign, a point.
+fn bare(text: &str) -> bool {
+    text.chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | ',' | ' '))
+}
+
 /// What a plugin's controller tells the host (`IComponentHandler`, `IUnitHandler`):
 /// edits (not yet sent back), restart requests, and changes that may rename its keys.
 struct Handler {
@@ -814,6 +823,9 @@ struct Handler {
     values: Arc<AtomicBool>,
     /// Something besides its parameters changed (D234: `setDirty`).
     dirty: AtomicBool,
+    /// Its parameters' names or list changed (`restartComponent(kParamTitlesChanged)`):
+    /// listed again by the host (PATCHES.md change 5).
+    titles: AtomicBool,
     /// The controller's program changes, whose edits may rename its keys (D216); set once
     /// the controller is ready.
     programs: std::sync::OnceLock<Vec<u32>>,
@@ -913,6 +925,10 @@ impl IComponentHandlerTrait for Handler {
         // Values changed (a preset loaded): read again into the project (D228).
         if flags & (kReloadComponent | kParamValuesChanged) != 0 {
             self.values.store(true, Ordering::Release);
+        }
+        // Names or the list changed: listed again by the host (PATCHES.md change 5).
+        if flags & (kReloadComponent | kParamTitlesChanged) != 0 {
+            self.titles.store(true, Ordering::Release);
         }
         kResultOk
     }
@@ -1170,6 +1186,7 @@ impl Module {
             names: names.clone(),
             values: values.clone(),
             dirty: AtomicBool::new(false),
+            titles: AtomicBool::new(false),
             programs: std::sync::OnceLock::new(),
             edits: Mutex::new(Vec::new()),
             to_processor: edits_in.clone(),
@@ -1332,9 +1349,15 @@ impl Instance {
                 continue;
             }
             let flags = info.flags as u32;
+            let flag = |f: i32| flags & f as u32 != 0;
             out.push(ParamInfo {
                 id: info.id,
                 name: wstr(&info.title),
+                short: wstr(&info.shortTitle),
+                units: wstr(&info.units),
+                steps: info.stepCount.max(0) as u32,
+                read_only: flag(ParameterInfo_::ParameterFlags_::kIsReadOnly as i32),
+                bypass: flag(ParameterInfo_::ParameterFlags_::kIsBypass as i32),
                 module: String::new(),
                 min: 0.0,
                 max: 1.0,
@@ -1909,6 +1932,44 @@ impl Instance {
                 }
             }
         }
+    }
+
+    /// Whether it said since the last call that its parameters' names or list changed
+    /// (`restartComponent(kParamTitlesChanged)`; PATCHES.md change 5).
+    pub fn take_params_changed(&self) -> bool {
+        self.handler.titles.swap(false, Ordering::AcqRel)
+    }
+
+    /// The controller's text for each value (normalized; PATCHES.md change 5):
+    /// `getParamStringByValue`, its units after it where it gave a number alone.
+    pub fn param_text(&self, values: &[(u32, f64)]) -> Vec<Option<String>> {
+        let Some(c) = &self.controller else {
+            return vec![None; values.len()];
+        };
+        let units: std::collections::BTreeMap<u32, String> = self
+            .params()
+            .into_iter()
+            .filter(|p| !p.units.is_empty())
+            .map(|p| (p.id, p.units))
+            .collect();
+        values
+            .iter()
+            .map(|(id, v)| {
+                // SAFETY: an all-zero string is a valid value to be overwritten.
+                let mut s: String128 = unsafe { std::mem::zeroed() };
+                // SAFETY: a controller query on the main thread; `s` is writable.
+                if unsafe { c.getParamStringByValue(*id, v.clamp(0.0, 1.0), &mut s) } != kResultOk {
+                    return None;
+                }
+                let text = wstr(&s).trim().to_owned();
+                Some(match units.get(id) {
+                    Some(u) if !text.is_empty() && !text.ends_with(u.as_str()) && bare(&text) => {
+                        format!("{text} {u}")
+                    }
+                    _ => text,
+                })
+            })
+            .collect()
     }
 
     /// Whether its names for its keys may have changed since the last call (D216).
@@ -2497,7 +2558,12 @@ impl Processor {
             {
                 self.pending.push((e.param, self.base[place]));
             }
-            self.mirror.set(e.param, value);
+            // The controller (its editor) is told the base alone, never the modulation: a
+            // modulated parameter's window does not chase it, and a drag there moves the
+            // base (PATCHES.md change 5).
+            if e.kind == EV_PARAM {
+                self.mirror.set(e.param, self.base[place]);
+            }
         }
         let mut in_ptrs = [input[0], input[1]];
         let mut out_ptrs = [output[0], output[1]];

@@ -132,6 +132,13 @@ impl Ca72 {
             params.clone(),
             library::Library::shared(),
         ));
+        // The standalone's effects, given what moves their pins (decisions.md R-FX-PARAMS).
+        #[cfg(feature = "fx-host")]
+        let fx = crate::fx::take_runner();
+        #[cfg(feature = "fx-host")]
+        if fx.is_some() {
+            crate::fx::bind_patch(params.lfo_patch.clone());
+        }
         Ca72 {
             params,
             engine: Engine::new(),
@@ -151,7 +158,7 @@ impl Ca72 {
             wheel: mod_wheel::Wheel::default(),
             expressions,
             #[cfg(feature = "fx-host")]
-            fx: crate::fx::take_runner(),
+            fx,
             arp: Arp::default(),
             timed_clock: crate::timed::Clock::default(),
             now: 0,
@@ -497,6 +504,19 @@ impl Ca72 {
         context: &mut impl ProcessContext<Self>,
     ) -> bool {
         let seven = (value.clamp(0.0, 1.0) * 127.0).round() as u8;
+        // (An effects' pin, learned by its pin: the chain sets its effect's parameter, the
+        // standalone's alone. R-FX-PARAMS.)
+        if let Some(k) = learn::LEARNABLE.get(i).and_then(|l| learn::fx_pin(l.id)) {
+            #[cfg(feature = "fx-host")]
+            if let Some(fx) = &mut self.fx
+                && fx.is_pinned(k)
+            {
+                fx.set_pin_value(k, f64::from(seven) / 127.0);
+                return true;
+            }
+            let _ = k;
+            return false;
+        }
         let Some(target) = learn::target(&self.params, i) else {
             return false;
         };
@@ -1008,7 +1028,16 @@ impl Plugin for Ca72 {
         {
             let deadline =
                 started + std::time::Duration::from_secs_f64(period * crate::fx::DEADLINE);
-            fx.process(&mut left[..len], &mut right[..len], Some(deadline));
+            // (The pins' points where the LFOs and macros moved them: R-FX-PARAMS.)
+            let p = self.engine.fx_points();
+            fx.process_modulated(
+                &mut left[..len],
+                &mut right[..len],
+                Some(deadline),
+                p.moved,
+                &p.at[..p.n],
+                &p.offsets[..p.n],
+            );
         }
         self.ask_helper();
         ProcessStatus::KeepAlive

@@ -405,6 +405,54 @@ pub fn tools() -> Vec<Tool> {
             Instance,
         ),
         t(
+            "ca72_effect_parameters",
+            "effects.parameters",
+            "The standalone application's effects (not the plug-ins'): the parameters of the effect in `slot` (1 to 4) a player may pin, in name order (`find`: only those whose name holds every word), each with its `parameter` ID, names, units, steps, value in % of its travel, the plug-in's own `text` for it (\"2.40 s\") and its pin target if pinned (`fx1` to `fx16`). Pinned parameters are modulation targets (ca72_modulation_set with `target` fx1 to fx16).",
+            |_| {
+                obj(
+                    json!({
+                        "slot": {"type": "integer", "minimum": 1, "maximum": 4},
+                        "find": {"type": "string", "description": "Words the parameter's name holds."},
+                    }),
+                    &["slot"],
+                )
+            },
+            true,
+            false,
+            Instance,
+        ),
+        t(
+            "ca72_effect_pin",
+            "effects.pin",
+            "Pin a parameter of the effect in `slot` (1 to 4) by its `parameter` ID or name: it shows as a knob under its effect, and becomes a modulation target (its pin's id, `fx1` to `fx16`, returned) that LFOs and macros move. At most 4 an effect. Saved with the effects' chain.",
+            |_| {
+                obj(
+                    json!({
+                        "slot": {"type": "integer", "minimum": 1, "maximum": 4},
+                        "parameter": {"type": ["integer", "string"], "description": "Its ID (ca72_effect_parameters) or its name."},
+                    }),
+                    &["slot", "parameter"],
+                )
+            },
+            false,
+            false,
+            Instance,
+        ),
+        t(
+            "ca72_effect_unpin",
+            "effects.unpin",
+            "Unpin an effect's parameter by its pin's `target` (`fx1` to `fx16`): what modulated it is let go of, and the parameter stays at its value.",
+            |_| {
+                obj(
+                    json!({"target": {"type": "string", "description": "fx1 to fx16."}}),
+                    &["target"],
+                )
+            },
+            false,
+            true,
+            Instance,
+        ),
+        t(
             "ca72_midi_learn",
             "midi.learn",
             "MIDI Learn for a control, or for PREVIOUS PRESET or NEXT PRESET (`previous_preset`, `next_preset`: kept on this computer): the next controller (CC) moved on a MIDI device is assigned to it (a preset action also takes a note: a pad), check with ca72_midi_assignments. `cancel` true stops waiting. `channel` and `cc` given, the controller is assigned at once, without waiting (as if moved); a preset action takes `channel` and `note` too.",

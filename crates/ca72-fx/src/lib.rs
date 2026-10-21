@@ -33,8 +33,8 @@ pub mod sandbox;
 
 pub use catalog::{Catalog, Found, Kind};
 pub use chain::{
-    Chain, ChainOptions, Disabled, Health, MAX_SLOTS, Restore, Runner, SavedChain, SavedSlot,
-    SlotStatus,
+    Chain, ChainOptions, Disabled, Health, MAX_PINS, MAX_SLOTS, PIN_POINTS, PINS_PER_SLOT, PinMods,
+    PinStatus, Restore, Runner, SavedChain, SavedPin, SavedSlot, SlotStatus, pinnable,
 };
 pub use sandbox::{Event, Fault, Sandbox, SandboxOptions};
 

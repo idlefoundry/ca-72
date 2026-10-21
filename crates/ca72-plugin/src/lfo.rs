@@ -117,6 +117,13 @@ pub enum Target {
     LfoRise(usize),
     LfoShape(usize),
     LfoLevel(usize),
+    /// A pinned parameter of the standalone's effects, `n` 0 to [`FX_PINS`] less 1 (decisions.md
+    /// R-FX-PARAMS; the owner, 2026-10-20: "expose plugin parameters so that those can also be
+    /// modulated by our LFOs and Macros"): a fixed target the effects' chain pins a parameter
+    /// to, which stays the pin's while its effect moves. Last, so that no other's index moves.
+    /// Its assignments are the chain's (saved with it, `effects.json`), not the sound's: a
+    /// preset or session's assignments leave them as they are ([`Patch::load`]).
+    Fx(usize),
 }
 
 /// An LFO's own knobs another source can move ([`Target::LfoRate`] and the rest), in the order
@@ -156,8 +163,15 @@ impl LfoKnob {
 pub const KNOB_TARGETS: usize = 30;
 /// Each LFO's own targets ([`LfoKnob`]).
 pub const LFO_KNOBS: usize = 5;
+/// The effects' pinned parameters' targets ([`Target::Fx`]): four for each of the chain's four
+/// effects (`ca72_fx::MAX_PINS`).
+pub const FX_PINS: usize = 16;
 /// How many targets there are.
-pub const TARGETS: usize = KNOB_TARGETS + LFOS * LFO_KNOBS;
+pub const TARGETS: usize = KNOB_TARGETS + LFOS * LFO_KNOBS + FX_PINS;
+
+/// The pin targets that can take a source now, a bit each ([`target_of`]): those pinned to
+/// an effect that runs, set by the standalone's effects (none in the plug-ins).
+pub static FX_PINNED: AtomicU32 = AtomicU32::new(0);
 
 /// The panel's and the strip's targets, [`Target::ALL`]'s first.
 const PANEL_TARGETS: [Target; KNOB_TARGETS] = [
@@ -193,7 +207,8 @@ const PANEL_TARGETS: [Target; KNOB_TARGETS] = [
     Target::Level,
 ];
 
-/// Every target: the panel's and the strip's, then each LFO's own, LFO by LFO.
+/// Every target: the panel's and the strip's, then each LFO's own, LFO by LFO, then the
+/// effects' pins.
 const fn all_targets() -> [Target; TARGETS] {
     let mut all = [Target::Tune; TARGETS];
     let mut i = 0;
@@ -210,6 +225,11 @@ const fn all_targets() -> [Target; TARGETS] {
         all[at + 3] = Target::LfoShape(n);
         all[at + 4] = Target::LfoLevel(n);
         n += 1;
+    }
+    let mut k = 0;
+    while k < FX_PINS {
+        all[KNOB_TARGETS + LFOS * LFO_KNOBS + k] = Target::Fx(k);
+        k += 1;
     }
     all
 }
@@ -245,6 +265,19 @@ impl Target {
         self.lfo_knob().is_some()
     }
 
+    /// The effects' pin it is, if it is one (R-FX-PARAMS).
+    pub fn fx(self) -> Option<usize> {
+        match self {
+            Target::Fx(k) => Some(k),
+            _ => None,
+        }
+    }
+
+    /// Whether it is an effects' pin (moving an effect, not the synth).
+    pub fn is_fx(self) -> bool {
+        self.fx().is_some()
+    }
+
     /// Its place in [`Target::ALL`].
     pub fn index(self) -> usize {
         match self {
@@ -278,6 +311,7 @@ impl Target {
             Target::Osc2Shape => 27,
             Target::Osc3Shape => 28,
             Target::Level => 29,
+            Target::Fx(k) => KNOB_TARGETS + LFOS * LFO_KNOBS + k.min(FX_PINS - 1),
             t => {
                 let (n, k) = t.lfo_knob().unwrap_or((0, LfoKnob::Rate));
                 KNOB_TARGETS + LFO_KNOBS * n.min(LFOS - 1) + k as usize
@@ -319,6 +353,7 @@ impl Target {
             Target::Osc2Shape => "osc2_shape",
             Target::Osc3Shape => "osc3_shape",
             Target::Level => "level",
+            Target::Fx(k) => FX_TARGET_IDS[k.min(FX_PINS - 1)],
             t => {
                 let (n, k) = t.lfo_knob().unwrap_or((0, LfoKnob::Rate));
                 LFO_TARGET_IDS[n.min(LFOS - 1)][k as usize]
@@ -364,6 +399,8 @@ impl Target {
             Target::Osc2Shape => "OSC 2 WAVE",
             Target::Osc3Shape => "OSC 3 WAVE",
             Target::Level => "LEVEL",
+            // (The pin's own name is the effects' to give: its parameter's.)
+            Target::Fx(k) => FX_TARGET_SHORT[k.min(FX_PINS - 1)],
             // (Ten characters: "LFO2 LEVEL", apart from the strip's LEVEL.)
             t => {
                 let (n, k) = t.lfo_knob().unwrap_or((0, LfoKnob::Rate));
@@ -403,12 +440,13 @@ impl Target {
                 | Target::LfoRise(_)
                 | Target::LfoShape(_)
                 | Target::LfoLevel(_)
+                | Target::Fx(_)
         )
     }
 
-    /// Its parameter.
-    pub fn param(self, p: &Ca72Params) -> &FloatParam {
-        match self {
+    /// Its parameter (none for an effects' pin, which is its effect's: R-FX-PARAMS).
+    pub fn param(self, p: &Ca72Params) -> Option<&FloatParam> {
+        Some(match self {
             Target::Tune => &p.tune,
             Target::Glide => &p.glide,
             Target::ModMix => &p.mod_mix,
@@ -444,7 +482,8 @@ impl Target {
             Target::LfoRise(n) => &p.lfo(n).rise,
             Target::LfoShape(n) => &p.lfo(n).shape,
             Target::LfoLevel(n) => &p.lfo_level(n).level,
-        }
+            Target::Fx(_) => return None,
+        })
     }
 
     /// The FREQUENCY pot it is, if it is one (its knob's travel read through the computer's
@@ -460,7 +499,10 @@ impl Target {
     /// The knob's travel (0..1, as its pointer turns) with its parameter at `plain` (its
     /// dial's units): the parameter's normalized value, a FREQUENCY knob's through `law`.
     pub fn travel(self, p: &Ca72Params, plain: f32, law: Law) -> f32 {
-        let n = self.param(p).preview_normalized(plain);
+        let Some(param) = self.param(p) else {
+            return plain.clamp(0.0, 1.0);
+        };
+        let n = param.preview_normalized(plain);
         match self.pot() {
             Some(pot) => pot.knob_at(law, crate::params::wiper_of(plain)) as f32,
             None => n,
@@ -473,7 +515,7 @@ impl Target {
         let t = travel.clamp(0.0, 1.0);
         match self.pot() {
             Some(pot) => ((2.0 * pot.wiper_at(law, f64::from(t)) - 1.0) * DIAL_END) as f32,
-            None => self.param(p).preview_plain(t),
+            None => self.param(p).map_or(t, |q| q.preview_plain(t)),
         }
     }
 
@@ -500,12 +542,14 @@ impl Target {
                     + t * (crate::engine::LEVEL_RANGE.1 - crate::engine::LEVEL_RANGE.0);
             }
             Target::Feedback => c.feedback = ca72::voice::feedback_law(t),
-            // (An LFO's own: the LFOs' generators take them, `Bank`'s ticks, not the controls.)
+            // (An LFO's own: the LFOs' generators take them, `Bank`'s ticks, not the controls;
+            // an effects' pin, the effects' chain.)
             Target::LfoRate(_)
             | Target::LfoPhase(_)
             | Target::LfoRise(_)
             | Target::LfoShape(_)
-            | Target::LfoLevel(_) => {}
+            | Target::LfoLevel(_)
+            | Target::Fx(_) => {}
             _ => self.write_panel(&mut c.panel, t, law),
         }
     }
@@ -548,10 +592,37 @@ impl Target {
             | Target::LfoPhase(_)
             | Target::LfoRise(_)
             | Target::LfoShape(_)
-            | Target::LfoLevel(_) => {}
+            | Target::LfoLevel(_)
+            | Target::Fx(_) => {}
         }
     }
 }
+
+/// The effects' pins' targets' IDs (R-FX-PARAMS).
+const FX_TARGET_IDS: [&str; FX_PINS] = [
+    "fx1", "fx2", "fx3", "fx4", "fx5", "fx6", "fx7", "fx8", "fx9", "fx10", "fx11", "fx12", "fx13",
+    "fx14", "fx15", "fx16",
+];
+
+/// Their names on a MODULATES screen where the effects give none.
+const FX_TARGET_SHORT: [&str; FX_PINS] = [
+    "FX PIN 1",
+    "FX PIN 2",
+    "FX PIN 3",
+    "FX PIN 4",
+    "FX PIN 5",
+    "FX PIN 6",
+    "FX PIN 7",
+    "FX PIN 8",
+    "FX PIN 9",
+    "FX PIN 10",
+    "FX PIN 11",
+    "FX PIN 12",
+    "FX PIN 13",
+    "FX PIN 14",
+    "FX PIN 15",
+    "FX PIN 16",
+];
 
 /// Each LFO's own targets' IDs, [`LfoKnob`]'s order: its parameters' (its WAVEFORM's
 /// CONTINUOUS shape `lfoN_shape`, its LEVEL `lfoN_level`).
@@ -658,6 +729,8 @@ pub fn target_of(p: &Ca72Params, param_id: &str) -> Option<Target> {
     let t = Target::of_id(param_id)?;
     match t {
         Target::Osc1Shape | Target::Osc2Shape | Target::Osc3Shape | Target::LfoShape(_) => None,
+        // (An effects' pin while it is pinned to an effect that runs: R-FX-PARAMS.)
+        Target::Fx(k) if FX_PINNED.load(Ordering::Acquire) & (1 << k) == 0 => None,
         Target::Osc2Frequency if p.timed_now(1) => None,
         Target::Osc3Frequency if p.timed_now(2) => None,
         // (Timed, its knob is a DIVISION dial, stepped: as a FREQUENCY.)
@@ -815,6 +888,12 @@ pub enum Refused {
 /// sessions, not host parameters: the owner, "Patch state only"). Set from the editor and the
 /// agents, read by the audio thread without locks: each slot one atomic word (its target and
 /// its depth), and [`Patch::changes`] counting every change.
+///
+/// The assignments to the effects' pins ([`Target::Fx`]) are kept here too, for the engine and
+/// the editor, but are the effects' chain's (decisions.md R-FX-PARAMS: "Pins and their
+/// assignments are saved with the chain"): never in [`Patch::saved`] or [`Patch::values`], left
+/// as they are by [`Patch::load`], [`Patch::clear`] and [`Patch::copy_from`], and counted apart
+/// ([`Patch::fx_changes`]).
 #[derive(Debug)]
 pub struct Patch {
     slots: [[AtomicU64; MOST]; SOURCES],
@@ -822,6 +901,7 @@ pub struct Patch {
     /// Each macro's typed name, its characters in one word (decisions.md R-MACROS).
     names: [AtomicU64; MACROS],
     changes: AtomicU32,
+    fx_changes: AtomicU32,
 }
 
 impl Default for Patch {
@@ -831,6 +911,7 @@ impl Default for Patch {
             sharp: std::array::from_fn(|_| AtomicBool::new(false)),
             names: std::array::from_fn(|_| AtomicU64::new(0)),
             changes: AtomicU32::new(0),
+            fx_changes: AtomicU32::new(0),
         }
     }
 }
@@ -908,7 +989,7 @@ impl Patch {
         let slot = same.or_else(|| slots.iter().find(|s| s.load(Ordering::Acquire) == 0));
         let slot = slot.ok_or(Refused::Full)?;
         slot.store(new, Ordering::Release);
-        self.changed();
+        self.changed_on(target);
         Ok(())
     }
 
@@ -940,16 +1021,43 @@ impl Patch {
             for (s, a) in slots.iter().zip(kept) {
                 s.store(word(a), Ordering::Release);
             }
-            self.changed();
+            self.changed_on(target);
         }
         gone
+    }
+
+    /// Source `source`'s words with its assignments to the effects' pins first, in order, then
+    /// `rest` (none past [`MOST`]): what a load or a clear leaves it.
+    fn keeping_fx(&self, source: Source, rest: &[u64]) -> [u64; MOST] {
+        let mut out = [0u64; MOST];
+        let mut n = 0;
+        for a in self.assignments(source).into_iter().flatten() {
+            if a.target.is_fx() {
+                out[n] = word(Some(a));
+                n += 1;
+            }
+        }
+        for w in rest {
+            if n == MOST {
+                break;
+            }
+            if *w != 0 {
+                out[n] = *w;
+                n += 1;
+            }
+        }
+        out
     }
 
     /// Every source's every assignment taken away, every EDGES SOFT again, every macro's name
     /// none (Init; a preset or session saved before LFOs).
     pub fn clear(&self) {
-        for s in self.slots.iter().flatten() {
-            s.store(0, Ordering::Release);
+        // (The effects' pins' assignments are the chain's: kept.)
+        for source in Source::all() {
+            let kept = self.keeping_fx(source, &[]);
+            for (s, w) in self.slots[source.index()].iter().zip(kept) {
+                s.store(w, Ordering::Release);
+            }
         }
         for e in &self.sharp {
             e.store(false, Ordering::Release);
@@ -1018,6 +1126,19 @@ impl Patch {
         self.changes.fetch_add(1, Ordering::AcqRel);
     }
 
+    fn changed_on(&self, target: Target) {
+        if target.is_fx() {
+            self.fx_changes.fetch_add(1, Ordering::AcqRel);
+        }
+        self.changed();
+    }
+
+    /// How many changes have been made to the effects' pins' assignments (the chain saves
+    /// them: R-FX-PARAMS).
+    pub fn fx_changes(&self) -> u32 {
+        self.fx_changes.load(Ordering::Acquire)
+    }
+
     /// As saved with the session: each source that has an assignment or SHARP EDGES.
     pub fn saved(&self) -> Saved {
         Saved {
@@ -1028,6 +1149,7 @@ impl Patch {
                         .assignments(s)
                         .into_iter()
                         .flatten()
+                        .filter(|a| !a.target.is_fx())
                         .map(|a| (a.target.id().to_owned(), a.depth))
                         .collect(),
                     sharp: s.lfo().is_some_and(|l| self.edges(l) == Edges::Sharp),
@@ -1060,7 +1182,8 @@ impl Patch {
                 sharp[l] |= s.sharp;
             }
             for (id, depth) in &s.to {
-                let Some(target) = Target::of_id(id) else {
+                // (The effects' pins' are the chain's: R-FX-PARAMS.)
+                let Some(target) = Target::of_id(id).filter(|t| !t.is_fx()) else {
                     continue;
                 };
                 let n = counts[i];
@@ -1077,8 +1200,9 @@ impl Patch {
                 counts[i] += 1;
             }
         }
-        for (slots, w) in self.slots.iter().zip(words) {
-            for (slot, w) in slots.iter().zip(w) {
+        for (source, w) in Source::all().zip(words) {
+            let kept = self.keeping_fx(source, &w);
+            for (slot, w) in self.slots[source.index()].iter().zip(kept) {
                 slot.store(w, Ordering::Release);
             }
         }
@@ -1100,6 +1224,9 @@ impl Patch {
         let mut out = Vec::new();
         for s in Source::all() {
             for a in self.assignments(s).into_iter().flatten() {
+                if a.target.is_fx() {
+                    continue;
+                }
                 let pct = (f64::from(a.depth) * 100.0 * 1e4).round() / 1e4;
                 out.push((format!("{}_to_{}", s.id(), a.target.id()), pct));
             }
@@ -1145,7 +1272,12 @@ impl Patch {
         let theirs = Patch::default();
         theirs.load_values(values);
         let sorted = |p: &Patch, s: Source| {
-            let mut a: Vec<Assignment> = p.assignments(s).into_iter().flatten().collect();
+            let mut a: Vec<Assignment> = p
+                .assignments(s)
+                .into_iter()
+                .flatten()
+                .filter(|a| !a.target.is_fx())
+                .collect();
             a.sort_by_key(|a| a.target);
             a
         };
@@ -1161,13 +1293,21 @@ impl Patch {
     /// `other`'s assignments and EDGES in place of these, without allocating (a preset a MIDI
     /// pad chose, prepared off the audio thread and applied on it).
     pub fn copy_from(&self, other: &Patch) {
-        for (a, b) in self
-            .slots
-            .iter()
-            .flatten()
-            .zip(other.slots.iter().flatten())
-        {
-            a.store(b.load(Ordering::Acquire), Ordering::Release);
+        // (This patch's effects' pins' assignments kept, the other's not taken: R-FX-PARAMS.)
+        for source in Source::all() {
+            let i = source.index();
+            let theirs: [u64; MOST] = std::array::from_fn(|k| {
+                let w = other.slots[i][k].load(Ordering::Acquire);
+                if of_word(w).is_some_and(|a| a.target.is_fx()) {
+                    0
+                } else {
+                    w
+                }
+            });
+            let kept = self.keeping_fx(source, &theirs);
+            for (a, w) in self.slots[i].iter().zip(kept) {
+                a.store(w, Ordering::Release);
+            }
         }
         for (a, b) in self.sharp.iter().zip(&other.sharp) {
             a.store(b.load(Ordering::Acquire), Ordering::Release);
@@ -1823,6 +1963,31 @@ impl Lfos {
         self.to.iter().flatten().flatten().any(|a| a.depth != 0.0)
     }
 
+    /// The effects' pins some source moves (a bit each, [`Target::Fx`]'s number): R-FX-PARAMS.
+    pub fn fx_moved(&self) -> u32 {
+        let mut bits = 0;
+        for a in self.to.iter().flatten().flatten() {
+            if let (Some(k), true) = (a.target.fx(), a.depth != 0.0) {
+                bits |= 1 << k;
+            }
+        }
+        bits
+    }
+
+    /// Each effects' pin's offset on its travel with the sources at `shared` (the sum of depth
+    /// × value; the shared copies: an effect has no voices).
+    pub fn fx_offsets(&self, shared: &[f64; SOURCES]) -> [f32; FX_PINS] {
+        let mut out = [0.0f64; FX_PINS];
+        for (i, to) in self.to.iter().enumerate() {
+            for a in to.iter().flatten() {
+                if let Some(k) = a.target.fx() {
+                    out[k] += f64::from(a.depth) * shared[i];
+                }
+            }
+        }
+        out.map(|v| v as f32)
+    }
+
     /// Whether source `i` ([`Source::index`]) has a value of each voice's own: an LFO with MONO
     /// off. The macros never.
     pub fn own(&self, i: usize) -> bool {
@@ -1859,7 +2024,7 @@ impl Lfos {
     pub fn modulated(&self, c: &Controls, shared: &[f64; SOURCES]) -> Controls {
         let mut m = *c;
         // (An LFO's own knobs are the generators', not the controls'.)
-        let (sums, touched) = self.sums(|_, t| !t.is_lfo(), |i| shared[i]);
+        let (sums, touched) = self.sums(|_, t| !t.is_lfo() && !t.is_fx(), |i| shared[i]);
         for t in Target::ALL {
             if touched & (1 << t.index()) != 0 {
                 let travel = f64::from(self.base[t.index()]) + sums[t.index()];
@@ -1885,12 +2050,12 @@ impl Lfos {
             return;
         }
         let (sums, _) = self.sums(
-            |_, t| own_touched & (1u64 << t.index()) != 0,
+            |_, t| own_touched & (1u128 << t.index()) != 0,
             |i| if self.own(i) { own[i] } else { shared[i] },
         );
         let law = self.law.into();
         for t in Target::ALL {
-            if own_touched & (1u64 << t.index()) == 0 {
+            if own_touched & (1u128 << t.index()) == 0 {
                 continue;
             }
             let travel = (f64::from(self.base[t.index()]) + sums[t.index()]).clamp(0.0, 1.0);
@@ -1908,9 +2073,9 @@ impl Lfos {
         &self,
         which: impl Fn(usize, Target) -> bool,
         value: impl Fn(usize) -> f64,
-    ) -> ([f64; TARGETS], u64) {
+    ) -> ([f64; TARGETS], u128) {
         let mut sums = [0.0f64; TARGETS];
-        let mut touched = 0u64;
+        let mut touched = 0u128;
         for (i, to) in self.to.iter().enumerate() {
             for a in to.iter().flatten() {
                 if a.depth == 0.0 || !which(i, a.target) {
@@ -2522,7 +2687,9 @@ pub fn controls(p: &Ca72Params, knob: &dyn Fn(&FloatParam) -> f32) -> Lfos {
         l.to[i] = patch.assignments(s);
         for a in l.to[i].iter().flatten() {
             let t = a.target;
-            l.base[t.index()] = t.travel(p, knob(t.param(p)), law);
+            if let Some(q) = t.param(p) {
+                l.base[t.index()] = t.travel(p, knob(q), law);
+            }
         }
     }
     // (A macro's value only where it is assigned, so that one turned with nothing to move

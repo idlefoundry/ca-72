@@ -4,8 +4,10 @@
 //!
 //! DAW-v3's `daw-sandbox/src/helper.rs` (commit cb15558, third_party/daw-v3/VENDORED.md),
 //! with its notices reduced to what the standalone keeps: the instances whose plug-in
-//! changed its own parameters or state (its editor), whose state is then saved again, and
-//! the rest as they come (a window the player closed). The helper's log goes to the
+//! changed its own parameters or state (its editor), whose state is then saved again; the
+//! values its editor gave its parameters (a pinned parameter's base, decisions.md
+//! R-FX-PARAMS); the instances whose parameters' names or list changed; and the rest as
+//! they come (a window the player closed). The helper's log goes to the
 //! standalone's stderr with `CA72_FX_LOG` set.
 
 use daw_ipc::protocol::{self, Op, Reply, Request};
@@ -48,6 +50,9 @@ impl std::fmt::Display for Failure {
 /// How many lines of the helper's stderr are kept for crash reports.
 const KEEP_LINES: usize = 20;
 
+/// How many parameters' editor values are kept until taken.
+const KEEP_EDITS: usize = 1024;
+
 pub struct HelperProc {
     child: Mutex<Child>,
     stdin: Mutex<Option<ChildStdin>>,
@@ -57,6 +62,11 @@ pub struct HelperProc {
     /// Instances whose plug-in changed its parameters or its state itself (its editor's
     /// edits, a preset it loaded: DAW-v3 D222, D228, D234), by instance number, until taken.
     edited: Mutex<Vec<u32>>,
+    /// The values the plug-ins' editors gave their parameters (instance, parameter, value in
+    /// the plug-in's units), the latest of each, until taken (R-FX-PARAMS).
+    edits: Mutex<Vec<(u32, u32, f64)>>,
+    /// Instances whose parameters' names or list changed, until taken (R-FX-PARAMS).
+    relist: Mutex<Vec<u32>>,
     next_id: AtomicU64,
     alive: AtomicBool,
     pid: u32,
@@ -100,6 +110,8 @@ impl HelperProc {
             pending: Mutex::new(HashMap::new()),
             notices: Mutex::new(Vec::new()),
             edited: Mutex::new(Vec::new()),
+            edits: Mutex::new(Vec::new()),
+            relist: Mutex::new(Vec::new()),
             next_id: AtomicU64::new(1),
             alive: AtomicBool::new(true),
             pid,
@@ -135,6 +147,15 @@ impl HelperProc {
                         {
                             if let Some(n) = reply.result["instance"].as_u64() {
                                 lock(&reader.edited).push(n as u32);
+                                reader.keep_edits(n as u32, &reply.result["edits"]);
+                            }
+                        }
+                        Some(Ok(reply))
+                            if reply.id == 0
+                                && reply.result["notice"] == protocol::NOTICE_PARAMS_CHANGED =>
+                        {
+                            if let Some(n) = reply.result["instance"].as_u64() {
+                                lock(&reader.relist).push(n as u32);
                             }
                         }
                         Some(Ok(reply)) if reply.id == 0 => {
@@ -236,6 +257,36 @@ impl HelperProc {
     /// The instances whose plug-in changed its own parameters or state since the last call.
     pub fn take_edited(&self) -> Vec<u32> {
         std::mem::take(&mut *lock(&self.edited))
+    }
+
+    /// The values the plug-ins' editors gave their parameters since the last call
+    /// (instance, parameter, value in the plug-in's units), the latest of each.
+    pub fn take_param_edits(&self) -> Vec<(u32, u32, f64)> {
+        std::mem::take(&mut *lock(&self.edits))
+    }
+
+    /// The instances whose parameters' names or list changed since the last call.
+    pub fn take_relist(&self) -> Vec<u32> {
+        std::mem::take(&mut *lock(&self.relist))
+    }
+
+    /// Keeps the values of a `param_edits` notice's edits (DAW-v3 D222: a gesture's ends
+    /// carry the value it had then), the latest of each; at most [`KEEP_EDITS`].
+    fn keep_edits(&self, instance: u32, edits: &serde_json::Value) {
+        let Ok(edits) = serde_json::from_value::<Vec<protocol::ParamEdit>>(edits.clone()) else {
+            return;
+        };
+        let mut kept = lock(&self.edits);
+        for e in edits {
+            let Some(v) = e.value.filter(|v| v.is_finite()) else {
+                continue;
+            };
+            if let Some(k) = kept.iter_mut().find(|k| k.0 == instance && k.1 == e.param) {
+                k.2 = v;
+            } else if kept.len() < KEEP_EDITS {
+                kept.push((instance, e.param, v));
+            }
+        }
     }
 
     /// Kills the process (SIGKILL on Unix, TerminateProcess on Windows).

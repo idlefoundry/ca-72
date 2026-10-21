@@ -4,6 +4,10 @@
 //! menus are (`lfo::Patch`, patch state: no host gesture), and the macros' typed names. The LFOs'
 //! own controls and the macros' knobs are parameters (`lfoN_rate`, `macroN`), set with
 //! `parameters.set`.
+//!
+//! The standalone's effects' pinned parameters are targets too (decisions.md R-FX-PARAMS:
+//! `fx1` to `fx16`, while pinned to an effect that runs), and `effects.parameters`,
+//! `effects.pin` and `effects.unpin` list an effect's parameters and pin or unpin them.
 
 use serde_json::{Value, json};
 
@@ -86,6 +90,9 @@ fn target_of(p: &Ca72Params, v: Option<&Value>) -> Result<Target, ApiError> {
             Some(Target::LfoRate(_)) => {
                 format!("{key} cannot take a source now (its LFO is timed)")
             }
+            Some(Target::Fx(_)) => {
+                format!("{key} is not pinned to an effect that runs (effects.pin pins one)")
+            }
             Some(_) => format!("{key} cannot take a source now (its oscillator is timed)"),
             None if id.ends_with("_waveform")
                 && (id.starts_with("osc") || id.starts_with("lfo")) =>
@@ -131,6 +138,7 @@ fn targets_now(p: &Ca72Params) -> Vec<&'static str> {
 /// FREQUENCY's not timed).
 fn live(p: &Ca72Params, t: Target) -> bool {
     match t {
+        Target::Fx(k) => lfo::FX_PINNED.load(std::sync::atomic::Ordering::Acquire) & (1 << k) != 0,
         Target::Osc1Shape => p.continuous(0),
         Target::Osc2Shape => p.continuous(1),
         Target::Osc3Shape => p.continuous(2),
@@ -147,6 +155,8 @@ fn live(p: &Ca72Params, t: Target) -> bool {
 /// and ON; the most a
 /// source takes; and the knobs that can take one now.
 pub fn list(p: &Ca72Params) -> Value {
+    // (The pins first: they say which pin targets can take a source now.)
+    let pins = pins_now();
     let table = values::table(p);
     let sources: Vec<Value> = Source::all()
         .map(|s| {
@@ -156,9 +166,19 @@ pub fn list(p: &Ca72Params) -> Value {
                 .into_iter()
                 .flatten()
                 .map(|a| {
+                    let pin = a
+                        .target
+                        .fx()
+                        .and_then(|k| pins.iter().find(|x| x.target == k));
+                    let label = match pin {
+                        Some(x) => format!("{}: {}", x.effect, x.name),
+                        None => values::find(&table, a.target.id())
+                            .map_or("", |e| e.label)
+                            .to_owned(),
+                    };
                     json!({
                         "target": a.target.id(),
-                        "label": values::find(&table, a.target.id()).map_or("", |e| e.label),
+                        "label": label,
                         "depth": (f64::from(a.depth) * 1000.0).round() / 10.0,
                         "shared": lfo::takes_shared(p, s, a.target),
                         "inert": !live(p, a.target),
@@ -189,7 +209,126 @@ pub fn list(p: &Ca72Params) -> Value {
             v
         })
         .collect();
-    json!({"sources": sources, "most": lfo::MOST, "targets": targets_now(p)})
+    let mut v = json!({"sources": sources, "most": lfo::MOST, "targets": targets_now(p)});
+    if crate::fx_view::installed().is_some() {
+        v["pins"] = json!(pins.iter().map(pin_json).collect::<Vec<_>>());
+    }
+    v
+}
+
+/// The effects' pins now (none without the standalone's effects), the targets that can take a
+/// source published with them.
+fn pins_now() -> Vec<crate::fx_view::PinInfo> {
+    crate::fx_view::installed()
+        .and_then(|e| e.pins())
+        .unwrap_or_default()
+}
+
+fn pin_json(x: &crate::fx_view::PinInfo) -> Value {
+    json!({
+        "target": Target::Fx(x.target).id(),
+        "slot": x.slot + 1,
+        "effect": x.effect,
+        "parameter": x.id,
+        "name": x.name,
+        "value": (x.value * 1000.0).round() / 10.0,
+        "live": x.live,
+        "missing": x.missing,
+    })
+}
+
+/// The standalone's effects, or why there are none.
+fn effects() -> Result<std::sync::Arc<dyn crate::fx_view::Effects>, ApiError> {
+    crate::fx_view::installed()
+        .ok_or_else(|| ApiError::refused("effects are the standalone application's alone"))
+}
+
+/// The effect's slot an agent names (1 to 4).
+fn slot_of(v: Option<&Value>) -> Result<usize, ApiError> {
+    match v.and_then(Value::as_u64) {
+        Some(n @ 1..=4) => Ok(n as usize - 1),
+        _ => Err(ApiError::params("`slot` is the effect's place, 1 to 4")),
+    }
+}
+
+/// `effects.parameters`: the parameters of the effect in `slot` that a player may pin, in
+/// name order (those holding every word of `find`, if given), each with its ID, names, units,
+/// steps, value in % of its travel, the plug-in's own text for it, and its pin target if
+/// pinned (R-FX-PARAMS).
+pub fn effect_params(_p: &Ca72Params, args: &Value) -> Reply {
+    let fx = effects()?;
+    let slot = slot_of(arg(args, "slot"))?;
+    let rows = fx.params(slot).map_err(ApiError::refused)?;
+    let find = arg(args, "find").and_then(Value::as_str).unwrap_or("");
+    let shown = crate::fx_view::search_params(&rows, find, false);
+    let texts = fx.param_text(
+        slot,
+        &shown
+            .iter()
+            .map(|&i| (rows[i].id, rows[i].plain))
+            .collect::<Vec<_>>(),
+    );
+    let list: Vec<Value> = shown
+        .iter()
+        .zip(texts)
+        .map(|(&i, text)| {
+            let r = &rows[i];
+            json!({
+                "parameter": r.id,
+                "name": r.name,
+                "short": r.short,
+                "units": r.units,
+                "steps": r.steps,
+                "value": (r.value * 1000.0).round() / 10.0,
+                "text": text,
+                "pinned": r.pinned.map(|t| Target::Fx(t).id()),
+            })
+        })
+        .collect();
+    Ok(
+        json!({"slot": slot + 1, "parameters": list, "pins": pins_now().iter().map(pin_json).collect::<Vec<_>>()}),
+    )
+}
+
+/// The parameter of `rows` an agent names: its ID, or its name (any case).
+fn param_of(rows: &[crate::fx_view::ParamRow], v: Option<&Value>) -> Result<u32, ApiError> {
+    let found = match v {
+        Some(Value::Number(n)) => n
+            .as_u64()
+            .and_then(|n| rows.iter().find(|r| u64::from(r.id) == n)),
+        Some(Value::String(s)) => rows.iter().find(|r| {
+            r.name.eq_ignore_ascii_case(s.trim()) || r.short.eq_ignore_ascii_case(s.trim())
+        }),
+        _ => return Err(ApiError::params("`parameter` is its ID or its name")),
+    };
+    found
+        .map(|r| r.id)
+        .ok_or_else(|| ApiError::refused("the effect has no such parameter a player may pin"))
+}
+
+/// `effects.pin`: the parameter `parameter` of the effect in `slot` pinned (at most four an
+/// effect): its target (`fx1` to `fx16`), which the modulation tools then take.
+pub fn pin(_p: &Ca72Params, args: &Value) -> Reply {
+    let fx = effects()?;
+    let slot = slot_of(arg(args, "slot"))?;
+    let rows = fx.params(slot).map_err(ApiError::refused)?;
+    let id = param_of(&rows, arg(args, "parameter"))?;
+    let t = fx.pin(slot, id).map_err(ApiError::refused)?;
+    Ok(
+        json!({"target": Target::Fx(t).id(), "pins": pins_now().iter().map(pin_json).collect::<Vec<_>>()}),
+    )
+}
+
+/// `effects.unpin`: pin `target` (`fx1` to `fx16`) unpinned, what moved it let go of.
+pub fn unpin(_p: &Ca72Params, args: &Value) -> Reply {
+    let fx = effects()?;
+    let t = arg(args, "target")
+        .and_then(Value::as_str)
+        .and_then(|s| Target::of_id(s.trim()))
+        .and_then(Target::fx)
+        .ok_or_else(|| ApiError::params("`target` is a pin's, fx1 to fx16"))?;
+    fx.unpin(t).map_err(ApiError::refused)?;
+    Ok(json!({"pins": pins_now().iter().map(pin_json).collect::<Vec<_>>()}))
 }
 
 /// `modulation.set`: `source` modulating `target` by `depth` (-100 to 100 % of the knob's

@@ -123,6 +123,76 @@ pub struct Catalogue {
     pub effects: Vec<Listing>,
 }
 
+/// One of an effect's parameters as its PARAMETERS list shows it (decisions.md R-FX-PARAMS).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParamRow {
+    /// The plug-in's ID for it.
+    pub id: u32,
+    /// The plug-in's names for it, and its units (VST3 alone gives a short name and units).
+    pub name: String,
+    pub short: String,
+    pub units: String,
+    /// Its steps past its first value (0: continuous); it steps when modulated.
+    pub steps: u32,
+    /// Its value now, a share of its travel (0..1), and in the plug-in's units (for its text,
+    /// [`Effects::param_text`]).
+    pub value: f64,
+    pub plain: f64,
+    /// The pin target it is pinned to (0 to 15: the synth's `fx1` to `fx16`), if it is.
+    pub pinned: Option<usize>,
+}
+
+/// A pinned parameter, for its knob under its effect (B1), its rings, tip and menu
+/// (decisions.md R-FX-PARAMS).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PinInfo {
+    /// Its target (0 to 15: the synth's `fx1` to `fx16`, `lfo::Target::Fx`), which stays its
+    /// own while its effect moves.
+    pub target: usize,
+    /// Its effect's place now, and name.
+    pub slot: usize,
+    pub effect: String,
+    pub id: u32,
+    pub name: String,
+    pub short: String,
+    /// Its base, a share of its travel (0..1), and in the plug-in's units.
+    pub value: f64,
+    pub plain: Option<f64>,
+    pub steps: u32,
+    /// Its effect runs and has it. Not: dimmed and inert, its assignments kept.
+    pub live: bool,
+    /// Its effect runs but no longer has it: MISSING (UNPIN in its menu).
+    pub missing: bool,
+}
+
+/// The rows of `rows` a PARAMETERS list shows, by index (decisions.md R-FX-PARAMS): those
+/// whose name, short name or units hold every typed word (case aside), and, with `pinned`, only
+/// the pinned ones (ALL · PINNED); in name order (the owner, 2026-10-20), then by ID.
+pub fn search_params(rows: &[ParamRow], typed: &str, pinned: bool) -> Vec<usize> {
+    let words: Vec<String> = typed.split_whitespace().map(str::to_lowercase).collect();
+    let mut out: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| {
+            let text = format!("{} {} {}", r.name, r.short, r.units).to_lowercase();
+            words.iter().all(|w| text.contains(w.as_str())) && (!pinned || r.pinned.is_some())
+        })
+        .map(|(i, _)| i)
+        .collect();
+    out.sort_by(|a, b| {
+        let (x, y) = (&rows[*a], &rows[*b]);
+        (x.name.to_lowercase(), x.id).cmp(&(y.name.to_lowercase(), y.id))
+    });
+    out
+}
+
+/// The synth's target for pin target `target` (`lfo::Target::Fx`), and whether it can take a
+/// cord now: pinned to an effect that runs (`lfo::target_of` of its ID, `fx1` to `fx16`).
+pub fn pin_target(p: &crate::params::Ca72Params, target: usize) -> Option<crate::lfo::Target> {
+    let id = crate::lfo::Target::Fx(target.min(crate::lfo::FX_PINS - 1)).id();
+    crate::lfo::target_of(p, id)
+}
+
 /// The chain as the drawer reaches it. What may take a while (loading, a window) is called on
 /// the drawer's threads, never the editor's; the rest returns at once.
 pub trait Effects: Send + Sync {
@@ -155,6 +225,36 @@ pub trait Effects: Send + Sync {
     fn turn_on(&self);
     /// Why the effects are off this time, if they are (a safe start).
     fn safe_start(&self) -> Option<SafeStart>;
+
+    // The effects' parameters and pins (decisions.md R-FX-PARAMS). The listing and the texts
+    // ask the effect's helper (milliseconds): the drawer's threads', or a frame's while its
+    // list is open.
+
+    /// The `slot`th effect's parameters a player may pin, with their values now, in the
+    /// plug-in's order ([`search_params`] gives the list's).
+    fn params(&self, _slot: usize) -> Result<Vec<ParamRow>, String> {
+        Err("no effects here".into())
+    }
+    /// The `slot`th effect's own text for each (parameter, value in its units) pair: "2.40 s".
+    fn param_text(&self, _slot: usize, values: &[(u32, f64)]) -> Vec<Option<String>> {
+        vec![None; values.len()]
+    }
+    /// Every pin, by target; none if the chain is busy now.
+    fn pins(&self) -> Option<Vec<PinInfo>> {
+        Some(Vec::new())
+    }
+    /// Parameter `id` of the `slot`th effect pinned: its target. A fifth of an effect is refused.
+    fn pin(&self, _slot: usize, _id: u32) -> Result<usize, String> {
+        Err("no effects here".into())
+    }
+    /// Pin target `target` unpinned, what moved it let go of.
+    fn unpin(&self, _target: usize) -> Result<(), String> {
+        Err("no effects here".into())
+    }
+    /// Pin target `target`'s value set to `travel` (0..1): the drawer's knob turned.
+    fn set_pin_value(&self, _target: usize, _travel: f64) -> Result<(), String> {
+        Err("no effects here".into())
+    }
 }
 
 /// The standalone's chain, if the application has one (the plug-ins: none).

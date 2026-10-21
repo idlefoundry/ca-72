@@ -2,7 +2,8 @@
 //! global allocator, counting only on the thread that plays, while blocks go through two
 //! effects in real time and the chain is changed under them (a parameter, a bypass, a move,
 //! an effect taken out, the chain restored as at a start, its effect joining as it plays) and
-//! one effect's helper is killed and restored. A binary of its own:
+//! one effect's helper is killed and restored, both effects' gains pinned and modulated
+//! throughout, one set by a learned controller (decisions.md R-FX-PARAMS). A binary of its own:
 //! the allocator is the process's.
 
 #![allow(unsafe_code)]
@@ -95,6 +96,11 @@ fn the_audio_side_never_allocates() {
         "vst3",
     ))
     .unwrap();
+    // Both gains pinned and moved, a point every 32 samples (R-FX-PARAMS).
+    assert_eq!(c.pin(0, 1).unwrap(), 0);
+    assert_eq!(c.pin(1, 1).unwrap(), 1);
+    let at: Vec<u32> = (0..8).map(|k| k * 32).collect();
+    let mut offsets = vec![[0.0f32; ca72_fx::MAX_PINS]; 8];
     let (mut l, mut rr) = (vec![0.1f32; 256], vec![-0.1f32; 256]);
     let period = Duration::from_secs_f64(256.0 / 48_000.0);
     // A first block outside the count: lazily made things (the clock's, the thread's).
@@ -116,9 +122,26 @@ fn the_audio_side_never_allocates() {
             ),
             _ => {}
         }
+        for (j, o) in offsets.iter_mut().enumerate() {
+            let x = ((k * 8 + j) as f32 * 0.05).sin() * 0.2;
+            o[0] = x;
+            o[1] = -x;
+        }
+        // (Nothing moves them for a while: each goes back to its base once.)
+        let moved = if (400..450).contains(&k) { 0 } else { 0b11 };
         let t = Instant::now();
         WATCHED.with(|w| w.set(true));
-        r.process(&mut l, &mut rr, Some(t + Duration::from_millis(30)));
+        if k == 120 {
+            r.set_pin_value(0, 0.4);
+        }
+        r.process_modulated(
+            &mut l,
+            &mut rr,
+            Some(t + Duration::from_millis(30)),
+            moved,
+            &at,
+            &offsets,
+        );
         WATCHED.with(|w| w.set(false));
         std::thread::sleep(period.saturating_sub(t.elapsed()));
     }

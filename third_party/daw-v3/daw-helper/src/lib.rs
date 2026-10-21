@@ -306,6 +306,18 @@ impl Helper {
                 Some(h) => h.inst.gui_open(&title, x.zip(y)).map(|v| h.with_watch(v)),
                 None => Err(format!("no instance {instance}")),
             },
+            // Listed again with their values now, and the plugin's text for values
+            // (PATCHES.md change 5).
+            Op::Params { instance } => match self.instances.get(&instance) {
+                Some(h) => serde_json::to_value(h.inst.params()).map_err(|e| e.to_string()),
+                None => Err(format!("no instance {instance}")),
+            },
+            Op::ParamText { instance, values } => match self.instances.get(&instance) {
+                Some(h) => {
+                    serde_json::to_value(h.inst.param_text(&values)).map_err(|e| e.to_string())
+                }
+                None => Err(format!("no instance {instance}")),
+            },
             Op::GuiMove { instance, x, y } => match self.instances.get_mut(&instance) {
                 Some(h) => h.inst.gui_move(x, y).map(|v| h.with_watch(v)),
                 None => Err(format!("no instance {instance}")),
@@ -430,6 +442,7 @@ impl Helper {
         h.inst.take_edits();
         h.inst.take_clears();
         h.inst.take_values_changed();
+        h.inst.take_params_changed();
         h.values_due = ValuesDue::default();
         // What it has now is what it changes from (D234).
         h.inst.take_host_given();
@@ -550,6 +563,17 @@ impl Helper {
                     now,
                 ) {
                     notices.push(ok(0, h.reading(*i, now)));
+                }
+                // Its parameters' names or list changed: the host lists them again
+                // (PATCHES.md change 5).
+                if h.inst.take_params_changed() {
+                    notices.push(ok(
+                        0,
+                        serde_json::json!({
+                            "notice": protocol::NOTICE_PARAMS_CHANGED,
+                            "instance": i,
+                        }),
+                    ));
                 }
                 for (param, flags) in h.inst.take_clears() {
                     notices.push(ok(
