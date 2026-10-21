@@ -14403,3 +14403,25 @@ every recording and platform. No release or merge is performed by this follow-up
 synthetic preset recovery is a regression fixture. Offline rendering must exclude computer
 MIDI preset-action bindings as well as live controllers, and whole-mix loudness is not a
 bass-only calibration metric.
+
+## R-REFERENCE-LFO-ENVELOPES. Offline routing and acoustic/polyphonic studies
+
+**The owner, 2026-10-21.** Keep the selected real flute excerpt, attempt a different
+polyphonic instrument, and make use of the four LFOs as secondary envelopes; add any missing
+MCP access. Live parameter/modulation tools already cover their ENV controls, but detached
+rendering could only retain existing assignments.
+
+**Implemented:** optional ordered `ca72_render.modulations` set/remove edits after parameter
+overrides, through the existing modulation rules on a disposable patch. Invalid batches
+reject before output; snapshots and normal preset export/reload retain routing. Per-voice
+mixer/filter targets and shared VOLUME/LEVEL are documented. Regression coverage verifies
+actual ENV completion and a later overlapping polyphonic voice, export/reload, malformed
+input and bridge liveness. Numeric source zero and late macro EDGES validation were fixed
+in the shared live parser. No DSP changes.
+
+Real flute and unprocessed accordion recordings were fitted, with excluded notes/takes and
+new phrases checked from delivered preset files. The accordion retains a per-voice rising
+ENV saw for its bellows attack; flute LFO trials did not improve the overall selection.
+Source permissions, methods, measurements, quantized reload differences and remaining
+acoustic limitations: [acoustic validation](mcp-acoustic-validation.md). These are working
+studies for the owner's listening review, not a release or an exact-reproduction claim.

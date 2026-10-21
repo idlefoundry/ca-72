@@ -371,19 +371,8 @@ pub fn tools() -> Vec<Tool> {
         t(
             "ca72_modulation_set",
             "modulation.set",
-            "Make a source modulate a knob, as dragging from an LFO's OUT jack or a macro's jack does, or change its depth: `source` (lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name), `target` (a continuous knob of the panel or the strip by id or label; an oscillator's WAVEFORM only while CONTINUOUS; not a switch, selector, wheel, VOICES, a timed dial, an LFO's own knob or a macro) and `depth` in % of the knob's travel, -100 to 100 (25 if a new one is given none). `edges` (SOFT or SHARP) sets an LFO's EDGES; `name` (at most 7 characters, capitals; \"\" for none) a macro's name. A source takes at most 8 knobs. Patch state, saved with presets and sessions. Returns what every source modulates.",
-            |p| {
-                obj(
-                    json!({
-                        "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name."},
-                        "target": param_key(p),
-                        "depth": {"type": "number", "minimum": -100, "maximum": 100},
-                        "edges": {"type": "string", "enum": ["SOFT", "SHARP"]},
-                        "name": {"type": "string", "maxLength": 7, "description": "A macro's name (\"\" for none)."},
-                    }),
-                    &["source"],
-                )
-            },
+            "Make a source modulate a knob, as dragging from an LFO's OUT jack or a macro's jack does, or change its depth: `source` (lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name), `target` (a continuous knob of the panel or the strip by id or label; an oscillator's WAVEFORM only while CONTINUOUS; including an LFO's own RATE (while untimed), PHASE, RISE, continuous shape and LEVEL; not a switch, selector, wheel, VOICES, a timed dial or a macro) and `depth` in % of the knob's travel, -100 to 100 (25 if a new one is given none). `edges` (SOFT or SHARP) sets an LFO's EDGES; `name` (at most 7 characters, capitals; \"\" for none) a macro's name. A source takes at most 8 knobs. Patch state, saved with presets and sessions. Returns what every source modulates.",
+            modulation_set_schema,
             false,
             false,
             Instance,
@@ -512,7 +501,7 @@ pub fn tools() -> Vec<Tool> {
         t(
             "ca72_render",
             "audio.render",
-            "Render the current sound, a named library preset, or a previous snapshot through the same synth process as playback, without an audio device or changing the live instrument. Supply MIDI notes with start and duration in seconds, total seconds including the release tail, and a new absolute output_dir. A preset or snapshot also works with no application open. effects must explicitly be dry: third-party effects are excluded and external input is silent. Returns a float WAV, exact snapshot, hashes and manifest. Fixed seed and settings repeat the render; latency is compensated. Optional values use ca72_set's parameter IDs and panel units, applied only to this candidate.",
+            "Render the current sound, a named library preset, or a previous snapshot through the same synth process as playback, without an audio device or changing the live instrument. Supply MIDI notes with start and duration in seconds, total seconds including the release tail, and a new absolute output_dir. A preset or snapshot also works with no application open. effects must explicitly be dry: third-party effects are excluded and external input is silent. Returns a float WAV, exact snapshot, hashes and manifest. Fixed seed and settings repeat the render; latency is compensated. Optional values use ca72_set's parameter IDs and panel units, including all four LFOs' Env modes. Optional modulations edits their routing after values, including secondary envelopes, with no app. Only this candidate changes; routing is preserved by snapshot/export/reload.",
             super::audio::render_schema,
             false,
             false,
@@ -555,6 +544,20 @@ pub fn tools() -> Vec<Tool> {
             Instance,
         ),
     ]
+}
+
+/// Shared routing schema for live edits and detached render candidates.
+pub(crate) fn modulation_set_schema(p: &Ca72Params) -> Value {
+    obj(
+        json!({
+            "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name."},
+            "target": param_key(p),
+            "depth": {"type": "number", "minimum": -100, "maximum": 100},
+            "edges": {"type": "string", "enum": ["SOFT", "SHARP"]},
+            "name": {"type": "string", "maxLength": 7, "description": "A macro's name (\"\" for none)."},
+        }),
+        &["source"],
+    )
 }
 
 /// `parameters.set`'s schema: a value for any parameter, each typed by its shape.

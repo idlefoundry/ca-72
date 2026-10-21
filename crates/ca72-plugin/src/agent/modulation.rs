@@ -27,10 +27,13 @@ pub fn source_of(p: &Ca72Params, v: Option<&Value>) -> Result<Source, ApiError> 
     };
     match v {
         Some(Value::Number(n)) => {
-            let n = n.as_u64().ok_or_else(bad)? as usize;
+            let n = n
+                .as_u64()
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(bad)?;
             (1..=lfo::LFOS)
                 .contains(&n)
-                .then_some(Source::Lfo(n - 1))
+                .then(|| Source::Lfo(n - 1))
                 .ok_or_else(bad)
         }
         Some(Value::String(s)) => {
@@ -354,6 +357,9 @@ pub fn set(p: &Ca72Params, args: &Value) -> Reply {
         Some(Value::String(e)) if e.eq_ignore_ascii_case("sharp") => Some(Edges::Sharp),
         Some(_) => return Err(ApiError::params("`edges` must be SOFT or SHARP")),
     };
+    if edges.is_some() && source.lfo().is_none() {
+        return Err(ApiError::params("`edges` is an LFO's"));
+    }
     let target = arg(args, "target");
     if target.is_none() && edges.is_none() && name.is_none() {
         return Err(ApiError::params(
@@ -397,10 +403,7 @@ pub fn set(p: &Ca72Params, args: &Value) -> Reply {
             Err(Refused::NoSource) => return Err(ApiError::params("no such source")),
         }
     }
-    if let Some(e) = edges {
-        let Some(n) = source.lfo() else {
-            return Err(ApiError::params("`edges` is an LFO's"));
-        };
+    if let (Some(e), Some(n)) = (edges, source.lfo()) {
         p.lfo_patch.set_edges(n, e);
     }
     if let (Some(name), Some(n)) = (name, source.macro_n()) {

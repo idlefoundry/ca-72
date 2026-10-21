@@ -51,6 +51,8 @@ pub fn render_schema(p: &crate::params::Ca72Params) -> Value {
         .iter()
         .map(|e| (e.id.into(), e.schema()))
         .collect();
+    let mut modulation = super::tools::modulation_set_schema(p);
+    modulation["properties"]["remove"] = json!({"type":"boolean","default":false,"description":"Remove this source's target, or all of its assignments when target is omitted. Takes source and optional target only."});
     schema(
         json!({
             "output_dir":{"type":"string","description":"New absolute local directory; parent must exist. Never overwrites a previous render."},
@@ -65,7 +67,8 @@ pub fn render_schema(p: &crate::params::Ca72Params) -> Value {
             "seed":{"type":"integer","minimum":0,"description":"Random seed for repeatable noise, component variations and arpeggiator randomness; default is captured seed, or 72 for a library preset."},
             "tempo":{"type":"number","minimum":30,"maximum":300,"description":"BPM before modulation; defaults to snapshot tempo (120 for a library preset)."},
             "frequency_dials":{"type":"string","enum":["SEMITONES","HARDWARE"],"description":"Frequency modulation travel preference; defaults to snapshot law. A preset file does not store this player preference."},
-            "values":{"type":"object","properties":values,"additionalProperties":false,"description":"Candidate overrides in ca72_set's panel units. Only this offline copy is changed."}
+            "values":{"type":"object","properties":values,"additionalProperties":false,"description":"Candidate overrides in ca72_set's panel units, including all four LFOs' mode (Env for one cycle), rate, phase, rise, polarity, reverse, mono and level. Applied before modulations; only this offline copy is changed."},
+            "modulations":{"type":"array","maxItems":128,"items":modulation,"description":"Routing edits in order, using ca72_modulation_set's source/target/depth/edges/name, or remove:true. Configure LFO controls in values. Allows secondary envelopes (Env), vibrato and macro routing with no app. Existing routing is retained unless edited; a rejected batch changes nothing. Effects pins are unavailable in a dry render."}
         }),
         &["output_dir", "effects", "notes"],
     )
@@ -503,6 +506,9 @@ pub fn render(args: &Value, mut snapshot: Snapshot, preset_source: Option<Value>
             }
         };
     }
+    if let Some(v) = arg(args, "modulations") {
+        snapshot.override_modulations(v)?;
+    }
     let request = Request {
         notes: serde_json::from_value(
             arg(args, "notes")
@@ -530,7 +536,7 @@ pub fn render(args: &Value, mut snapshot: Snapshot, preset_source: Option<Value>
     write(&dir.join("render.wav"), &bytes)?;
     let manifest = json!({"format":1,"engine_version":env!("CARGO_PKG_VERSION"),"engine_source_sha256":env!("CA72_ENGINE_SOURCE_SHA256"),
         "snapshot":snapshot,"snapshot_sha256":snapshot_hash,"request":request,"wav_sha256":wave_hash,
-        "preset_file_source":preset_source,
+        "preset_file_source":preset_source,"modulation_edits":arg(args,"modulations"),
         "latency_compensated_samples":result.latency_compensated_samples,"block_frames":crate::offline::BLOCK,
         "effects":"dry","external_input":"silence","initial_state":"fresh voices; seed resets noise and component variations; no live held notes or oscillator phase copied",
         "processing":"same Ca72::process as playback; offline, no device, real-time workers or live-state changes"});

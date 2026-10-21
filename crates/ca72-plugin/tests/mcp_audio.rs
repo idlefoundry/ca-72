@@ -219,3 +219,104 @@ fn named_preset_rendering_selects_the_requested_qualitys_curve() {
         }
     }
 }
+
+#[test]
+fn offline_env_routing_retriggers_per_voice_and_survives_preset_export() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = Client::new(dir.path());
+    let notes = json!([
+        {"note":60,"start":0,"duration":0.75},
+        {"note":72,"start":0.35,"duration":0.35}
+    ]);
+    let values = json!({"quality":"LO","poly":true,"osc1_on":true,"osc2_on":false,
+        "osc3_on":false,"noise_on":false,"emphasis":0,"contour_amount":0,
+        "osc1_volume":0,"loudness_attack":0,"loudness_sustain":10,"volume":10,
+        "lfo1_mode":"Env","lfo1_waveform":"Sawtooth","lfo1_reverse":true,
+        "lfo1_polarity":"Unipolar","lfo1_rate":4,"lfo1_mono":false,
+        "lfo1_phase":0,"lfo1_rise":0,"retrigger":false});
+    let mut args = json!({"preset":"White Lotus","effects":"dry","values":values,
+        "modulations":[{"source":"lfo1","target":"osc1_volume","depth":100}],
+        "notes":notes,"seconds":0.85,"sample_rate":48000,
+        "output_dir":dir.path().join("env")});
+    let rendered = ok(c.tool("ca72_render", args.clone()));
+    let bytes = std::fs::read(rendered["path"].as_str().unwrap()).unwrap();
+    let (rate, audio) = ca72_analysis::wav::read(&bytes).unwrap();
+    let ac_rms = |start: f64, end: f64| {
+        let a = (start * f64::from(rate)) as usize;
+        let b = (end * f64::from(rate)) as usize;
+        let mean = audio[0][a..b].iter().map(|x| f64::from(*x)).sum::<f64>() / (b - a) as f64;
+        (audio[0][a..b]
+            .iter()
+            .map(|x| (f64::from(*x) - mean).powi(2))
+            .sum::<f64>()
+            / (b - a) as f64)
+            .sqrt()
+    };
+    // Mixer changes also move the circuit's DC operating point. Judge the audible
+    // oscillator energy, allowing that low-frequency settling tail to remain.
+    let first = ac_rms(0.04, 0.10);
+    let second = ac_rms(0.39, 0.45);
+    assert!(first > 0.0001, "first envelope sounds");
+    assert!(
+        ac_rms(0.28, 0.32) < first * 0.01,
+        "ENV attenuates the held note by at least 40 dB"
+    );
+    assert!(
+        second > first * 0.2,
+        "new poly voice has its own envelope while first key remains held"
+    );
+    assert!(
+        ac_rms(0.64, 0.68) < second * 0.01,
+        "second envelope also finishes"
+    );
+    let exported = ok(c.tool(
+        "ca72_preset_export",
+        json!({"snapshot":rendered["snapshot"],
+        "name":"Envelope Study","output_dir":dir.path().join("export")}),
+    ));
+    let mut replay = exported["render_conditions"].clone();
+    replay["preset_file"] = exported["preset_file"].clone();
+    replay["effects"] = json!("dry");
+    replay["notes"] = notes;
+    replay["seconds"] = json!(0.85);
+    replay["output_dir"] = json!(dir.path().join("replay"));
+    let reloaded = ok(c.tool("ca72_render", replay));
+    assert_eq!(
+        rendered["snapshot"]["fields"]["lfo"],
+        reloaded["snapshot"]["fields"]["lfo"]
+    );
+    let compared = ok(c.tool("ca72_compare", json!({"reference":rendered["path"],
+        "candidate":reloaded["path"],"include_image":false,"output_dir":dir.path().join("reload-check")})));
+    assert!(
+        compared["resolutions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["spectral_mae_db"].as_f64().unwrap() < 0.5)
+    );
+    // A malformed batch neither creates output nor terminates the bridge, including
+    // source zero (formerly an eager unsigned subtraction in the shared live parser).
+    for (i, edits) in [
+        json!([{"source":"lfo1","target":"cutoff","depth":20},{"source":0,"target":"cutoff"}]),
+        json!([{"source":"lfo1","target":"cutoff","deph":20}]),
+        json!([{"source":"lfo1","target":"cutoff","depth":101}]),
+        json!([{"source":"lfo1","remove":true,"depth":20}]),
+        json!([{"source":"lfo1","target":"fx1","depth":20}]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let output = dir.path().join(format!("bad-{i}"));
+        args["output_dir"] = json!(output);
+        args["modulations"] = edits;
+        assert_eq!(c.tool("ca72_render", args.clone())["isError"], true);
+        assert!(!output.exists());
+    }
+    args["snapshot"] = rendered["snapshot"].clone();
+    args.as_object_mut().unwrap().remove("preset");
+    args["values"] = json!({"osc1_volume":10});
+    args["modulations"] = json!([{"source":"lfo1","remove":true}]);
+    args["output_dir"] = json!(dir.path().join("removed"));
+    let removed = ok(c.tool("ca72_render", args));
+    assert_ne!(removed["wav_sha256"], rendered["wav_sha256"]);
+}

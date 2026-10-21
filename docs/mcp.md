@@ -475,7 +475,7 @@ prompts; the same file can be installed as an agent skill. It is included in the
 | Tool | Input | Result |
 |---|---|---|
 | `ca72_snapshot` | None; chosen live instance | Every normalized parameter, assignments and macro names, AUTO GAIN curve, seed, tempo, frequency-dial law and engine fingerprint |
-| `ca72_render` | One of `snapshot`, library `preset` or exact `preset_file`, else current sound; `notes [{note, start, duration}]`; `seconds` including tail (default 3); `sample_rate` (default 48000); optional `values`, `seed`, `tempo`, `frequency_dials`; required `effects: "dry"`, new absolute `output_dir` | `render.wav` (stereo float), `manifest.json`, complete candidate snapshot and SHA-256 hashes, including the exact preset file source when used |
+| `ca72_render` | One of `snapshot`, library `preset` or exact `preset_file`, else current sound; `notes [{note, start, duration}]`; `seconds` including tail (default 3); `sample_rate` (default 48000); optional `values`, `modulations`, `seed`, `tempo`, `frequency_dials`; required `effects: "dry"`, new absolute `output_dir` | `render.wav` (stereo float), `manifest.json`, complete candidate snapshot and SHA-256 hashes, including routing edits and the exact preset file source when used |
 | `ca72_preset_export` | Candidate `snapshot`, `name`, optional `tags`, new absolute `output_dir` | Normal user-preset TOML, its exact path/hash and manifest with `render_conditions`; does not install into the player's library |
 | `ca72_analyze` | Absolute WAV `path`, optional `start`, `seconds`, `fundamental_hz`, `modulation_hz`; new `output_dir` | Pitch, loudness, onsets, 10 ms envelope, harmonics and optional sidebands; full `metrics.json` and a labelled spectrogram PNG, also returned inline |
 | `ca72_compare` | Absolute `reference` and `candidate` WAV paths, optional `reference_start`, `candidate_start`, `seconds`, harmonic/sideband arguments; new `output_dir` | Gain correction, spectral errors at 512/2048/8192 samples, envelope and pitch differences, full metrics, spectrograms on the same scale and two level-matched A/B WAVs |
@@ -505,6 +505,45 @@ for the requested quality (LO or HI/ULTRA) before rendering, as loading into a l
 To recalibrate it after changing DRIVE
 or AUTO GAIN, use the live controls, release notes, then capture again; `ca72_snapshot` returns
 BUSY while measurement is pending. Verify the settled curve before saving.
+
+**Secondary envelopes and routing without an app.** All four LFOs' controls are already
+parameters in `values` (`lfoN_mode`, `rate`, `phase`, `rise`, `waveform`, `polarity`,
+`reverse`, `mono`, `level`). `Env` runs one cycle and holds its final value; the rate
+sets the duration, or a timed division follows tempo. `modulations` adds or changes routing
+with the same `source`, `target`, `depth`, `edges` and macro `name` rules as
+`ca72_modulation_set`. Edits apply in order **after** `values`, so enable CONTINUOUS or
+untimed mode before assigning a conditional target. Existing assignments remain unless
+edited. `{"source":"lfo1","target":"cutoff","remove":true}` removes one;
+omitting `target` removes every assignment of that source. A remove edit takes only source
+and optional target. There are at most 128 edits; invalid fields, unavailable targets or a
+rejected edit reject the whole batch before output is created. Effect pins are unavailable.
+The manifest records the edits and the snapshot carries the resulting routing.
+
+For example, a per-voice triangular amplitude envelope on oscillator 1, independent of
+the standard loudness contour:
+
+```json
+{
+  "preset": "White Lotus", "effects": "dry",
+  "values": {
+    "poly": true, "osc1_volume": 0, "osc2_on": false, "osc3_on": false,
+    "noise_on": false, "loudness_attack": 0, "loudness_sustain": 10,
+    "lfo1_mode": "Env", "lfo1_waveform": "Triangle", "lfo1_rate": 0.8,
+    "lfo1_phase": 0, "lfo1_rise": 0, "lfo1_polarity": "Unipolar",
+    "lfo1_mono": false
+  },
+  "modulations": [{"source":"lfo1", "target":"osc1_volume", "depth":100}],
+  "notes": [{"note":60,"start":0.1,"duration":1.5},
+            {"note":64,"start":0.5,"duration":1.3}],
+  "seconds": 2, "output_dir": "/absolute/existing-parent/env-candidate"
+}
+```
+
+MONO off gives each voice its own copy for per-voice targets such as oscillator mixer
+volumes and cutoff. Main `volume` and strip `level` are shared targets even with MONO off.
+For a breath envelope, route the relevant oscillator/noise volumes and filter, rather than
+assuming main VOLUME is per voice. Note triggering follows RETRIGGER, as in playback.
+Saved presets retain the routing and LFO parameters; export and reload the file to verify it.
 
 The snapshot carries the frequency-dial law because it affects frequency modulation, though
 it normally lives in computer settings. Named-preset rendering uses 120 BPM and semitone

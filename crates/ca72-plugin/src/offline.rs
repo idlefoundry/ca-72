@@ -241,6 +241,62 @@ impl Snapshot {
         self.parameters.extend(planned);
         Ok(())
     }
+
+    /// Edit routing on a disposable copy after parameter overrides. The live modulation
+    /// tools supply the same target rules, limits and preset state; a rejected batch leaves
+    /// this snapshot untouched. Offline rendering has standalone tempo, but no effect pins.
+    pub fn override_modulations(&mut self, input: &serde_json::Value) -> Result<(), ApiError> {
+        let edits = input
+            .as_array()
+            .filter(|a| a.len() <= 128)
+            .ok_or_else(|| ApiError::params("modulations must be an array of at most 128 edits"))?;
+        let p = self.restore_params()?;
+        p.set_standalone(true);
+        for edit in edits {
+            let mut edit = edit
+                .as_object()
+                .cloned()
+                .ok_or_else(|| ApiError::params("each modulation edit must be an object"))?;
+            if edit.keys().any(|key| {
+                !matches!(
+                    key.as_str(),
+                    "source" | "target" | "depth" | "edges" | "name" | "remove"
+                )
+            }) {
+                return Err(ApiError::params("unknown modulation edit field"));
+            }
+            if edit.contains_key("depth") && !edit.contains_key("target") {
+                return Err(ApiError::params("modulation depth requires a target"));
+            }
+            if edit
+                .get("target")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|t| crate::lfo::Target::of_id(&t.trim().to_ascii_lowercase()))
+                .is_some_and(|t| t.fx().is_some())
+            {
+                return Err(ApiError::params(
+                    "effect pins are unavailable in a dry render",
+                ));
+            }
+            let remove = match edit.remove("remove") {
+                None => false,
+                Some(serde_json::Value::Bool(b)) => b,
+                Some(_) => return Err(ApiError::params("modulation remove must be a boolean")),
+            };
+            if remove {
+                if edit.keys().any(|key| key != "source" && key != "target") {
+                    return Err(ApiError::params(
+                        "a remove edit takes source and optional target only",
+                    ));
+                }
+                crate::agent::modulation::remove(&p, &serde_json::Value::Object(edit))?;
+            } else {
+                crate::agent::modulation::set(&p, &serde_json::Value::Object(edit))?;
+            }
+        }
+        *self = Self::capture(&p);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -432,6 +488,42 @@ fn render_inner(snapshot: &Snapshot, request: &Request) -> Result<Render, ApiErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rejected_routing_batch_keeps_the_snapshot_and_source_unchanged() {
+        let p = Ca72Params::default();
+        let mut s = Snapshot::capture(&p);
+        let before = serde_json::to_value(&s).expect("snapshot");
+        assert!(
+            s.override_modulations(&serde_json::json!([
+                {"source":"lfo1","target":"cutoff","depth":20},
+                {"source":0,"target":"cutoff","depth":10}
+            ]))
+            .is_err()
+        );
+        assert_eq!(before, serde_json::to_value(&s).expect("unchanged"));
+        assert!(
+            p.lfo_patch
+                .assignments(crate::lfo::Source::Lfo(0))
+                .iter()
+                .all(Option::is_none)
+        );
+        assert!(
+            crate::agent::modulation::set(
+                &p,
+                &serde_json::json!({
+                    "source":"macro1","target":"cutoff","depth":20,"edges":"SHARP"
+                })
+            )
+            .is_err()
+        );
+        assert!(
+            p.lfo_patch
+                .assignments(crate::lfo::Source::Macro(0))
+                .iter()
+                .all(Option::is_none)
+        );
+    }
+
     #[test]
     fn noise_renders_repeat_and_a_snapshot_includes_the_new_controls() {
         let p = Ca72Params::default();

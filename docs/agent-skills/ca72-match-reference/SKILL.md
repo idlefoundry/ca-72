@@ -26,7 +26,11 @@ harmonics into another stem. White Lotus exposed exactly this problem.
 Call `ca72_analyze` with the reference's absolute `path`, optional `start` and `seconds`,
 and a fresh absolute `output_dir` whose parent exists. Keep the source hash and crop. Inspect
 the spectrogram, pitch track and onsets; establish the notes and their gates before timbre.
-Pitch tracking assumes a predominant monophonic part. Check uncertain octaves and transients
+Pitch tracking assumes a predominant monophonic part. For polyphonic references, identify
+simultaneous fundamentals independently from spectral spacing; do not interpret monophonic
+YIN or every reed register/harmonic as a played note. Use overlapping MIDI gates with POLY on,
+retain the chord's relative balance in measurements, and validate another chord/take with
+the patch frozen. Overlapping harmonic bands describe aggregate chord energy. Check uncertain octaves and transients
 by ear and the harmonic spacing; a full mix does not become a trustworthy transcription.
 If using an existing transcription, identify its provenance and recheck pitches and timing
 against the recording. Reserve some notes or passages for validation after fitting.
@@ -89,6 +93,16 @@ Fit the audible structure, using a small number of changes each iteration:
   note to resolve it. Compare sidebands around several harmonics. Unresolved sidebands are
   null, not proof of absent modulation. Test whether detuned oscillators explain beating
   across several notes; avoid a pair which fits only at one locked phase.
+- Use the four LFOs as secondary envelopes when the main contours are insufficient.
+  Configure `lfoN_mode: "Env"`, waveform, rate (one cycle's inverse duration), phase, rise,
+  polarity, reverse, mono and level through `values`; supply `ca72_render.modulations`
+  routing edits (`source`, `target`, `depth`, optional `edges`). A triangular UNI envelope
+  rises then falls; a reversed UNI saw falls then holds zero. Rates can also follow a timed
+  division. Use `remove:true` to remove a route or source's assignments. Parameter overrides
+  apply before routing validation. An existing snapshot/preset's routes stay unless edited.
+  With MONO off, oscillator/noise mixer volumes and cutoff can have per-voice envelopes;
+  main volume and output level always share one copy. Consider separate sources for breath,
+  brightness and vibrato; measure the result rather than forcing every source into a fit.
 - Check several notes and transitions after each promising local fit. Listen to the
   level-matched pair, using the user's ear to judge what the metrics prioritise poorly.
 
