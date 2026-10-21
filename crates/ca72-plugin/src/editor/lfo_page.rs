@@ -487,6 +487,7 @@ impl Editing {
             };
             let c = self.renderer.arrangement().control(i);
             let place = (c.centre(), art::skirt(&c.kind));
+            let sweep = art::sweep(&c.kind);
             if let Some(p) = patching {
                 let room = self.params.lfo_patch.depth(p.source, t).is_some()
                     || self.params.lfo_patch.count(p.source) < lfo::MOST;
@@ -542,6 +543,7 @@ impl Editing {
                 control: i,
                 at: place.0,
                 skirt: place.1,
+                sweep,
                 travel,
                 rings,
             });
@@ -571,8 +573,10 @@ impl Editing {
                     return None;
                 }
                 let c = self.renderer.arrangement().control(i);
+                let (a0, a1) = art::sweep(&c.kind);
                 Some(Popup {
                     knob: (c.centre(), art::skirt(&c.kind)),
+                    span: a1 - a0,
                     dials: on
                         .iter()
                         .map(|&(s, d)| PopDial {

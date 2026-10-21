@@ -14686,6 +14686,47 @@ mod tests {
         assert_eq!(params.lfo_patch.count(Source::Lfo(1)), 1);
     }
 
+    /// A CONTINUOUS WAVEFORM's rings and pop-up take its own sweep, where its pointer stands at
+    /// its travel's ends (R-LFO's corrections: about 199 degrees, not a knob's 300): its ring from
+    /// its pointer as drawn, +25 % a quarter of that sweep, the pop-up's dial as far.
+    #[test]
+    fn a_continuous_waveforms_rings_take_its_own_sweep() {
+        use crate::lfo::{Source, Target as T};
+        use crate::params::{Wave, WaveMode};
+        let (mut e, _host, params) = editing_of(
+            Ca72Params {
+                osc1_waveform: EnumParam::new("Osc 1 Waveform", Wave::Square),
+                osc1_shape_mode: EnumParam::new("Osc 1 Waveform Mode", WaveMode::Continuous),
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Osc1Shape, 0.25)
+            .expect("room");
+        let wave = at(&e, centre("osc1_waveform"));
+        go(&mut e, wave);
+        e.draw();
+        let k = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| CONTROLS[k.control].param == "osc1_waveform")
+            .expect("its rings")
+            .clone();
+        assert_eq!(k.sweep, art::sweep(&CONTROLS[k.control].kind));
+        assert!((k.span() - 5.95 * 33.5).abs() < 1e-9, "{}", k.span());
+        let drawn = art::shape_angle(e.scene.shape[0].at);
+        assert!((k.angle(k.travel) - drawn).abs() < 1e-9, "from its pointer");
+        let (lo, hi, end) = ca72_panel::modulation::swing(&k, &k.rings[0]);
+        let quarter = 0.25 * k.span();
+        assert!((end - k.angle(k.travel) - quarter).abs() < 1e-9);
+        assert!((hi - lo - 2.0 * quarter).abs() < 1e-9, "{lo}..{hi}");
+        let popup = e.mod_scene.popup.clone().expect("its pop-up");
+        assert_eq!(popup.span, k.span());
+    }
+
     /// The rings show only while the LFO page shows, an assignment is dragged, or on the knob
     /// under the pointer (the owner's "option 2"); there its pop-up shows a dial per source in its
     /// colour, dragged up for more depth; a ring's end dragged round sets it; Alt/Option-drag on
@@ -14743,7 +14784,7 @@ mod tests {
             button: MouseButton::Left,
             modifiers: Modifiers::empty(),
         });
-        let (px, py) = art::polar(k.skirt - 4.0, ca72_panel::modulation::angle(k.travel));
+        let (px, py) = art::polar(k.skirt - 4.0, k.angle(k.travel));
         let to = at(&e, (k.at.0 + px, k.at.1 + py));
         go(&mut e, to);
         release(&mut e);

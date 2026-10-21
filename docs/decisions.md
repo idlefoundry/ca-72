@@ -13068,6 +13068,41 @@ setting up by 25 % of the travel. The swing stops at the travel's ends.
   output every step, from 0.25 to 0.75, 0 to 0.35, and 0.65 to 1; a macro at 100 % gives
   exactly ±0.25 at ±25 %). The panel's `the_popups_dial_turns_as_far_as_the_rings_end`.
 
+**Each knob's own sweep.** The owner: "the % seems to be calculated as the same radial distance
+for each knob regardless the total active radius that knob has, which is a mistake. I think it's
+correct for the widest range knobs but incorrect for everything else." A ring's swing, its
+bright point and its end's drag are now depth × the control's own sweep, the angle its pointer
+turns between its travel's ends (`art::sweep`, which the knobs' pointers are drawn by too,
+`art::knob_angle`); the pop-up's dial turns as far. A macro's one-way rings take the same.
+- **The sweeps** (where each pointer stands at its travel's ends, as the code that draws it puts
+  it): **every knob turns 300 degrees**, −150 to +150, stop to stop: TUNE, GLIDE, MODULATION MIX,
+  OSC. 2 and 3 FREQUENCY, the mixer's five VOLUMEs, CUTOFF, EMPHASIS, AMOUNT OF CONTOUR, both
+  contours' ATTACK, DECAY and SUSTAIN, MAIN OUTPUT VOLUME, FEEDBACK, and the strip's ENTROPY,
+  WIDTH, INNER, DETUNE and DRIVE; each dial's printed ticks run to the same stops (the TIMEs'
+  last at +148). **The three WAVEFORM switches, CONTINUOUS, turn 199.3 degrees**, from TRIANGLE's
+  place at −83.75 to the floor at +115.6 (`shape_angle`: 5.95 of the switch's 33.5-degree steps).
+  They are the only controls that take a ring and differ from the widest.
+- **What was wrong:** the overlay drew every ring on a 300-degree sweep of its own
+  (`modulation::angle`, apart from the code that turns the pointers). For the knobs that is their
+  sweep. For a WAVEFORM it was not: its ring started where a knob at its travel would point, not
+  at its pointer (at TRIANGLE, 66 degrees anticlockwise of it), swung half as far again as the
+  switch turns, and a ring end dragged there read its depth on the wrong scale.
+- **Where a knob looks narrower and is not:** TUNE's numbers (−2 to 2) and CUTOFF's (−4 to 4) end
+  at ±120 degrees, the FREQUENCYs' (−7 to 7) at ±140, the TIMEs' 10 ms at −120 and 10 s at +108.
+  Each knob turns on past its last number to its stop (TUNE to ±2.5 semitones, CUTOFF to ±5, a
+  FREQUENCY to ±7.5, a TIME from 0 to past 10 s), so +25 % there is a quarter of that whole
+  turn: on CUTOFF from 0 it reaches 2.5 on its dial, not 2, and ±40 % reaches its printed ±4. If
+  the owner means a depth to be a share of the numbered span instead, a depth would no longer be
+  a share of the knob's travel (the rule above); not done, asked.
+- **Evidence:** the panel's `a_ring_takes_its_knobs_own_sweep` (every knob's sweep 300 degrees,
+  every WAVEFORM's 199.325 and its pointer as drawn; at +25 % on ATTACK TIME, CUTOFF and OSC. 1
+  WAVEFORM, at two settings, each way and one way: exactly a quarter of the sweep, the ticked end
+  there, dragged there +25 %; at the foot the swing stops at the sweep's start) and
+  `the_popups_dial_turns_as_far_as_the_rings_end` on both sweeps; the editor's
+  `a_continuous_waveforms_rings_take_its_own_sweep` (the scene's ring on OSC. 1 WAVEFORM from its
+  pointer, a quarter of 199.325 degrees, the pop-up's span the same). The knobs' pictures are
+  unchanged to the bit (the same sum, `examples/golden`).
+
 ## R-LFO-PAGE. The LFO page and drag-to-knob modulation: the panel and the editor
 
 The page, the rings and the drag of R-LFO (whose record has the owner's decisions of 2026-10-20,

@@ -2029,9 +2029,7 @@ pub fn control(c: &Control, v: f64, midi: f64) -> Layer {
     let mut s = Svg::default();
     let v = v.clamp(0.0, 1.0);
     match c.kind {
-        Kind::Knob { big, .. } => {
-            knob_body(&mut s, if big { BIG } else { STD }, -150.0 + 300.0 * v)
-        }
+        Kind::Knob { big, .. } => knob_body(&mut s, if big { BIG } else { STD }, knob_angle(v)),
         Kind::Selector(_) => selector_body(&mut s, SIX[position(v)]),
         Kind::Toggle { across, .. } => {
             let at = crate::interact::toggle_position(v);
@@ -2403,7 +2401,7 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
                 origin,
                 bounds,
                 sprites: vec![
-                    sprite(part, (d, d), -150.0 + 300.0 * v, (false, false)),
+                    sprite(part, (d, d), knob_angle(v), (false, false)),
                     sprite(cap, (d, d), CAP_TURN, (false, false)),
                 ],
                 overlays: round_lights(size.skirt, d / 2.0 * cap_share),
@@ -3096,6 +3094,28 @@ pub(crate) fn jack_layer(x: f64, y: f64, r: f64, worn: bool) -> Layer {
         bounds: [-d, -d, d, d],
         body: s.0,
         ..Layer::default()
+    }
+}
+
+/// Where every knob's pointer stands at the ends of its travel (degrees from twelve o'clock):
+/// stop to stop, as its dial's printed ticks run (TUNE's, CUTOFF's, the FREQUENCYs' and the
+/// TIMEs' numbers stop short of them; the TIMEs' last tick is at 148).
+pub const KNOB_SWEEP: (f64, f64) = (-150.0, 150.0);
+
+/// Where a knob's pointer stands at `v` (0..1) of its travel.
+pub fn knob_angle(v: f64) -> f64 {
+    KNOB_SWEEP.0 + (KNOB_SWEEP.1 - KNOB_SWEEP.0) * v
+}
+
+/// Where a control that takes a modulation's rings (decisions.md R-LFO) points at the ends of
+/// its travel, its own sweep (R-LFO's corrections: the owner, 2026-10-20, "the % seems to be
+/// calculated as the same radial distance for each knob regardless the total active radius that
+/// knob has"): a knob's [`KNOB_SWEEP`], a WAVEFORM switch's CONTINUOUS travel from TRIANGLE's
+/// place to the floor ([`shape_angle`], about 199 degrees).
+pub fn sweep(kind: &Kind) -> (f64, f64) {
+    match *kind {
+        Kind::Selector(_) => (shape_angle(0.0), shape_angle(SHAPE_PLACES)),
+        _ => KNOB_SWEEP,
     }
 }
 

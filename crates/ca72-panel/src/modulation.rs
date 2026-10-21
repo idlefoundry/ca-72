@@ -40,15 +40,29 @@ pub struct Ring {
 }
 
 /// A knob's rings: the control's index (`controls::CONTROLS`), its centre and its skirt's radius
-/// (the drawing's units, as the look places it), its pointer's travel (0..1), its rings
-/// outermost first.
+/// (the drawing's units, as the look places it), where its pointer stands at its travel's ends
+/// (degrees from twelve o'clock, its own sweep: `art::sweep`), its pointer's travel (0..1), its
+/// rings outermost first.
 #[derive(Clone, Debug, PartialEq)]
 pub struct KnobRings {
     pub control: usize,
     pub at: (f64, f64),
     pub skirt: f64,
+    pub sweep: (f64, f64),
     pub travel: f64,
     pub rings: Vec<Ring>,
+}
+
+impl KnobRings {
+    /// The angle of its travel `t`.
+    pub fn angle(&self, t: f64) -> f64 {
+        angle(self.sweep, t)
+    }
+
+    /// How far its pointer turns over its whole travel (degrees).
+    pub fn span(&self) -> f64 {
+        self.sweep.1 - self.sweep.0
+    }
 }
 
 /// An assignment being dragged from a source's jack: from the jack to the pointer, in the
@@ -73,11 +87,13 @@ pub struct PopDial {
     pub shared: bool,
 }
 
-/// The hover pop-up: under the knob at `knob` (its centre and skirt), its dials, the one under
-/// the pointer, its lettering's size (the drawing's units).
+/// The hover pop-up: under the knob at `knob` (its centre and skirt), how far that knob turns
+/// over its travel (degrees, its sweep's span), its dials, the one under the pointer, its
+/// lettering's size (the drawing's units).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Popup {
     pub knob: ((f64, f64), f64),
+    pub span: f64,
     pub dials: Vec<PopDial>,
     pub hover: Option<usize>,
     pub size: f64,
@@ -113,23 +129,24 @@ pub fn ring_radius(skirt: f64, k: usize, n: usize) -> f64 {
     skirt - RING_IN - step * k as f64
 }
 
-/// The angle (degrees from twelve o'clock) of a knob's travel `t`.
-pub fn angle(t: f64) -> f64 {
-    -150.0 + 300.0 * t.clamp(0.0, 1.0)
+/// The angle (degrees from twelve o'clock) of a knob's travel `t` on its `sweep` (where its
+/// pointer stands at its travel's ends: `art::sweep`).
+pub fn angle(sweep: (f64, f64), t: f64) -> f64 {
+    sweep.0 + (sweep.1 - sweep.0) * t.clamp(0.0, 1.0)
 }
 
 /// How far a pop-up's depth dial turns from twelve o'clock for `depth` (degrees, positive
-/// clockwise): as far as the ring's end is from the knob's pointer, on the knob's own 300
-/// degrees of travel (the owner, 2026-10-20: "+25% on the selector, but then the actual
+/// clockwise) on a knob whose pointer turns `span` over its travel: as far as the ring's end is
+/// from the knob's pointer (the owner, 2026-10-20: "+25% on the selector, but then the actual
 /// automation goes +-12.5%": it turned at half the ring's scale, ±150 degrees for ±100 %).
-pub fn dial_angle(depth: f64) -> f64 {
-    300.0 * depth.clamp(-1.0, 1.0)
+pub fn dial_angle(depth: f64, span: f64) -> f64 {
+    span * depth.clamp(-1.0, 1.0)
 }
 
 /// Where ring `k`'s end (its positive peak, ticked) is: the drawing's units.
 pub fn ring_end(knob: &KnobRings, k: usize) -> (f64, f64) {
     let r = ring_radius(knob.skirt, k, knob.rings.len());
-    let end = angle(knob.travel + knob.rings[k].depth);
+    let end = knob.angle(knob.travel + knob.rings[k].depth);
     let (x, y) = art::polar(r, end);
     (knob.at.0 + x, knob.at.1 + y)
 }
@@ -147,10 +164,30 @@ pub fn hit_ring_end(knobs: &[KnobRings], x: f64, y: f64) -> Option<(usize, usize
 }
 
 /// The depth a ring's end dragged to (`x`, `y`) gives: the angle from the knob's pointer to it,
-/// a share of the travel's 300 degrees, within -1..1.
+/// a share of the knob's own sweep, within -1..1.
 pub fn depth_at(knob: &KnobRings, (x, y): (f64, f64)) -> f64 {
     let a = (x - knob.at.0).atan2(-(y - knob.at.1)).to_degrees();
-    ((a - angle(knob.travel)) / 300.0).clamp(-1.0, 1.0)
+    ((a - knob.angle(knob.travel)) / knob.span()).clamp(-1.0, 1.0)
+}
+
+/// What `ring` draws on knob `k` (degrees from twelve o'clock): its faint swing's ends and its
+/// ticked end, depth × the knob's own sweep from its pointer, within that sweep (R-LFO's
+/// corrections); one way, from the pointer to the ticked end.
+pub fn swing(k: &KnobRings, ring: &Ring) -> (f64, f64, f64) {
+    let base = k.angle(k.travel);
+    // (Its own sweep's ends: a knob's stops, a CONTINUOUS switch's TRIANGLE and floor.)
+    let (a0, a1) = (k.sweep.0.min(k.sweep.1), k.sweep.0.max(k.sweep.1));
+    let reach = k.span() * ring.depth;
+    let end = (base + reach).clamp(a0, a1);
+    if ring.one_way {
+        (base, end, end)
+    } else {
+        (
+            (base - reach.abs()).max(a0),
+            (base + reach.abs()).min(a1),
+            end,
+        )
+    }
 }
 
 /// The pop-up's box (left, top, width, height) and each dial's centre and radius.
@@ -373,21 +410,15 @@ impl ModRenderer {
         let local = |(x, y): (f64, f64)| ((x * s) as f32 - px0 as f32, (y * s) as f32 - py0 as f32);
         let (w, h) = (p.width(), p.height());
         let n = k.rings.len();
-        let base = angle(k.travel);
+        let base = k.angle(k.travel);
         for (j, ring) in k.rings.iter().enumerate() {
             let r = ring_radius(k.skirt, j, n);
             let ph = Phosphor::of(ring.colour);
             let line = mix(ring.colour, [255; 3], 0.25);
             let glow_c = mix(ring.colour, ph.halo, 0.5);
-            let reach = 300.0 * ring.depth;
-            let (lo, hi) = (
-                (base - reach.abs()).max(-150.0),
-                (base + reach.abs()).min(150.0),
-            );
-            let end = (base + reach).clamp(-150.0, 150.0);
+            let (lo, hi, end) = swing(k, ring);
             let arc = |a0: f64, a1: f64| arc_path(k.at, r, a0, a1, &local);
             // The whole swing, faint (one way: to where 100 % takes the knob).
-            let (lo, hi) = if ring.one_way { (base, end) } else { (lo, hi) };
             if let Some(path) = arc(lo, hi) {
                 stroke(
                     &mut p,
@@ -401,7 +432,7 @@ impl ModRenderer {
             // The half its positive peak reaches, glowing, its end ticked; one way, as far as
             // the source has it now.
             let bright = match (ring.one_way, ring.point) {
-                (true, Some(t)) => Some(angle(t)),
+                (true, Some(t)) => Some(k.angle(t)),
                 (true, None) => None,
                 (false, _) => Some(end),
             };
@@ -426,7 +457,7 @@ impl ModRenderer {
             }
             // Where the source has the knob now.
             if let Some(t) = ring.point {
-                let (x, y) = art::polar(r, angle(t));
+                let (x, y) = art::polar(r, k.angle(t));
                 let c = local((k.at.0 + x, k.at.1 + y));
                 let mut g = Coverage::new(w, h);
                 g.disc(c, (6.0 * s) as f32, 0.7);
@@ -584,7 +615,7 @@ impl ModRenderer {
                 if pp.hover == Some(i) { "0.35" } else { "0.12" },
                 N(0.1 * size)
             );
-            let a = dial_angle(d.depth);
+            let a = dial_angle(d.depth, pp.span);
             if a.abs() > 0.5 {
                 let rr = r - 0.25 * size;
                 let (x0, y0) = art::polar(rr, 0.0);
@@ -752,12 +783,14 @@ fn fill_disc(p: &mut Pixmap, (x, y): (f32, f32), r: f32, c: [u8; 3]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::controls::CONTROLS;
 
     fn knob() -> KnobRings {
         KnobRings {
             control: 29,
             at: (2081.0, 170.0),
             skirt: art::STD.skirt,
+            sweep: art::KNOB_SWEEP,
             travel: 0.5,
             rings: vec![
                 Ring {
@@ -795,26 +828,119 @@ mod tests {
 
     /// The pop-up's dial and the ring read a depth alike: the dial turns from twelve o'clock as
     /// far as the ring's ticked end is from the knob's pointer, +25 % a quarter of the knob's
-    /// 300 degrees (the owner, 2026-10-20, saw it turn half as far).
+    /// sweep (the owner, 2026-10-20, saw it turn half as far), a knob's or a WAVEFORM's.
     #[test]
     fn the_popups_dial_turns_as_far_as_the_rings_end() {
-        for d in [0.25, -0.25, 0.1, 0.4, -0.5] {
+        for sweep in [art::KNOB_SWEEP, art::sweep(&CONTROLS[waveform()].kind)] {
+            for d in [0.25, -0.25, 0.1, 0.4, -0.5] {
+                let k = KnobRings {
+                    sweep,
+                    rings: vec![Ring {
+                        depth: d,
+                        ..knob().rings[0]
+                    }],
+                    ..knob()
+                };
+                let (x, y) = ring_end(&k, 0);
+                let end = (x - k.at.0).atan2(-(y - k.at.1)).to_degrees();
+                assert!(
+                    (dial_angle(d, k.span()) - (end - k.angle(k.travel))).abs() < 1e-9,
+                    "{d}"
+                );
+            }
+        }
+        assert_eq!(dial_angle(0.25, 300.0), 75.0);
+        assert_eq!(dial_angle(-1.0, 300.0), -300.0);
+    }
+
+    fn waveform() -> usize {
+        CONTROLS
+            .iter()
+            .position(|c| c.param == "osc1_waveform")
+            .expect("OSC 1 WAVEFORM")
+    }
+
+    /// Each control's rings take its own sweep, where its pointer stands at its travel's ends
+    /// (R-LFO's corrections: the owner, 2026-10-20, "the % seems to be calculated as the same
+    /// radial distance for each knob regardless the total active radius that knob has"). Every
+    /// knob turns 300 degrees stop to stop, as its ticks run; the three WAVEFORM switches,
+    /// CONTINUOUS, 199.325 from TRIANGLE to the floor, their pointers as drawn. A ring at +25 %
+    /// draws exactly a quarter of the sweep each way, its ticked end there and dragged there
+    /// giving +25 %, on ATTACK TIME, CUTOFF and a WAVEFORM; a one way ring (a macro's) a quarter
+    /// one way; at a sweep's end the swing stops there.
+    #[test]
+    fn a_ring_takes_its_knobs_own_sweep() {
+        use crate::controls::{Kind, Legends};
+        for c in CONTROLS.iter() {
+            match c.kind {
+                Kind::Knob { .. } => {
+                    assert_eq!(art::sweep(&c.kind), (-150.0, 150.0), "{}", c.param)
+                }
+                Kind::Selector(Legends::Waves12 | Legends::Waves3) => {
+                    let (a0, a1) = art::sweep(&c.kind);
+                    assert_eq!(a0, -83.75, "{}", c.param);
+                    assert!((a1 - a0 - 5.95 * 33.5).abs() < 1e-9, "{}", c.param);
+                    for t in [0.0, 0.3, 0.5, 1.0] {
+                        let drawn = art::shape_angle(t * art::SHAPE_PLACES);
+                        assert!((angle((a0, a1), t) - drawn).abs() < 1e-9, "{}", c.param);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let of = |param: &str| {
+            let c = CONTROLS.iter().find(|c| c.param == param).expect(param);
+            (c.kind, art::sweep(&c.kind))
+        };
+        for param in ["filter_attack", "cutoff", "osc1_waveform"] {
+            let (kind, sweep) = of(param);
+            let quarter = 0.25 * (sweep.1 - sweep.0);
+            for travel in [0.5, 0.3] {
+                for one_way in [false, true] {
+                    let ring = Ring {
+                        depth: 0.25,
+                        one_way,
+                        ..knob().rings[0]
+                    };
+                    let k = KnobRings {
+                        skirt: art::skirt(&kind),
+                        sweep,
+                        travel,
+                        rings: vec![ring],
+                        ..knob()
+                    };
+                    let base = k.angle(travel);
+                    let (lo, hi, end) = swing(&k, &ring);
+                    let want = if one_way {
+                        (base, base + quarter)
+                    } else {
+                        (base - quarter, base + quarter)
+                    };
+                    assert!(
+                        (lo - want.0).abs() < 1e-9 && (hi - want.1).abs() < 1e-9,
+                        "{param} at {travel}: {lo}..{hi}, not {want:?}"
+                    );
+                    assert!((end - (base + quarter)).abs() < 1e-9, "{param}");
+                    let (x, y) = ring_end(&k, 0);
+                    let at = (x - k.at.0).atan2(-(y - k.at.1)).to_degrees();
+                    assert!((at - end).abs() < 1e-9, "{param}: its end where drawn");
+                    assert!((depth_at(&k, (x, y)) - 0.25).abs() < 1e-9, "{param}");
+                }
+            }
+            // (At the travel's foot the swing stops at the sweep's start.)
             let k = KnobRings {
+                sweep,
+                travel: 0.1,
                 rings: vec![Ring {
-                    depth: d,
+                    depth: 0.25,
                     ..knob().rings[0]
                 }],
                 ..knob()
             };
-            let (x, y) = ring_end(&k, 0);
-            let end = (x - k.at.0).atan2(-(y - k.at.1)).to_degrees();
-            assert!(
-                (dial_angle(d) - (end - angle(k.travel))).abs() < 1e-9,
-                "{d}"
-            );
+            let (lo, hi, _) = swing(&k, &k.rings[0]);
+            assert!((lo - sweep.0).abs() < 1e-9, "{param}");
+            assert!((hi - k.angle(0.35)).abs() < 1e-9, "{param}");
         }
-        assert_eq!(dial_angle(0.25), 75.0);
-        assert_eq!(dial_angle(-1.0), -300.0);
     }
 
     /// Only what changed is drawn again: the same scene twice draws nothing; a ring's point
@@ -833,6 +959,7 @@ mod tests {
         assert_eq!(r.damages().len(), 2, "where it was and is");
         let popup = Popup {
             knob: ((2081.0, 170.0), art::STD.skirt),
+            span: 300.0,
             dials: vec![
                 PopDial {
                     colour: [0xff, 0xb0, 0x20],

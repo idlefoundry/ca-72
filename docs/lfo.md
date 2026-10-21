@@ -172,7 +172,9 @@ table.
   `Patch::assignments(Source::Lfo(n))`.
 - **The overlay** is `ca72_panel::modulation` (`ModRenderer`, `ModScene`): knobs' rings, a
   dragged assignment's cord and targets, the hover pop-up. Nothing in it names an LFO: a ring, a
-  dial and a cord each take a colour and (the pop-up's) a label.
+  dial and a cord each take a colour and (the pop-up's) a label. A knob's rings are on its own
+  sweep (`KnobRings::sweep`, from `art::sweep`: a knob's 300 degrees, a CONTINUOUS WAVEFORM's
+  199.3), a depth × that sweep from its pointer; the pop-up's dial turns as far (`Popup::span`).
 
 ## The macros in the editor (R-MACROS)
 

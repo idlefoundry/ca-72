@@ -669,6 +669,7 @@ fn lfo(s: f64, panel: &mut Renderer) {
                     control,
                     at,
                     skirt,
+                    sweep: ca72_panel::art::KNOB_SWEEP,
                     travel: 0.5,
                     rings: vec![Ring {
                         colour: colours[n],
@@ -751,6 +752,7 @@ fn lfo(s: f64, panel: &mut Renderer) {
         let (_, at, r) = knob("cutoff");
         sc.popup = (i % 2 == 0).then(|| Popup {
             knob: (at, r),
+            span: 300.0,
             dials: vec![
                 PopDial {
                     colour: colours[0],

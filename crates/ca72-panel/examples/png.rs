@@ -907,6 +907,7 @@ fn lfo_overlay(all: &mut ca72_panel::Pixmap, r: &Renderer, scale: f64, values: &
                 control,
                 at,
                 skirt,
+                sweep: ca72_panel::art::KNOB_SWEEP,
                 travel,
                 rings: mods
                     .iter()
@@ -964,6 +965,7 @@ fn lfo_overlay(all: &mut ca72_panel::Pixmap, r: &Renderer, scale: f64, values: &
     {
         scene.popup = Some(Popup {
             knob: (at, skirt),
+            span: 300.0,
             dials: vec![
                 PopDial {
                     colour: colour(0),
