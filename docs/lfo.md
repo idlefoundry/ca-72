@@ -60,7 +60,10 @@ where SHARP), the macros' names a list of their own, `macro_names` (`library::So
 only where one is typed.
 
 - `Patch::assignments(source) -> [Option<Assignment>; MOST]`: in the order made, `MOST` = 8.
-  `Assignment { target: Target, depth: f32 }`, depth -1..1, a share of the knob's travel.
+  `Assignment { target: Target, depth: f32 }`, depth -1..1, a share of the knob's travel: an
+  LFO at +25 % swings its knob 0.25 of its travel (its pointer, not seconds or hertz) each way
+  about its setting, a macro at +25 % and 100 % moves it up 0.25, clamped at the travel's ends
+  (R-LFO's corrections). The pop-up's depth dial turns as far as the ring's end.
 - `Patch::assign(source, target, depth) -> Result<(), Refused>`: adds, or sets the depth if
   already there; `Refused::Full` past 8, `Refused::NoSource`. A drop on a knob uses
   `lfo::DEFAULT_DEPTH` (0.25).

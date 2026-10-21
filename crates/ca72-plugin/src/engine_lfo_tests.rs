@@ -153,6 +153,56 @@ fn a_shared_lfo_moves_its_knob_within_its_travel() {
     }
 }
 
+/// What a depth means (the owner, 2026-10-20, ATTACK TIME: "why am I seeing +25% on the
+/// selector, but then the actual automation goes +-12.5%?"): an LFO at +25 % swings its knob's
+/// travel (its pointer, not seconds or hertz) exactly 0.25 each way about its setting, the
+/// contours' ATTACK TIMEs as CUTOFF, clamped at the travel's ends; a macro at +25 % and 100 %
+/// adds exactly 0.25, at −25 % takes it away.
+#[test]
+fn a_depth_is_so_much_of_the_knobs_travel_each_way() {
+    type Of = fn(&Panel) -> f64;
+    let knobs: [(Target, Of); 3] = [
+        (Target::FilterAttack, |p| p.filter_contour.attack),
+        (Target::LoudnessAttack, |p| p.loudness_contour.attack),
+        (Target::Cutoff, |p| p.cutoff),
+    ];
+    for (t, of) in knobs {
+        for (base, lo, hi) in [(0.5f32, 0.25, 0.75), (0.1, 0.0, 0.35), (0.9, 0.65, 1.0)] {
+            let c = with(controls(), 0, sharp(Mode::Free, 0.0, 5.0), t, 0.25, base);
+            let mut e = engine(&c);
+            key(&mut e, 60, true);
+            let (mut min, mut max) = (f64::MAX, f64::MIN);
+            for _ in 0..(secs(0.25) / lfo::STEP) {
+                run(&mut e, lfo::STEP);
+                let v = e.bank.shared_values[0];
+                let want = (f64::from(base) + 0.25 * v).clamp(0.0, 1.0);
+                let got = of(&panel(&e, 0));
+                assert!((got - want).abs() < 1e-6, "{t:?} at {base}: {got} {want}");
+                (min, max) = (min.min(got), max.max(got));
+            }
+            // (The triangle's peaks within a step of 32 samples at 5 Hz.)
+            assert!(
+                (min - lo).abs() < 0.002 && (max - hi).abs() < 0.002,
+                "{t:?} at {base}: {min}..{max}, not {lo}..{hi}"
+            );
+        }
+        for depth in [0.25f32, -0.25] {
+            let mut c = controls();
+            c.lfo.to[lfo::Source::Macro(0).index()][0] = Some(Assignment { target: t, depth });
+            c.lfo.base[t.index()] = 0.5;
+            c.lfo.macros[0] = 1.0;
+            let mut e = engine(&c);
+            key(&mut e, 60, true);
+            run(&mut e, lfo::STEP * 4);
+            let got = of(&panel(&e, 0));
+            assert!(
+                (got - (0.5 + f64::from(depth))).abs() < 1e-6,
+                "{t:?}: a macro at 100 % by {depth}: {got}"
+            );
+        }
+    }
+}
+
 /// A target's law: OSC. 2 FREQUENCY's knob travel through the computer's law, as its knob
 /// reads (the pot's wiper the law's), and FEEDBACK's taper.
 #[test]

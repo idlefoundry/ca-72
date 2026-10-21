@@ -13042,6 +13042,32 @@ cycle's start at 0 in f32, ENV's end however f32 rounds it) and
 column, FREE, RETRIG and ENV, timed and not: none over a scope, none past the window's side).
 The panel's `strip::lfo::tests::drawn_in_parts_it_is_drawn_whole` takes the wake's gain as a step.
 
+**What a depth means.** The owner, at ATTACK TIME with an LFO on it: "why am I seeing +25% on
+the selector, but then the actual automation goes +-12.5%?" The meaning, as recommended to the
+owner: **a depth of +25 % swings the knob 25 % of its travel each way**, −25 % to +25 % about its
+setting, for a bipolar LFO at its full output. It is measured in the knob's travel (its pointer,
+0 to 10 on its dial), not in seconds, hertz or volts, so a knob with a steep law such as ATTACK
+TIME's is moved as CUTOFF is. A macro is one way: at +25 % and 100 % it moves its knob from its
+setting up by 25 % of the travel. The swing stops at the travel's ends.
+- **What was wrong:** only the hover pop-up's depth dial. It turned ±150 degrees for ±100 %, half
+  the ring's scale (the ring's end lies 300 degrees × depth from the knob's pointer, the knob's
+  own travel). So at +25 % the dial's pointer stood an eighth of a knob's turn round: 12.5 %. Now
+  it turns as far as the ring's end (`modulation::dial_angle`), and its drag (240 pixels for
+  100 %) turns it at a knob's rate.
+- **Already so, and checked:** the engine (travel + depth × value, clamped), the ring (its
+  ticked end at the positive peak, its faint arc the whole swing), the ring's moving point, the
+  pop-up's readout, the tip, the menus' DEPTH…, MODULATES, MCP and presets all read +25 % as
+  0.25 of the travel each way. **Saved depths keep their meaning:** nothing in the engine
+  halved the swing, so none of them changes.
+- **Where the swing is cut short:** ATTACK TIME is at 0 in a new patch, so there an LFO at
+  +25 % moves it only from 0 to 0.25, half the swing. The ring shows that too: its faint arc
+  stops at the travel's start. This is the meaning above ("clamped at the ends"). If the owner
+  was at ATTACK 0, it is also what they saw.
+- **Evidence:** the engine's `a_depth_is_so_much_of_the_knobs_travel_each_way` (both ATTACK
+  TIMEs and CUTOFF at 0.5, 0.1 and 0.9: an LFO at +25 % gives exactly setting + 0.25 × its
+  output every step, from 0.25 to 0.75, 0 to 0.35, and 0.65 to 1; a macro at 100 % gives
+  exactly ±0.25 at ±25 %). The panel's `the_popups_dial_turns_as_far_as_the_rings_end`.
+
 ## R-LFO-PAGE. The LFO page and drag-to-knob modulation: the panel and the editor
 
 The page, the rings and the drag of R-LFO (whose record has the owner's decisions of 2026-10-20,

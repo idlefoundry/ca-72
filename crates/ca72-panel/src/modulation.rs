@@ -118,6 +118,14 @@ pub fn angle(t: f64) -> f64 {
     -150.0 + 300.0 * t.clamp(0.0, 1.0)
 }
 
+/// How far a pop-up's depth dial turns from twelve o'clock for `depth` (degrees, positive
+/// clockwise): as far as the ring's end is from the knob's pointer, on the knob's own 300
+/// degrees of travel (the owner, 2026-10-20: "+25% on the selector, but then the actual
+/// automation goes +-12.5%": it turned at half the ring's scale, ±150 degrees for ±100 %).
+pub fn dial_angle(depth: f64) -> f64 {
+    300.0 * depth.clamp(-1.0, 1.0)
+}
+
 /// Where ring `k`'s end (its positive peak, ticked) is: the drawing's units.
 pub fn ring_end(knob: &KnobRings, k: usize) -> (f64, f64) {
     let r = ring_radius(knob.skirt, k, knob.rings.len());
@@ -565,7 +573,8 @@ impl ModRenderer {
             let (cx, cy) = (cx - ox, cy - oy);
             let c = hex(d.colour);
             let core = hex(Phosphor::of(d.colour).core);
-            // Its well, the depth's arc from twelve o'clock (positive clockwise), its pointer.
+            // Its well, the depth's arc from twelve o'clock (positive clockwise) on the knob's
+            // scale, its pointer.
             put!(
                 o,
                 "<circle cx='{}' cy='{}' r='{}' fill='#0b0b0c' stroke='#ffffff' stroke-opacity='{}' stroke-width='{}'/>",
@@ -575,7 +584,7 @@ impl ModRenderer {
                 if pp.hover == Some(i) { "0.35" } else { "0.12" },
                 N(0.1 * size)
             );
-            let a = 150.0 * d.depth.clamp(-1.0, 1.0);
+            let a = dial_angle(d.depth);
             if a.abs() > 0.5 {
                 let rr = r - 0.25 * size;
                 let (x0, y0) = art::polar(rr, 0.0);
@@ -782,6 +791,30 @@ mod tests {
         assert_eq!(percent(0.4), "+40 %");
         assert_eq!(percent(-0.25), "\u{2013}25 %");
         assert_eq!(percent(0.0), "0 %");
+    }
+
+    /// The pop-up's dial and the ring read a depth alike: the dial turns from twelve o'clock as
+    /// far as the ring's ticked end is from the knob's pointer, +25 % a quarter of the knob's
+    /// 300 degrees (the owner, 2026-10-20, saw it turn half as far).
+    #[test]
+    fn the_popups_dial_turns_as_far_as_the_rings_end() {
+        for d in [0.25, -0.25, 0.1, 0.4, -0.5] {
+            let k = KnobRings {
+                rings: vec![Ring {
+                    depth: d,
+                    ..knob().rings[0]
+                }],
+                ..knob()
+            };
+            let (x, y) = ring_end(&k, 0);
+            let end = (x - k.at.0).atan2(-(y - k.at.1)).to_degrees();
+            assert!(
+                (dial_angle(d) - (end - angle(k.travel))).abs() < 1e-9,
+                "{d}"
+            );
+        }
+        assert_eq!(dial_angle(0.25), 75.0);
+        assert_eq!(dial_angle(-1.0), -300.0);
     }
 
     /// Only what changed is drawn again: the same scene twice draws nothing; a ring's point
