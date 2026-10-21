@@ -100,6 +100,8 @@ features = [
   "Right-click a WAVEFORM switch and choose CONTINUOUS to sweep smoothly through every waveform to a narrow pulse, with a MOD key to modulate the shape.",
   "Standalone: press FX for four slots of your own CLAP and VST3 effects; one that crashes never stops the synth.",
   "Standalone: search an effect’s PARAMETERS and pin four knobs under its slot for LFOs, macros and MIDI Learn, with its own value text.",
+  "Standalone presets save effects. CHAIN > LOCK keeps yours while browsing; unlock to hear the preset's.",
+  "Standalone: FIND searches effects by name, maker or type; RECENT keeps your last six choices across launches.",
   "Standalone: SETTINGS > AGENTS > ALLOW lets an AI agent play and set up the CA-72 through MCP, on this computer only.",
   "The Left and Right arrow keys, or MIDI pads you assign, choose the previous and next preset.",
   "Settings > MOD WHEEL SOURCE chooses the CC or aftertouch that moves the MOD wheel.",

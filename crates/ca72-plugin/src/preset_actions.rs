@@ -19,7 +19,7 @@ pub(crate) struct PresetActions {
     stage: AtomicU8,
     generation: AtomicU64,
     prepared_generation: AtomicU64,
-    name: Mutex<Option<(String, String)>>,
+    name: Mutex<Option<(String, String, Option<String>)>>,
     values: Vec<(String, ParamPtr, AtomicU32)>,
     /// The prepared preset's LFO assignments and EDGES (decisions.md R-LFO).
     lfo: crate::lfo::Patch,
@@ -70,13 +70,19 @@ impl PresetActions {
             1 => return,
             2 => {
                 if let Ok(mut pending) = self.name.lock()
-                    && let Some((before, after)) = pending.take()
+                    && let Some((before, after, effects)) = pending.take()
                     && let Ok(mut name) = self.params.preset.write()
                     && self.prepared_generation.load(Ordering::Relaxed)
                         == self.generation.load(Ordering::Acquire) & (u64::MAX >> 2)
                     && *name == before
                 {
                     *name = after;
+                    if let Ok(mut raw) = self.params.preset_effects.write() {
+                        *raw = effects.clone();
+                    }
+                    if let Some(host) = crate::fx_view::installed() {
+                        host.load_preset(effects);
+                    }
                 }
                 self.stage.store(0, Ordering::Release);
             }
@@ -137,7 +143,11 @@ impl PresetActions {
         self.lfo.load_values(&entry.sound.values);
         self.lfo.load_names(&entry.sound.macro_names);
         if let Ok(mut pending) = self.name.lock() {
-            *pending = Some((current, entry.sound.name.clone()));
+            *pending = Some((
+                current,
+                entry.sound.name.clone(),
+                entry.sound.effects.clone(),
+            ));
         }
         self.prepared_generation
             .store(generation, Ordering::Relaxed);
@@ -171,6 +181,35 @@ mod tests {
     use super::*;
     use nih_plug::context::process::TestProcessContext;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn midi_presets_carry_opaque_effects_on_the_helper_after_the_sound_is_applied() {
+        let p = Arc::new(Ca72Params::default());
+        let dir = tempfile::tempdir().unwrap();
+        let library = Library::at(dir.path());
+        let raw = "[effects]\nchain = 'opaque state'\n";
+        library
+            .save_with(
+                "With effects",
+                Vec::new(),
+                None,
+                None,
+                Vec::new(),
+                Some(raw.into()),
+            )
+            .unwrap();
+        *p.midi_map.preset_list.lock().unwrap() = Some(vec!["With effects".into()]);
+        let actions = PresetActions::new(p.clone(), library);
+        let mut context =
+            TestProcessContext::<Ca72>::new(p.clone(), 48_000.0, ProcessMode::Realtime);
+        actions.request(1);
+        actions.prepare();
+        assert!(p.preset_effects.read().unwrap().is_none());
+        actions.apply(&mut context);
+        assert!(p.preset_effects.read().unwrap().is_none());
+        actions.prepare();
+        assert_eq!(p.preset_effects.read().unwrap().as_deref(), Some(raw));
+    }
 
     #[test]
     fn a_helper_delayed_across_reset_keeps_a_fresh_press() {

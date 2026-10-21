@@ -14057,3 +14057,214 @@ by hand; the review pictures use the tests' fake chain through the real editor.
   actual window, hardware MIDI Learn, Windows or macOS (no Mac build), and a parameter-catalogue
   rescan while the list stays open (reopen to list it again). The engine and helper are the
   existing R-FX-PARAMS implementation; none was changed for the view.
+
+## R-FX-SEARCH. FIND in the standalone’s effects’ chooser, with grouping and six recent choices
+
+**The owner, 2026-10-20:** "we need to add search functionality to the FX page so people can easily find their plugins."
+The owner approved the recommendations in mock-up A: search inside today’s chooser; NAME with
+nothing typed by default, and RECENT keeping the last six effects chosen. The approved pictures
+and their measurements are in `~/Code/ca72-night/fx-params-mockups/README.md`, section A,
+`sheet-1-search.png` and `a*.png` (drawn by the real panel renderer).
+
+**The chooser** (`fx_view.rs`, `fx_view/search.rs`, `ca72_panel::strip::fx`). The plate is 1480
+units wide (was 1240), still 540 deep: the title, FIND, then ten rows (was eleven). FIND uses the
+presets’ `Field`, its caret and its text editing, with a faint A NAME, MAKER OR TYPE while empty.
+Each word typed must be a case-insensitive substring of a name, maker or type; words may match
+different fields. Matched characters are brighter and underlined. NAME sorts by name, maker and
+format; MAKER and TYPE group the matches under inert heads, each with a dotted rule and its
+filtered count. The grouped column is omitted from each effect’s row, leaving room for the other
+one. The keyboard’s row has a `>`; Up, Down, Page Up and Page Down move it past heads and blank
+lines, keeping it in view. Enter chooses it. Left, Right, Home, End, Backspace and Delete edit
+FIND. Escape clears its text, then closes the empty list. The list takes the keyboard while open;
+the standalone’s quit shortcut still quits. A click on FIND places its caret; long text scrolls
+inside its place, clear of the grouping words. A click elsewhere closes the chooser as before.
+Each filtered or grouped row keeps its original catalogue index and scan generation, so adding
+or replacing still asks for that exact effect.
+
+**Types without another scan.** `catalogue()` now keeps `PluginDesc.features`, and the effect’s
+identity (format, path, plug-in id); the existing scan cache and its format are unchanged. The
+mapping below accepts VST3 categories already split on `|`, or still joined, and ignores case.
+The first matching row wins if a descriptor gives several types; generic format and channel
+features do not affect the type.
+
+| Type | VST3 sub-category | CLAP feature |
+|---|---|---|
+| Reverb | Reverb | reverb |
+| Delay | Delay | delay |
+| Distortion | Distortion | distortion |
+| Dynamics | Dynamics | compressor, limiter, gate, expander, transient-shaper |
+| EQ | EQ, Filter | equalizer, filter |
+| Modulation | Modulation | chorus, flanger, phaser, tremolo, vibrato |
+| Pitch | Pitch Shift | pitch-shifter |
+| Tools | Tools, Analyzer | utility, analyzer |
+
+Unknown or absent categories show Tools. A maker not named has an UNKNOWN MAKER head. These are
+agent choices for incomplete descriptions; no inference is made from an effect’s name.
+
+**On this computer** (`settings.rs`, `fx.rs`). The chosen grouping is `fx_order` in the existing
+`CA-72/settings.toml`. `fx_recent` holds at most six identities, newest first: a successful add or
+replacement moves that identity to the front, dropping its older place. Failed loads do not
+enter RECENT. Two formats, or two paths with the same id, are distinct. Identities absent from
+the current catalogue stay saved but are not offered; no recent entry points at a stale scan
+index. RECENT is filtered by FIND too, and has ALL EFFECTS… (back to NAME) and SCAN AGAIN. The
+settings use the existing lock and atomic write, read again before each change, preserving
+unrelated settings and leaving an unreadable file alone. The drawer’s worker writes them;
+nothing in the sound preset, session or audio thread changes.
+
+**Evidence** (Linux, 2026-10-20; branch `fx-search` from fed586d):
+- `cargo test -p ca72-plugin -p ca72-panel --features ca72-plugin/standalone-production`:
+  768 passed, 0 failed, 76 ignored. New tests cover name, maker and type substrings, words
+  across fields and case; grouped heads and filtered counts; the original catalogue indices;
+  navigation past heads, scrolling and Enter for add and replace; field editing and both
+  Escapes; recent ordering, six-entry limit, stable identities and fresh reads of their file;
+  category aliases; FIND and grouping hit tests; Unicode and overlapping underlines. The
+  editor’s existing chooser test still opens, adds, replaces, scrolls and closes it; a new one
+  checks that typing plays no notes and arrows step no presets. The panel’s parts-equal-whole
+  test includes FIND, a marked row, groups and long text, in both skins and at both scales.
+- **Workspace:** `CA72_REQUIRE_NGSPICE=1 cargo test --workspace --features
+  ca72-plugin/standalone-production -- --test-threads=4` stopped with 873 passed, 1 failed and
+  53 ignored across 62 completed suites. The existing
+  `tests::a_held_drone_plays_through_the_engine_as_held_keys` differed in UNISON, 256-frame
+  realtime blocks, first at sample 21415. It passed in the targeted run above, twice in
+  isolation under the timing lock, and once more when the exact workspace binary was run on
+  its own. Scheduling sensitivity is suspected (its realtime workers use wall-clock
+  deadlines), not proven. No engine code or test was changed to make it pass. The whole
+  workspace run is therefore not claimed green; suites after that failure were not reached.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`, clippy for the two
+  touched crates with default features, `cargo fmt --all -- --check`, and
+  `python3 scripts/notices.py --check`: clean.
+- **Golden:** both `approved.png` and `approved-large.png` pass. The chooser is in neither;
+  no golden image changed or was re-approved.
+- **Pictures:** `the_fx_search_pngs`, run explicitly, writes sixteen images of the real
+  chooser: search, MAKER, TYPE and RECENT, both skins, at 0.44 and 1.0. Checked against A’s
+  approved pictures; these use sixteen fixture effects, hence 7 OF 16 rather than 7 OF 47.
+- **Frames:** `cargo run --release -p ca72-panel --example frames`, two consecutive runs of
+  the final renderer under the timing lock: typing in FIND 2.7 / 6.4 ms at 0.44 / 0.87
+  (median and slowest, rounded to 0.1 ms, both runs). This is the list’s redraw and composition
+  in the frame example with thirty effects; it does not time catalogue filtering. The machine
+  was shared, load 9.7 falling to 6.1. An earlier run at load 24 to 28 was noisy (40.9 / 9.3 ms
+  medians), retained in the worktree’s evidence but not used for the consistent pair.
+
+**Not tried:** live window input or listening with installed third-party effects, Windows,
+macOS or a Mac build (another agent’s job). The fixture chain exercises the same add and
+replace dispatch, but does not load a third-party binary. Unknown categories showing Tools,
+an unnamed maker’s UNKNOWN MAKER head, the category precedence above, and RECENT recording
+successful choices are agent decisions for the owner to confirm.
+
+
+## R-FX-PRESETS. The standalone's presets carry effects, held beneath a whole-chain LOCK
+
+**The owner, 2026-10-19:** effects saved in presets in the standalone; VST3, CLAP and AU
+instances ignore a preset's chain but keep it when re-saving that preset. Unlocked (the
+default), loading a preset replaces the chain, an empty chain where it has none. Locked:
+"If somebody locks it, it should stay locked"; "we just need a way of indicating that the
+preset ... has another effect chain that is underneath the lock".
+
+**The owner, 2026-10-20:** "Presets should carry effects chains in standalone only." On the
+sign, "okay, do your recommendation": options 2 + 1, with the padlock on the FX key. The
+brief specifies the tip "This preset has its own effects. Unlock to hear them." and
+UNLOCK TO HEAR beneath LOCK. The research and drawn options supplied with the brief are
+`fxlock-research.md` and `fxlock-section.html` in the night's working folder; its referenced
+images were absent from the supplied folder. The HTML's layout text was available.
+
+**The sound and its file.** Format stays **1**: `library::sound_of` reads only the keys it
+knows from a TOML table, never rejecting unknown top-level sections. A new `[effects]`
+section holds `chain`, the JSON record already used by `effects.json` (`SavedChain`): up to
+four slots, their format, ID, name, maker and path hint, bypass and saved state in hex. Missing
+effects keep their state. The existing safety records (`disabled` and `set_aside`) travel with
+them too. Factory presets have no section. The plug-ins keep the entire section opaque,
+including unknown fields, whitespace and comments, through SAVE AS, replacement, renaming,
+tagging and project state; they never load its effects. The parser's source spans select the
+original bytes, preserving LF, CRLF and mixed endings without formatting them again. A project
+saved before this metadata, or with unreadable metadata, clears the previous sound's carried
+section when recalled. The standalone takes fresh snapshots through the session's existing
+snapshot code on the preset thread. SAVE finishes
+asynchronously; neither the editor nor the audio thread waits for a helper. Saves write in
+request order. A save finishing after another preset was chosen leaves that choice alone.
+
+**Loading and LOCK.** The standalone's `PresetChains` serialises preset and lock changes on
+its own thread, using `Chain::restore_as(Background)`: the chain in place dry, each effect
+joining when ready, the same crash/hang limits, remembered failures and missing effects as
+R-FX-SAFETY. A safe start stays off through preset changes until the player turns effects
+back on. A preset chosen from MIDI is handed to the same path by the helper after processing
+applies its sound; no effect state, allocation or file access reaches the audio thread.
+Unlocked, no section clears the chain (Init too). Locked, every preset leaves the playing
+chain alone. Unlocking loads the current preset's held chain, including an empty one. LOCK
+is `settings.toml`'s `fx_locked`, false by default, never in presets or host parameters, and
+kept across launches. Recalling a session observes its selected preset without replacing
+the session's own effects.
+
+**The signs.** Four slots a little closer together leave CHAIN and a full-size LOCK tab at
+the row's right end. LOCK lights amber as ON does. While locked, a dim padlock remains on
+the rail's FX key whether its drawer is open or shut. Only while locked, with a nonempty
+preset chain different from the playing chain, the name's screen shows a small dim FX by
+its arrow (the tip above), each slot's slim second screen shows ▸ and the preset's effect
+name, or ▸ – where none, and UNLOCK TO HEAR prints under LOCK. Matching chains and presets
+without effects show none of these held signs. Fault words sit under
+the ON tabs, clear of the held names. The preset's changed mark includes a differing chain
+while unlocked; locking excludes only the chain, never the synth's changed parameters.
+
+**Saving while locked saves what you hear**, including the locked chain, following the
+Kemper precedent in the supplied research. This replaces the saved preset's held chain
+without a separate warning; the ordinary save's replacement controls remain in force.
+
+**Agent decisions for the owner's review:** JSON inside the TOML section reuses the session's
+schema instead of defining a second state encoding. Its original opaque text is also kept
+with the plug-in's project so a later SAVE AS preserves it after reopening. A section the
+standalone does not understand is kept and reported, and leaves the chain playing; it does
+not silently clear it. Fault words move beneath their ON tabs to make room for the second
+screens. There is no extra dot on FX and no separate USE PRESET'S EFFECTS button: LOCK itself
+opens the lock and loads the preset, as the brief specifies.
+
+**A restore guard found here:** the existing restore loop ignored an error removing a slot.
+With no audio device and the bounded changes queue full it could loop forever. It now returns
+the error. A newly restored chain is saved before the loading threads begin, including an
+empty chain and missing effects, following R-FX-SAVE-ORDER.
+
+**Evidence (Linux reference machine, Rust 1.97.1, 2026-10-21):**
+- The requested four-crate matrix, with `ca72-plugin/standalone-production` and
+  four test threads: **802 passed, 0 failed, 79 ignored**. The workspace run with that feature
+  and `CA72_REQUIRE_NGSPICE=1`: **1,112 passed, 0 failed, 96 ignored**. Both used
+  `--no-fail-fast`, their own target and isolated shared settings, TMPDIR outside Git and /tmp.
+- After the source-span fix and old-project reset, the complete plug-in unit suite: **556
+  passed, 0 failed, 27 ignored**; the default plug-in build's opaque/project round trip: one
+  passed. Final agent and preset follow-ups (including deferred saves): 7 and 21 passed.
+- Fake CLAP and VST3 effects in `ca72-fx-helper/tests/chain.rs`: fresh gain state, order,
+  bypass, preset save/load, LOCK keeping the chain, unlock loading the held one, no section
+  clearing it, persisted LOCK, missing effects' state kept, safe-start/off/turn-on, session
+  observation without replacing the chain. A stopped audio thread fills the queue and restore
+  returns an error. Existing crash, hang, recovery, saved-state and no-allocation tests pass.
+- Opaque sections survive unknown fields, comments, nested tables and arrays, LF, CRLF,
+  mixed endings and header-like text inside multiline strings. Preset metadata crosses from
+  MIDI only on the helper, after processing applies the sound. A delayed snapshot does not
+  block the editor; replies arriving out of order still write files in request order; a save
+  finishing after another preset was chosen leaves that selection alone.
+- The editor operates LOCK and the tag's exact tip, with the drawer open and shut. Drawer
+  partial frames match whole frames as LOCK, held names and hover change, in both skins at
+  0.44 and 0.87. All fault words and UNLOCK TO HEAR fit standard and LARGE lettering. The
+  editor's own 32 composed PNGs (both skins, both letterings, 0.44 and 1.0; unlocked, locked,
+  held and shut) were inspected. No approved image was changed.
+- A final release `preset_render`, 19 factory presets, ten voices, four seconds at 48 kHz in
+  256-frame blocks, HI, LO and ULTRA: all **57 renders, 21,888,000 interleaved f32 samples,
+  bit-identical against 393588a**. References reused from R-GLIDE-LONG's retained base renders;
+  settings, file counts, lengths and bytes checked by a separate fail-closed comparison.
+- Workspace clippy, all targets and all features, `-D warnings`: clean; touched crates and
+  the default plug-in build, all targets, also clean. `cargo fmt --all -- --check` and
+  `python3 scripts/notices.py --check` pass. The source-span parser's MIT notices are included.
+
+Not tried: the Mac (no build), Windows, real hosts, live window input, a real audio device or
+listening. Ignored manual benchmarks were not run. The approved mock-up's JPGs were absent;
+the actual editor frames above follow the HTML's layout text and the brief's final signs.
+
+### Pins travel with the chain (R-FX-PARAMS merged, 2026-10-21)
+
+R-FX-PARAMS saves each effect's pins (their parameters, targets, bases and what moves them) in
+the slot's own record, and the preset's `[effects]` section is that record whole, so nothing
+was added for presets: the owner's "Presets should carry effects chains in standalone only"
+carries the pins too. Unlocked, choosing a preset gives its pins and their LFO and macro
+assignments back with its effects; a factory or older preset clears them with the chain.
+Locked, the heard chain's pins and assignments stay through preset changes, and a save while
+locked writes them as heard. The parameter list shares the effects' chooser's two-line head
+(the title, then FIND): ten parameters show, as before. Held by
+`pins_and_what_moves_them_travel_with_a_preset_and_under_lock` (ca72-fx-helper, real test
+CLAP effect).

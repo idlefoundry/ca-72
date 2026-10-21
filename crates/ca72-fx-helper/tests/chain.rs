@@ -757,3 +757,282 @@ fn third_party_effects_are_heard_in_real_time() {
         c.shutdown().unwrap();
     }
 }
+
+/// A standalone preset uses the session’s state record and restore, including both formats,
+/// bypass and a missing plug-in. The chain’s lock wins until it is opened (R-FX-PRESETS).
+#[test]
+fn preset_chains_restore_lock_unlock_and_save_what_is_heard() {
+    use ca72_plugin::{fx::PresetChains, library::Library};
+    let dir = tempfile::tempdir().unwrap();
+    let (c, mut r) = chain(false);
+    for p in plugins() {
+        c.add(&p).unwrap();
+    }
+    let before = c.saved();
+    c.set_param(0, P_GAIN, value(&c, 0, P_GAIN, 0.37)).unwrap();
+    c.set_bypass(1, true).unwrap();
+    play(&mut r, 0, 2);
+    let presets = PresetChains::new(c.clone(), false, dir.path().join("settings.toml"));
+    let raw = presets.save().unwrap().unwrap();
+    let wanted = c.saved();
+    assert!(wanted.slots.iter().all(|s| s.state.is_some()));
+    assert_ne!(
+        wanted.slots[0].state, before.slots[0].state,
+        "SAVE takes fresh state after the edit"
+    );
+    let library = Library::at(dir.path().join("Presets"));
+    let e = library
+        .save_with(
+            "With effects",
+            Vec::new(),
+            None,
+            None,
+            Vec::new(),
+            Some(raw.clone()),
+        )
+        .unwrap();
+    assert_eq!(e.sound.effects.as_deref(), Some(raw.as_str()));
+    c.restore(&SavedChain {
+        format: 1,
+        slots: Vec::new(),
+    });
+    presets.load(e.sound.effects);
+    let wait = |check: &dyn Fn() -> bool| {
+        let start = Instant::now();
+        while !check() {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "preset change did not finish: {:?}",
+                c.status()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    wait(&|| c.status().len() == 2 && c.status().iter().all(|s| s.health == Health::Running));
+    assert_eq!(c.saved(), wanted);
+    presets.set_locked(true);
+    wait(&|| presets.status().locked);
+    c.set_bypass(0, true).unwrap();
+    let heard = c.saved();
+    let mut other = wanted.clone();
+    other.slots.swap(0, 1);
+    other.slots[0].name = "Preset reverb".into();
+    let raw = format!(
+        "[effects]\nchain = {}\n",
+        serde_json::to_string(&serde_json::to_string(&other).unwrap()).unwrap()
+    );
+    presets.load(Some(raw));
+    wait(&|| {
+        presets
+            .status()
+            .held
+            .as_ref()
+            .is_some_and(|n| n[0] == "Preset reverb")
+    });
+    assert_eq!(c.saved(), heard, "LOCK keeps what is heard");
+    let locked = presets.save().unwrap().unwrap();
+    let e = library
+        .save_with(
+            "Locked copy",
+            Vec::new(),
+            None,
+            None,
+            Vec::new(),
+            Some(locked.clone()),
+        )
+        .unwrap();
+    assert_eq!(e.sound.effects.as_deref(), Some(locked.as_str()));
+    presets.set_locked(false);
+    wait(&|| {
+        !presets.status().locked
+            && c.status().len() == 2
+            && c.status().iter().all(|s| s.health == Health::Running)
+            && c.saved() == other
+    });
+    assert_eq!(c.saved(), other);
+    assert!(presets.status().held.is_none());
+    presets.load(None);
+    wait(&|| c.is_empty());
+    // An absent plug-in stays in its place with its exact state and bypass, as in a session.
+    let mut missing = wanted.clone();
+    missing.slots.truncate(1);
+    missing.slots[0].path = dir.path().join("not-installed.clap");
+    let raw = format!(
+        "[effects]\nchain = {}\n",
+        serde_json::to_string(&serde_json::to_string(&missing).unwrap()).unwrap()
+    );
+    presets.load(Some(raw));
+    wait(&|| c.status().len() == 1 && c.status()[0].health == Health::Missing);
+    assert_eq!(c.saved(), missing);
+    presets.set_locked(true);
+    wait(&|| presets.status().locked);
+    presets.load(None);
+    wait(&|| presets.status().held.is_none() && presets.status().differs);
+    assert_eq!(c.saved(), missing);
+    wait(&|| {
+        std::fs::read_to_string(dir.path().join("settings.toml"))
+            .is_ok_and(|s| s.contains("fx_locked = true"))
+    });
+    drop(presets);
+    let reopened = PresetChains::new(c.clone(), false, dir.path().join("settings.toml"));
+    assert!(
+        reopened.status().locked,
+        "LOCK stays locked across launches"
+    );
+    reopened.load(None);
+    std::thread::sleep(Duration::from_millis(150));
+    assert_eq!(c.saved(), missing);
+    reopened.set_locked(false);
+    wait(&|| c.is_empty());
+    drop(reopened);
+    let safe = PresetChains::new(c.clone(), true, dir.path().join("safe-settings.toml"));
+    let raw = format!(
+        "[effects]\nchain = {}\n",
+        serde_json::to_string(&serde_json::to_string(&wanted).unwrap()).unwrap()
+    );
+    safe.load(Some(raw));
+    wait(&|| c.status().len() == 2 && c.status().iter().all(|s| s.health == Health::Off));
+    assert_eq!(c.saved(), wanted);
+    assert!(c.status().iter().all(|s| s.helper_pid.is_none()));
+    safe.turn_on();
+    wait(&|| c.status().len() == 2 && c.status().iter().all(|s| s.health == Health::Running));
+    safe.observe(None);
+    wait(&|| safe.status().differs);
+    assert_eq!(
+        c.saved(),
+        wanted,
+        "opening an editor observes, never replaces, a session’s chain"
+    );
+    safe.load(None);
+    wait(&|| c.is_empty());
+    c.shutdown().unwrap();
+}
+
+/// No audio device may be running while presets are browsed. A full control queue is an
+/// error, never an endless retry of the same removal (R-FX-PRESETS).
+#[test]
+fn a_full_queue_returns_from_preset_restore_without_retrying_forever() {
+    let (c, _r) = chain(false);
+    c.add(&plugins()[0]).unwrap();
+    let saved = c.saved();
+    let start = Instant::now();
+    let mut failed = false;
+    for _ in 0..1024 {
+        let errors = c.restore_as(&saved, ca72_fx::Restore::Off);
+        if !errors.is_empty() {
+            assert!(errors[0].contains("not taking changes"));
+            failed = true;
+            break;
+        }
+    }
+    assert!(failed, "the stopped audio thread must fill its queue");
+    assert!(start.elapsed() < Duration::from_secs(5));
+    c.shutdown().unwrap();
+}
+
+/// A synth's pin assignments, as a test keeps them (R-FX-PARAMS).
+#[derive(Default)]
+struct Mods {
+    by: std::sync::Mutex<[Vec<(String, f32)>; ca72_fx::MAX_PINS]>,
+    rev: std::sync::atomic::AtomicU64,
+}
+
+impl ca72_fx::PinMods for Mods {
+    fn get(&self, target: usize) -> Vec<(String, f32)> {
+        self.by.lock().expect("the mods")[target].clone()
+    }
+    fn set(&self, target: usize, mods: &[(String, f32)]) {
+        self.by.lock().expect("the mods")[target] = mods.to_vec();
+        self.rev.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    }
+    fn revision(&self) -> u64 {
+        self.rev.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
+/// Pins are saved with the chain, so a standalone preset carries them and what moves them;
+/// LOCK keeps the heard chain's pins and assignments through a preset change, and saves them
+/// as heard (R-FX-PARAMS, R-FX-PRESETS: "Presets should carry effects chains in standalone
+/// only").
+#[test]
+fn pins_and_what_moves_them_travel_with_a_preset_and_under_lock() {
+    use ca72_fx::PinMods;
+    use ca72_plugin::{fx::PresetChains, library::Library};
+    use std::sync::Arc;
+    let dir = tempfile::tempdir().unwrap();
+    let (c, mut r) = chain(false);
+    let mods = Arc::new(Mods::default());
+    c.set_pin_mods(mods.clone());
+    let [clap, _] = plugins();
+    c.add(&clap).unwrap();
+    assert_eq!(c.pin(0, P_GAIN).unwrap(), 0);
+    let lfo = vec![("lfo1".to_owned(), 0.5f32)];
+    mods.set(0, &lfo);
+    play(&mut r, 0, 2);
+    let pinned =
+        |c: &Chain| -> Vec<(usize, u32)> { c.pins().iter().map(|p| (p.target, p.id)).collect() };
+    let wait = |check: &dyn Fn() -> bool| {
+        let start = Instant::now();
+        while !check() {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "preset change did not finish: {:?}",
+                c.status()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    let presets = PresetChains::new(c.clone(), false, dir.path().join("settings.toml"));
+    let raw = presets.save().unwrap().unwrap();
+    let library = Library::at(dir.path().join("Presets"));
+    let e = library
+        .save_with("Pinned", Vec::new(), None, None, Vec::new(), Some(raw))
+        .unwrap();
+    // Cleared, then the preset chosen: the pin and its LFO come back with the effect.
+    c.restore(&SavedChain {
+        format: 1,
+        slots: Vec::new(),
+    });
+    assert!(pinned(&c).is_empty());
+    assert!(mods.get(0).is_empty(), "a cleared chain moves no pin");
+    presets.load(e.sound.effects.clone());
+    wait(&|| c.status().len() == 1 && c.status()[0].health == Health::Running);
+    wait(&|| pinned(&c) == [(0, P_GAIN)]);
+    assert_eq!(mods.get(0), lfo, "the preset gives back what moved the pin");
+    // Locked: another preset (one without effects) leaves the heard pins and their sources.
+    presets.set_locked(true);
+    wait(&|| presets.status().locked);
+    let macro2 = vec![("macro2".to_owned(), -0.25f32)];
+    mods.set(0, &macro2);
+    presets.load(None);
+    wait(&|| presets.status().differs);
+    assert_eq!(pinned(&c), [(0, P_GAIN)], "LOCK keeps the pins");
+    assert_eq!(mods.get(0), macro2, "LOCK keeps what moves them");
+    let locked = presets.save().unwrap().unwrap();
+    let held = library
+        .save_with(
+            "Locked pins",
+            Vec::new(),
+            None,
+            None,
+            Vec::new(),
+            Some(locked),
+        )
+        .unwrap();
+    // Unlocked: the chosen preset's empty chain is heard, its pins and sources gone.
+    presets.set_locked(false);
+    wait(&|| c.is_empty());
+    assert!(pinned(&c).is_empty());
+    assert!(mods.get(0).is_empty());
+    // The preset saved under LOCK has the pin as it was heard: the macro, not the LFO.
+    presets.load(held.sound.effects.clone());
+    wait(&|| c.status().len() == 1 && c.status()[0].health == Health::Running);
+    wait(&|| pinned(&c) == [(0, P_GAIN)]);
+    assert_eq!(mods.get(0), macro2);
+    let saved = c.saved();
+    assert_eq!(saved.slots[0].pins.len(), 1);
+    assert_eq!(saved.slots[0].pins[0].target, Some(0));
+    presets.load(None);
+    wait(&|| c.is_empty());
+    c.shutdown().unwrap();
+}

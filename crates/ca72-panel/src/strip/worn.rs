@@ -832,6 +832,20 @@ impl StripRenderer {
                 svg_over(&self.options, &mut self.frame, s, &o.0);
             }
         }
+        if scene.bar.fx_locked
+            && self.rail == Rail::Effects
+            && meets(self.key_part(BarTarget::Fx), r)
+            && let Some((x, _, _)) = self.keys().find(|k| k.2 == BarTarget::Fx)
+        {
+            let mut o = Svg::default();
+            put!(
+                o,
+                "<g transform='translate({},{})' fill='none' stroke='#ffb020' stroke-opacity='0.4' stroke-width='2'><path d='M-4 0 V-5 A4 4 0 0 1 4 -5 V0'/><rect x='-6' y='0' width='12' height='10' rx='1'/></g>",
+                N(x + 24.0),
+                N(super::RAIL_Y - PANEL_H - 15.0)
+            );
+            svg_over(&self.options, &mut self.frame, s, &o.0);
+        }
         if let Some(keyboard) = &scene.keyboard {
             self.keyboard.over(&mut self.frame, keyboard, r);
         }
@@ -1450,6 +1464,11 @@ fn name_level(b: &BarScene) -> f64 {
 /// The preset's name in dots ([`font::glyph`]), lit over the unlit dots (the still's).
 fn name(frame: &mut Pixmap, scale: f64, rail: Rail, b: &BarScene, lamp: &Lamp) {
     let (_, places, ..) = name_places(rail);
+    let places = if b.preset_fx {
+        places.saturating_sub(3)
+    } else {
+        places
+    };
     let level = name_level(b);
     let text: String = if b.name.is_empty() {
         "NO PRESET".to_owned()
@@ -1474,6 +1493,27 @@ fn name(frame: &mut Pixmap, scale: f64, rail: Rail, b: &BarScene, lamp: &Lamp) {
             core.push_circle(px, py, r as f32);
         }
     });
+    if b.preset_fx {
+        let (_, _, _, arrow) = name_places(rail);
+        let (_, y, _, h) = rail.name();
+        let d = DOT * 0.65;
+        let mut dots = PathBuilder::new();
+        for (i, c) in "FX".chars().enumerate() {
+            for (row, bits) in font::glyph(c).iter().enumerate() {
+                for col in 0..5 {
+                    if bits >> (4 - col) & 1 == 1 {
+                        dots.push_circle(
+                            ((arrow - 92.0 + (i * 6 + col) as f64 * d) * scale) as f32,
+                            ((y - PANEL_H + h / 2.0 - CAP_LIFT - 3.0 * d + row as f64 * d) * scale)
+                                as f32,
+                            (d * 0.36 * scale) as f32,
+                        );
+                    }
+                }
+            }
+        }
+        fill(frame, dots, lamp.on, 0.32);
+    }
     // The favourite's star before it and the arrow that drops the list down after it, in the
     // same dots (the owner, 2026-10-10: "turn this into a pixel star", "make sure the arrow on
     // the right side of the preset dropdown is also dots"): the star lit for a favourite, else

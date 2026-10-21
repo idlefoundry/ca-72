@@ -42,6 +42,7 @@ pub(super) struct Agents {
     pub timed: Vec<(u8, Instant)>,
     /// Agents turned off by an agent: the socket closed once its answer has gone.
     pub stop: bool,
+    saves: Vec<(crate::agent::server::Job, crate::presets::Saving)>,
 }
 
 impl Editing {
@@ -86,6 +87,26 @@ impl Editing {
             }
             done = true;
         }
+        let mut waiting = Vec::new();
+        for (job, saving) in std::mem::take(&mut self.agents.saves) {
+            if let Some(result) = saving.poll() {
+                let reply = match result {
+                    Ok(e) => {
+                        self.browser.finish_save(&saving, &e, &self.params);
+                        self.browser.drawer.hint = format!("Saved {}.", e.sound.name);
+                        Ok(
+                            json!({"saved": e.sound.name, "origin": origin(e.origin), "preset": self.preset_state()}),
+                        )
+                    }
+                    Err(e) => Err(ApiError::refused(e)),
+                };
+                job.answer(reply);
+                done = true;
+            } else {
+                waiting.push((job, saving));
+            }
+        }
+        self.agents.saves = waiting;
         let Some(inbox) = self
             .agents
             .server
@@ -98,6 +119,20 @@ impl Editing {
             let Some(job) = inbox.take() else {
                 break;
             };
+            if job.method == "presets.save" && self.browser.effects.is_some() {
+                match self
+                    .save_preset_fields(&job.params)
+                    .and_then(|(name, tags)| {
+                        self.browser
+                            .start_save_sound(&name, tags, &self.params)
+                            .map_err(ApiError::refused)
+                    }) {
+                    Ok(saving) => self.agents.saves.push((job, saving)),
+                    Err(e) => job.answer(Err(e)),
+                }
+                done = true;
+                continue;
+            }
             let r = self.agent_call(&job.method, &job.params);
             job.answer(r);
             done = true;
@@ -504,11 +539,23 @@ impl Editing {
         }
     }
 
-    fn save_preset(&mut self, args: &Value) -> Reply {
+    fn save_preset_fields(&self, args: &Value) -> Result<(String, Vec<String>), ApiError> {
         let name = text_arg(args, "name")?.trim().to_owned();
         library::check_name(&name).map_err(ApiError::params)?;
         let tags = Self::tags_of(args)?;
         let replace = flag_arg(args, "replace", false)?;
+        if !replace
+            && (self.browser.saving_as(&name)
+                || self
+                    .agents
+                    .saves
+                    .iter()
+                    .any(|(_, s)| s.name.to_lowercase() == name.to_lowercase()))
+        {
+            return Err(ApiError::refused(
+                "A save under that name is in progress; give replace true to save over it",
+            ));
+        }
         let there = self.browser.library.find(&name);
         if let Some(e) = &there
             && !replace
@@ -524,6 +571,11 @@ impl Editing {
             )));
         }
         let tags = tags.unwrap_or_else(|| there.map(|e| e.sound.tags).unwrap_or_default());
+        Ok((name, tags))
+    }
+
+    fn save_preset(&mut self, args: &Value) -> Reply {
+        let (name, tags) = self.save_preset_fields(args)?;
         match self.browser.save_sound(&name, tags, &self.params) {
             Ok(e) => {
                 self.browser.drawer.hint = format!("Saved {}.", e.sound.name);
@@ -1564,6 +1616,29 @@ mod tests {
             json!({"method": "tools/call", "params": {"name": "ca72_nothing", "arguments": {}}}),
         );
         assert_eq!(unknown["error"]["code"], json!(codes::INVALID_PARAMS));
+    }
+
+    #[test]
+    fn an_agents_save_waits_for_effects_then_keeps_their_section() {
+        let (_t, mut e, params, mut a) = agent_and_editor();
+        let fake = crate::fx_view::fake::Fake::with(&[], &[]);
+        let raw = "[effects]\nchain = 'captured effects'\n";
+        *fake.preset_raw.lock().unwrap() = Some(raw.into());
+        e.use_effects(crate::fx_view::FxView::new(Some(fake)));
+        let result = a.tool(&mut e, "ca72_preset_save", json!({"name": "With effects"}));
+        assert_eq!(ok(&result)["saved"], "With effects");
+        assert_eq!(
+            e.browser
+                .library
+                .find("With effects")
+                .unwrap()
+                .sound
+                .effects
+                .as_deref(),
+            Some(raw)
+        );
+        assert_eq!(params.preset_effects.read().unwrap().as_deref(), Some(raw));
+        assert!(e.agents.saves.is_empty());
     }
 
     /// Presets saved, refused over another without `replace`, marked changed, loaded,

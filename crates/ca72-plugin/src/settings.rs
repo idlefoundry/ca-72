@@ -444,6 +444,89 @@ fn table(path: &Path) -> Result<Option<toml::Table>, String> {
     }
 }
 
+/// The standalone chooser’s order and six recent stable identities (R-FX-SEARCH). These
+/// variable-length settings are kept apart from the editor’s small, copyable `Settings`.
+#[cfg(any(feature = "fx-host", test))]
+pub(crate) fn fx_preferences(path: &Path) -> crate::fx_view::Preferences {
+    table(path)
+        .ok()
+        .flatten()
+        .map(|t| fx_preferences_of(&t))
+        .unwrap_or_default()
+}
+
+#[cfg(any(feature = "fx-host", test))]
+fn fx_preferences_of(t: &toml::Table) -> crate::fx_view::Preferences {
+    use ca72_panel::strip::fx::FxOrder;
+    let order = match t.get("fx_order").and_then(toml::Value::as_str) {
+        Some("MAKER") => FxOrder::Maker,
+        Some("TYPE") => FxOrder::Type,
+        Some("RECENT") => FxOrder::Recent,
+        _ => FxOrder::Name,
+    };
+    let recent = t
+        .get("fx_recent")
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.clone().try_into::<crate::fx_view::EffectId>().ok())
+        .fold(Vec::new(), |mut ids, id| {
+            if ids.len() < 6 && !ids.contains(&id) {
+                ids.push(id);
+            }
+            ids
+        });
+    crate::fx_view::Preferences { order, recent }
+}
+
+#[cfg(any(feature = "fx-host", test))]
+pub(crate) fn keep_fx_order(
+    path: &Path,
+    order: ca72_panel::strip::fx::FxOrder,
+) -> Result<(), String> {
+    let _lock = lock(path)?;
+    let mut t = table(path)?.unwrap_or_default();
+    t.insert("format".into(), 1.into());
+    t.insert("fx_order".into(), order.word().into());
+    write(path, &t)
+}
+
+#[cfg(any(feature = "fx-host", test))]
+pub(crate) fn keep_fx_choice(path: &Path, id: crate::fx_view::EffectId) -> Result<(), String> {
+    let _lock = lock(path)?;
+    let mut t = table(path)?.unwrap_or_default();
+    let mut prefs = fx_preferences_of(&t);
+    prefs.chosen(id);
+    let recent = prefs
+        .recent
+        .into_iter()
+        .map(toml::Value::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    t.insert("format".into(), 1.into());
+    t.insert("fx_recent".into(), toml::Value::Array(recent));
+    write(path, &t)
+}
+
+/// The standalone’s whole-chain lock belongs to this computer, never a preset.
+#[cfg(any(feature = "fx-host", test))]
+pub(crate) fn fx_locked(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.parse::<toml::Table>().ok())
+        .and_then(|t| t.get("fx_locked").and_then(toml::Value::as_bool))
+        .unwrap_or(false)
+}
+
+#[cfg(any(feature = "fx-host", test))]
+pub(crate) fn keep_fx_locked(path: &Path, on: bool) -> Result<(), String> {
+    let _guard = lock(path)?;
+    let mut t = table(path)?.unwrap_or_default();
+    t.insert("format".into(), 1.into());
+    t.insert("fx_locked".into(), on.into());
+    write(path, &t)
+}
+
 /// Preset actions belong to this computer, across formats and projects. Each entry names a
 /// channel and exactly one input, with the same channel numbering the menus show.
 pub(crate) fn preset_actions(path: &Path) -> Vec<(usize, crate::learn::Binding)> {
@@ -555,6 +638,78 @@ pub(crate) fn claim_release_notes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The chooser’s computer settings survive a fresh read and leave other keys alone.
+    #[test]
+    fn the_chain_lock_is_off_by_default_and_kept_without_changing_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        assert!(!fx_locked(&path));
+        std::fs::write(&path, "format = 1\nskin = 'drawn'\n").unwrap();
+        keep_fx_locked(&path, true).unwrap();
+        assert!(fx_locked(&path));
+        let t = table(&path).unwrap().unwrap();
+        assert_eq!(t.get("skin").and_then(toml::Value::as_str), Some("drawn"));
+        keep_fx_locked(&path, false).unwrap();
+        assert!(!fx_locked(&path));
+        std::fs::write(&path, "broken = [").unwrap();
+        assert!(keep_fx_locked(&path, true).is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "broken = [");
+    }
+
+    #[test]
+    fn fx_recents_and_grouping_persist_without_overwriting_other_settings() {
+        use crate::fx_view::EffectId;
+        use ca72_panel::strip::fx::FxOrder;
+        let folder = tempfile::tempdir().expect("settings folder");
+        let path = folder.path().join("settings.toml");
+        std::fs::write(&path, "skin = \"classic\"\nother_app = 42\n").expect("settings");
+        assert_eq!(
+            fx_preferences(&path),
+            crate::fx_view::Preferences::default()
+        );
+        keep_fx_order(&path, FxOrder::Type).expect("order");
+        let id = |n: usize| EffectId {
+            format: "clap".into(),
+            path: format!("/effects/{n}.clap").into(),
+            id: n.to_string(),
+        };
+        for n in 0..8 {
+            keep_fx_choice(&path, id(n)).expect("recent");
+        }
+        keep_fx_choice(&path, id(4)).expect("chosen again");
+        let prefs = fx_preferences(&path);
+        assert_eq!(prefs.order, FxOrder::Type);
+        assert_eq!(
+            prefs
+                .recent
+                .iter()
+                .map(|k| k.id.as_str())
+                .collect::<Vec<_>>(),
+            ["4", "7", "6", "5", "3", "2"]
+        );
+        let same_id_another_format = EffectId {
+            format: "vst3".into(),
+            ..id(4)
+        };
+        keep_fx_choice(&path, same_id_another_format.clone()).expect("format");
+        let same_id_another_path = EffectId {
+            path: "/other/4.clap".into(),
+            ..id(4)
+        };
+        keep_fx_choice(&path, same_id_another_path.clone()).expect("path");
+        assert_eq!(
+            &fx_preferences(&path).recent[..3],
+            &[same_id_another_path, same_id_another_format, id(4)]
+        );
+        let t = table(&path).expect("table").expect("file");
+        assert_eq!(t["skin"].as_str(), Some("classic"));
+        assert_eq!(t["other_app"].as_integer(), Some(42));
+        std::fs::write(&path, "bad = [").expect("bad settings");
+        assert!(keep_fx_choice(&path, id(0)).is_err());
+        assert!(keep_fx_order(&path, FxOrder::Recent).is_err());
+        assert_eq!(std::fs::read_to_string(&path).expect("settings"), "bad = [");
+    }
 
     /// The standalone's TEMPO: 120 for a new computer, kept within 30 to 300, a value out of
     /// its range or not a number read as 120.

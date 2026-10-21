@@ -318,6 +318,9 @@ pub struct BarScene {
     pub arp: bool,
     /// An effect plays (the standalone's FX key lit).
     pub fx: bool,
+    /// The standalone’s chain is locked; this preset has different effects held beneath it.
+    pub fx_locked: bool,
+    pub preset_fx: bool,
     /// An amount of each note's own expression is not 0 (the MPE key lit).
     pub mpe: bool,
     /// An LFO is assigned and moves a knob (decisions.md R-LFO).
@@ -810,6 +813,8 @@ mod png {
                         panel: true,
                         arp: false,
                         fx: false,
+                        fx_locked: false,
+                        preset_fx: false,
                         mpe: false,
                         lfo: false,
                         page: None,
@@ -1107,6 +1112,8 @@ mod png {
                     panel: true,
                     arp: false,
                     fx: false,
+                    fx_locked: false,
+                    preset_fx: false,
                     mpe: false,
                     lfo: false,
                     page: None,

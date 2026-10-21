@@ -523,6 +523,9 @@ pub struct Ca72Params {
     /// with the session, so the bar names it again.
     #[persist = "preset"]
     pub preset: Arc<RwLock<String>>,
+    /// The selected preset’s opaque effects, carried through plug-in sessions (R-FX-PRESETS).
+    #[persist = "preset_effects"]
+    pub preset_effects: Arc<RwLock<Option<String>>>,
     /// The MIDI controllers assigned to parameters by MIDI Learn, and the learning (decisions.md
     /// R34): saved with the session (`crate::learn::Saved`), not with a sound preset.
     #[persist = "midi_map"]
@@ -1065,6 +1068,7 @@ impl Default for Ca72Params {
             editor_presets: Arc::new(AtomicBool::new(false)),
             editor_resizing: Arc::default(),
             preset: Arc::new(RwLock::new(String::new())),
+            preset_effects: Arc::new(RwLock::new(None)),
             midi_map: Arc::new(if cfg!(test) {
                 MidiMap::default()
             } else {

@@ -492,6 +492,7 @@ struct Shared {
     from_audio: Mutex<rtrb::Consumer<Stage>>,
     /// The sandbox's state revision last saved.
     saved_rev: AtomicU64,
+    revision: AtomicU64,
     /// Events already logged.
     logged: Mutex<usize>,
     /// Changes are not saved one by one (restoring, closing).
@@ -574,6 +575,7 @@ impl Chain {
             to_audio: Mutex::new(to_audio),
             from_audio: Mutex::new(from_audio),
             saved_rev: AtomicU64::new(0),
+            revision: AtomicU64::new(0),
             logged: Mutex::new(0),
             quiet: AtomicBool::new(false),
             keep_file: AtomicBool::new(false),
@@ -1275,6 +1277,47 @@ impl Chain {
         self.shared.saved()
     }
 
+    /// Changes to the chain and to its effects’ snapshots, without copying the snapshots.
+    pub fn changes(&self) -> (u64, u64) {
+        (
+            self.shared.revision.load(Ordering::Acquire),
+            self.shared.sandbox.state_rev(),
+        )
+    }
+
+    /// The latest snapshots, only when the chain is free (the editor’s preset signs).
+    pub fn try_saved(&self) -> Option<SavedChain> {
+        self.shared
+            .core
+            .try_lock()
+            .ok()
+            .map(|core| self.shared.saved_of(&core))
+    }
+
+    /// Fresh snapshots of these slots, with their identities kept if the chain changes
+    /// meanwhile. Like the session’s save, this may wait for helpers: control threads only.
+    pub fn capture(&self) -> SavedChain {
+        let (mut saved, instances) = {
+            let core = lock(&self.shared.core);
+            (
+                self.shared.saved_of(&core),
+                core.slots
+                    .iter()
+                    .map(|s| s.inst.clone())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        for (slot, instance) in saved.slots.iter_mut().zip(instances) {
+            if let Some(instance) = instance {
+                let _ = instance.take_snapshot();
+                if let Some(state) = instance.snapshot() {
+                    slot.state = Some(protocol::hex(&state));
+                }
+            }
+        }
+        saved
+    }
+
     /// Takes every effect's state now and saves the chain (if it has a file).
     pub fn save_now(&self) -> Result<(), String> {
         self.shared.sandbox.snapshot_all();
@@ -1292,7 +1335,9 @@ impl Chain {
     /// could not be put back is said (and, waiting, what would not load).
     pub fn restore_as(&self, chain: &SavedChain, how: Restore) -> Vec<String> {
         while !self.is_empty() {
-            let _ = self.remove(self.len() - 1);
+            if let Err(e) = self.remove(self.len() - 1) {
+                return vec![e];
+            }
         }
         let mut errors = Vec::new();
         let mut started = Vec::new();
@@ -1341,6 +1386,7 @@ impl Chain {
             drop(q);
             // Its pins on the targets they had, where they are free (R-FX-PARAMS).
             shared.bind_pins(&mut core);
+            shared.save_in(&core);
         }
         for id in started {
             self.shared.spawn_load(id, Attempt::Saved);
@@ -2026,6 +2072,7 @@ impl Shared {
     /// flush take milliseconds, an effect was shown turned off before its record was
     /// written). Nothing on the audio thread takes the lock.
     fn save_in(&self, core: &Core) {
+        self.revision.fetch_add(1, Ordering::Release);
         if self.quiet.load(Ordering::Acquire) || self.keep_file.load(Ordering::Acquire) {
             return;
         }

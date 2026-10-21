@@ -40,7 +40,7 @@ impl Parameters {
     fn keep_in_view(&mut self) {
         let n = self.found().len();
         self.chosen = self.chosen.min(n.saturating_sub(1));
-        let shown = LIST_ROWS - 1;
+        let shown = LIST_ROWS;
         self.first = self.first.min(n.saturating_sub(shown));
         if self.chosen < self.first {
             self.first = self.chosen;
@@ -195,6 +195,7 @@ impl FxView {
                 field: p.field.clone(),
                 pinned: p.pinned,
             }),
+            ..FxList::default()
         })
     }
 
@@ -284,8 +285,8 @@ impl FxView {
             }
             Key::ArrowUp => p.chosen = p.chosen.saturating_sub(1),
             Key::ArrowDown => p.chosen = p.chosen.saturating_add(1),
-            Key::PageUp => p.chosen = p.chosen.saturating_sub(LIST_ROWS - 1),
-            Key::PageDown => p.chosen = p.chosen.saturating_add(LIST_ROWS - 1),
+            Key::PageUp => p.chosen = p.chosen.saturating_sub(LIST_ROWS),
+            Key::PageDown => p.chosen = p.chosen.saturating_add(LIST_ROWS),
             Key::ArrowLeft => p.field.left(),
             Key::ArrowRight => p.field.right(),
             Key::Home => p.field.home(),
