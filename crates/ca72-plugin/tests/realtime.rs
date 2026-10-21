@@ -1215,6 +1215,21 @@ fn the_oscillators_timed_neither_allocate_nor_free() {
 /// ULTRA, and the patch changed between blocks as the editor changes it: no allocation, no free.
 #[test]
 fn the_lfos_neither_allocate_nor_free() {
+    lfos_play_without_allocating(false);
+}
+
+/// The LFOs moving each other's knobs and their own (R-LFO's addendum), in loops, per voice
+/// (MONO off on ten voices), on their ticks, with the macros on their knobs too, their LEVELs
+/// and WAVEFORMs' CONTINUOUS automated besides: no allocation, no free.
+#[test]
+fn the_lfos_moving_each_other_neither_allocate_nor_free() {
+    lfos_play_without_allocating(true);
+}
+
+/// The LFOs' run for [`the_lfos_neither_allocate_nor_free`]; `cross`, half of each source's
+/// knobs the LFOs' own (an LFO's own RATE, the next one's RATE and PHASE, another's LEVEL; the
+/// macros' RISE, shape and LEVEL).
+fn lfos_play_without_allocating(cross: bool) {
     use ca72_plugin::Ca72;
     use ca72_plugin::lfo::{Source, Target};
     use nih_plug::context::process::TestProcessContext;
@@ -1249,27 +1264,53 @@ fn the_lfos_neither_allocate_nor_free() {
     ] {
         assert!(c.automate(q, v));
     }
-    let targets = [
-        Target::Cutoff,
-        Target::Emphasis,
-        Target::Osc2Frequency,
-        Target::Osc1Volume,
-        Target::Volume,
-        Target::Feedback,
-        Target::Tune,
-        Target::Spread,
-    ];
+    let targets = |n: usize| {
+        let on = [
+            Target::Cutoff,
+            Target::Emphasis,
+            Target::Osc2Frequency,
+            Target::Osc1Volume,
+            Target::Volume,
+            Target::Feedback,
+            Target::Tune,
+            Target::Spread,
+        ];
+        if !cross {
+            return on;
+        }
+        // (R-LFO's addendum: an LFO's own RATE, the next one's RATE and PHASE, another's LEVEL.)
+        let m = n % 4;
+        [
+            on[0],
+            on[1],
+            on[4],
+            on[5],
+            Target::LfoRate(m),
+            Target::LfoRate((m + 1) % 4),
+            Target::LfoPhase((m + 1) % 4),
+            Target::LfoLevel((m + 2) % 4),
+        ]
+    };
     for n in 0..4 {
-        for (k, t) in targets.iter().enumerate() {
+        for (k, t) in targets(n).iter().enumerate() {
             a.lfo_patch
                 .assign(Source::Lfo(n), *t, 0.05 * (k as f32 - 3.5))
                 .expect("room");
         }
         assert!(c.automate(a.lfo(n).mono.as_ptr(), 0.0));
     }
-    // (The six macros on the same knobs, one way each: decisions.md R-MACROS.)
+    // (The six macros on the same knobs, one way each: decisions.md R-MACROS; moving the
+    // LFOs, their RISE, shape and LEVEL too.)
     for n in 0..ca72_plugin::lfo::MACROS {
-        for (k, t) in targets.iter().enumerate() {
+        let mut on = targets(n);
+        if cross {
+            (on[4], on[5], on[6]) = (
+                Target::LfoRise(n % 4),
+                Target::LfoShape((n + 1) % 4),
+                Target::LfoLevel((n + 3) % 4),
+            );
+        }
+        for (k, t) in on.iter().enumerate() {
             a.lfo_patch
                 .assign(Source::Macro(n), *t, 0.04 * (k as f32 - 3.5))
                 .expect("room");
@@ -1332,6 +1373,13 @@ fn the_lfos_neither_allocate_nor_free() {
         c.automate(keys.polarity.as_ptr(), if b % 70 < 35 { 1.0 } else { 0.0 });
         c.automate(keys.reverse.as_ptr(), if b % 110 < 55 { 1.0 } else { 0.0 });
         c.automate(keys.on.as_ptr(), if b % 60 < 40 { 1.0 } else { 0.0 });
+        if cross {
+            // (LEVEL and CONTINUOUS's shape, the macros' and the LFOs' targets: R-LFO's
+            // addendum.)
+            c.automate(a.lfo_level(n).level.as_ptr(), (b % 13) as f32 / 12.0);
+            c.automate(q.shape_mode.as_ptr(), if b % 80 < 50 { 1.0 } else { 0.0 });
+            c.automate(q.shape.as_ptr(), (b % 9) as f32 / 8.0);
+        }
         c.automate(a.quality.as_ptr(), (b / 300) as f32 / 2.0);
         // (A macro turned, gliding there; one renamed, between blocks, by the editor.)
         c.automate(a.macro_param(b % 6).as_ptr(), (b % 33) as f32 / 32.0);
@@ -1342,6 +1390,10 @@ fn the_lfos_neither_allocate_nor_free() {
         // (The patch as the editor changes it, between blocks; its atomics alone.)
         if b % 50 == 25 {
             a.lfo_patch.set_depth(Source::Lfo(n), Target::Cutoff, -0.3);
+            if cross {
+                a.lfo_patch
+                    .set_depth(Source::Lfo(n), Target::LfoRate(n), 0.9);
+            }
         }
         p.process(&mut buffer, &mut aux, &mut c);
     }

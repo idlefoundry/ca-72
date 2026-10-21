@@ -891,6 +891,17 @@ pub struct Ca72Params {
     pub lfo3_keys: crate::lfo::LfoKeys,
     #[nested(id_prefix = "lfo4", group = "LFO 4")]
     pub lfo4_keys: crate::lfo::LfoKeys,
+    // Each LFO's LEVEL (decisions.md R-LFO's addendum), after everything, so that no parameter
+    // before it moves: `lfo1_level` to `lfo4_level`. A preset or a session saved before reads
+    // 100 %.
+    #[nested(id_prefix = "lfo1", group = "LFO 1")]
+    pub lfo1_level: crate::lfo::LfoLevel,
+    #[nested(id_prefix = "lfo2", group = "LFO 2")]
+    pub lfo2_level: crate::lfo::LfoLevel,
+    #[nested(id_prefix = "lfo3", group = "LFO 3")]
+    pub lfo3_level: crate::lfo::LfoLevel,
+    #[nested(id_prefix = "lfo4", group = "LFO 4")]
+    pub lfo4_level: crate::lfo::LfoLevel,
 }
 
 /// How far PRESSURE and TIMBRE move a voice's cutoff at most, either way, octaves.
@@ -1253,6 +1264,10 @@ impl Default for Ca72Params {
             lfo2_keys: crate::lfo::LfoKeys::new(2),
             lfo3_keys: crate::lfo::LfoKeys::new(3),
             lfo4_keys: crate::lfo::LfoKeys::new(4),
+            lfo1_level: crate::lfo::LfoLevel::new(1),
+            lfo2_level: crate::lfo::LfoLevel::new(2),
+            lfo3_level: crate::lfo::LfoLevel::new(3),
+            lfo4_level: crate::lfo::LfoLevel::new(4),
         }
     }
 }
@@ -1422,6 +1437,16 @@ impl Ca72Params {
             1 => &self.lfo2_keys,
             2 => &self.lfo3_keys,
             _ => &self.lfo4_keys,
+        }
+    }
+
+    /// LFO `n`'s (0 to 3; past 3, the fourth) LEVEL (R-LFO's addendum).
+    pub fn lfo_level(&self, n: usize) -> &crate::lfo::LfoLevel {
+        match n {
+            0 => &self.lfo1_level,
+            1 => &self.lfo2_level,
+            2 => &self.lfo3_level,
+            _ => &self.lfo4_level,
         }
     }
 

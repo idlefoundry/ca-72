@@ -93,7 +93,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 146] = [
+pub const LEARNABLE: [Learnable; 150] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -262,6 +262,11 @@ pub const LEARNABLE: [Learnable; 146] = [
     switch("lfo4_polarity", "LFO 4 POLARITY (BI or UNI)"),
     switch("lfo4_reverse", "LFO 4 REVERSE"),
     switch("lfo4_on", "LFO 4 ON"),
+    // Each LFO's LEVEL, its OUT jack's (decisions.md R-LFO's addendum).
+    knob("lfo1_level", "LFO 1 LEVEL"),
+    knob("lfo2_level", "LFO 2 LEVEL"),
+    knob("lfo3_level", "LFO 3 LEVEL"),
+    knob("lfo4_level", "LFO 4 LEVEL"),
     Learnable {
         id: "previous_preset",
         label: "PREVIOUS PRESET",
@@ -1293,8 +1298,8 @@ mod tests {
             // GLIDE RANGE, a switch; each LFO's SHAPE, RATE, PHASE and RISE knobs, WAVEFORM,
             // DIVISION and MODE selectors, STEPPED or CONTINUOUS, TIMED and MONO switches: R-LFO;
             // the six macros, knobs: R-MACROS; each LFO's POLARITY, REVERSE and ON switches:
-            // R-LFO's corrections.)
-            (58, 28, 58)
+            // R-LFO's corrections; each LFO's LEVEL, a knob: R-LFO's addendum.)
+            (62, 28, 58)
         );
     }
 

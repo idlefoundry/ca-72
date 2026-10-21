@@ -68,8 +68,9 @@ pub const VOICES: usize = POLY_VOICES.2;
 
 // ---- What an LFO can modulate.
 
-/// A knob an LFO can modulate: the panel's continuous knobs and the strip's (27), and each
-/// oscillator's WAVEFORM while it is CONTINUOUS (its shape's travel). Its parameter's ID
+/// A knob an LFO can modulate: the panel's continuous knobs and the strip's (27), each
+/// oscillator's WAVEFORM while it is CONTINUOUS (its shape's travel), and each LFO's own RATE,
+/// PHASE, RISE, CONTINUOUS shape and LEVEL (R-LFO's addendum). Its parameter's ID
 /// ([`Target::id`]) is what presets and sessions save.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Target {
@@ -103,50 +104,185 @@ pub enum Target {
     Osc2Shape,
     Osc3Shape,
     /// The strip's OUTPUT LEVEL (R-LFO's corrections: the owner, 2026-10-20, "and entropy,
-    /// drive, and output"), last, so that no target's index moves.
+    /// drive, and output"), last of the panel's, so that no target's index moves.
+    Level,
+    /// LFO `n`'s (0 to 3) own knobs, moved by the macros and by the LFOs, itself among them
+    /// (decisions.md R-LFO's addendum; the owner, 2026-10-20: "it might be interesting to allow
+    /// macros to control LFO parameters. And LFOs to control each other's parameters"): its
+    /// RATE (not while it is timed, as a FREQUENCY), its PHASE, its RISE, its WAVEFORM's shape
+    /// while CONTINUOUS, and its LEVEL (`lfoN_level`, the OUT jack's: the share of every one of
+    /// its assignments it gives). After the panel's, so that none of theirs moves.
+    LfoRate(usize),
+    LfoPhase(usize),
+    LfoRise(usize),
+    LfoShape(usize),
+    LfoLevel(usize),
+}
+
+/// An LFO's own knobs another source can move ([`Target::LfoRate`] and the rest), in the order
+/// their targets come.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum LfoKnob {
+    Rate,
+    Phase,
+    Rise,
+    Shape,
     Level,
 }
 
+impl LfoKnob {
+    pub const ALL: [LfoKnob; LFO_KNOBS] = [
+        LfoKnob::Rate,
+        LfoKnob::Phase,
+        LfoKnob::Rise,
+        LfoKnob::Shape,
+        LfoKnob::Level,
+    ];
+
+    /// Its parameter's ID's last part (`lfo2_rate`): `shape` is its WAVEFORM's CONTINUOUS
+    /// shape, `level` its LEVEL.
+    pub fn part(self) -> &'static str {
+        match self {
+            LfoKnob::Rate => "rate",
+            LfoKnob::Phase => "phase",
+            LfoKnob::Rise => "rise",
+            LfoKnob::Shape => "shape",
+            LfoKnob::Level => "level",
+        }
+    }
+}
+
+/// The panel's and the strip's targets (theirs first in [`Target::ALL`]).
+pub const KNOB_TARGETS: usize = 30;
+/// Each LFO's own targets ([`LfoKnob`]).
+pub const LFO_KNOBS: usize = 5;
 /// How many targets there are.
-pub const TARGETS: usize = 30;
+pub const TARGETS: usize = KNOB_TARGETS + LFOS * LFO_KNOBS;
+
+/// The panel's and the strip's targets, [`Target::ALL`]'s first.
+const PANEL_TARGETS: [Target; KNOB_TARGETS] = [
+    Target::Tune,
+    Target::Glide,
+    Target::ModMix,
+    Target::Osc2Frequency,
+    Target::Osc3Frequency,
+    Target::Osc1Volume,
+    Target::ExtVolume,
+    Target::Osc2Volume,
+    Target::NoiseVolume,
+    Target::Osc3Volume,
+    Target::Cutoff,
+    Target::Emphasis,
+    Target::ContourAmount,
+    Target::FilterAttack,
+    Target::FilterDecay,
+    Target::FilterSustain,
+    Target::LoudnessAttack,
+    Target::LoudnessDecay,
+    Target::LoudnessSustain,
+    Target::Volume,
+    Target::Feedback,
+    Target::Entropy,
+    Target::Spread,
+    Target::Double,
+    Target::Drive,
+    Target::Inner,
+    Target::Osc1Shape,
+    Target::Osc2Shape,
+    Target::Osc3Shape,
+    Target::Level,
+];
+
+/// Every target: the panel's and the strip's, then each LFO's own, LFO by LFO.
+const fn all_targets() -> [Target; TARGETS] {
+    let mut all = [Target::Tune; TARGETS];
+    let mut i = 0;
+    while i < KNOB_TARGETS {
+        all[i] = PANEL_TARGETS[i];
+        i += 1;
+    }
+    let mut n = 0;
+    while n < LFOS {
+        let at = KNOB_TARGETS + LFO_KNOBS * n;
+        all[at] = Target::LfoRate(n);
+        all[at + 1] = Target::LfoPhase(n);
+        all[at + 2] = Target::LfoRise(n);
+        all[at + 3] = Target::LfoShape(n);
+        all[at + 4] = Target::LfoLevel(n);
+        n += 1;
+    }
+    all
+}
 
 impl Target {
-    pub const ALL: [Target; TARGETS] = [
-        Target::Tune,
-        Target::Glide,
-        Target::ModMix,
-        Target::Osc2Frequency,
-        Target::Osc3Frequency,
-        Target::Osc1Volume,
-        Target::ExtVolume,
-        Target::Osc2Volume,
-        Target::NoiseVolume,
-        Target::Osc3Volume,
-        Target::Cutoff,
-        Target::Emphasis,
-        Target::ContourAmount,
-        Target::FilterAttack,
-        Target::FilterDecay,
-        Target::FilterSustain,
-        Target::LoudnessAttack,
-        Target::LoudnessDecay,
-        Target::LoudnessSustain,
-        Target::Volume,
-        Target::Feedback,
-        Target::Entropy,
-        Target::Spread,
-        Target::Double,
-        Target::Drive,
-        Target::Inner,
-        Target::Osc1Shape,
-        Target::Osc2Shape,
-        Target::Osc3Shape,
-        Target::Level,
-    ];
+    pub const ALL: [Target; TARGETS] = all_targets();
+
+    /// LFO `n`'s knob `k` as a target.
+    pub fn of_lfo(n: usize, k: LfoKnob) -> Target {
+        match k {
+            LfoKnob::Rate => Target::LfoRate(n),
+            LfoKnob::Phase => Target::LfoPhase(n),
+            LfoKnob::Rise => Target::LfoRise(n),
+            LfoKnob::Shape => Target::LfoShape(n),
+            LfoKnob::Level => Target::LfoLevel(n),
+        }
+    }
+
+    /// The LFO and its knob it is, if it is one of an LFO's own.
+    pub fn lfo_knob(self) -> Option<(usize, LfoKnob)> {
+        match self {
+            Target::LfoRate(n) => Some((n, LfoKnob::Rate)),
+            Target::LfoPhase(n) => Some((n, LfoKnob::Phase)),
+            Target::LfoRise(n) => Some((n, LfoKnob::Rise)),
+            Target::LfoShape(n) => Some((n, LfoKnob::Shape)),
+            Target::LfoLevel(n) => Some((n, LfoKnob::Level)),
+            _ => None,
+        }
+    }
+
+    /// Whether it is one of an LFO's own (moving the LFO, not the sound's controls).
+    pub fn is_lfo(self) -> bool {
+        self.lfo_knob().is_some()
+    }
 
     /// Its place in [`Target::ALL`].
     pub fn index(self) -> usize {
-        self as usize
+        match self {
+            Target::Tune => 0,
+            Target::Glide => 1,
+            Target::ModMix => 2,
+            Target::Osc2Frequency => 3,
+            Target::Osc3Frequency => 4,
+            Target::Osc1Volume => 5,
+            Target::ExtVolume => 6,
+            Target::Osc2Volume => 7,
+            Target::NoiseVolume => 8,
+            Target::Osc3Volume => 9,
+            Target::Cutoff => 10,
+            Target::Emphasis => 11,
+            Target::ContourAmount => 12,
+            Target::FilterAttack => 13,
+            Target::FilterDecay => 14,
+            Target::FilterSustain => 15,
+            Target::LoudnessAttack => 16,
+            Target::LoudnessDecay => 17,
+            Target::LoudnessSustain => 18,
+            Target::Volume => 19,
+            Target::Feedback => 20,
+            Target::Entropy => 21,
+            Target::Spread => 22,
+            Target::Double => 23,
+            Target::Drive => 24,
+            Target::Inner => 25,
+            Target::Osc1Shape => 26,
+            Target::Osc2Shape => 27,
+            Target::Osc3Shape => 28,
+            Target::Level => 29,
+            t => {
+                let (n, k) = t.lfo_knob().unwrap_or((0, LfoKnob::Rate));
+                KNOB_TARGETS + LFO_KNOBS * n.min(LFOS - 1) + k as usize
+            }
+        }
     }
 
     /// Its parameter's ID (what presets and sessions save; the editor's control's parameter,
@@ -183,6 +319,10 @@ impl Target {
             Target::Osc2Shape => "osc2_shape",
             Target::Osc3Shape => "osc3_shape",
             Target::Level => "level",
+            t => {
+                let (n, k) = t.lfo_knob().unwrap_or((0, LfoKnob::Rate));
+                LFO_TARGET_IDS[n.min(LFOS - 1)][k as usize]
+            }
         }
     }
 
@@ -224,13 +364,30 @@ impl Target {
             Target::Osc2Shape => "OSC 2 WAVE",
             Target::Osc3Shape => "OSC 3 WAVE",
             Target::Level => "LEVEL",
+            // (Ten characters: "LFO2 LEVEL", apart from the strip's LEVEL.)
+            t => {
+                let (n, k) = t.lfo_knob().unwrap_or((0, LfoKnob::Rate));
+                LFO_TARGET_SHORT[n.min(LFOS - 1)][k as usize]
+            }
+        }
+    }
+
+    /// Its name as the agents and the menus give it: an LFO's own with its LFO's number
+    /// ("LFO 2 LEVEL", "LFO 1 RATE"), apart from the strip's LEVEL; the others their short
+    /// names.
+    pub fn name(self) -> String {
+        match self.lfo_knob() {
+            Some((n, k)) => format!("LFO {} {}", n + 1, k.part().to_uppercase()),
+            None => self.short().to_owned(),
         }
     }
 
     /// Whether each voice has its own (it is on the voice's panel, or FEEDBACK, each voice's
     /// own loop): an LFO with MONO off moves it a voice at a time. The others the voices share
     /// (MAIN OUTPUT's VOLUME, the strip's ENTROPY, WIDTH, INNER, DETUNE, DRIVE and LEVEL), which
-    /// take the LFO's shared copy whatever MONO is (option C).
+    /// take the LFO's shared copy whatever MONO is (option C). An LFO's own knobs are on no
+    /// voice's panel: each copy of that LFO has its own (per voice where its MONO is off:
+    /// [`takes_shared`]).
     pub fn per_voice(self) -> bool {
         !matches!(
             self,
@@ -241,6 +398,11 @@ impl Target {
                 | Target::Double
                 | Target::Drive
                 | Target::Inner
+                | Target::LfoRate(_)
+                | Target::LfoPhase(_)
+                | Target::LfoRise(_)
+                | Target::LfoShape(_)
+                | Target::LfoLevel(_)
         )
     }
 
@@ -277,6 +439,11 @@ impl Target {
             Target::Osc2Shape => &p.osc2_shape,
             Target::Osc3Shape => &p.osc3_shape,
             Target::Level => &p.level,
+            Target::LfoRate(n) => &p.lfo(n).rate,
+            Target::LfoPhase(n) => &p.lfo(n).phase,
+            Target::LfoRise(n) => &p.lfo(n).rise,
+            Target::LfoShape(n) => &p.lfo(n).shape,
+            Target::LfoLevel(n) => &p.lfo_level(n).level,
         }
     }
 
@@ -333,6 +500,12 @@ impl Target {
                     + t * (crate::engine::LEVEL_RANGE.1 - crate::engine::LEVEL_RANGE.0);
             }
             Target::Feedback => c.feedback = ca72::voice::feedback_law(t),
+            // (An LFO's own: the LFOs' generators take them, `Bank`'s ticks, not the controls.)
+            Target::LfoRate(_)
+            | Target::LfoPhase(_)
+            | Target::LfoRise(_)
+            | Target::LfoShape(_)
+            | Target::LfoLevel(_) => {}
             _ => self.write_panel(&mut c.panel, t, law),
         }
     }
@@ -370,17 +543,100 @@ impl Target {
             | Target::Spread
             | Target::Double
             | Target::Drive
-            | Target::Inner => {}
+            | Target::Inner
+            | Target::LfoRate(_)
+            | Target::LfoPhase(_)
+            | Target::LfoRise(_)
+            | Target::LfoShape(_)
+            | Target::LfoLevel(_) => {}
         }
+    }
+}
+
+/// Each LFO's own targets' IDs, [`LfoKnob`]'s order: its parameters' (its WAVEFORM's
+/// CONTINUOUS shape `lfoN_shape`, its LEVEL `lfoN_level`).
+const LFO_TARGET_IDS: [[&str; LFO_KNOBS]; LFOS] = [
+    [
+        "lfo1_rate",
+        "lfo1_phase",
+        "lfo1_rise",
+        "lfo1_shape",
+        "lfo1_level",
+    ],
+    [
+        "lfo2_rate",
+        "lfo2_phase",
+        "lfo2_rise",
+        "lfo2_shape",
+        "lfo2_level",
+    ],
+    [
+        "lfo3_rate",
+        "lfo3_phase",
+        "lfo3_rise",
+        "lfo3_shape",
+        "lfo3_level",
+    ],
+    [
+        "lfo4_rate",
+        "lfo4_phase",
+        "lfo4_rise",
+        "lfo4_shape",
+        "lfo4_level",
+    ],
+];
+
+/// Their names on a MODULATES screen (ten characters at most).
+const LFO_TARGET_SHORT: [[&str; LFO_KNOBS]; LFOS] = [
+    [
+        "LFO1 RATE",
+        "LFO1 PHASE",
+        "LFO1 RISE",
+        "LFO1 WAVE",
+        "LFO1 LEVEL",
+    ],
+    [
+        "LFO2 RATE",
+        "LFO2 PHASE",
+        "LFO2 RISE",
+        "LFO2 WAVE",
+        "LFO2 LEVEL",
+    ],
+    [
+        "LFO3 RATE",
+        "LFO3 PHASE",
+        "LFO3 RISE",
+        "LFO3 WAVE",
+        "LFO3 LEVEL",
+    ],
+    [
+        "LFO4 RATE",
+        "LFO4 PHASE",
+        "LFO4 RISE",
+        "LFO4 WAVE",
+        "LFO4 LEVEL",
+    ],
+];
+
+/// Whether source `s` moves target `t` by its shared copy where it has one of each voice's own
+/// (MONO off): `t` a control the voices share, or an LFO's own knob of an LFO with MONO on (one
+/// copy every voice shares: option C). False for a macro, or an LFO with MONO on.
+pub fn takes_shared(p: &Ca72Params, s: Source, t: Target) -> bool {
+    let own = s.lfo().is_some_and(|n| !p.lfo(n).mono.value());
+    own && match t.lfo_knob() {
+        Some((n, _)) => p.lfo(n).mono.value(),
+        None => !t.per_voice(),
     }
 }
 
 /// The target a panel control can take an LFO on now, by the control's parameter's ID: a
 /// continuous knob of the panel's or the strip's; a WAVEFORM switch only while CONTINUOUS
 /// (`oscN_waveform` gives its shape); a FREQUENCY knob not while its oscillator is timed (it is
-/// a DIVISION dial then, stepped). None for anything else: switches, stepped selectors,
-/// VOICES, the timed dials, the wheels, the drawers' knobs and the LFOs' own. An assignment
-/// already made stays while its knob cannot take one (it does nothing then).
+/// a DIVISION dial then, stepped); an LFO's RATE, PHASE, RISE and LEVEL (its OUT jack's), its
+/// RATE not while it is timed, its WAVEFORM only while CONTINUOUS (`lfoN_waveform` gives its
+/// shape: R-LFO's addendum). None for anything else: switches, stepped selectors, VOICES, the
+/// timed dials, the wheels and the drawers' knobs. An assignment already made stays while its
+/// knob cannot take one (it does nothing then).
 pub fn target_of(p: &Ca72Params, param_id: &str) -> Option<Target> {
     let wave = ["osc1_waveform", "osc2_waveform", "osc3_waveform"];
     if let Some(n) = wave.iter().position(|w| *w == param_id) {
@@ -388,11 +644,24 @@ pub fn target_of(p: &Ca72Params, param_id: &str) -> Option<Target> {
             .continuous(n)
             .then_some([Target::Osc1Shape, Target::Osc2Shape, Target::Osc3Shape][n]);
     }
+    // (An LFO's WAVEFORM likewise, its CONTINUOUS shape: R-LFO's addendum.)
+    let lfo_wave = [
+        "lfo1_waveform",
+        "lfo2_waveform",
+        "lfo3_waveform",
+        "lfo4_waveform",
+    ];
+    if let Some(n) = lfo_wave.iter().position(|w| *w == param_id) {
+        return (p.lfo(n).shape_mode.value() == WaveMode::Continuous)
+            .then_some(Target::LfoShape(n));
+    }
     let t = Target::of_id(param_id)?;
     match t {
-        Target::Osc1Shape | Target::Osc2Shape | Target::Osc3Shape => None,
+        Target::Osc1Shape | Target::Osc2Shape | Target::Osc3Shape | Target::LfoShape(_) => None,
         Target::Osc2Frequency if p.timed_now(1) => None,
         Target::Osc3Frequency if p.timed_now(2) => None,
+        // (Timed, its knob is a DIVISION dial, stepped: as a FREQUENCY.)
+        Target::LfoRate(n) if p.lfo(n).timed.value() => None,
         _ => Some(t),
     }
 }
@@ -1321,6 +1590,10 @@ pub struct Settings {
     pub reverse: bool,
     /// ON (off: muted, faded to nothing and back over [`MUTE_FADE`]).
     pub on: bool,
+    /// LEVEL (0..1): the share of every one of its assignments it gives (R-LFO's addendum).
+    pub level: f64,
+    /// WAVEFORM CONTINUOUS (its shape can be moved: [`Target::LfoShape`]).
+    pub continuous: bool,
 }
 
 impl Default for Settings {
@@ -1337,6 +1610,8 @@ impl Default for Settings {
             uni: false,
             reverse: false,
             on: true,
+            level: 1.0,
+            continuous: false,
         }
     }
 }
@@ -1483,7 +1758,7 @@ impl Gen {
 /// The modulation as the engine is given it: each LFO's settings, every source's assignments,
 /// each assigned knob's travel after its glide, and the computer's FREQUENCY law (the knobs'
 /// travel through it). Part of the engine's `Controls`; none assigned, nothing more runs.
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Lfos {
     pub lfo: [Settings; LFOS],
     /// Each source's assignments, [`Source::index`]'s order.
@@ -1493,6 +1768,18 @@ pub struct Lfos {
     pub law: FreqLaw,
     /// Each macro's value (0..1), where its knob's glide has it.
     pub macros: [f32; MACROS],
+}
+
+impl Default for Lfos {
+    fn default() -> Self {
+        Lfos {
+            lfo: Default::default(),
+            to: Default::default(),
+            base: [0.0; TARGETS],
+            law: FreqLaw::default(),
+            macros: [0.0; MACROS],
+        }
+    }
 }
 
 /// The computer's FREQUENCY law, as a value the controls can compare.
@@ -1547,6 +1834,16 @@ impl Lfos {
         self.to[lfo].iter().flatten().any(|a| a.depth != 0.0)
     }
 
+    /// Whether any source moves an LFO's own knob (R-LFO's addendum): the generators then run
+    /// on [`TICK`]'s clock ([`Bank`]'s ticks).
+    pub fn cross(&self) -> bool {
+        self.to
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|a| a.depth != 0.0 && a.target.is_lfo())
+    }
+
     /// Whether a source with values of each voice's own modulates a knob each voice has.
     pub fn per_voice(&self) -> bool {
         self.to.iter().enumerate().any(|(i, to)| {
@@ -1561,7 +1858,8 @@ impl Lfos {
     /// The controls `c` with every assigned knob moved by the sources' shared values `shared`.
     pub fn modulated(&self, c: &Controls, shared: &[f64; SOURCES]) -> Controls {
         let mut m = *c;
-        let (sums, touched) = self.sums(|_, _| true, |i| shared[i]);
+        // (An LFO's own knobs are the generators', not the controls'.)
+        let (sums, touched) = self.sums(|_, t| !t.is_lfo(), |i| shared[i]);
         for t in Target::ALL {
             if touched & (1 << t.index()) != 0 {
                 let travel = f64::from(self.base[t.index()]) + sums[t.index()];
@@ -1587,12 +1885,12 @@ impl Lfos {
             return;
         }
         let (sums, _) = self.sums(
-            |_, t| own_touched & (1 << t.index()) != 0,
+            |_, t| own_touched & (1u64 << t.index()) != 0,
             |i| if self.own(i) { own[i] } else { shared[i] },
         );
         let law = self.law.into();
         for t in Target::ALL {
-            if own_touched & (1 << t.index()) == 0 {
+            if own_touched & (1u64 << t.index()) == 0 {
                 continue;
             }
             let travel = (f64::from(self.base[t.index()]) + sums[t.index()]).clamp(0.0, 1.0);
@@ -1610,9 +1908,9 @@ impl Lfos {
         &self,
         which: impl Fn(usize, Target) -> bool,
         value: impl Fn(usize) -> f64,
-    ) -> ([f64; TARGETS], u32) {
+    ) -> ([f64; TARGETS], u64) {
         let mut sums = [0.0f64; TARGETS];
-        let mut touched = 0u32;
+        let mut touched = 0u64;
         for (i, to) in self.to.iter().enumerate() {
             for a in to.iter().flatten() {
                 if a.depth == 0.0 || !which(i, a.target) {
@@ -1627,7 +1925,8 @@ impl Lfos {
 }
 
 /// The LFOs' generators in the engine: each one's shared copy, and each voice's own (for the
-/// LFOs with MONO off), with their values at the latest step.
+/// LFOs with MONO off), with their values at the latest step; and, while a source moves an
+/// LFO's own knob, the ticks they then run on ([`Cross`]).
 #[derive(Clone, Debug, Default)]
 pub struct Bank {
     pub shared: [Gen; LFOS],
@@ -1636,6 +1935,7 @@ pub struct Bank {
     pub voice_values: [[f64; LFOS]; VOICES],
     /// The voice the scope shows where MONO is off (the latest started).
     pub latest: usize,
+    pub cross: Cross,
 }
 
 impl Bank {
@@ -1643,6 +1943,14 @@ impl Bank {
     pub fn start_shared(&mut self, l: &Lfos) {
         for (g, s) in self.shared.iter_mut().zip(&l.lfo) {
             g.start(s);
+        }
+        if self.cross.on {
+            for (j, s) in l.lfo.iter().enumerate() {
+                if s.mode != Mode::Free {
+                    self.cross.shared[j] = *s;
+                    self.cross.shared_out[j] = self.shared[j].fresh(s);
+                }
+            }
         }
     }
 
@@ -1653,18 +1961,28 @@ impl Bank {
                 g.start(s);
             }
             self.latest = k;
+            if self.cross.on {
+                for (j, s) in l.lfo.iter().enumerate() {
+                    if s.mode != Mode::Free {
+                        self.cross.voices[k][j] = *s;
+                        self.cross.voice_out[k][j] = v[j].fresh(s);
+                    }
+                }
+            }
         }
     }
 
     /// Every LFO's value now (`clock`, each timed FREE one's place on the host's clock, in
-    /// cycles), its slew moved on by `dt` s; voices' own only for the LFOs with MONO off.
+    /// cycles), its slew moved on by `dt` s; voices' own only for the LFOs with MONO off. Each
+    /// is its output at its LEVEL.
     pub fn step(&mut self, l: &Lfos, clock: &[Option<f64>; LFOS], dt: f64, voices: usize) {
         let n = voices.min(VOICES);
         for (k, (s, &c)) in l.lfo.iter().zip(clock).enumerate() {
-            self.shared_values[k] = self.shared[k].value(s, c, dt);
+            // (At LEVEL 100 %, × 1: the output to the bit.)
+            self.shared_values[k] = self.shared[k].value(s, c, dt) * s.level;
             if !s.mono {
                 for (values, gens) in self.voice_values[..n].iter_mut().zip(&mut self.voices[..n]) {
-                    values[k] = gens[k].value(s, c, dt);
+                    values[k] = gens[k].value(s, c, dt) * s.level;
                 }
             }
         }
@@ -1710,18 +2028,451 @@ impl Bank {
     }
 
     /// The scope's readings: the shared copies', or the latest voice's where MONO is off;
-    /// moving where assigned and running.
+    /// moving where assigned and running; at its LEVEL (its RISE's gain too), with the settings
+    /// in force (on the ticks, as the sources have moved them).
     pub fn readings(&self, l: &Lfos) -> [Reading; LFOS] {
         std::array::from_fn(|k| {
-            let s = &l.lfo[k];
-            let g = if s.mono {
+            let latest = self.latest.min(VOICES - 1);
+            let s = match (self.cross.on, l.lfo[k].mono) {
+                (false, _) => &l.lfo[k],
+                (true, true) => &self.cross.shared[k],
+                (true, false) => &self.cross.voices[latest][k],
+            };
+            let g = if l.lfo[k].mono {
                 &self.shared[k]
             } else {
-                &self.voices[self.latest.min(VOICES - 1)][k]
+                &self.voices[latest][k]
             };
             let assigned = l.lfo_active(k);
-            g.reading(s, assigned && g.moving(s))
+            let mut r = g.reading(s, assigned && g.moving(s));
+            r.value *= s.level as f32;
+            r.rise *= s.level as f32;
+            r
         })
+    }
+}
+
+// ---- The LFOs moving each other (decisions.md R-LFO's addendum).
+
+/// How often the LFOs' own knobs are moved by the sources, s: a tick fixed in time, not in
+/// samples or blocks, so that a patch whose LFOs move each other (in a loop too: the owner,
+/// 2026-10-20, "Let's try B. It's unconventional, but it's interesting") runs the same at
+/// every sample rate and block size, live and offline. Half a millisecond: 40 ticks a cycle of
+/// the fastest LFO (50 Hz), so that an LFO moving another keeps its shape; a loop's delay, one
+/// tick, short beside the slowest cycle it can shape (20 ms); about the audio's own step (32
+/// samples, 0.33 to 0.73 ms); and cheap (2000 a second, a few hundred operations each).
+pub const TICK: f64 = 1.0 / TICKS_A_SECOND;
+/// [`TICK`]s a second.
+pub const TICKS_A_SECOND: f64 = 2000.0;
+
+/// The latest tick by host sample `played` at `rate` Hz: the greatest whose time (its number
+/// over [`TICKS_A_SECOND`]) is not past `played / rate`. Exact: `played × 2000` is an f64
+/// exactly, the quotient is rounded once, and a quotient that is not whole is at least
+/// `1 / rate` from one, far more than its rounding; so the same at every sample rate for the
+/// same time.
+pub fn tick_at(played: u64, rate: f64) -> u64 {
+    (played as f64 * TICKS_A_SECOND / rate).floor() as u64
+}
+
+/// One source moving one LFO's knob: the source's index, the LFO, its knob, the depth.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Route {
+    from: usize,
+    lfo: usize,
+    knob: LfoKnob,
+    depth: f64,
+}
+
+/// Every source's assignments on the LFOs' own knobs (of a depth other than 0), gathered so
+/// that a tick reads only them.
+#[derive(Clone, Copy, Debug)]
+struct Routes {
+    n: usize,
+    all: [Route; SOURCES * MOST],
+}
+
+impl Default for Routes {
+    fn default() -> Self {
+        Routes {
+            n: 0,
+            all: [Route {
+                from: 0,
+                lfo: 0,
+                knob: LfoKnob::Rate,
+                depth: 0.0,
+            }; SOURCES * MOST],
+        }
+    }
+}
+
+impl Routes {
+    fn of(l: &Lfos) -> Routes {
+        let mut r = Routes::default();
+        for (from, to) in l.to.iter().enumerate() {
+            for a in to.iter().flatten() {
+                if let Some((lfo, knob)) = a.target.lfo_knob()
+                    && a.depth != 0.0
+                    && lfo < LFOS
+                    && r.n < r.all.len()
+                {
+                    r.all[r.n] = Route {
+                        from,
+                        lfo,
+                        knob,
+                        depth: f64::from(a.depth),
+                    };
+                    r.n += 1;
+                }
+            }
+        }
+        r
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Route> {
+        self.all[..self.n].iter()
+    }
+}
+
+/// Each LFO's clock over a block: a timed one's cycles a second at the tempo and, FREE, its
+/// place on the host's clock at the block's start (R-OSC-TIMED's, as [`Bank::clock`]'s), on
+/// the ticks' time (s from the engine's first sample).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Clocks {
+    hz: [Option<f64>; LFOS],
+    from: [Option<f64>; LFOS],
+    start: f64,
+}
+
+impl Clocks {
+    /// For a block from `position`, which began `start` s on the ticks' time, at `rate` Hz.
+    pub fn of(l: &Lfos, position: &Position, start: f64, rate: f64) -> Clocks {
+        let mut c = Clocks {
+            start,
+            ..Clocks::default()
+        };
+        for (k, s) in l.lfo.iter().enumerate() {
+            if let Some(length) = s.timed {
+                let (phase, per) = position.cycle(length);
+                c.hz[k] = Some(per * rate);
+                if s.mode == Mode::Free {
+                    c.from[k] = Some(phase);
+                }
+            }
+        }
+        c
+    }
+
+    /// LFO `k`'s cycles a second with `s` in force: the tempo's timed, else its RATE.
+    fn hz(&self, k: usize, s: &Settings) -> f64 {
+        self.hz[k].unwrap_or(s.hz)
+    }
+
+    /// LFO `k`'s place on the host's clock at `t` s, if it is timed and FREE.
+    fn at(&self, k: usize, t: f64) -> Option<f64> {
+        let hz = self.hz[k]?;
+        self.from[k].map(|c| c + (t - self.start) * hz)
+    }
+}
+
+/// The LFOs on their ticks: whether they run on them (a source moves an LFO's own knob), the
+/// next tick's number, each copy's settings in force since its latest tick (its knobs where
+/// the sources had them then), and each copy's value at its latest tick as the LFOs read it at
+/// the next: its waveform, RISE, POLARITY, ON's fade and LEVEL, not EDGES' slew (which smooths
+/// what reaches the sound), so that a note that starts every LFO of a loop again starts the
+/// loop again exactly.
+#[derive(Clone, Debug, Default)]
+pub struct Cross {
+    pub on: bool,
+    next: u64,
+    shared: [Settings; LFOS],
+    voices: [[Settings; LFOS]; VOICES],
+    shared_out: [f64; LFOS],
+    voice_out: [[f64; LFOS]; VOICES],
+    routes: Routes,
+}
+
+impl Cross {
+    /// The latest tick's number.
+    pub fn latest(&self) -> u64 {
+        self.next.saturating_sub(1)
+    }
+
+    /// LFO `k`'s value at the latest tick, its shared copy's or voice `v`'s own (MONO off), as
+    /// the LFOs read it (the tests' trajectory).
+    pub fn value(&self, k: usize, v: Option<usize>) -> f64 {
+        match v {
+            Some(v) => self.voice_out[v.min(VOICES - 1)][k.min(LFOS - 1)],
+            None => self.shared_out[k.min(LFOS - 1)],
+        }
+    }
+
+    /// LFO `k`'s settings in force since the latest tick (its shared copy's).
+    pub fn settings(&self, k: usize) -> Settings {
+        self.shared[k.min(LFOS - 1)]
+    }
+
+    /// Voice `v`'s own copy's of LFO `k` (MONO off).
+    pub fn voice_settings(&self, v: usize, k: usize) -> Settings {
+        self.voices[v.min(VOICES - 1)][k.min(LFOS - 1)]
+    }
+}
+
+/// LFO `j`'s settings with its knobs moved by the routes to them, each source's value
+/// `value(i)` (its index): its knob's travel plus depth × value, clamped, through its
+/// parameter's own range. RATE not while timed, the shape only while CONTINUOUS.
+fn moved(l: &Lfos, routes: &Routes, j: usize, value: impl Fn(usize) -> f64) -> Settings {
+    let mut s = l.lfo[j];
+    let mut sums = [0.0f64; LFO_KNOBS];
+    let mut touched = [false; LFO_KNOBS];
+    for r in routes.iter().filter(|r| r.lfo == j) {
+        sums[r.knob as usize] += r.depth * value(r.from);
+        touched[r.knob as usize] = true;
+    }
+    for k in LfoKnob::ALL {
+        if !touched[k as usize] {
+            continue;
+        }
+        let base = f64::from(l.base[Target::of_lfo(j, k).index()]);
+        let t = (base + sums[k as usize]).clamp(0.0, 1.0) as f32;
+        match k {
+            LfoKnob::Rate => {
+                if s.timed.is_none() {
+                    s.hz = f64::from(RATE_RANGE.unnormalize(t))
+                        .clamp(f64::from(RATE_HZ.0), f64::from(RATE_HZ.1));
+                }
+            }
+            LfoKnob::Phase => {
+                s.phase = (f64::from(PHASE_RANGE.unnormalize(t)) / 360.0).rem_euclid(1.0);
+            }
+            LfoKnob::Rise => {
+                s.rise = f64::from(RISE_RANGE.unnormalize(t)).clamp(0.0, f64::from(RISE_MOST));
+            }
+            LfoKnob::Shape => {
+                if s.continuous {
+                    s.at = shape_snapped(f64::from(t) * SHAPE_PLACES);
+                }
+            }
+            LfoKnob::Level => s.level = f64::from(t),
+        }
+    }
+    s
+}
+
+impl Gen {
+    /// Its value at its start (a note's), with `s` its settings: as the LFOs read it.
+    fn fresh(&self, s: &Settings) -> f64 {
+        let c = if s.mode == Mode::Free {
+            self.cycles
+        } else {
+            0.0
+        };
+        let gain = if s.rise > 0.0 { 0.0 } else { 1.0 };
+        let x = s.shaped((s.phase + c).rem_euclid(1.0)) * gain;
+        let x = if self.muted == 0.0 {
+            x
+        } else {
+            x * (1.0 - self.muted)
+        };
+        x * s.level
+    }
+
+    /// Moved on by a tick at `hz` cycles a second with `s` in force: its cycle (an ENV's to
+    /// its end), the time since its note, ON's fade.
+    fn tick_on(&mut self, s: &Settings, hz: f64) {
+        let c = self.cycles + hz * TICK;
+        self.cycles = if s.mode == Mode::Env {
+            c.min(1.0)
+        } else {
+            c - c.floor()
+        };
+        self.since += TICK;
+        let step = TICK / MUTE_FADE;
+        self.muted = if s.on {
+            (self.muted - step).max(0.0)
+        } else {
+            (self.muted + step).min(1.0)
+        };
+    }
+
+    /// Its value at its tick with `s` in force (`clock`, a timed FREE one's place on the
+    /// host's clock): as the LFOs read it ([`Cross`]).
+    fn tick_value(&self, s: &Settings, clock: Option<f64>) -> f64 {
+        let c = self.place(s, clock, 0.0, 0.0);
+        let gain = if s.rise > 0.0 && !self.started {
+            0.0
+        } else {
+            s.rise_gain(self.since)
+        };
+        let x = s.shaped((s.phase + c).rem_euclid(1.0)) * gain;
+        let x = if self.muted == 0.0 {
+            x
+        } else {
+            x * (1.0 - self.muted)
+        };
+        x * s.level
+    }
+
+    /// Its cycle `ahead` s past its latest tick, at `hz` (`clock`: a timed FREE one's place).
+    fn place(&self, s: &Settings, clock: Option<f64>, hz: f64, ahead: f64) -> f64 {
+        match (s.mode, clock) {
+            (Mode::Free, Some(c)) => c,
+            (Mode::Env, _) if !self.started => ENV_END,
+            (Mode::Env, _) => (self.cycles + hz * ahead).min(ENV_END),
+            _ => self.cycles + hz * ahead,
+        }
+    }
+
+    /// Its value for the sound `ahead` s past its latest tick, with `s` in force since at `hz`
+    /// cycles a second (`clock`: a timed FREE one's place): its waveform there, RISE, EDGES'
+    /// slew moved on by `dt` s, ON's fade, at its LEVEL.
+    fn peek(&mut self, s: &Settings, clock: Option<f64>, hz: f64, ahead: f64, dt: f64) -> f64 {
+        let c = self.place(s, clock, hz, ahead);
+        self.at = (s.phase + c).rem_euclid(1.0);
+        let gain = if s.rise > 0.0 && !self.started {
+            0.0
+        } else {
+            s.rise_gain(self.since + ahead)
+        };
+        let x = s.shaped(self.at) * gain;
+        self.out = match s.edges {
+            Edges::Sharp => x,
+            Edges::Soft => {
+                let tau = SOFT_EDGE / 9f64.ln();
+                self.out + (x - self.out) * (1.0 - (-dt / tau).exp())
+            }
+        };
+        let step = ahead / MUTE_FADE;
+        let muted = if s.on {
+            (self.muted - step).max(0.0)
+        } else {
+            (self.muted + step).min(1.0)
+        };
+        self.heard = if muted == 0.0 {
+            self.out
+        } else {
+            self.out * (1.0 - muted)
+        };
+        self.heard * s.level
+    }
+}
+
+impl Bank {
+    /// The ticks due by host sample `played` (counted from the engine's first at `rate` Hz)
+    /// run, `clocks` the block's: each copy moved on to each tick at the settings in force
+    /// since the one before, its knobs then moved by the sources' values at that one, its value
+    /// there. The first (the patch's first source on an LFO's knob) starts them at the latest
+    /// tick from where the generators are.
+    pub fn cross_to(&mut self, l: &Lfos, clocks: &Clocks, played: u64, rate: f64, voices: usize) {
+        let due = tick_at(played, rate);
+        let n = voices.min(VOICES);
+        // (Started, or behind by more than a second: from here.)
+        if !self.cross.on || due > self.cross.next + TICKS_A_SECOND as u64 {
+            self.cross.on = true;
+            self.cross.next = due + 1;
+            self.cross.shared = l.lfo;
+            self.cross.voices = [l.lfo; VOICES];
+            self.cross.shared_out = self.shared_values;
+            self.cross.voice_out = self.voice_values;
+            self.cross.routes = Routes::of(l);
+            return;
+        }
+        self.cross.routes = Routes::of(l);
+        while self.cross.next <= due {
+            let k = self.cross.next;
+            self.tick(l, clocks, k, n);
+            self.cross.next = k + 1;
+        }
+    }
+
+    /// Tick `k` for the shared copies and voices `..n`' own.
+    fn tick(&mut self, l: &Lfos, clocks: &Clocks, k: u64, n: usize) {
+        let Bank {
+            shared,
+            voices,
+            cross,
+            ..
+        } = self;
+        let t = k as f64 / TICKS_A_SECOND;
+        // Moved on from the latest tick, at the settings in force since.
+        for j in 0..LFOS {
+            shared[j].tick_on(&cross.shared[j], clocks.hz(j, &cross.shared[j]));
+            if !l.lfo[j].mono {
+                for (g, s) in voices[..n].iter_mut().zip(&cross.voices[..n]) {
+                    g[j].tick_on(&s[j], clocks.hz(j, &s[j]));
+                }
+            }
+        }
+        // Their knobs moved by the sources' values at the latest tick (so that nothing feeds
+        // back within one): a voice's own LFO by the sources' own for that voice, a shared LFO
+        // by their shared copies (option C).
+        let (was_shared, was_voices) = (cross.shared_out, &cross.voice_out);
+        let macros = |m: usize| f64::from(l.macros[m.min(MACROS - 1)]);
+        let routes = cross.routes;
+        for j in 0..LFOS {
+            cross.shared[j] = moved(l, &routes, j, |i| match Source::of_index(i) {
+                Some(Source::Lfo(m)) => was_shared[m],
+                Some(Source::Macro(m)) => macros(m),
+                None => 0.0,
+            });
+            if !l.lfo[j].mono {
+                for (s, was) in cross.voices[..n].iter_mut().zip(&was_voices[..n]) {
+                    s[j] = moved(l, &routes, j, |i| match Source::of_index(i) {
+                        Some(Source::Lfo(m)) if l.own(i) => was[m],
+                        Some(Source::Lfo(m)) => was_shared[m],
+                        Some(Source::Macro(m)) => macros(m),
+                        None => 0.0,
+                    });
+                }
+            }
+        }
+        // Their values here.
+        for j in 0..LFOS {
+            let at = clocks.at(j, t);
+            cross.shared_out[j] = shared[j].tick_value(&cross.shared[j], at);
+            if !l.lfo[j].mono {
+                let copies = voices[..n].iter().zip(&cross.voices[..n]);
+                for ((g, s), out) in copies.zip(&mut cross.voice_out[..n]) {
+                    out[j] = g[j].tick_value(&s[j], at);
+                }
+            }
+        }
+    }
+
+    /// Every LFO's value for the sound at host sample `played` (on the ticks: from its latest,
+    /// at the settings in force since), its slew moved on by `dt` s; voices' own only for the
+    /// LFOs with MONO off.
+    pub fn peek(
+        &mut self,
+        l: &Lfos,
+        clocks: &Clocks,
+        played: u64,
+        rate: f64,
+        dt: f64,
+        voices: usize,
+    ) {
+        let n = voices.min(VOICES);
+        let t = played as f64 / rate;
+        let ahead = (t - self.cross.latest() as f64 / TICKS_A_SECOND).max(0.0);
+        let Bank {
+            shared,
+            voices,
+            shared_values,
+            voice_values,
+            cross,
+            ..
+        } = self;
+        for j in 0..LFOS {
+            let at = clocks.at(j, t);
+            let s = &cross.shared[j];
+            shared_values[j] = shared[j].peek(s, at, clocks.hz(j, s), ahead, dt);
+            if !l.lfo[j].mono {
+                let copies = voices[..n].iter_mut().zip(&cross.voices[..n]);
+                for ((g, s), value) in copies.zip(&mut voice_values[..n]) {
+                    let s = &s[j];
+                    value[j] = g[j].peek(s, at, clocks.hz(j, s), ahead, dt);
+                }
+            }
+        }
     }
 }
 
@@ -1749,6 +2500,8 @@ pub fn settings(p: &Ca72Params, n: usize, edges: Edges) -> Settings {
         uni: p.lfo_keys(n).polarity.value() == Polarity::Uni,
         reverse: p.lfo_keys(n).reverse.value(),
         on: p.lfo_keys(n).on.value(),
+        level: (f64::from(p.lfo_level(n).level.value()) / 100.0).clamp(0.0, 1.0),
+        continuous: q.shape_mode.value() == WaveMode::Continuous,
     }
 }
 
@@ -1905,46 +2658,23 @@ impl LfoParams {
             )
             .with_value_to_string(Arc::new(|t| crate::params::shape_text(0, f64::from(t)))),
             // (Its travel nearly logarithmic: about 1.6 Hz at its middle.)
-            rate: FloatParam::new(
-                name("Rate"),
-                DEFAULT_RATE,
-                FloatRange::Skewed {
-                    min: RATE_HZ.0,
-                    max: RATE_HZ.1,
-                    factor: 0.2,
-                },
-            )
-            .with_unit(" Hz")
-            .with_value_to_string(Arc::new(rate_text))
-            .with_string_to_value(Arc::new(|s| {
-                let s = s.trim().trim_end_matches("Hz").trim();
-                let v: f32 = s.parse().ok()?;
-                v.is_finite().then(|| v.clamp(RATE_HZ.0, RATE_HZ.1))
-            })),
+            rate: FloatParam::new(name("Rate"), DEFAULT_RATE, RATE_RANGE)
+                .with_unit(" Hz")
+                .with_value_to_string(Arc::new(rate_text))
+                .with_string_to_value(Arc::new(|s| {
+                    let s = s.trim().trim_end_matches("Hz").trim();
+                    let v: f32 = s.parse().ok()?;
+                    v.is_finite().then(|| v.clamp(RATE_HZ.0, RATE_HZ.1))
+                })),
             timed: BoolParam::new(name("Timed"), false),
             division: EnumParam::new(name("Division"), Division::Quarter),
-            phase: FloatParam::new(
-                name("Phase"),
-                0.0,
-                FloatRange::Linear {
-                    min: 0.0,
-                    max: 360.0,
-                },
-            )
-            .with_unit("\u{b0}")
-            .with_value_to_string(formatters::v2s_f32_rounded(0)),
+            phase: FloatParam::new(name("Phase"), 0.0, PHASE_RANGE)
+                .with_unit("\u{b0}")
+                .with_value_to_string(formatters::v2s_f32_rounded(0)),
             // (A cube-root travel, so that short fades have room: 1 s near its middle.)
-            rise: FloatParam::new(
-                name("Rise"),
-                0.0,
-                FloatRange::Skewed {
-                    min: 0.0,
-                    max: RISE_MOST,
-                    factor: 1.0 / 3.0,
-                },
-            )
-            .with_unit(" s")
-            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            rise: FloatParam::new(name("Rise"), 0.0, RISE_RANGE)
+                .with_unit(" s")
+                .with_value_to_string(formatters::v2s_f32_rounded(2)),
             mode: EnumParam::new(name("Mode"), LfoMode::Free),
             mono: BoolParam::new(name("Mono"), true),
         }
@@ -1967,15 +2697,79 @@ impl LfoParams {
     }
 }
 
-/// How many parameters an LFO has: [`LfoParams`]' ten and [`LfoKeys`]' three.
-pub const PARTS: usize = 13;
+/// One LFO's LEVEL (decisions.md R-LFO's addendum; ID `lfoN_level`): 0 to 100 %, 100 in a new
+/// patch, the share of every one of its assignments it gives, so that a macro or an LFO (itself
+/// too) can fade a whole LFO in and out. Its ring is round the LFO's OUT jack, which has no
+/// knob of its own: turned there by the wheel, typed there (Ctrl or Cmd and a click), by the
+/// host, MIDI Learn and the agents. A nest of its own after the LFOs' keys, so that no
+/// parameter before it moves; a preset or a session saved before reads 100 %.
+#[derive(Params)]
+pub struct LfoLevel {
+    #[id = "level"]
+    pub level: FloatParam,
+}
+
+impl std::fmt::Debug for LfoLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LfoLevel").finish_non_exhaustive()
+    }
+}
+
+impl LfoLevel {
+    /// LFO `n`'s (1 to 4): 100 %.
+    pub fn new(n: usize) -> LfoLevel {
+        LfoLevel {
+            level: FloatParam::new(format!("LFO {n} Level"), 100.0, LEVEL_RANGE)
+                .with_unit(" %")
+                .with_value_to_string(formatters::v2s_f32_rounded(0)),
+        }
+    }
+}
+
+/// The LFOs' knobs' ranges, as their parameters have them and the ticks read a moved one's.
+pub const RATE_RANGE: FloatRange = FloatRange::Skewed {
+    min: RATE_HZ.0,
+    max: RATE_HZ.1,
+    factor: 0.2,
+};
+pub const PHASE_RANGE: FloatRange = FloatRange::Linear {
+    min: 0.0,
+    max: 360.0,
+};
+pub const RISE_RANGE: FloatRange = FloatRange::Skewed {
+    min: 0.0,
+    max: RISE_MOST,
+    factor: 1.0 / 3.0,
+};
+pub const LEVEL_RANGE: FloatRange = FloatRange::Linear {
+    min: 0.0,
+    max: 100.0,
+};
+
+/// How many parameters an LFO has: [`LfoParams`]' ten, [`LfoKeys`]' three and its LEVEL.
+pub const PARTS: usize = 14;
 
 /// LFO `n`'s (0 to 3) parameters as a preset sets them, [`PARAM_IDS`]' order: its
-/// [`LfoParams`]', then its POLARITY, REVERSE and ON.
+/// [`LfoParams`]', then its POLARITY, REVERSE and ON, then its LEVEL.
 pub fn sound_params(p: &Ca72Params, n: usize) -> [&dyn crate::presets::SoundParam; PARTS] {
     let (q, k) = (p.lfo(n), p.lfo_keys(n));
     let [a, b, c, d, e, f, g, h, i, j] = q.sound_params().map(|(_, v)| v);
-    [a, b, c, d, e, f, g, h, i, j, &k.polarity, &k.reverse, &k.on]
+    [
+        a,
+        b,
+        c,
+        d,
+        e,
+        f,
+        g,
+        h,
+        i,
+        j,
+        &k.polarity,
+        &k.reverse,
+        &k.on,
+        &p.lfo_level(n).level,
+    ]
 }
 
 /// RATE as the host shows it: Hz to two figures under 1 Hz, else to a tenth or whole.
@@ -2005,6 +2799,7 @@ pub const PARAM_IDS: [[&str; PARTS]; LFOS] = [
         "lfo1_polarity",
         "lfo1_reverse",
         "lfo1_on",
+        "lfo1_level",
     ],
     [
         "lfo2_waveform",
@@ -2020,6 +2815,7 @@ pub const PARAM_IDS: [[&str; PARTS]; LFOS] = [
         "lfo2_polarity",
         "lfo2_reverse",
         "lfo2_on",
+        "lfo2_level",
     ],
     [
         "lfo3_waveform",
@@ -2035,6 +2831,7 @@ pub const PARAM_IDS: [[&str; PARTS]; LFOS] = [
         "lfo3_polarity",
         "lfo3_reverse",
         "lfo3_on",
+        "lfo3_level",
     ],
     [
         "lfo4_waveform",
@@ -2050,6 +2847,7 @@ pub const PARAM_IDS: [[&str; PARTS]; LFOS] = [
         "lfo4_polarity",
         "lfo4_reverse",
         "lfo4_on",
+        "lfo4_level",
     ],
 ];
 
@@ -2070,6 +2868,7 @@ pub const PARAM_LABELS: [[&str; PARTS]; LFOS] = [
         "LFO 1 POLARITY",
         "LFO 1 REVERSE",
         "LFO 1 ON",
+        "LFO 1 LEVEL",
     ],
     [
         "LFO 2 WAVEFORM",
@@ -2085,6 +2884,7 @@ pub const PARAM_LABELS: [[&str; PARTS]; LFOS] = [
         "LFO 2 POLARITY",
         "LFO 2 REVERSE",
         "LFO 2 ON",
+        "LFO 2 LEVEL",
     ],
     [
         "LFO 3 WAVEFORM",
@@ -2100,6 +2900,7 @@ pub const PARAM_LABELS: [[&str; PARTS]; LFOS] = [
         "LFO 3 POLARITY",
         "LFO 3 REVERSE",
         "LFO 3 ON",
+        "LFO 3 LEVEL",
     ],
     [
         "LFO 4 WAVEFORM",
@@ -2115,6 +2916,7 @@ pub const PARAM_LABELS: [[&str; PARTS]; LFOS] = [
         "LFO 4 POLARITY",
         "LFO 4 REVERSE",
         "LFO 4 ON",
+        "LFO 4 LEVEL",
     ],
 ];
 pub const SECTIONS: [&str; LFOS] = ["LFO 1", "LFO 2", "LFO 3", "LFO 4"];
@@ -2145,12 +2947,13 @@ pub fn learn_target<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn crate::le
         9 => &q.mono,
         10 => &keys.polarity,
         11 => &keys.reverse,
-        _ => &keys.on,
+        12 => &keys.on,
+        _ => &p.lfo_level(n).level,
     })
 }
 
-/// An LFO's knob of `id` (SHAPE, RATE, PHASE, RISE), if it is one (`learn::knob_param`). They
-/// do not glide: none is on the audio path (R-LFO; EDGES smooths what they step).
+/// An LFO's knob of `id` (SHAPE, RATE, PHASE, RISE, LEVEL), if it is one (`learn::knob_param`).
+/// They do not glide: none is on the audio path (R-LFO; EDGES smooths what they step).
 pub fn knob<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a FloatParam> {
     let (n, k) = param_place(id)?;
     let q = p.lfo(n);
@@ -2159,13 +2962,14 @@ pub fn knob<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a FloatParam> {
         3 => Some(&q.rate),
         6 => Some(&q.phase),
         7 => Some(&q.rise),
+        13 => Some(&p.lfo_level(n).level),
         _ => None,
     }
 }
 
 /// Whether `id` is one of the LFOs' knobs (continuous, not gliding).
 pub fn is_knob_id(id: &str) -> bool {
-    param_place(id).is_some_and(|(_, k)| matches!(k, 2 | 3 | 6 | 7))
+    param_place(id).is_some_and(|(_, k)| matches!(k, 2 | 3 | 6 | 7 | 13))
 }
 
 /// The IDs of each LFO's parameters, `lfoN_<part>`, LFO by LFO ([`PARAM_IDS`]' order; the host
@@ -2380,6 +3184,83 @@ mod tests {
         assert!(!l.own(Source::Macro(2).index()));
     }
 
+    /// An LFO's own knobs as targets (R-LFO's addendum): every target at its index, found by
+    /// its ID, its screen name ten characters at most; LFO 2's LEVEL apart from the strip's
+    /// (`lfo2_level`, "LFO2 LEVEL", "LFO 2 LEVEL"; `level`, "LEVEL"); saved with a session and a
+    /// preset (`lfo1_to_lfo2_rate`) and read back; RATE none while timed, WAVEFORM its shape only
+    /// while CONTINUOUS, the shape's own ID none; a MONO off LFO's copies on a MONO on LFO's knob
+    /// the shared one's (option C).
+    #[test]
+    fn an_lfos_own_knobs_are_targets() {
+        use nih_plug::context::process::TestProcessContext;
+        for (i, t) in Target::ALL.iter().enumerate() {
+            assert_eq!(t.index(), i, "{t:?}");
+            assert_eq!(Target::of_id(t.id()), Some(*t));
+            assert!(t.short().len() <= 10, "{}", t.short());
+        }
+        let level = Target::LfoLevel(1);
+        assert_eq!(
+            (level.id(), level.short(), level.name()),
+            ("lfo2_level", "LFO2 LEVEL", "LFO 2 LEVEL".to_owned())
+        );
+        assert_eq!(
+            (Target::Level.id(), Target::Level.short()),
+            ("level", "LEVEL")
+        );
+        assert!(level.is_lfo() && !Target::Level.is_lfo() && !level.per_voice());
+        let p = Patch::default();
+        p.assign(Source::Lfo(0), Target::LfoRate(1), 0.4)
+            .expect("room");
+        p.assign(Source::Lfo(2), Target::LfoPhase(2), -0.2)
+            .expect("room");
+        p.assign(Source::Macro(2), Target::LfoLevel(3), -0.5)
+            .expect("room");
+        assert!(
+            p.values()
+                .iter()
+                .any(|(k, v)| k == "lfo1_to_lfo2_rate" && (*v - 40.0).abs() < 1e-3)
+        );
+        assert!(Patch::is_value_id("macro3_to_lfo4_level"));
+        let q = Patch::default();
+        q.load_values(&p.values());
+        assert!(q.same_as_values(&p.values()));
+        assert_eq!(q.depth(Source::Macro(2), Target::LfoLevel(3)), Some(-0.5));
+        let r = Patch::default();
+        r.load(&p.saved());
+        assert_eq!(r.saved(), p.saved());
+        // Which can take one now.
+        let params = Arc::new(Ca72Params::default());
+        assert_eq!(target_of(&params, "lfo1_rate"), Some(Target::LfoRate(0)));
+        assert_eq!(target_of(&params, "lfo2_level"), Some(Target::LfoLevel(1)));
+        assert_eq!(target_of(&params, "lfo3_rise"), Some(Target::LfoRise(2)));
+        assert_eq!(target_of(&params, "lfo4_phase"), Some(Target::LfoPhase(3)));
+        assert_eq!(target_of(&params, "lfo1_waveform"), None, "STEPPED");
+        assert_eq!(target_of(&params, "lfo1_shape"), None);
+        assert_eq!(target_of(&params, "lfo1_timed"), None);
+        let c =
+            TestProcessContext::<crate::Ca72>::new(params.clone(), 48_000.0, ProcessMode::Realtime);
+        assert!(c.automate(params.lfo(0).shape_mode.as_ptr(), 1.0));
+        assert!(c.automate(params.lfo(0).timed.as_ptr(), 1.0));
+        assert_eq!(
+            target_of(&params, "lfo1_waveform"),
+            Some(Target::LfoShape(0))
+        );
+        assert_eq!(target_of(&params, "lfo1_rate"), None, "timed");
+        // The shared copy's: LFO 1 MONO off on LFO 2's (MONO on), not on its own.
+        assert!(c.automate(params.lfo(0).mono.as_ptr(), 0.0));
+        assert!(takes_shared(&params, Source::Lfo(0), Target::LfoRate(1)));
+        assert!(!takes_shared(&params, Source::Lfo(0), Target::LfoRate(0)));
+        assert!(takes_shared(&params, Source::Lfo(0), Target::Volume));
+        assert!(!takes_shared(&params, Source::Lfo(0), Target::Cutoff));
+        assert!(
+            !takes_shared(&params, Source::Lfo(1), Target::Volume),
+            "MONO on"
+        );
+        assert!(!takes_shared(&params, Source::Macro(0), Target::LfoRate(0)));
+        // A LEVEL a share of its LFO's every assignment: its settings', from its parameter.
+        assert_eq!(settings(&params, 0, Edges::Soft).level, 1.0);
+    }
+
     /// The control a target sets, as the engine has it.
     fn field(t: Target, c: &Controls) -> f64 {
         let p = &c.panel;
@@ -2414,6 +3295,12 @@ mod tests {
             Target::Osc2Shape => p.shape[1].at,
             Target::Osc3Shape => p.shape[2].at,
             Target::Level => c.level,
+            // (An LFO's own: not the controls', its ticks' (engine_lfo_tests).)
+            Target::LfoRate(_)
+            | Target::LfoPhase(_)
+            | Target::LfoRise(_)
+            | Target::LfoShape(_)
+            | Target::LfoLevel(_) => 0.0,
         }
     }
 

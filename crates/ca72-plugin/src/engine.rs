@@ -1624,6 +1624,10 @@ pub struct Engine {
     base: Controls,
     bank: Box<crate::lfo::Bank>,
     lfo_dt: f64,
+    /// The host samples played since the engine was prepared at its rate, and where the
+    /// present block began among them: the time the LFOs' ticks keep (R-LFO's addendum).
+    played: u64,
+    block_from: u64,
 }
 
 impl Default for Engine {
@@ -1657,6 +1661,8 @@ impl Engine {
             base: controls,
             bank: Box::default(),
             lfo_dt: 0.0,
+            played: 0,
+            block_from: 0,
             controls,
             held: [false; 128],
             counter: 0,
@@ -1749,6 +1755,9 @@ impl Engine {
         if rate != self.rate {
             self.position = Position::start(crate::timed::FALLBACK_TEMPO, rate);
             (self.since, self.cursor) = (0.0, 0.0);
+            // (The LFOs' ticks from the start again, at the new rate.)
+            (self.played, self.block_from) = (0, 0);
+            self.bank.cross.on = false;
         }
         // (The machine's cores, which ULTRA's split crews are sized by, read here, off the
         // audio thread: an instance made at LO read them at ULTRA's first block, a file read
@@ -1989,6 +1998,7 @@ impl Engine {
     pub fn set_position(&mut self, p: Position) {
         self.position = p;
         (self.since, self.cursor) = (0.0, 0.0);
+        self.block_from = self.played;
     }
 
     /// Each oscillator's place on the clock `at` host samples after the block's start, and its
@@ -2104,12 +2114,22 @@ impl Engine {
     /// is off; the generators moved on by `n`. Never wakes the sleeping instrument (R68): asleep,
     /// the generators run on and nothing more.
     fn modulate(&mut self, n: usize) {
-        let rate = if self.rate > 0.0 { self.rate } else { 48_000.0 };
+        let rate = self.lfo_rate();
         let l = &self.base.lfo;
-        let (per, clock) = crate::lfo::Bank::clock(l, &self.position, self.since, rate);
         let voices = if self.many() { self.slots.len() } else { 1 };
-        self.bank.step(l, &clock, self.lfo_dt, voices);
-        self.bank.advance(l, &per, n, rate, voices);
+        if l.cross() {
+            // (A source moves an LFO's own knob: the generators on their ticks, fixed in time,
+            // each value for the sound read between them: R-LFO's addendum.)
+            let clocks = self.lfo_clocks(rate);
+            self.bank.cross_to(l, &clocks, self.played, rate, voices);
+            self.bank
+                .peek(l, &clocks, self.played, rate, self.lfo_dt, voices);
+        } else {
+            self.bank.cross.on = false;
+            let (per, clock) = crate::lfo::Bank::clock(l, &self.position, self.since, rate);
+            self.bank.step(l, &clock, self.lfo_dt, voices);
+            self.bank.advance(l, &per, n, rate, voices);
+        }
         self.lfo_dt = n as f64 / rate;
         if self.rest.asleep {
             return;
@@ -2126,6 +2146,40 @@ impl Engine {
     /// Each LFO's present reading, for the editor's scopes (decisions.md R-LFO).
     pub fn lfo_readings(&self) -> [crate::lfo::Reading; crate::lfo::LFOS] {
         self.bank.readings(&self.base.lfo)
+    }
+
+    /// The rate the LFOs keep time by.
+    fn lfo_rate(&self) -> f64 {
+        if self.rate > 0.0 { self.rate } else { 48_000.0 }
+    }
+
+    /// The LFOs' clocks for the present block, on their ticks' time.
+    fn lfo_clocks(&self, rate: f64) -> crate::lfo::Clocks {
+        crate::lfo::Clocks::of(
+            &self.base.lfo,
+            &self.position,
+            self.block_from as f64 / rate,
+            rate,
+        )
+    }
+
+    /// The LFOs' ticks run up to now, where they run on them (R-LFO's addendum): before a note
+    /// starts them, and at a run's end, so that what follows takes them from the time it is.
+    fn lfo_catch_up(&mut self) {
+        if !self.bank.cross.on || !self.base.lfo.cross() {
+            return;
+        }
+        let rate = self.lfo_rate();
+        let clocks = self.lfo_clocks(rate);
+        let voices = if self.many() { self.slots.len() } else { 1 };
+        self.bank
+            .cross_to(&self.base.lfo, &clocks, self.played, rate, voices);
+    }
+
+    /// The LFOs' ticks, for the tests (R-LFO's addendum).
+    #[cfg(test)]
+    pub fn lfo_cross(&self) -> &crate::lfo::Cross {
+        &self.bank.cross
     }
 
     /// The one instrument's key pressed or released (POLY off), on the first voice (once it
@@ -2235,8 +2289,11 @@ impl Engine {
                     self.pressed[usize::from(key)] = self.presses;
                 }
                 // (A new note for the LFOs: a key from silence, or any with RETRIGGER on;
-                // decisions.md R-LFO.)
+                // decisions.md R-LFO. On their ticks, they are first brought up to now.)
                 let new = on && (phrase || self.controls.panel.retrigger);
+                if on {
+                    self.lfo_catch_up();
+                }
                 if new {
                     self.bank.start_shared(&self.base.lfo);
                 }
@@ -2574,6 +2631,7 @@ impl Engine {
     pub fn tick_stereo(&mut self, ext: f32) -> (f32, f32) {
         self.cursor = self.since;
         self.since += 1.0;
+        self.played += 1;
         let (l, r) = self.voices_stereo(ext);
         let (mut l, mut r) = ([l], [r]);
         let late = self.lined_up();
@@ -2635,6 +2693,7 @@ impl Engine {
     /// silence, as as many samples would give, without them (decisions.md R68).
     pub fn render(&mut self, ext: &[f32], left: &mut [f32], right: &mut [f32]) {
         if !self.base.lfo.active() {
+            self.bank.cross.on = false;
             return self.render_part(ext, left, right);
         }
         // (The LFOs modulating: a step every `lfo::STEP` samples, decisions.md R-LFO.)
@@ -2647,6 +2706,7 @@ impl Engine {
             self.render_part(x, &mut left[i..i + n], &mut right[i..i + n]);
             i += n;
         }
+        self.lfo_catch_up();
     }
 
     /// [`Engine::render`]'s samples, with the controls as they are.
@@ -2654,6 +2714,7 @@ impl Engine {
         let len = left.len().min(right.len());
         let from = self.since;
         self.since += len as f64;
+        self.played += len as u64;
         if self.rest.asleep {
             if self.dormant(&ext[..ext.len().min(len)]) {
                 left[..len].fill(0.0);
@@ -6820,3 +6881,7 @@ mod expression_tests {
 #[cfg(test)]
 #[path = "engine_lfo_tests.rs"]
 mod lfo_tests;
+
+#[cfg(test)]
+#[path = "engine_lfo_cross_tests.rs"]
+mod lfo_cross_tests;

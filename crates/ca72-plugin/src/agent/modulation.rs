@@ -65,8 +65,9 @@ fn named(p: &Ca72Params, s: Source) -> String {
     }
 }
 
-/// The knob an agent names (an id, a panel label or a host name; an oscillator's WAVEFORM, its
-/// CONTINUOUS shape), if it can take a source now, as the panel's drag allows.
+/// The knob an agent names (an id, a panel label or a host name; an oscillator's or an LFO's
+/// WAVEFORM, its CONTINUOUS shape; an LFO's RATE, PHASE, RISE or LEVEL: R-LFO's addendum), if it
+/// can take a source now, as the panel's drag allows.
 fn target_of(p: &Ca72Params, v: Option<&Value>) -> Result<Target, ApiError> {
     let Some(Value::String(key)) = v else {
         return Err(ApiError::params("`target` must be a knob's id or label"));
@@ -77,11 +78,18 @@ fn target_of(p: &Ca72Params, v: Option<&Value>) -> Result<Target, ApiError> {
         .unwrap_or(key.trim());
     lfo::target_of(p, id).ok_or_else(|| {
         let why = match Target::of_id(id) {
-            Some(Target::Osc1Shape | Target::Osc2Shape | Target::Osc3Shape) => {
+            Some(
+                Target::Osc1Shape | Target::Osc2Shape | Target::Osc3Shape | Target::LfoShape(_),
+            ) => {
                 format!("{key} takes a source only through its WAVEFORM while CONTINUOUS")
             }
+            Some(Target::LfoRate(_)) => {
+                format!("{key} cannot take a source now (its LFO is timed)")
+            }
             Some(_) => format!("{key} cannot take a source now (its oscillator is timed)"),
-            None if id.ends_with("_waveform") && id.starts_with("osc") => {
+            None if id.ends_with("_waveform")
+                && (id.starts_with("osc") || id.starts_with("lfo")) =>
+            {
                 format!("{key} takes a source only while CONTINUOUS")
             }
             None => format!("{key} is not a knob a source can modulate"),
@@ -105,6 +113,17 @@ fn targets_now(p: &Ca72Params) -> Vec<&'static str> {
             ids.push(w);
         }
     }
+    // (An LFO's WAVEFORM likewise: R-LFO's addendum.)
+    for w in [
+        "lfo1_waveform",
+        "lfo2_waveform",
+        "lfo3_waveform",
+        "lfo4_waveform",
+    ] {
+        if lfo::target_of(p, w).is_some() {
+            ids.push(w);
+        }
+    }
     ids
 }
 
@@ -117,6 +136,8 @@ fn live(p: &Ca72Params, t: Target) -> bool {
         Target::Osc3Shape => p.continuous(2),
         Target::Osc2Frequency => !p.timed_now(1),
         Target::Osc3Frequency => !p.timed_now(2),
+        Target::LfoShape(n) => p.lfo(n).shape_mode.value() == crate::params::WaveMode::Continuous,
+        Target::LfoRate(n) => !p.lfo(n).timed.value(),
         _ => true,
     }
 }
@@ -135,12 +156,11 @@ pub fn list(p: &Ca72Params) -> Value {
                 .into_iter()
                 .flatten()
                 .map(|a| {
-                    let mono = s.lfo().is_none_or(|n| p.lfo(n).mono.value());
                     json!({
                         "target": a.target.id(),
                         "label": values::find(&table, a.target.id()).map_or("", |e| e.label),
                         "depth": (f64::from(a.depth) * 1000.0).round() / 10.0,
-                        "shared": !mono && !a.target.per_voice(),
+                        "shared": lfo::takes_shared(p, s, a.target),
                         "inert": !live(p, a.target),
                     })
                 })
@@ -257,10 +277,17 @@ pub fn remove(p: &Ca72Params, args: &Value) -> Reply {
             let table = values::table(p);
             let id = values::find(&table, key).map_or(key.trim(), |e| e.id);
             let wave = ["osc1_waveform", "osc2_waveform", "osc3_waveform"];
+            let lfo_wave = [
+                "lfo1_waveform",
+                "lfo2_waveform",
+                "lfo3_waveform",
+                "lfo4_waveform",
+            ];
             let t = wave
                 .iter()
                 .position(|w| *w == id)
                 .map(|n| [Target::Osc1Shape, Target::Osc2Shape, Target::Osc3Shape][n])
+                .or_else(|| lfo_wave.iter().position(|w| *w == id).map(Target::LfoShape))
                 .or_else(|| Target::of_id(id));
             if !t.is_some_and(|t| p.lfo_patch.remove(source, t)) {
                 return Err(ApiError::refused(format!(
@@ -377,6 +404,60 @@ mod tests {
     /// The macros as the agents name them: by id, label or typed name; a name set (capitals, at
     /// most seven) and listed with the macro's value; a macro's knob, an LFO's own knob or a
     /// macro not a target; `edges` an LFO's and `name` a macro's alone.
+    /// The LFOs' own knobs, by an agent as by the page (R-LFO's addendum): an LFO's RATE by its
+    /// ID or label (its own too), its LEVEL by "LFO 2 LEVEL" apart from the strip's `level`, its
+    /// WAVEFORM only while CONTINUOUS; each listed by its label, the shared copy's marked; the
+    /// targets now listed; and removed.
+    #[test]
+    fn agents_move_the_lfos_own_knobs() {
+        let p = Ca72Params::default();
+        let at = |s, t| p.lfo_patch.depth(s, t);
+        set(
+            &p,
+            &json!({"source": "lfo2", "target": "lfo1_rate", "depth": 30}),
+        )
+        .unwrap();
+        assert_eq!(at(Source::Lfo(1), Target::LfoRate(0)), Some(0.3));
+        set(
+            &p,
+            &json!({"source": "lfo1", "target": "LFO 1 RATE", "depth": -20}),
+        )
+        .unwrap();
+        assert_eq!(
+            at(Source::Lfo(0), Target::LfoRate(0)),
+            Some(-0.2),
+            "its own"
+        );
+        set(
+            &p,
+            &json!({"source": "macro1", "target": "LFO 2 LEVEL", "depth": -50}),
+        )
+        .unwrap();
+        assert_eq!(at(Source::Macro(0), Target::LfoLevel(1)), Some(-0.5));
+        set(&p, &json!({"source": "lfo3", "target": "level"})).unwrap();
+        assert_eq!(at(Source::Lfo(2), Target::Level), Some(0.25), "the strip's");
+        assert_eq!(at(Source::Lfo(2), Target::LfoLevel(2)), None);
+        assert!(set(&p, &json!({"source": "lfo1", "target": "lfo3_waveform"})).is_err());
+        let r = list(&p);
+        let targets = r["targets"].as_array().unwrap();
+        for id in ["lfo1_rate", "lfo2_phase", "lfo3_rise", "lfo4_level"] {
+            assert!(targets.contains(&json!(id)), "{id}");
+        }
+        assert!(!targets.contains(&json!("lfo1_waveform")));
+        let knob = &r["sources"][1]["knobs"][0];
+        assert_eq!(
+            (&knob["target"], &knob["label"], &knob["shared"]),
+            (&json!("lfo1_rate"), &json!("LFO 1 RATE"), &json!(false))
+        );
+        assert_eq!(
+            r["sources"][lfo::LFOS]["knobs"][0]["label"],
+            json!("LFO 2 LEVEL")
+        );
+        remove(&p, &json!({"source": "macro1", "target": "lfo2_level"})).unwrap();
+        assert_eq!(at(Source::Macro(0), Target::LfoLevel(1)), None);
+        assert!(remove(&p, &json!({"source": "macro1", "target": "lfo2_level"})).is_err());
+    }
+
     #[test]
     fn agents_name_and_assign_the_macros() {
         let p = Ca72Params::default();
@@ -395,7 +476,7 @@ mod tests {
             p.lfo_patch.depth(Source::Macro(1), Target::Drive),
             Some(0.5)
         );
-        for bad in ["macro3", "lfo1_rate"] {
+        for bad in ["macro3", "lfo1_timed"] {
             assert!(
                 set(&p, &json!({"source": "macro1", "target": bad})).is_err(),
                 "{bad}"

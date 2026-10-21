@@ -516,6 +516,7 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
             &keys.polarity,
             &keys.reverse,
             &keys.on,
+            &p.lfo_level(n).level,
         ];
         for (k, param) in params.into_iter().enumerate() {
             all.push(e(
