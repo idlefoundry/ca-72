@@ -654,12 +654,17 @@ and the same for LFOs 2 to 4), on the LFO page beside each column's title. A lay
 them, as it does not place the page's others: a layout naming one is refused, and a layout made
 for revisions 1 to 5 loads as it did.
 
+Revision 7 of the controls (0.3.0) adds each LFO's LEVEL (`lfo1_level` to `lfo4_level`), a
+control of a kind of its own, `Kind::Jack`: its LFO's OUT jack on the LFO page, which has no knob
+(the page draws the jack; LEVEL's rings go round it). A layout does not place it either: a layout
+naming one is refused, and a layout made for revisions 1 to 6 loads as it did.
+
 ## Compatibility: packs keep working as the CA-72 changes
 
 A pack made today must keep working on later CA-72s, and a pack made for a later one should do
 its best on an earlier one.
 
-- **Each layout says which revision of the CA-72's controls it was made for** (`controls = 6`
+- **Each layout says which revision of the CA-72's controls it was made for** (`controls = 7`
   today; a layout without it is made for the first). The plug-in keeps a record of its controls over
   time: when each arrived, and any rename, retirement or change of kind since.
 - **A control added after the pack was made** is placed by the plug-in: at its official place if

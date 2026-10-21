@@ -13214,6 +13214,123 @@ gap closed:
   quarter of 300 degrees at +25 %, and no measurement asked by any of it, nor by a macro on DRIVE
   turned there).
 
+### The LFOs moving the LFOs (the owner, 2026-10-20: option B)
+
+**Asked.** The owner, at the V0.3 test build: "it might be interesting to allow macros to control
+LFO parameters. And LFOs to control each other's parameters." R-LFO had left LFO→LFO "later"
+("Sure"). Asked about loops (an LFO moving one that moves it back, or itself), the options were A
+(refused), B (allowed, each LFO reading the others' values from the update before, so a loop is
+bounded, evolves progressively and is deterministic under RETRIG and ENV) and C (allowed only
+without a cycle). The owner: "Let's try B. It's unconventional, but it's interesting."
+
+**What can be moved.** Each LFO's RATE (not while it is timed, as a FREQUENCY isn't: its knob is
+then a DIVISION dial), PHASE, RISE, its WAVEFORM's shape while CONTINUOUS, and a new **LEVEL**:
+`Target::LfoRate(n)`, `LfoPhase(n)`, `LfoRise(n)`, `LfoShape(n)` and `LfoLevel(n)`, after the
+panel's 30 so that no target's index moves (50 in all). They are apart from the strip's LEVEL
+(`Target::Level`, `level`) in IDs (`lfo2_level`), names ("LFO 2 LEVEL"; "LFO2 LEVEL" on
+MODULATES' ten characters, the strip's "LEVEL") and screens. The sources are the macros (no
+loop can go through one) and the LFOs, an LFO on its own knobs too. Depths are a share of the
+knob's own travel (items 2 and 7 above); up to 8 a source, as before. Presets save them as any
+other (`lfo1_to_lfo2_rate = 40`); sessions likewise.
+
+**LEVEL** (an agent's proposal, built as asked): `lfoN_level`, 0 to 100 %, 100 in a new patch,
+the share of every one of its LFO's assignments it gives: the LFO's output × LEVEL wherever it
+goes (its knobs and the LFOs it moves), so a macro or another LFO (or the LFO itself) fades a
+whole LFO in and out. A host parameter, learnable (62 knobs, 28 selectors, 58 switches) and a
+preset's, in a nest of its own after the LFOs' keys so that no parameter moves; a preset or
+session saved before reads 100 %. At 100 % the output is multiplied by 1: the same to the bit.
+
+**LEVEL's place: the OUT jack** (an agent's choice; the brief suggested the scope's bezel, the ON
+key or the title plate). The jack is round, so a knob's rings go round it as round a knob; it is
+already "this LFO's output", which LEVEL scales; and the column has no room for another knob. The
+scope's bezel is a rectangle (rings are arcs about a centre) and its right click is the LFO's
+menu; the ON key's cap and the title are pressed for ON. So LEVEL is a control of a kind of its
+own, `Kind::Jack`, at the jack (CONTROL_SET revision 7, after the keys so that no control moves),
+drawn by the page as the jack: a press there still draws a cord from it; a cord let go on a jack
+moves that LFO's LEVEL (an LFO's own jack only if the cord left it first, so that a click gives
+nothing); the wheel over it turns LEVEL, Ctrl or Cmd and a click types it, a double click puts it
+back at 100 %; its tip is LEVEL's ("LFO 1 LEVEL: 100 % · LFO 2 −60 % · LFO 1 OUT: DRAG TO A KNOB
+TO MODULATE IT"); its right-click menu has LEVEL's DEPTH… and REMOVE, then the LFO's COLOR and
+EDGES, which a right click on the jack gave before. Its pop-up would fall off the window under
+the jack, so a pop-up that would leave the drawing under its knob stands beside it, its top level
+with the knob's, under the tip.
+
+**Loops: a tick fixed in time.** While any source moves an LFO's knob, the generators run on
+ticks of **0.5 ms of audio time** (`lfo::TICK`), numbered from the engine's own count of the host
+samples played since it was prepared at its rate, whatever the block or the 32-sample step;
+without one they run as before (bit-identical). At each tick each copy of each LFO (the shared
+one, each voice's own where MONO is off) is moved on from the tick before at the settings in force
+since; then its knobs are set from the sources' values **at the tick before**, so nothing feeds
+back within a tick; then its value is taken there. Why 0.5 ms: 40 ticks a cycle of the fastest
+LFO (50 Hz), so an LFO moving another keeps its shape; a loop's delay of one tick is short beside
+the shortest cycle it shapes (20 ms); it is about the audio's own step (32 samples: 0.33 to
+0.73 ms at 96 to 44.1 kHz); and it is cheap (2000 a second, a few hundred operations each).
+- **Exact:** a tick's number at a sample is `floor(samples × 2000 / rate)`, one rounding of a
+  quotient that is never within its rounding of a whole number unless it is one, so a time is
+  the same tick at every rate; a tick's arithmetic uses its number, the tick's length and the
+  settings alone. So an untimed patch's LFO values are the same **to the bit** at every sample
+  rate and block size, live and offline. A timed LFO follows the host's clock (its place each
+  block, its cycles a second from the tempo), the same within that arithmetic's rounding.
+- **The sound** reads each generator at its own time between ticks (its cycle moved on at the
+  settings in force, RISE, EDGES' slew and ON's fade then): as smooth as before, its EDGES' slew
+  still at each 32-sample step.
+- **What the LFOs read of each other** is a value without EDGES' slew (waveform, RISE, POLARITY,
+  ON's fade and LEVEL): the slew smooths what reaches the sound (a click), not what moves a knob of
+  an LFO, and without it a loop's state is the generators' alone.
+- **Bounded:** every output within −1..1 (0..1 UNI) and every knob clamped to its travel, so a
+  loop can wander but never run away. A moved PHASE stops at 0 and 360 degrees rather than
+  wrapping (its knob's travel, clamped as every knob's).
+- **A note** starts its LFOs at the latest tick (up to 0.5 ms before it). A RETRIG or ENV LFO a
+  note starts forgets what moved its knobs and its value (its settings as set, its value its
+  start's), so a loop of RETRIG LFOs starts again exactly at each note; a FREE one runs on.
+- **Per voice** (option C): a voice's own LFO (MONO off) is moved by the sources' own values for
+  that voice, a shared LFO (MONO on) by their shared copies; a macro is shared. The pop-up marks
+  SHARED where a MONO-off LFO moves a MONO LFO's knob.
+- **Starting and stopping:** the first source on an LFO's knob starts the ticks from where the
+  generators are (that tick their settings as set); the last taken away, they run on from where
+  the ticks left them.
+- **The scope** draws the waveform as its knobs are set; its orb rides the LFO's output as it
+  is, moved (agent's choice: a moving trace would redraw the screen every frame).
+
+**Agents:** `ca72_modulation_set`, `_remove` and `ca72_modulations` take the new targets by ID
+or label ("LFO 1 RATE", `lfo2_level`, an LFO's WAVEFORM while CONTINUOUS), list them with their
+labels and `shared`, and name the LFOs' own knobs among the targets now.
+
+**Demo presets** (not the factory's): `docs/lfo-loops/presets`, LFO LOOP Coupled Rates (LFO 1 on
+CUTOFF, LFO 2 on LFO 1's RATE +35 % and LFO 1 on LFO 2's −30 %), Phase Chase (two at 2 Hz
+pushing each other's PHASE by +40 %), Level Pump (a 4 Hz SQUARE pumping VOLUME, LFO 2 taking its
+LEVEL down −100 % and LFO 1 denting LFO 2's back −20 %) and Self Rate (a RETRIG shark tooth on
+its own RATE +60 %, RETRIGGER on). Levelled by the strip's LEVEL to about −21 dBFS RMS at HI.
+
+**Evidence:**
+- `preset_render`, 19 presets, 2 s, HI, LO and ULTRA, against 393588a: every preset the same to
+  the bit (nothing on an LFO's knob, so the generators as before).
+- The engine's `engine_lfo_cross_tests.rs`: `each_lfo_knob_takes_a_source` (RATE, PHASE, RISE,
+  shape, LEVEL through their parameters' ranges, clamped; RATE not timed, shape not STEPPED;
+  LEVEL scaling the LFO's CUTOFF); `loops_stay_bounded_and_finite_for_ten_minutes` (a coupled
+  RATE pair, a PHASE pair, a self RATE, a self LEVEL: every value within −1..1 and finite, every
+  knob in range, the RATE still moving); `a_loop_runs_the_same_at_every_rate_and_block` (the
+  four LFOs' values to the bit every 10 ms for 3 s at 44.1, 48 and 96 kHz in blocks of 64 and
+  1024, a RETRIG and an ENV LFO among them and notes between); `live_and_offline_play_a_loop_alike`
+  (paced in real time with each block's deadline against offline: the LFOs and the sound to the
+  bit); `retrig_starts_a_loop_again_note_for_note` (four notes falling anywhere in a tick: 1200
+  ticks after each the same to the bit; FREE not); `a_voices_own_lfo_moves_its_own_lfos_knob`
+  (two POLY voices' LFO 1s apart; MONO on, LFO 2's shared copy).
+- `lfo.rs`' `an_lfos_own_knobs_are_targets` (IDs, names, saving, eligibility, `takes_shared`);
+  the agents' `agents_move_the_lfos_own_knobs`; presets' LEVEL (100 % in an old one); the
+  editor's `the_lfos_own_knobs_take_sources` (cords to RATE, PHASE, RISE, its own RATE, the
+  jacks, a click on its own jack nothing, away and back its LEVEL, timed none, CONTINUOUS's
+  shape, a macro's; rings, the jack's round it; pop-up; tips; menus; the wheel on the jack) and
+  `an_assignment_dragged_from_out_lands_on_a_knob_at_a_quarter` (another LFO's knob now takes
+  it); `tests/lfo_loops.rs` (the four presets read, move an LFO's knob and sound).
+- `tests/realtime.rs`' `the_lfos_moving_each_other_neither_allocate_nor_free` (release: every
+  LFO and macro half on LFOs' knobs, loops and self-loops, MONO off on ten voices, LEVEL and
+  CONTINUOUS automated): no allocation, no free.
+- Cost (`lfo_cross_cost`, release, ten POLY voices held, four LFOs MONO off each on four knobs a
+  voice, against the same with each also on its own RATE and the next one's RATE, PHASE and
+  LEVEL; omarchy at load 4 to 8): LO 211.8 against 213.8 ms a second of audio (+1.0 %), HI 901.0
+  against 880.6 (within the noise).
+
 ## R-LFO-PAGE. The LFO page and drag-to-knob modulation: the panel and the editor
 
 The page, the rings and the drag of R-LFO (whose record has the owner's decisions of 2026-10-20,

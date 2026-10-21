@@ -207,7 +207,7 @@ agent to use the bridge that came with that instance.
 | `ca72_midi_learn` | Learns, cancels, or assigns outright | `control?, cancel?, channel?, cc?, note?` (`note` for PREVIOUS and NEXT PRESET only) |
 | `ca72_midi_assignments` | Lists MIDI Learn's assignments | none |
 | `ca72_midi_forget` | REMOVE MIDI ASSIGNMENT | `control` |
-| `ca72_modulations` | Lists what each modulation source (LFO 1 to 4, MACRO 1 to 6) modulates: each knob, its depth in %, `shared` (an LFO with MONO off on a knob every voice shares) and `inert`; each LFO's EDGES and MONO; each macro's `name` ("" for none) and its knob's `value` in %; the knobs that can take one now (decisions.md R-LFO, R-MACROS) | none |
+| `ca72_modulations` | Lists what each modulation source (LFO 1 to 4, MACRO 1 to 6) modulates: each knob (an LFO's own RATE, PHASE, RISE, shape or LEVEL among them, `lfo2_rate`, `lfo2_level`), its depth in %, `shared` (an LFO with MONO off on a knob every voice shares, or on a MONO LFO's own knob) and `inert`; each LFO's EDGES and MONO; each macro's `name` ("" for none) and its knob's `value` in %; the knobs that can take one now (decisions.md R-LFO, R-MACROS) | none |
 | `ca72_modulation_set` | Assigns a source to a knob, as a drag from its OUT jack or a macro's jack (25 % if no depth), or changes its depth; sets an LFO's EDGES; names a macro | `source` (lfo1 to lfo4, "LFO 1", 1 to 4; macro1 to macro6, "MACRO 1" or a macro's name), `target?`, `depth?` (-100 to 100), `edges?` (SOFT, SHARP), `name?` (a macro's, 7 characters, "" for none) |
 | `ca72_modulation_remove` | REMOVE, for one knob or all of a source's | `source`, `target?` |
 | `ca72_audio` | Reads AUDIO & MIDI (read only) | none |
@@ -322,10 +322,18 @@ set with the `modulation` tools (saved with presets and sessions, not a host par
 | UNI (POLARITY: R-LFO's corrections) | key | Bipolar, Unipolar (Bipolar) | `lfoN_polarity` |
 | WAVEFORM's menu: REVERSE | menu | on/off (off) | `lfoN_reverse` |
 | ON (the key at its title: muted while off) | key | on/off (on) | `lfoN_on` |
+| LEVEL (the OUT jack's: the wheel over it, typed there; R-LFO's addendum) | the jack | 0 to 100 % (100): the share of every assignment of the LFO's it gives | `lfoN_level` |
 | EDGES (the LFO's menu) | menu | SOFT, SHARP (SOFT) | `ca72_modulation_set {source, edges}` |
 | OUT jack: a drag to a knob | | a knob and a depth, -100 to 100 % (25) | `ca72_modulation_set {source, target, depth}` |
 | A knob's menu: DEPTH…, REMOVE | | | `ca72_modulation_set`, `ca72_modulation_remove` |
 | MODULATES | screen | | `ca72_modulations` (each LFO's `polarity`, `reverse` and `on` too) |
+
+The LFOs' own knobs are targets too (R-LFO's addendum): any LFO (itself included) or macro on an
+LFO's RATE (`lfoN_rate`, not while it is timed), PHASE (`lfoN_phase`), RISE (`lfoN_rise`),
+WAVEFORM while CONTINUOUS (`lfoN_waveform`, its shape) and LEVEL (`lfoN_level`, "LFO 2 LEVEL";
+the strip's LEVEL is `level`), by `ca72_modulation_set {source, target, depth}` as any knob.
+Loops are allowed: each LFO reads the others' values from the latest of its ticks, every 0.5 ms
+of audio time.
 
 ### The macros (decisions.md R-MACROS)
 

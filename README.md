@@ -380,9 +380,9 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   **To modulate a knob, drag a cord from an LFO's OUT jack to it.** While you drag, every knob
   that can take it has a dotted ring and the one under the plug a bright one; let go there and
   the LFO moves it by 25 % of its travel either way. Each LFO modulates up to eight knobs, and
-  a knob takes several LFOs. The panel's continuous knobs can be modulated, and an oscillator's
-  WAVEFORM while CONTINUOUS (not switches, stepped selectors, VOICES, the timed dials, the
-  wheels, the drawers' or the LFOs' own knobs). The strip's knobs (ENTROPY, WIDTH, INNER, DETUNE,
+  a knob takes several LFOs. The panel's continuous knobs can be modulated, an oscillator's
+  WAVEFORM while CONTINUOUS, and the LFO page's own knobs (below); not switches, stepped
+  selectors, VOICES, the timed dials, the wheels or the drawers' knobs. The strip's knobs (ENTROPY, WIDTH, INNER, DETUNE,
   DRIVE, LEVEL) are under the LFO page, so they take an LFO from their right-click menu instead. A
   modulated knob carries a thin ring for each LFO in its colour (the first LFO outermost)
   showing how far it swings either way, its positive end ticked, and while the LFO page shows a
@@ -396,6 +396,19 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   with presets and projects but are not host parameters; every other LFO control is a host
   parameter that can be automated or MIDI-learned. The LFO key is lit while its page shows and
   glows faintly while an LFO is assigned and moving a knob with it put away.
+
+  **LFOs move LFOs.** An LFO's RATE (not while timed), PHASE, RISE and WAVEFORM (while
+  CONTINUOUS) take a cord from any LFO's OUT jack, its own included, or from a macro's jack, as
+  the panel's knobs do, with the same rings, pop-up, menus and tip. An LFO's **OUT** jack is also
+  its **LEVEL**, how much of every one of its assignments it gives (0 to 100 %, 100 to start; a
+  host parameter): let a cord go on the jack to move it (drawn away from an LFO's own jack and
+  back, its own LEVEL), turn it with the wheel over the jack, Ctrl- or Command-click the jack to
+  type it, double-click it for 100 %. Loops are allowed: each LFO reads the others where they
+  were at its last tick, every 0.5 ms of audio time, so a loop evolves without running away
+  (everything stays within its range), and a patch plays the same at every sample rate and
+  buffer size, live and exported. RETRIG on every LFO of a loop starts it again the same at each
+  note. A MONO-off LFO on another MONO-off LFO's knob moves each voice's own; on a MONO LFO's
+  knob, its shared one.
 - **Macros** (from 0.3.0; none assigned in any preset or project saved before it, which sound as
   they did, each macro at 0): the rail's **MACRO** key, at its far left, flips the lower page's
   left area from the PITCH and MOD wheels and their switches to six macro knobs, two across and
@@ -413,8 +426,8 @@ are [standalone-spec.md](docs/standalone-spec.md) and
     computer, not in the patch).
 
   **To have a macro move a knob, drag a cord from its jack to it**, as from an LFO's OUT: it
-  starts at 25 %, up to eight knobs a macro, the same knobs an LFO can take (not the LFOs' own
-  knobs, nor another macro). A macro moves its knobs one way: at 0 a knob is where you set it, at
+  starts at 25 %, up to eight knobs a macro, the same knobs an LFO can take (the LFOs' own
+  knobs and LEVELs among them, not another macro). A macro moves its knobs one way: at 0 a knob is where you set it, at
   100 % it is moved by the depth (-100 to 100 % of its travel; negative turns it down). Its ring
   on a knob runs from the knob's setting toward where 100 % takes it, ticked there, bright as far
   as the macro is turned now. While the macros show, every macro's rings show on the panel's
