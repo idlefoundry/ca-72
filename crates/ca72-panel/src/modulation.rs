@@ -214,19 +214,41 @@ pub fn swing(k: &KnobRings, ring: &Ring) -> (f64, f64, f64) {
     }
 }
 
-/// The pop-up's box (left, top, width, height) and each dial's centre and radius.
+/// The pop-up's box (left, top, width, height) and each dial's centre and radius: under its
+/// knob, or, where that would leave the drawing (an LFO's OUT jack, near the window's foot:
+/// R-LFO's addendum), beside it to the right (to the left at the drawing's right edge), its
+/// tip above kept clear.
 pub fn popup_layout(p: &Popup) -> ((f64, f64, f64, f64), Vec<KnobPlace>) {
     let s = p.size;
     let (r, pitch) = (1.9 * s, 6.2 * s);
     let n = p.dials.len().max(1) as f64;
     let (w, h) = (pitch * n + 0.6 * s, 8.4 * s);
     let ((kx, ky), skirt) = p.knob;
-    let x = (kx - w / 2.0).clamp(8.0, W - w - 8.0);
-    let y = ky + skirt + 18.0;
+    let (x, y) = if beside(p, h) {
+        let right = kx + skirt + POPUP_BESIDE;
+        let x = if right + w <= W - 8.0 {
+            right
+        } else {
+            kx - skirt - POPUP_BESIDE - w
+        };
+        // (Its top level with its knob's, under the tip above it.)
+        (x, (ky - skirt + 4.0).min(art::H - h - 8.0))
+    } else {
+        ((kx - w / 2.0).clamp(8.0, W - w - 8.0), ky + skirt + 18.0)
+    };
     let dials = (0..p.dials.len())
         .map(|i| ((x + 0.3 * s + pitch * (i as f64 + 0.5), y + 3.9 * s), r))
         .collect();
     ((x, y, w, h), dials)
+}
+
+/// How far a pop-up beside its knob stands from the knob's rings' radius.
+const POPUP_BESIDE: f64 = 6.0;
+
+/// Whether pop-up `p`, `h` high, stands beside its knob: under it, it would leave the drawing.
+fn beside(p: &Popup, h: f64) -> bool {
+    let ((_, ky), skirt) = p.knob;
+    ky + skirt + 18.0 + h > art::H - 8.0
 }
 
 /// The pop-up's dial at (`x`, `y`), if one is there.
@@ -237,9 +259,13 @@ pub fn hit_popup(p: &Popup, x: f64, y: f64) -> Option<usize> {
         .position(|((dx, dy), r)| (x - dx).hypot(y - dy) <= r + 0.8 * p.size)
 }
 
-/// Whether (`x`, `y`) is on the pop-up.
+/// Whether (`x`, `y`) is on the pop-up, or on the way to it from its knob.
 pub fn on_popup(p: &Popup, x: f64, y: f64) -> bool {
     let ((bx, by, bw, bh), _) = popup_layout(p);
+    if beside(p, bh) {
+        let way = POPUP_BESIDE + 12.0;
+        return (bx - way..bx + bw + way).contains(&x) && (by..by + bh).contains(&y);
+    }
     (bx..bx + bw).contains(&x) && (by - 18.0..by + bh).contains(&y)
 }
 

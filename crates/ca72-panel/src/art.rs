@@ -1827,6 +1827,10 @@ pub fn bounds(kind: &Kind) -> [f64; 4] {
             );
             [-hx, -hy, hx, hy]
         }
+        Kind::Jack => {
+            let r = crate::strip::lfo::JACK_R + 4.0;
+            [-r, -r, r, r]
+        }
     }
 }
 
@@ -2060,6 +2064,8 @@ pub fn control(c: &Control, v: f64, midi: f64) -> Layer {
         Kind::Wheel { mark, detent, span } => {
             wheel(&mut s, mark, span, wheel_shown(detent, v, midi))
         }
+        // (The LFO page draws its jack: R-LFO's addendum.)
+        Kind::Jack => {}
         // (Its sign is its division's, which the renderer knows: `key`.)
         Kind::Key => {
             return key(
@@ -2501,6 +2507,12 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
             "×",
             true,
         ),
+        // (The LFO page draws its jack: R-LFO's addendum.)
+        Kind::Jack => Layer {
+            origin,
+            bounds,
+            ..Layer::default()
+        },
     }
 }
 
@@ -2968,7 +2980,7 @@ pub fn worn_overlay(arrangement: &Arrangement) -> String {
             ),
             // A key's cap's is its own: it comes and goes ([`comes_and_goes`]).
             Kind::Key => {}
-            Kind::Wheel { .. } => {}
+            Kind::Wheel { .. } | Kind::Jack => {}
         }
     }
     put!(
@@ -3126,6 +3138,8 @@ pub fn skirt(kind: &Kind) -> f64 {
         Kind::Knob { big: true, .. } => BIG.skirt,
         Kind::Knob { .. } => STD.skirt,
         Kind::Selector(_) => SELECTOR_R + 2.0,
+        // (An LFO's OUT jack's, its LEVEL's: R-LFO's addendum.)
+        Kind::Jack => crate::strip::lfo::JACK_R + 8.0,
         _ => 0.0,
     }
 }

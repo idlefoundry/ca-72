@@ -76,6 +76,8 @@ fn hit_control(layout: &Layout, i: usize, c: &Control, x: f64, y: f64) -> Option
             in_rect(dx, dy, [-hx, -hy, hx, hy])
         }
         Kind::Key => in_rect(dx, dy, KEY_HIT),
+        // (As the page finds its jack.)
+        Kind::Jack => dx.hypot(dy) <= crate::strip::lfo::JACK_R + 10.0,
         Kind::Toggle { across: false, .. } => in_rect(dx, dy, TOGGLE_HIT),
         Kind::Toggle { across: true, .. } => in_rect(dx, dy, TOGGLE_HIT_ACROSS),
     };
@@ -133,6 +135,7 @@ pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64
             (art::position(start) as f64 + steps).clamp(0.0, 5.0) / 5.0
         }
         Kind::Wheel { .. } => (start - dy / 160.0 * rate).clamp(0.0, 1.0),
+        Kind::Jack => (start - dy / 240.0 * rate).clamp(0.0, 1.0),
         Kind::Rocker { .. } | Kind::Toggle { .. } | Kind::Key => return None,
     })
 }
@@ -211,6 +214,7 @@ pub fn scroll(kind: &Kind, v: f64, notches: f64, fine: bool) -> f64 {
         },
         Kind::Selector(_) => (art::position(v) as f64 + notches).clamp(0.0, 5.0) / 5.0,
         Kind::Wheel { .. } => (v + notches * if fine { 0.005 } else { 0.05 }).clamp(0.0, 1.0),
+        Kind::Jack => (v + notches * if fine { 0.002 } else { 0.02 }).clamp(0.0, 1.0),
         Kind::Rocker { .. } | Kind::Key => {
             if notches > 0.0 {
                 1.0

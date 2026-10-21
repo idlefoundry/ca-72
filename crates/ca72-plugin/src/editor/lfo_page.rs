@@ -84,12 +84,19 @@ pub(super) fn orb_at(set: &lfo::Settings, r: &Reading, tempo: f64, assigned: boo
     if x > 1.0 - 1e-6 { 0.0 } else { x }
 }
 
-/// An assignment being dragged from a source's jack: the pointer's place (the drawing's).
+/// An assignment being dragged from a source's jack: the pointer's place (the drawing's), and
+/// whether it has left the jack (an LFO's cord let go on its own jack without, a click, gives
+/// its LEVEL nothing: R-LFO's addendum).
 #[derive(Debug)]
 pub(super) struct Patching {
     pub(super) source: Source,
     pub(super) at: (f64, f64),
+    pub(super) from: (f64, f64),
+    pub(super) away: bool,
 }
+
+/// How far a cord's plug goes from its jack before it has left it (as the page finds the jack).
+const JACK_LEFT: f64 = lfo_ui::JACK_R + 10.0;
 
 /// How a depth is being dragged: up or down (the pop-up's dial, Alt/Option on the knob), or a
 /// ring's end round the knob.
@@ -266,8 +273,14 @@ pub(super) fn lfo_param<'a>(
         "polarity" => &keys.polarity,
         "reverse" => &keys.reverse,
         "on" => &keys.on,
+        "level" => &p.lfo_level(n).level,
         _ => return None,
     })
+}
+
+/// The LFO whose LEVEL control `i` is (its OUT jack: R-LFO's addendum), if it is one.
+pub(super) fn level_of_control(i: usize) -> Option<usize> {
+    (0..LFOS).find(|&n| lfo_index(n, ca72_panel::controls::LFO_LEVEL_PART) == i)
 }
 
 /// The control showing modulation target `t`: its knob's (an oscillator's shape its WAVEFORM).
@@ -276,6 +289,10 @@ pub(super) fn control_of(t: ModTarget) -> Option<usize> {
         ModTarget::Osc1Shape => "osc1_waveform",
         ModTarget::Osc2Shape => "osc2_waveform",
         ModTarget::Osc3Shape => "osc3_waveform",
+        // (An LFO's CONTINUOUS shape its WAVEFORM's, as an oscillator's: R-LFO's addendum.)
+        ModTarget::LfoShape(n) => {
+            return Some(lfo_index(n.min(LFOS - 1), 0));
+        }
         t => t.id(),
     };
     ca72_panel::controls::index(id)
@@ -352,14 +369,26 @@ impl Editing {
     }
 
     /// Whether control `i` is in view: the panel's always, the strip's while the strip's page
-    /// shows (neither the keyboard nor the LFO page over it).
+    /// shows (neither the keyboard nor the LFO page over it), the LFO page's while it shows (its
+    /// knobs and jacks take the sources too: R-LFO's addendum).
     fn in_view(&self, i: usize) -> bool {
         match CONTROLS.get(i).map(|c| c.place) {
             Some(ControlPlace::Panel) => true,
             Some(ControlPlace::Strip) => {
                 self.expanded() && !self.modulating.open && !self.playing.visible
             }
+            Some(ControlPlace::Lfo) => self.page_shows(),
             _ => false,
+        }
+    }
+
+    /// The control under (`x`, `y`) a source can be given to: the LFO page's while it shows and
+    /// the pointer is over it, else the panel's and the strip's.
+    pub(super) fn mod_hit(&self, x: f64, y: f64) -> Option<Target> {
+        if self.page_shows() && lfo_ui::inside(x, y) {
+            interact::hit_lfo(self.renderer.layout(), x, y)
+        } else {
+            self.hit(x, y)
         }
     }
 
@@ -486,7 +515,7 @@ impl Editing {
         let mut targets = Vec::new();
         let mut over = None;
         let pointer = patching.map(|p| p.at);
-        let under = pointer.and_then(|(x, y)| match self.hit(x, y) {
+        let under = pointer.and_then(|(x, y)| match self.mod_hit(x, y) {
             Some(Target::Control(i) | Target::Legend(i, _)) => Some(i),
             _ => None,
         });
@@ -596,8 +625,7 @@ impl Editing {
                             colour: colour(&self.settings, s),
                             label: label(&self.params.lfo_patch, s),
                             depth: f64::from(d),
-                            shared: !t.per_voice()
-                                && s.lfo().is_some_and(|n| !self.params.lfo(n).mono.value()),
+                            shared: lfo::takes_shared(&self.params, s, t),
                             uni: s.lfo().is_some() && self.one_way(s),
                             muted: self.muted(s),
                         })
@@ -719,6 +747,33 @@ impl Editing {
             {
                 self.modulating.last = Some(Source::Lfo(n));
             }
+            // (The OUT jack is its LEVEL's control: a press there drags a cord as before, a
+            // double click puts LEVEL back at 100 %, Ctrl or Cmd and a click types it: R-LFO's
+            // addendum.)
+            if let Target::Control(i) = t
+                && let Some(n) = level_of_control(i)
+                && !super::entry::shortcut(modifiers)
+            {
+                let now = Instant::now();
+                let double = self
+                    .last_press
+                    .is_some_and(|(at, last)| last == t && now - at < DOUBLE_CLICK);
+                self.last_press = Some((now, t));
+                if double {
+                    let level = &self.params.lfo_level(n).level;
+                    self.set_once(i, f64::from(level.default_normalized_value()));
+                    self.last_press = None;
+                    return;
+                }
+                self.modulating.patching = Some(Patching {
+                    source: Source::Lfo(n),
+                    at: (x, y),
+                    from: (x, y),
+                    away: false,
+                });
+                self.modulating.popup = None;
+                return;
+            }
             self.press_target(t, modifiers);
             return;
         }
@@ -730,6 +785,8 @@ impl Editing {
                 self.modulating.patching = Some(Patching {
                     source: Source::Lfo(n),
                     at: (x, y),
+                    from: (x, y),
+                    away: false,
                 });
                 self.modulating.popup = None;
             }
@@ -792,7 +849,7 @@ impl Editing {
             }
         }
         if modifiers.contains(Modifiers::ALT)
-            && let Some(Target::Control(i)) = self.hit(x, y)
+            && let Some(Target::Control(i)) = self.mod_hit(x, y)
             && self.in_view(i)
             && let Some(t) = self.mod_target(i)
         {
@@ -818,6 +875,7 @@ impl Editing {
     pub(super) fn mod_moved(&mut self, at: (f64, f64)) -> bool {
         if let Some(p) = &mut self.modulating.patching {
             p.at = at;
+            p.away |= (at.0 - p.from.0).hypot(at.1 - p.from.1) > JACK_LEFT;
             return true;
         }
         let Some(d) = &self.modulating.depth else {
@@ -848,10 +906,16 @@ impl Editing {
     /// 0). Whether it was one.
     pub(super) fn mod_released(&mut self) -> bool {
         if let Some(p) = self.modulating.patching.take() {
-            if let Some(Target::Control(i) | Target::Legend(i, _)) = self.hit(p.at.0, p.at.1)
+            // (A cord drawn away is no click: the next press is no double click.)
+            if p.away {
+                self.last_press = None;
+            }
+            if let Some(Target::Control(i) | Target::Legend(i, _)) = self.mod_hit(p.at.0, p.at.1)
                 && self.in_view(i)
                 && let Some(t) = self.mod_target(i)
                 && self.params.lfo_patch.depth(p.source, t).is_none()
+                // (Let go on its own jack without leaving it: a click, not a cord.)
+                && (p.away || level_of_control(i).map(Source::Lfo) != Some(p.source))
             {
                 let _ = self
                     .params
@@ -912,6 +976,10 @@ impl Editing {
         }
         let mut rows = Vec::new();
         if let Some((n, "waveform")) = lfo_part(CONTROLS[i].param) {
+            // (CONTINUOUS, what moves its shape first: R-LFO's addendum.)
+            if let Some(t) = self.mod_target(i) {
+                rows.extend(self.depth_rows(t, i));
+            }
             let continuous = self.params.lfo(n).shape_mode.value() == WaveMode::Continuous;
             rows.push(Row::Head("WAVEFORM".into()));
             rows.push(Row::Item(
@@ -939,6 +1007,35 @@ impl Editing {
         let Some(t) = self.mod_target(i) else {
             return rows;
         };
+        // (An LFO's OUT jack, its LEVEL's: what moves its LEVEL, then the LFO's own menu's
+        // COLOR and EDGES, which a right click on its jack gave before: R-LFO's addendum.)
+        if let Some(n) = level_of_control(i) {
+            rows.extend(self.depth_rows(t, i));
+            rows.extend(self.lfo_rows(n));
+            return rows;
+        }
+        rows.extend(self.depth_rows(t, i));
+        if CONTROLS[i].place == ControlPlace::Strip {
+            for (head, macros) in [("LFO", false), ("MACRO", true)] {
+                rows.push(Row::Head(head.into()));
+                for s in Source::all().filter(|s| s.macro_n().is_some() == macros) {
+                    let free = self.params.lfo_patch.depth(s, t).is_none()
+                        && self.params.lfo_patch.count(s) < lfo::MOST;
+                    rows.push(Row::Item(
+                        ModItem::Assign(s, t),
+                        label(&self.params.lfo_patch, s),
+                        free,
+                        false,
+                    ));
+                }
+            }
+        }
+        rows
+    }
+
+    /// A head for each source on target `t` (control `i`'s) with DEPTH… and REMOVE.
+    fn depth_rows(&self, t: ModTarget, i: usize) -> Vec<Row> {
+        let mut rows = Vec::new();
         for (s, d) in self.sources_on(t) {
             rows.push(Row::Head(format!(
                 "{} \u{b7} {}",
@@ -958,27 +1055,12 @@ impl Editing {
                 false,
             ));
         }
-        if CONTROLS[i].place == ControlPlace::Strip {
-            for (head, macros) in [("LFO", false), ("MACRO", true)] {
-                rows.push(Row::Head(head.into()));
-                for s in Source::all().filter(|s| s.macro_n().is_some() == macros) {
-                    let free = self.params.lfo_patch.depth(s, t).is_none()
-                        && self.params.lfo_patch.count(s) < lfo::MOST;
-                    rows.push(Row::Item(
-                        ModItem::Assign(s, t),
-                        label(&self.params.lfo_patch, s),
-                        free,
-                        false,
-                    ));
-                }
-            }
-        }
         rows
     }
 
-    /// An LFO's own menu (a right click on its scope, its jack, its screen or its column): its
-    /// colour from the phosphors (the computer's), its EDGES (the patch's).
-    pub(super) fn open_lfo_menu(&mut self, n: usize, at: (f64, f64)) {
+    /// LFO `n`'s own rows: its colour from the phosphors (the computer's), its EDGES (the
+    /// patch's).
+    fn lfo_rows(&self, n: usize) -> Vec<Row> {
         let shown = self.settings.lfo_colors[n];
         let edges = self.params.lfo_patch.edges(n);
         let mut rows = vec![Row::Head("COLOR".into())];
@@ -999,6 +1081,14 @@ impl Editing {
                 e == edges,
             ));
         }
+        rows
+    }
+
+    /// An LFO's own menu (a right click on its scope, its screen or its column; its jack's is
+    /// its LEVEL's, with these rows): its colour from the phosphors (the computer's), its EDGES
+    /// (the patch's).
+    pub(super) fn open_lfo_menu(&mut self, n: usize, at: (f64, f64)) {
+        let rows = self.lfo_rows(n);
         let size = self.renderer.text_size() * MENU_TEXT;
         self.learning.open_rows_menu(
             self.renderer.fonts(),

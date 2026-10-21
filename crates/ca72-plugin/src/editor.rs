@@ -3832,7 +3832,8 @@ impl Editing {
                 };
                 self.strip_scene.hover = None;
                 self.browser.bar.hover = None;
-                self.modulating.popup = None;
+                // (Its knobs and jacks take sources too, with their pop-ups: R-LFO's addendum.)
+                self.follow_popup(at);
                 return;
             }
             self.modulating.hover = None;
@@ -4446,9 +4447,15 @@ impl Editing {
                 } else {
                     ""
                 };
+                // (An LFO's OUT jack is its LEVEL's: what the jack does after: R-LFO's
+                // addendum.)
+                let jack = match lfo_page::level_of_control(i) {
+                    Some(n) => format!(" \u{b7} LFO {} OUT: DRAG TO A KNOB TO MODULATE IT", n + 1),
+                    None => String::new(),
+                };
                 // (The sources on it and their depths: decisions.md R-LFO.)
                 let tip = (
-                    format!("{label}: {}{range}{}", p.text(v), self.depths_tip(i)),
+                    format!("{label}: {}{range}{}{jack}", p.text(v), self.depths_tip(i)),
                     x,
                     y + top,
                 );
@@ -14240,6 +14247,28 @@ mod tests {
         e.learning.close_menu();
         go(&mut e, Point { x: 5.0, y: 5.0 });
         save(&mut e, "glow.png");
+        // (The LFOs moving each other, R-LFO's addendum: `cross.png` the page with LFO 1 and 2's
+        // RATEs in a loop, LFO 3 on its own PHASE, LFO 2 on LFO 1's LEVEL and macro 1 on LFO
+        // 4's; `cross-hover.png` LFO 1's RATE under the pointer, its pop-up; `level-hover.png`
+        // LFO 1's jack, its LEVEL's rings and tip.)
+        patch.assign(Source::Lfo(1), T::LfoRate(0), 0.4).unwrap();
+        patch.assign(Source::Lfo(0), T::LfoRate(1), -0.3).unwrap();
+        patch.assign(Source::Lfo(2), T::LfoPhase(2), 0.5).unwrap();
+        patch.assign(Source::Lfo(1), T::LfoLevel(0), -0.6).unwrap();
+        patch.assign(Source::Macro(0), T::LfoLevel(3), 0.8).unwrap();
+        lfo_open(&mut e);
+        e.modulating.due = None;
+        let (sx, sy, sw, sh) = ca72_panel::strip::lfo::places(3).scope;
+        let p = at(&e, (sx + sw / 2.0, sy + sh / 2.0));
+        go(&mut e, p);
+        save(&mut e, "cross.png");
+        let rate = at(&e, lfo_centre(0, 1));
+        go(&mut e, rate);
+        save(&mut e, "cross-hover.png");
+        go(&mut e, Point { x: 5.0, y: 5.0 });
+        let jack = at(&e, ca72_panel::strip::lfo::places(0).jack);
+        go(&mut e, jack);
+        save(&mut e, "level-hover.png");
     }
 
     // ---- The LFO page and modulation (decisions.md R-LFO).
@@ -14735,7 +14764,8 @@ mod tests {
     /// An assignment dragged from an OUT jack (the owner's "Drag to knob"): while held, the cord
     /// and the knobs that can take it ringed, the one under the plug brightly with its preview
     /// ring at 25 %; let go there, the LFO modulates it at +25 % (Pigments' convention), its
-    /// MODULATES screen saying so. Not on a switch, nor on the LFOs' own knobs.
+    /// MODULATES screen saying so. Not on a switch; on another LFO's knob, that knob (R-LFO's
+    /// addendum).
     #[test]
     fn an_assignment_dragged_from_out_lands_on_a_knob_at_a_quarter() {
         use crate::lfo::{Source, Target as T};
@@ -14776,7 +14806,7 @@ mod tests {
         assert!(e.mod_scene.cord.is_none());
         assert_eq!(e.lfo_scene.columns[1].screen, "CUTOFF +25");
         assert!(e.lfo_scene.columns[1].in_use);
-        // Dropped on a switch, or on another LFO's knob: nothing.
+        // Dropped on a switch: nothing; on another LFO's knob, that knob (R-LFO's addendum).
         for p in [at(&e, centre("osc_mod")), at(&e, lfo_centre(2, 3))] {
             go(&mut e, jack);
             e.mouse(MouseEvent::ButtonPressed {
@@ -14786,7 +14816,11 @@ mod tests {
             go(&mut e, p);
             release(&mut e);
         }
-        assert_eq!(params.lfo_patch.count(Source::Lfo(1)), 1);
+        assert_eq!(params.lfo_patch.count(Source::Lfo(1)), 2);
+        assert_eq!(
+            params.lfo_patch.depth(Source::Lfo(1), T::LfoPhase(2)),
+            Some(0.25)
+        );
     }
 
     /// A CONTINUOUS WAVEFORM's rings and pop-up take its own sweep, where its pointer stands at
@@ -15180,6 +15214,175 @@ mod tests {
             );
         }
         assert!(!e.watched.take_moved());
+    }
+
+    /// The LFOs' own knobs take sources (decisions.md R-LFO's addendum; the owner, 2026-10-20:
+    /// "LFOs to control each other's parameters", "Let's try B"): with the page open, LFO 2's cord
+    /// lands on LFO 1's RATE, PHASE and RISE, on its own RATE, on LFO 1's WAVEFORM only while it
+    /// is CONTINUOUS, on LFO 1's OUT jack as its LEVEL; LFO 1's cord let go on its own jack without
+    /// leaving it gives nothing, drawn away and back its own LEVEL; a timed RATE takes none; a
+    /// macro's cord lands on an LFO's RATE. The page's knobs then show rings (on their own
+    /// sweeps; the jack's round it), the pop-up on hover, the tip's depths and the menu's
+    /// DEPTH…/REMOVE; the jack's menu keeps the LFO's COLOR and EDGES; the wheel on the jack
+    /// turns LEVEL.
+    #[test]
+    fn the_lfos_own_knobs_take_sources() {
+        use crate::learning::{ModItem, Row};
+        use crate::lfo::{Source, Target as T};
+        use ca72_panel::controls::LFO_LEVEL_PART;
+        use ca72_panel::strip::lfo::places;
+        use nih_plug::context::process::TestProcessContext;
+        let (mut e, host, params) = editing();
+        e.playing.visible = false;
+        lfo_open(&mut e);
+        let drag = |e: &mut Editing, from: (f64, f64), to: (f64, f64)| {
+            let p = at(e, from);
+            go(e, p);
+            e.mouse(MouseEvent::ButtonPressed {
+                button: MouseButton::Left,
+                modifiers: Modifiers::empty(),
+            });
+            let q = at(e, to);
+            go(e, q);
+            e.draw();
+            release(e);
+            e.draw();
+        };
+        let depth = |s, t| params.lfo_patch.depth(s, t);
+        for (k, t) in [(1, T::LfoRate(0)), (3, T::LfoPhase(0)), (4, T::LfoRise(0))] {
+            drag(&mut e, places(1).jack, lfo_centre(0, k));
+            assert_eq!(depth(Source::Lfo(1), t), Some(0.25), "{t:?}");
+        }
+        drag(&mut e, places(1).jack, lfo_centre(1, 1));
+        assert_eq!(depth(Source::Lfo(1), T::LfoRate(1)), Some(0.25), "its own");
+        drag(&mut e, places(1).jack, lfo_centre(0, 0));
+        assert_eq!(depth(Source::Lfo(1), T::LfoShape(0)), None, "STEPPED");
+        drag(&mut e, places(1).jack, places(0).jack);
+        assert_eq!(depth(Source::Lfo(1), T::LfoLevel(0)), Some(0.25), "LEVEL");
+        // A click on its own jack: nothing; away and back: its own LEVEL.
+        let jack = at(&e, places(0).jack);
+        click(&mut e, jack);
+        assert_eq!(params.lfo_patch.count(Source::Lfo(0)), 0, "a click");
+        // (Past a double click's time: a second press then would put LEVEL back at 100 %.)
+        e.last_press = None;
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let away = at(&e, lfo_centre(0, 1));
+        go(&mut e, away);
+        go(&mut e, jack);
+        release(&mut e);
+        assert_eq!(
+            depth(Source::Lfo(0), T::LfoLevel(0)),
+            Some(0.25),
+            "away and back"
+        );
+        // Timed, RATE takes none; CONTINUOUS, WAVEFORM its shape (the parameters as a host sets
+        // them).
+        let c =
+            TestProcessContext::<crate::Ca72>::new(params.clone(), 48_000.0, ProcessMode::Realtime);
+        assert!(c.automate(params.lfo(2).timed.as_ptr(), 1.0));
+        assert!(c.automate(params.lfo(0).shape_mode.as_ptr(), 1.0));
+        e.draw();
+        drag(&mut e, places(1).jack, lfo_centre(2, 1));
+        assert_eq!(depth(Source::Lfo(1), T::LfoRate(2)), None, "timed");
+        drag(&mut e, places(1).jack, lfo_centre(0, 0));
+        assert_eq!(
+            depth(Source::Lfo(1), T::LfoShape(0)),
+            Some(0.25),
+            "CONTINUOUS"
+        );
+        // A macro's.
+        macro_key(&mut e);
+        drag(
+            &mut e,
+            ca72_panel::strip::macros::jack_at(0),
+            lfo_centre(3, 1),
+        );
+        assert_eq!(
+            depth(Source::Macro(0), T::LfoRate(3)),
+            Some(0.25),
+            "a macro's"
+        );
+        // Rings on the page's knobs, the jack's round it.
+        e.draw();
+        let rate = ca72_panel::controls::lfo_index(0, 1);
+        let level = ca72_panel::controls::lfo_index(0, LFO_LEVEL_PART);
+        let rings = |e: &Editing, i: usize| {
+            e.mod_scene
+                .knobs
+                .iter()
+                .find(|k| k.control == i)
+                .map(|k| (k.rings.len(), k.skirt, k.sweep))
+        };
+        assert_eq!(
+            rings(&e, rate).map(|r| (r.0, r.2)),
+            Some((1, art::KNOB_SWEEP))
+        );
+        let (n, skirt, _) = rings(&e, level).expect("LEVEL's rings");
+        assert_eq!(n, 2);
+        assert!(skirt < art::STD.skirt, "round the jack: {skirt}");
+        // The pop-up and the tip on hover.
+        let p = at(&e, lfo_centre(0, 1));
+        go(&mut e, p);
+        e.draw();
+        assert_eq!(e.modulating.popup, Some(rate));
+        let tip = e.tip().map(|t| t.0).unwrap_or_default();
+        assert!(
+            tip.starts_with("LFO 1 RATE") && tip.contains("LFO 2 +25 %"),
+            "{tip}"
+        );
+        // (Off RATE's pop-up, which hangs below it, first.)
+        let (sx, sy, sw, sh) = places(0).scope;
+        let p = at(&e, (sx + sw / 2.0, sy + sh / 2.0));
+        go(&mut e, p);
+        e.draw();
+        let p = at(&e, places(0).jack);
+        go(&mut e, p);
+        e.draw();
+        let tip = e.tip().map(|t| t.0).unwrap_or_default();
+        assert!(
+            tip.starts_with("LFO 1 LEVEL: 100")
+                && tip.contains("LFO 2 +25 %")
+                && tip.contains("OUT"),
+            "{tip}"
+        );
+        // The menus.
+        let rows = e.knob_rows(rate);
+        assert!(rows.iter().any(|r| matches!(
+            r,
+            Row::Item(ModItem::Depth(Source::Lfo(1), T::LfoRate(0), _), ..)
+        )));
+        assert!(rows.iter().any(|r| matches!(
+            r,
+            Row::Item(ModItem::Remove(Source::Lfo(1), T::LfoRate(0)), ..)
+        )));
+        let rows = e.knob_rows(level);
+        assert!(rows.iter().any(|r| matches!(
+            r,
+            Row::Item(ModItem::Remove(Source::Lfo(0), T::LfoLevel(0)), ..)
+        )));
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r, Row::Item(ModItem::Color(0, _), ..)))
+        );
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r, Row::Item(ModItem::Edges(0, _), ..)))
+        );
+        // The wheel on the jack turns LEVEL.
+        host.take();
+        wheel(&mut e, -1.0);
+        let calls = host.take();
+        let lvl = params.lfo_level(0).level.as_ptr();
+        assert!(
+            calls
+                .iter()
+                .any(|c| matches!(c, Call::Set(p, _) if *p == lvl)),
+            "{calls:?}"
+        );
     }
 
     /// An assignment dragged from a macro's jack lands on a knob at +25 %, as an LFO's; while

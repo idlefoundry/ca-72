@@ -776,6 +776,10 @@ impl LfoRenderer {
         col: &Column,
         panel: &mut Renderer,
     ) -> Vec<[i32; 4]> {
+        // (LEVEL is its jack's, drawn as the jack: R-LFO's addendum.)
+        if k == crate::controls::LFO_LEVEL_PART {
+            return Vec::new();
+        }
         let key: Key = match k {
             0 => vec![
                 u64::from(col.continuous),
@@ -1552,7 +1556,12 @@ mod tests {
             ] {
                 let (x, y) = target_centre(t);
                 assert_eq!(hit(x, y), Some(t));
-                assert_eq!(hit_lfo(&layout, x, y), None, "{t:?} is no control");
+                // (The jack is its LEVEL's control: R-LFO's addendum.)
+                let jack = matches!(t, LfoTarget::Jack(_)).then_some(Target::Control(lfo_index(
+                    n,
+                    crate::controls::LFO_LEVEL_PART,
+                )));
+                assert_eq!(hit_lfo(&layout, x, y), jack, "{t:?}");
             }
             let p = places(n);
             let (sx, _, sw, _) = p.scope;

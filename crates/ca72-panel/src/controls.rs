@@ -142,6 +142,10 @@ pub enum Kind {
     /// oscillator is timed at printed beside it: an oscillator's TIMED (decisions.md
     /// R-OSC-TIMED). It flips at a click, as a switch.
     Key,
+    /// An LFO's OUT jack, as its LEVEL's control (decisions.md R-LFO's addendum): no knob of
+    /// its own (the page draws the jack), its rings round the jack; a press there drags an
+    /// assignment from it, the wheel turns its LEVEL, a typed value sets it.
+    Jack,
 }
 
 impl Kind {
@@ -150,7 +154,7 @@ impl Kind {
     /// discrete options.
     pub fn is_continuous(&self) -> bool {
         matches!(self, Self::Knob { dial, .. } if dial.steps().is_none())
-            || matches!(self, Self::Wheel { .. })
+            || matches!(self, Self::Wheel { .. } | Self::Jack)
     }
 }
 
@@ -373,12 +377,12 @@ const fn lfo_knob(dial: Dial) -> Kind {
     Kind::Knob { dial, big: false }
 }
 
-/// LFO `n`'s (0 to 3) nine controls, in the order [`LFO_PARTS`] names them.
+/// LFO `n`'s (0 to 3) ten controls, in the order [`LFO_PARTS`] names them.
 const fn lfo_column(
     n: usize,
-    params: [&'static str; 9],
-    labels: [&'static str; 9],
-) -> [Control; 9] {
+    params: [&'static str; 10],
+    labels: [&'static str; 10],
+) -> [Control; 10] {
     let p = crate::strip::lfo::places(n);
     [
         lfo(
@@ -404,15 +408,19 @@ const fn lfo_column(
         lfo(params[6], labels[6], p.mono, Kind::Key),
         lfo(params[7], labels[7], p.polarity, Kind::Key),
         lfo(params[8], labels[8], p.on, Kind::Key),
+        lfo(params[9], labels[9], p.jack, Kind::Jack),
     ]
 }
 
 /// The parts of an LFO's column that are controls, their parameters' IDs' last parts.
-pub const LFO_PARTS: [&str; 9] = [
-    "waveform", "rate", "timed", "phase", "rise", "mode", "mono", "polarity", "on",
+pub const LFO_PARTS: [&str; 10] = [
+    "waveform", "rate", "timed", "phase", "rise", "mode", "mono", "polarity", "on", "level",
 ];
 
-const LFO_COLUMNS: [[Control; 9]; 4] = [
+/// LEVEL's place among [`LFO_PARTS`]: its OUT jack's (R-LFO's addendum).
+pub const LFO_LEVEL_PART: usize = 9;
+
+const LFO_COLUMNS: [[Control; 10]; 4] = [
     lfo_column(
         0,
         [
@@ -425,6 +433,7 @@ const LFO_COLUMNS: [[Control; 9]; 4] = [
             "lfo1_mono",
             "lfo1_polarity",
             "lfo1_on",
+            "lfo1_level",
         ],
         [
             "LFO 1 WAVEFORM",
@@ -436,6 +445,7 @@ const LFO_COLUMNS: [[Control; 9]; 4] = [
             "LFO 1 MONO",
             "LFO 1 POLARITY (BI or UNI)",
             "LFO 1 ON",
+            "LFO 1 LEVEL",
         ],
     ),
     lfo_column(
@@ -450,6 +460,7 @@ const LFO_COLUMNS: [[Control; 9]; 4] = [
             "lfo2_mono",
             "lfo2_polarity",
             "lfo2_on",
+            "lfo2_level",
         ],
         [
             "LFO 2 WAVEFORM",
@@ -461,6 +472,7 @@ const LFO_COLUMNS: [[Control; 9]; 4] = [
             "LFO 2 MONO",
             "LFO 2 POLARITY (BI or UNI)",
             "LFO 2 ON",
+            "LFO 2 LEVEL",
         ],
     ),
     lfo_column(
@@ -475,6 +487,7 @@ const LFO_COLUMNS: [[Control; 9]; 4] = [
             "lfo3_mono",
             "lfo3_polarity",
             "lfo3_on",
+            "lfo3_level",
         ],
         [
             "LFO 3 WAVEFORM",
@@ -486,6 +499,7 @@ const LFO_COLUMNS: [[Control; 9]; 4] = [
             "LFO 3 MONO",
             "LFO 3 POLARITY (BI or UNI)",
             "LFO 3 ON",
+            "LFO 3 LEVEL",
         ],
     ),
     lfo_column(
@@ -500,6 +514,7 @@ const LFO_COLUMNS: [[Control; 9]; 4] = [
             "lfo4_mono",
             "lfo4_polarity",
             "lfo4_on",
+            "lfo4_level",
         ],
         [
             "LFO 4 WAVEFORM",
@@ -511,6 +526,7 @@ const LFO_COLUMNS: [[Control; 9]; 4] = [
             "LFO 4 MONO",
             "LFO 4 POLARITY (BI or UNI)",
             "LFO 4 ON",
+            "LFO 4 LEVEL",
         ],
     ),
 ];
@@ -536,17 +552,22 @@ pub const MACRO_FIRST: usize = 96;
 
 /// The index in [`CONTROLS`] of LFO `n`'s (0 to 3) part `k` ([`LFO_PARTS`]' order): its first
 /// seven together, its POLARITY and ON keys after the macros' (R-LFO's corrections: so that no
-/// control moves).
+/// control moves), its LEVEL after those (R-LFO's addendum).
 pub const fn lfo_index(n: usize, k: usize) -> usize {
     if k < 7 {
         LFO_FIRST + 7 * n + k
-    } else {
+    } else if k < LFO_LEVEL_PART {
         LFO_KEYS_FIRST + 2 * n + (k - 7)
+    } else {
+        LFO_LEVEL_FIRST + n
     }
 }
 
 /// Where the LFOs' POLARITY and ON keys begin in [`CONTROLS`]: after the macros' knobs.
 pub const LFO_KEYS_FIRST: usize = MACRO_FIRST + 6;
+
+/// Where the LFOs' LEVELs (their OUT jacks) begin in [`CONTROLS`]: after their keys.
+pub const LFO_LEVEL_FIRST: usize = LFO_KEYS_FIRST + 8;
 
 /// Where the LFO page's controls begin in [`CONTROLS`].
 pub const LFO_FIRST: usize = 68;
@@ -559,7 +580,7 @@ pub const KEY_BELOW_RANGE: f64 = 84.0;
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 110] = [
+pub const CONTROLS: [Control; 114] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -995,6 +1016,12 @@ pub const CONTROLS: [Control; 110] = [
     LFO_COLUMNS[2][8],
     LFO_COLUMNS[3][7],
     LFO_COLUMNS[3][8],
+    // Each LFO's LEVEL, its OUT jack's (R-LFO's addendum), after those, so that no control
+    // moves.
+    LFO_COLUMNS[0][9],
+    LFO_COLUMNS[1][9],
+    LFO_COLUMNS[2][9],
+    LFO_COLUMNS[3][9],
 ];
 
 /// The panel's controls' history (decisions.md R-SKIN-PACKS), so that a skin pack's layout made
@@ -1020,10 +1047,11 @@ pub struct ControlSet {
 /// (R-CONTINUOUS-WAVE), the LFO page's in the fourth (R-LFO: the plug-in's own, on its lower
 /// page, which a layout does not place, as the strip's), the six macros in the fifth (R-MACROS:
 /// in the left hand's area, which a layout does not place either), each LFO's POLARITY (UNI) and
-/// ON keys in the sixth (R-LFO's corrections). Never edit an entry once
+/// ON keys in the sixth (R-LFO's corrections), each LFO's LEVEL (its OUT jack) in the seventh
+/// (R-LFO's addendum). Never edit an entry once
 /// released: add to it (and raise `revision`) as controls come, go, or change.
 pub const CONTROL_SET: ControlSet = ControlSet {
-    revision: 6,
+    revision: 7,
     added: &[
         ("osc2_timed", 2),
         ("osc3_timed", 2),
@@ -1072,6 +1100,10 @@ pub const CONTROL_SET: ControlSet = ControlSet {
         ("lfo3_on", 6),
         ("lfo4_polarity", 6),
         ("lfo4_on", 6),
+        ("lfo1_level", 7),
+        ("lfo2_level", 7),
+        ("lfo3_level", 7),
+        ("lfo4_level", 7),
     ],
     renamed: &[],
     retired: &[],

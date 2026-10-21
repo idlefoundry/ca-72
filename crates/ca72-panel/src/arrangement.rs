@@ -923,6 +923,7 @@ fn look_of(official: Kind, e: &ControlEntry) -> Result<Kind, String> {
             Kind::Key
         }
         Kind::Wheel { .. } => return Err("a wheel is the plug-in's own".into()),
+        Kind::Jack => return Err("a jack is the LFO page's own".into()),
     })
 }
 

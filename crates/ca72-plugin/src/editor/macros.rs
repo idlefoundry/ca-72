@@ -147,6 +147,8 @@ impl Editing {
                 self.modulating.patching = Some(super::lfo_page::Patching {
                     source: Source::Macro(n),
                     at: (x, y),
+                    from: (x, y),
+                    away: false,
                 });
                 self.modulating.popup = None;
                 true
