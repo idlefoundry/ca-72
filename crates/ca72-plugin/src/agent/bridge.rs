@@ -288,6 +288,30 @@ impl Backend for Bridge {
         match (tool.runs, tool.method) {
             (Runs::Bridge, "instances") => self.instances(),
             (Runs::Bridge, "select") => self.select(args),
+            (Runs::Bridge, "audio.analyze") => super::audio::analyze(args),
+            (Runs::Bridge, "audio.compare") => super::audio::compare(args),
+            (Runs::Bridge, "audio.render") => {
+                let snapshot = match (super::arg(args, "snapshot"), super::arg(args, "preset")) {
+                    (Some(_), Some(_)) => {
+                        return Err(ApiError::params("choose snapshot or preset, not both"));
+                    }
+                    (Some(v), None) => serde_json::from_value(v.clone())
+                        .map_err(|e| ApiError::params(format!("snapshot: {e}")))?,
+                    (None, Some(v)) => crate::offline::Snapshot::preset(
+                        v.as_str()
+                            .ok_or_else(|| ApiError::params("preset must be a name"))?,
+                    )?,
+                    (None, None) => {
+                        serde_json::from_value(self.forward("render.snapshot", &json!({}))?)
+                            .map_err(|e| {
+                                ApiError::refused(format!(
+                                    "instance returned an incompatible render snapshot: {e}"
+                                ))
+                            })?
+                    }
+                };
+                super::audio::render(args, snapshot)
+            }
             (_, method) => self.forward(method, args),
         }
     }

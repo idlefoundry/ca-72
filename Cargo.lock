@@ -311,6 +311,7 @@ name = "ca72-analysis"
 version = "0.3.0"
 dependencies = [
  "libm",
+ "png",
  "serde",
 ]
 
@@ -369,6 +370,7 @@ dependencies = [
 name = "ca72-plugin"
 version = "0.3.0"
 dependencies = [
+ "base64",
  "baseview",
  "ca72",
  "ca72-analysis",
@@ -393,6 +395,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "softbuffer",
  "tempfile",
  "toml",

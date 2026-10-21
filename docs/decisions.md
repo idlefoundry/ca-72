@@ -14268,3 +14268,93 @@ locked writes them as heard. The parameter list shares the effects' chooser's tw
 (the title, then FIND): ten parameters show, as before. Held by
 `pins_and_what_moves_them_travel_with_a_preset_and_under_lock` (ca72-fx-helper, real test
 CLAP effect).
+
+
+## R-REFERENCE-AUDIO. Reference matching through measured offline renders (#77)
+
+**The owner, 2026-10-21.** White Lotus (R43) is the example of what the MCP must allow an
+agent to reproduce for 0.3: a user supplies audio, the agent fits a usable preset and tests
+it with spectrograms and other measurements. Offline rendering is needed so the agent can
+calibrate against its settings. The owner authorised building this workflow.
+
+**Agent implementation choices (not separately approved).**
+
+- Four tools: `ca72_snapshot` captures the selected live sound; `ca72_render` renders that
+  snapshot, a library preset or the current sound; `ca72_analyze` measures a local WAV;
+  `ca72_compare` compares a reference and candidate and writes a level-matched listening pair.
+  The fitting skill is `docs/agent-skills/ca72-match-reference/SKILL.md`, also supplied by the
+  MCP prompt `ca72_match_reference`. Transcription, source separation and a parameter
+  optimiser are not claimed. The agent performs the iterative fitting.
+- Only the capture goes through the editor. The bridge owns a fresh `Ca72`, calls the same
+  `Ca72::process` as playback, and does rendering/FFT/file work without a device, live worker,
+  audio deadline or change to the user's sound. Arpeggiator, timed oscillators, LFOs, macros,
+  stereo, DRIVE, LEVEL and captured AUTO GAIN are included. The existing framework FTZ guard
+  is exposed for parity on the detached thread; no DSP law is retuned.
+- Snapshots retain every parameter, modulation patch, macro names, curve, seed, tempo and
+  frequency-dial law. That preference changes frequency modulation despite normally being a
+  computer setting. The version and engine-source SHA-256 must match the bridge. Manifests
+  retain the snapshot, gates, rate, block size, compensated latency and output hash. Settings
+  repeat on the tested build; cross-target floating point identity is not promised.
+- Rendering explicitly requests `effects: "dry"`. Hosted effects, external audio, already
+  sounding oscillator/LFO phase, MIDI wheel offsets, pressure and pedals are excluded.
+  A preset-only render uses 120 BPM, semitone frequency dials and seed 72. Live captures keep
+  theirs. `ca72_settings_set` now offers the standalone TEMPO through the screen's own path,
+  with its whole-BPM rounding. Candidate overrides retain the captured AUTO GAIN curve;
+  recalibration after DRIVE/AUTO GAIN changes goes through the live controls. A snapshot
+  returns BUSY while the curve is being measured, and the workflow verifies it before saving.
+- WAV first, local processing only, no upload, download or source separation. Inputs are
+  complete mono/stereo PCM or float WAVs up to 128 MiB, 8 to 192 kHz, with 1024 samples to
+  60 s selected. Reject invalid/truncated containers, partial frames, non-finite audio,
+  unsupported state, silent comparisons and mismatched rates/lengths. New output folders
+  only; the manifest/metrics file is the completion marker. A failed/interrupted call may
+  leave an incomplete folder, never overwrite an earlier result.
+- Measurements retain time: three spectral resolutions, 10 ms envelope, pitch and onsets,
+  held-note harmonic levels and optional modulation sidebands. Spectra average channel
+  powers to preserve anti-phase material. LUFS matching canonicalises mono to stereo, with
+  RMS for short clips. Both signals' audible bins/windows count, including extra candidate
+  harmonics, noise and tails. No hidden time/pitch alignment, correlation score, similarity
+  percentage or automatic perceptual pass. Spectrograms have labelled axes and a shared
+  colour scale; listening files share any attenuation needed to keep peaks below 0.9.
+- Typed/bounded AUTO GAIN fields and per-block engine diagnostics reject invalid curves,
+  recovered broken voices and sanitised output, even if the final samples are finite.
+- The build and installer scripts now carry the bridge on Linux, Windows and macOS. On
+  macOS its nested executable is signed before the application. The feature branch starts
+  from `test-v03-21oct` to retain its LFO/macros/effects-pin changes.
+
+**Evidence, Linux x86-64, 2026-10-21.**
+
+- Analysis library: 14 tests passed, including level-only changes, mono/stereo layout,
+  anti-phase input, missing and extra harmonics, pitch, attack/release, resolved/unresolved
+  sidebands, silence and invalid audio.
+- Agents: 32 tests passed, including a real editor/socket/bridge save and reload with LFO
+  assignments, HARDWARE frequency dials and TEMPO retained. The reloaded sound's rendered
+  level changes less than 0.1 dB and each spectral error less than 0.5 dB.
+- Offline filter: 6 tests passed, including seeded noise, dial-law modulation, invalid
+  curves/source hashes, zero-sample gates, fault visibility and existing clock/loop parity.
+- Built bridge: the 2 existing integration tests and the new stdio fitting test passed. The
+  latter renders a synthetic White Lotus held-bass reference, measures it, chooses the
+  matching cutoff from three candidates and checks exact same-snapshot reproduction,
+  manifests and overwrite refusal, with no live application or device.
+- `scripts/reference-audio-demo.py` retains a listening report. A controlled four-second,
+  two-note White Lotus fixture at QUALITY HI, reference seed 271, candidates seed 72,
+  recovers CUTOFF -2.14 from five choices. Mean spectral error across the three resolutions:
+  3.105 dB at -2.14, versus 7.595 to 20.456 dB for the other candidates. A held D2 measures
+  H3 6.07 dB over H1 and its lower/upper 11.3 Hz sidebands -14.50/-16.50 dB relative to H3.
+  This is one-parameter synthetic recovery, not a fit to the original studio recording or
+  a listening judgement. The source hashes, metrics, WAVs, plots and report are retained in
+  the worktree's `target/reference-audio-demo`.
+- Clippy with `-D warnings` passes for the analysis and plug-in libraries, binaries and
+  tests. Linux production-standalone feature checking and Windows GNU bridge checking pass.
+  Installer tests pass (10), shell syntax and notices checks pass, and the skill validates.
+- A read-only critic reviewed the implementation twice; its findings about channel layout,
+  dial law, extra candidate energy, quantised gates, FTZ, internal fault detection and
+  fixture isolation were addressed.
+
+**Not yet verified.** The original White Lotus recording, an independent representative
+reference corpus, macOS runtime/packaging and Windows runtime. Existing live-control MCP
+transport remains Unix-only; Windows can use the headless preset/snapshot file tools.
+No release was tagged, published or installed on the player's machine for this change.
+
+**Shared skill lesson.** Offline parity includes DSP-affecting preferences, the wrapper's
+floating point mode and internal recovery diagnostics. Calling the same process function
+and checking finite WAV samples alone does not establish a valid calibration render.

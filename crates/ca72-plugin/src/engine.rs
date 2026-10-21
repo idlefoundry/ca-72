@@ -1533,6 +1533,10 @@ pub struct Engine {
     seed: u64,
     controls: Controls,
     gain: f64,
+    /// Diagnostics for detached renders: recovered or sanitised output cannot be used as
+    /// a calibration measurement. Live recovery's audio behaviour is unchanged.
+    render_recoveries: u64,
+    render_sanitised: u64,
     /// Keys held (MIDI numbers), played on by voices built for a new rate (POLY off).
     held: [bool; 128],
     /// POLY's notes taken so far (each voice's age).
@@ -1638,6 +1642,21 @@ impl Default for Engine {
     }
 }
 
+#[cfg(test)]
+mod offline_health_tests {
+    use super::*;
+    #[test]
+    fn sanitised_output_is_observable_by_the_offline_host() {
+        let mut engine = Engine::new();
+        assert!(!engine.render_faulted());
+        assert_eq!(engine.faded(f64::NAN, 0.0), (0.0, 0.0));
+        assert!(
+            engine.render_faulted(),
+            "zeroed NaN must not become successful calibration audio"
+        );
+    }
+}
+
 /// How a voice's place reaches its voice: `f` on it at once, unless a worker late from an
 /// earlier run holds it.
 fn with_voice<T>(s: &Slot, f: impl FnOnce(&mut Playing) -> T) -> Option<T> {
@@ -1678,6 +1697,8 @@ impl Engine {
             presses: 0,
             sounding: None,
             lamp: 0.0,
+            render_recoveries: 0,
+            render_sanitised: 0,
             glide: 1.0,
             turn_glide: 1.0,
             turn: 0,
@@ -2550,6 +2571,9 @@ impl Engine {
     /// the spare has not been made again since it was last used. Either way the spares are
     /// then to be mended ([`Engine::take_mending`]).
     fn restore(&mut self, k: usize, p: &mut Playing) -> bool {
+        if p.broken {
+            self.render_recoveries = self.render_recoveries.saturating_add(1);
+        }
         if p.potato {
             // (The light voices are put to rest in place: nothing to make.)
             p.light.rest();
@@ -3069,6 +3093,17 @@ impl Engine {
         s.pending = 0;
     }
 
+    /// Whether a detached render encountered a recovered voice, sanitised sample, or
+    /// a voice still broken. Called only with offline work stopped; a held lock also fails.
+    pub fn render_faulted(&self) -> bool {
+        self.render_recoveries != 0
+            || self.render_sanitised != 0
+            || self
+                .slots
+                .iter()
+                .any(|s| s.play.try_lock().map_or(true, |p| p.broken))
+    }
+
     /// A sample of the voices' sum, left and right, through MAIN OUTPUT's gain and POWER's
     /// or All Sound Off's fade (moved a sample on). Never a sample that is not finite
     /// (decisions.md R18): 0 instead, and the resamplers, which may hold one, start again.
@@ -3087,6 +3122,7 @@ impl Engine {
         if l.is_finite() && r.is_finite() {
             return (l, r);
         }
+        self.render_sanitised = self.render_sanitised.saturating_add(1);
         if let Some(o) = &mut self.over {
             o.up.reset();
             o.down.iter_mut().for_each(Decimator::reset);

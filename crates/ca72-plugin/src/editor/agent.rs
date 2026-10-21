@@ -147,6 +147,16 @@ impl Editing {
     pub(super) fn agent_call(&mut self, method: &str, args: &Value) -> Reply {
         let r = match method {
             "describe" => Ok(self.describe()),
+            "render.snapshot" => {
+                if self.params.drive_curve.waiting() {
+                    return Err(ApiError::new(
+                        codes::BUSY,
+                        "AUTO GAIN is still measuring; wait for it to finish, then capture again",
+                    ));
+                }
+                serde_json::to_value(crate::offline::Snapshot::capture(&self.params))
+                    .map_err(|e| ApiError::refused(format!("could not capture sound: {e}")))
+            }
             "parameters.get" => self.get(args),
             "parameters.set" => self.set(args),
             "parameters.reset" => self.reset(args),
@@ -677,6 +687,7 @@ impl Editing {
             "look": match s.skin { Skin::Worn => "REALISTIC", Skin::Drawn => "CLASSIC" },
             "lettering": match s.lettering { Lettering::Standard => "STANDARD", Lettering::Large => "LARGE" },
             "frequency_dials": match s.frequency { Law::Semitones => "SEMITONES", Law::Hardware => "HARDWARE" },
+            "tempo": self.params.tempo(),
             "quality_indicator": s.shutter,
             "mod_wheel_source": self.params.midi_map.wheel_source().text(),
             "mpe_input": mpe_input_word(self.params.mpe_mode()),
@@ -733,6 +744,17 @@ impl Editing {
             Some(Value::Bool(b)) => Some(*b),
             Some(_) => return Err(ApiError::params("`quality_indicator` is true or false")),
         };
+        let tempo = match arg(args, "tempo") {
+            None => None,
+            Some(v) => Some(
+                v.as_f64()
+                    .filter(|v| v.is_finite() && (30.0..=300.0).contains(v))
+                    .ok_or_else(|| ApiError::params("tempo must be 30 to 300 BPM"))?,
+            ),
+        };
+        if tempo.is_some() && !self.playing.standalone {
+            return Err(ApiError::refused("a plug-in follows its host's tempo"));
+        }
         let wheel = match word("mod_wheel_source")? {
             None => None,
             Some(w) => Some(wheel_source(&w)?),
@@ -808,6 +830,7 @@ impl Editing {
             "look",
             "lettering",
             "frequency_dials",
+            "tempo",
             "quality_indicator",
             "mod_wheel_source",
             "mpe_input",
@@ -829,6 +852,9 @@ impl Editing {
         }
         if let Some(l) = dials {
             self.set_frequency_dials(l);
+        }
+        if let Some(bpm) = tempo {
+            self.set_tempo(bpm, true);
         }
         if let Some(shown) = indicator {
             self.keep_settings(Change::Shutter(shown));
@@ -1730,6 +1756,76 @@ mod tests {
         assert!(
             refused(&a.tool(&mut e, "ca72_preset_revert", json!({"name": factory})))
                 .contains("only")
+        );
+    }
+
+    #[test]
+    fn a_reference_candidate_is_saved_reloaded_and_renders_with_its_modulation() {
+        use crate::offline::{Note, Request, Snapshot};
+        let (_t, mut e, params, mut a) = agent_and_editor();
+        ok(&a.tool(&mut e, "ca72_preset_load", json!({"name":"White Lotus"})));
+        ok(&a.tool(&mut e, "ca72_set", json!({"values":{"quality":"LO"}})));
+        ok(&a.tool(
+            &mut e,
+            "ca72_settings_set",
+            json!({"tempo":133.5,"frequency_dials":"HARDWARE"}),
+        ));
+        ok(&a.tool(
+            &mut e,
+            "ca72_modulation_set",
+            json!({"source":"lfo1","target":"cutoff","depth":8}),
+        ));
+        let before: Snapshot =
+            serde_json::from_value(ok(&a.tool(&mut e, "ca72_snapshot", json!({}))).clone())
+                .expect("snapshot");
+        assert_eq!(before.tempo, 134.0, "TEMPO follows the screen's rounding");
+        assert!(before.hardware_frequency_dials);
+        let request = Request {
+            notes: vec![Note {
+                note: 38,
+                start: 0.0,
+                duration: 0.15,
+            }],
+            seconds: 0.25,
+            sample_rate: 48000,
+        };
+        let rendered = crate::offline::render(&before, &request).expect("candidate");
+        ok(&a.tool(
+            &mut e,
+            "ca72_preset_save",
+            json!({"name":"Reference loop test"}),
+        ));
+        ok(&a.tool(&mut e, "ca72_set", json!({"values":{"cutoff":1}})));
+        ok(&a.tool(&mut e, "ca72_modulation_remove", json!({"source":"lfo1"})));
+        ok(&a.tool(
+            &mut e,
+            "ca72_preset_load",
+            json!({"name":"Reference loop test"}),
+        ));
+        let after: Snapshot =
+            serde_json::from_value(ok(&a.tool(&mut e, "ca72_snapshot", json!({}))).clone())
+                .expect("reloaded");
+        let reloaded = crate::offline::render(&after, &request).expect("reloaded render");
+        assert_eq!(before.fields["lfo"], after.fields["lfo"]);
+        let compared = ca72_analysis::matching::compare(
+            &rendered.channels,
+            &reloaded.channels,
+            48000,
+            Some(73.4162),
+            None,
+        )
+        .expect("compare saved sound");
+        assert!(compared.candidate_gain_db.abs() < 0.1);
+        assert!(compared.resolutions.iter().all(|r| r.spectral_mae_db < 0.5));
+        assert!(
+            params.lfo_patch.same_as_values(
+                &e.browser
+                    .library
+                    .find("Reference loop test")
+                    .expect("saved preset")
+                    .sound
+                    .values
+            )
         );
     }
 

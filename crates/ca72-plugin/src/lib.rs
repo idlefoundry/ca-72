@@ -20,6 +20,7 @@ pub mod lfo;
 pub mod library;
 pub mod local_notes;
 pub mod mod_wheel;
+pub mod offline;
 pub mod opening;
 pub mod params;
 pub mod playing;

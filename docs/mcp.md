@@ -4,8 +4,8 @@ Issue [#76](https://github.com/idlefoundry/ca-72/issues/76); decisions.md R-MCP.
 2026-10-18 for 0.3.0. An AI agent operates the CA-72 the way a player does, through the
 [Model Context Protocol](https://modelcontextprotocol.io): it reads every control, turns them,
 chooses, saves and organises presets, changes the settings and the view, uses MIDI Learn and
-plays notes. Reference-sound matching (#77) and an agent skill for skins (#78) will build on
-this interface. They are not part of it.
+plays notes. Reference-sound matching (#77) uses the offline tools and workflow below. An agent skill
+for skins (#78) is separate.
 
 **Status.** The first version controls the **standalone application**. Plug-ins in a host
 come later (see [Next: plug-ins in a host](#next-plug-ins-in-a-host)). It is built and tested
@@ -31,8 +31,9 @@ marked **owner's call**.
 
 `ca72-mcp --instance ID` acts on one CA-72 when several are open; otherwise the agent chooses
 with `ca72_select`. Building from source: `cargo build --release -p ca72-plugin --bin ca72-mcp`
-(the bridge) and `scripts/standalone.sh` (the application). The installers do not ship
-`ca72-mcp` yet.
+(the bridge) and `scripts/standalone.sh` (the application). The 0.3 build and installer scripts ship `ca72-mcp` with the application. On macOS it is
+`/Applications/CA-72.app/Contents/MacOS/ca72-mcp`; on Linux it is beside
+`ca72-standalone` (normally `~/.local/bin`); on Windows it is `ca72-mcp.exe` beside `CA-72.exe`.
 
 ## Design
 
@@ -147,7 +148,7 @@ range and choices, the similar preset names, the list of instances. Codes
 | -32003 | No CA-72 to talk to: none allows agents, the chosen one has closed, or the connection was lost. |
 | -32005 | Several are open and none is chosen. |
 | -32001 | The window didn't take the request within 10 s. Nothing was done. |
-| -32002 | Busy: eight agents are already connected. |
+| -32002 | Busy: eight agents are connected, or AUTO GAIN is still measuring when a snapshot is requested. |
 
 An unknown tool, or arguments that aren't an object, are JSON-RPC errors, as MCP specifies.
 
@@ -199,7 +200,7 @@ agent to use the bridge that came with that instance.
 | `ca72_preset_revert` | REVERT | `name` |
 | `ca72_presets_restore` | RESTORE | none |
 | `ca72_settings` | Reads the settings and window sizes | none |
-| `ca72_settings_set` | Changes settings as the SETTINGS menu does | `look? lettering? frequency_dials? quality_indicator? mod_wheel_source? mpe_input? timbre_rest? size? agents?` (`agents` only false) |
+| `ca72_settings_set` | Changes settings as the SETTINGS menu does | `look? lettering? frequency_dials? quality_indicator? tempo? mod_wheel_source? mpe_input? timbre_rest? size? agents?` (`agents` only false) |
 | `ca72_view` | Changes the view as the rail and keyboard keys do | `presets? panel? keyboard? keyboard_octave? midi_list?` |
 | `ca72_note_on` / `ca72_note_off` | Presses or lets go of keys (no velocity: the instrument has none); `note_off` with no notes lets go of all the agent's | `notes` (numbers 0 to 127, or names, C4 = 60) |
 | `ca72_play` | Plays notes for a while, then lets go | `notes, seconds` (0.01 to 30) |
@@ -392,6 +393,7 @@ area shows, the wheels or the macros, is the computer's (the rail's MACRO key), 
 | MPE: INPUT & TIMBRE… › TIMBRE REST: CENTERED ON 64, FROM 0, FROM THE NOTE'S START | `ca72_settings_set {timbre_rest}` |
 | WINDOW: SIZE… (75 % to 200 %, FIT TO SCREEN) | `ca72_settings_set {size}`: one of the widths `ca72_settings` lists, or `"FIT"` |
 | The resize grip | the same, at the SIZE menu's widths (any other width is not offered) |
+| STANDALONE: TEMPO | `ca72_settings_set {tempo}` (30 to 300 BPM, rounded as the screen does); `ca72_settings` reads it |
 | STANDALONE: AUDIO & MIDI… | `ca72_audio` reads it. Changing devices is not offered yet (see below). |
 | AGENTS: ALLOW, OFF (new) | `ca72_settings_set {agents: false}` only |
 
@@ -427,8 +429,8 @@ area shows, the wheels or the macros, is the computer's (the rail's MACRO key), 
   version. They go through `AppHandle::apply_tracked` after `negotiate`, as the dialog does,
   and can stop the sound. Recommendation: offer them in 0.3.0's second step, after a
   confirmation design. **Owner's call.**
-- **Rendering and listening** (#77) are not part of this interface (the issue says so). See
-  below.
+- **Hosted effects and live controller state** are not part of offline rendering. The tools
+  below render a detached dry synth and state those conditions in every manifest.
 
 ## Next: plug-ins in a host
 
@@ -458,11 +460,88 @@ What is needed, in order:
    separate too. This needs testing in each host.
 5. **Windows.** A named pipe in place of the Unix socket, or AF_UNIX, which Windows 10 and 11
    support but Rust's standard library does not.
-6. **Shipping the bridge.** The installers and `scripts/standalone.sh` should ship `ca72-mcp`
-   beside the application, with a line in the README.
-7. **For #77.** A tool that renders a preset or the current sound offline to a WAV, which the
-   CA-72's own `preset_render` already does in tests. Its home (the standalone, or a headless
-   `ca72-mcp render`) is to be decided with #77.
+6. **Shipping the bridge.** Added for 0.3 in `scripts/standalone.sh` and the installers.
+7. **For #77.** Implemented in the bridge: `ca72_snapshot`, `ca72_render`, `ca72_analyze`
+   and `ca72_compare`, described below. Rendering never waits on a window or live audio thread.
+
+## Offline reference matching (#77)
+
+The bridge offers `ca72_render`, `ca72_analyze` and `ca72_compare` without a device or a
+running application. `ca72_snapshot` captures the selected live instance, including unsaved
+edits. The MCP prompt `ca72_match_reference` (`prompts/get`, `arguments.reference`) supplies
+[the fitting skill](agent-skills/ca72-match-reference/SKILL.md) to any client which supports
+prompts; the same file can be installed as an agent skill. It is included in the bridge.
+
+| Tool | Input | Result |
+|---|---|---|
+| `ca72_snapshot` | None; chosen live instance | Every normalized parameter, assignments and macro names, AUTO GAIN curve, seed, tempo, frequency-dial law and engine fingerprint |
+| `ca72_render` | `snapshot` or `preset`, else current sound; `notes [{note, start, duration}]`; `seconds` including tail (default 3); `sample_rate` (default 48000); optional `values`, `seed`, `tempo`; required `effects: "dry"`, new absolute `output_dir` | `render.wav` (stereo float), `manifest.json`, complete candidate snapshot and SHA-256 hashes |
+| `ca72_analyze` | Absolute WAV `path`, optional `start`, `seconds`, `fundamental_hz`, `modulation_hz`; new `output_dir` | Pitch, loudness, onsets, 10 ms envelope, harmonics and optional sidebands; full `metrics.json` and a labelled spectrogram PNG, also returned inline |
+| `ca72_compare` | Absolute `reference` and `candidate` WAV paths, optional `reference_start`, `candidate_start`, `seconds`, harmonic/sideband arguments; new `output_dir` | Gain correction, spectral errors at 512/2048/8192 samples, envelope and pitch differences, full metrics, spectrograms on the same scale and two level-matched A/B WAVs |
+
+`start`, `duration` and `seconds` are seconds; `note` is MIDI 0 to 127 (C4 = 60). Gates are
+rounded to samples and must span at least one. A repeated note cannot overlap itself. Each
+render is 1024 samples to 60 s, at 8 to 192 kHz. The reference parser accepts complete mono
+or stereo PCM/float WAV files up to 128 MiB and crops of 1024 samples to 60 s. It refuses
+invalid formats, truncated chunks, partial frames, non-finite audio, or a crop past the end.
+Comparison refuses rate/length differences and silence, with no hidden truncation, resampling,
+time alignment or pitch shift. Sources are read only; existing output directories are refused.
+A render's `manifest.json`, or measurement's `metrics.json`, is written last as its completion
+marker. An interrupted/failed run may leave an incomplete directory; use a new one to retry.
+
+### Render fidelity and repeatability
+
+A short editor request captures state; the bridge does all rendering and file I/O afterwards.
+The renderer owns a fresh `Ca72` and calls the same `Ca72::process` as normal playback, using
+its current parameter conversion, clock, arpeggiator, LFOs, macros, stereo, DRIVE, LEVEL and
+AUTO GAIN. It sets up voices and smoothers without loading computer preferences or starting
+real-time workers, a device or the live helper. It uses the framework's scoped floating point
+flush-to-zero setting and no audio deadlines. Non-finite samples, voice recovery or output
+sanitisation refuse the render. AUTO GAIN fields are typed and bounded before rendering.
+
+Offline overrides retain the captured AUTO GAIN curve. To recalibrate it after changing DRIVE
+or AUTO GAIN, use the live controls, release notes, then capture again; `ca72_snapshot` returns
+BUSY while measurement is pending. Verify the settled curve before saving.
+
+The snapshot carries the frequency-dial law because it affects frequency modulation, though
+it normally lives in computer settings. Named-preset rendering uses 120 BPM and semitone
+frequency dials; capture the loaded live preset when its computer preferences should apply.
+An explicit `tempo` override follows the standalone screen's whole-BPM rounding. Candidate
+`values` are in the panel units of `ca72_set`, through its same parser, and affect only the
+offline copy. The result returns the fully overridden snapshot for the next iteration.
+
+Seeded noise, component variation and arpeggiator randomness repeat. Snapshots carry an
+engine source SHA-256 and refuse replay in a bridge built from different sources, even when
+both say 0.3.0. Manifests record version, source and snapshot hashes, rate, exact gates,
+quality, tempo, seed, block size and WAV hash. This does not promise identical floating point
+results between different targets or compilers. The output compensates the engine's reported
+latency by rendering extra samples and removing that initial delay; the removed count is kept.
+
+Every render explicitly requests dry output. Hosted effects and external audio are excluded
+(the external jack receives silence); output gain and synth feedback remain part of the synth.
+Oscillators, LFO runtime phase and MIDI controllers start fresh. This is a settings snapshot,
+not a capture of already sounding notes, pedals, pressure, wheel offsets or an effect's tail.
+
+### Interpreting a comparison
+
+LUFS matching uses a common stereo layout (mono duplicated to two speakers); very short clips
+fall back to RMS. Both spectral and envelope differences count extra candidate harmonics,
+noise and release tails as well as missing reference material. Spectrograms use 4096-sample
+Hann frames, a logarithmic frequency axis and an 80 dB colour range. The full JSON records
+the axes, bin resolution and envelope trace. A/B files have the same common attenuation when
+needed to keep their peaks below 0.9, after candidate level matching.
+
+Pitch tracking assumes one predominant part. Use individual held-note crops and known
+`fundamental_hz` for harmonics; `modulation_hz` measures sidebands relative to each harmonic.
+A sideband closer than three analysis bins is unresolved (`null`). Reference harmonics in a
+full mix include other instruments. These metrics guide fitting; none is an automatic pass,
+a perceptual similarity percentage or proof of an exact match. Listen to the A/B pair.
+
+The skill ends by applying the selected candidate through the live controls, saving with
+`ca72_preset_save`, loading it again, then re-rendering. Presets round values to four decimal
+places and exclude the player's quality, seed, tempo and dial preference. Keep those render
+conditions fixed and report material save/reload differences. No automatic transcription,
+source separation or parameter optimiser is claimed.
 
 ## Tests
 

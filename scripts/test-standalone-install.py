@@ -25,7 +25,7 @@ class Installation(unittest.TestCase):
         self.payload.mkdir()
         shutil.copy(ROOT / "scripts/installer/install.sh", self.payload / "install.sh")
         shutil.copy(ROOT / "scripts/standalone/CA-72.desktop", self.payload / "CA-72.desktop")
-        for name in ["ca72-standalone", "com.idlefoundry.ca72.png", "LICENSE.txt", "THIRD-PARTY-NOTICES.txt", "CA-72.clap"]:
+        for name in ["ca72-standalone", "ca72-mcp", "com.idlefoundry.ca72.png", "LICENSE.txt", "THIRD-PARTY-NOTICES.txt", "CA-72.clap"]:
             (self.payload / name).write_text("fixture\n")
         (self.payload / "CA-72.vst3").mkdir()
         (self.payload / "CA-72.vst3/binary").write_text("old\n")
@@ -40,6 +40,7 @@ class Installation(unittest.TestCase):
         self.run_installer("--standalone-only")
         binary = self.prefix / "bin/ca72-standalone"
         self.assertTrue(binary.stat().st_mode & 0o111)
+        self.assertTrue((self.prefix / "bin/ca72-mcp").stat().st_mode & 0o111)
         self.assertFalse((self.prefix / "lib/clap/CA-72.clap").exists())
         self.assertFalse((self.home / ".clap/CA-72.clap").exists())
         desktop = self.data / "applications/com.idlefoundry.ca72.desktop"
@@ -58,6 +59,7 @@ class Installation(unittest.TestCase):
         unrelated.write_text("unrelated")
         self.run_installer("--standalone-only", "--uninstall")
         self.assertFalse(binary.exists())
+        self.assertFalse((self.prefix / "bin/ca72-mcp").exists())
         self.assertFalse(desktop.exists())
         self.assertEqual(session.read_text(), "saved edits")
         self.assertEqual(settings.read_text(), "settings")

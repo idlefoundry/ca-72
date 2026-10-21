@@ -15,6 +15,7 @@
 //! then no socket exists. Only the standalone application listens in this version; a
 //! plug-in in a host is the next step (docs/mcp.md).
 
+pub mod audio;
 pub mod bridge;
 pub mod discovery;
 pub mod mcp;

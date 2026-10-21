@@ -49,6 +49,9 @@ harness = false
 name = "mac_quit"
 harness = false
 
+[build-dependencies]
+sha2 = "0.10"
+
 [dependencies]
 ca72.workspace = true
 ca72-fx = { workspace = true, optional = true }
@@ -77,6 +80,9 @@ semver = "1"
 # (nih-plug's too).
 serde_json = "1"
 serde.workspace = true
+ca72-analysis.workspace = true
+base64 = "0.22"
+sha2 = "0.10"
 # The stereo and AUTO GAIN's machinery (plugin-kit's K6 and K7), from github.com/idlefoundry/plugin-kit
 # at one commit (its main, K5 to K7 merged), as the panel takes K5.
 plugin-kit-stereo = { git = "https://github.com/idlefoundry/plugin-kit", rev = "4c0f0f31041cb28b9dc803996dd01d8f44af5ce8" }
@@ -97,7 +103,6 @@ x11 = { version = "2.21", features = ["xlib"] }
 x11rb = { version = "0.13.0", features = ["randr"] }
 
 [dev-dependencies]
-ca72-analysis.workspace = true
 ca72-rt.workspace = true
 tempfile.workspace = true
 # A CLAP host in the tests (`tests/clap_host.rs`, decisions.md R34): the bindings nih-plug's CLAP

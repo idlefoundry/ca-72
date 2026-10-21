@@ -694,6 +694,15 @@ follows it there.
 Learn waiting too, unless that window's **Send all keyboard input to plug-in** is on; the
 arrows, Enter and Delete reach the MIDI list either way.
 
+## Agents and audio references
+
+The 0.3 MCP bridge lets an agent inspect the standalone, adjust controls and save presets.
+It also renders detached candidates and measures local WAV references: spectrograms, pitch,
+harmonics, modulation sidebands, envelopes and level-matched comparisons. Use the
+`ca72_match_reference` MCP prompt for the fitting workflow. Processing stays on your computer;
+offline rendering explicitly uses the dry synth. See [MCP and reference matching](docs/mcp.md)
+for setup, tools, replay conditions and current platform limits.
+
 ## Building
 
 You need [rustup](https://rustup.rs), which installs the Rust that `rust-toolchain.toml`

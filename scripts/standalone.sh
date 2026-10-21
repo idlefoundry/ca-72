@@ -17,6 +17,7 @@ version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
 build() {
     cargo build --locked -p ca72-plugin --bin ca72-standalone \
         --features standalone-production --profile "$profile" "$@"
+    cargo build --locked -p ca72-plugin --bin ca72-mcp --profile "$profile" "$@"
     cargo build --locked -p ca72-fx-helper --bin ca72-fx-helper --profile "$profile" "$@"
 }
 case "$(uname -s)" in
@@ -33,6 +34,9 @@ Darwin)
     lipo -create "$target_dir/aarch64-apple-darwin/$profile_dir/ca72-standalone" \
         "$target_dir/x86_64-apple-darwin/$profile_dir/ca72-standalone" \
         -output "$app/Contents/MacOS/ca72-standalone"
+    lipo -create "$target_dir/aarch64-apple-darwin/$profile_dir/ca72-mcp" \
+        "$target_dir/x86_64-apple-darwin/$profile_dir/ca72-mcp" \
+        -output "$app/Contents/MacOS/ca72-mcp"
     lipo -create "$target_dir/aarch64-apple-darwin/$profile_dir/ca72-fx-helper" \
         "$target_dir/x86_64-apple-darwin/$profile_dir/ca72-fx-helper" \
         -output "$host/Contents/MacOS/ca72-fx-helper"
@@ -70,6 +74,7 @@ PY
     # Apple lipo versions differ in parsing architecture lists. Check each slice.
     for arch in arm64 x86_64; do
         lipo "$app/Contents/MacOS/ca72-standalone" -verify_arch "$arch"
+        lipo "$app/Contents/MacOS/ca72-mcp" -verify_arch "$arch"
         lipo "$host/Contents/MacOS/ca72-fx-helper" -verify_arch "$arch"
     done
     printf '%s\n' "$app"
@@ -77,6 +82,7 @@ PY
 Linux)
     build
     cp "$target_dir/$profile_dir/ca72-standalone" "$root/target/bundled/ca72-standalone"
+    cp "$target_dir/$profile_dir/ca72-mcp" "$root/target/bundled/ca72-mcp"
     cp "$target_dir/$profile_dir/ca72-fx-helper" "$root/target/bundled/ca72-fx-helper"
     cp scripts/standalone/CA-72.desktop scripts/standalone/com.idlefoundry.ca72.png "$root/target/bundled/"
     printf '%s\n' "$root/target/bundled/ca72-standalone"
@@ -84,6 +90,7 @@ Linux)
 MINGW*|MSYS*|CYGWIN*)
     build
     cp "$target_dir/$profile_dir/ca72-standalone.exe" "$root/target/bundled/CA-72.exe"
+    cp "$target_dir/$profile_dir/ca72-mcp.exe" "$root/target/bundled/ca72-mcp.exe"
     cp "$target_dir/$profile_dir/ca72-fx-helper.exe" "$root/target/bundled/ca72-fx-helper.exe"
     cp scripts/standalone/CA-72.ico "$root/target/bundled/"
     printf '%s\n' "$root/target/bundled/CA-72.exe"
