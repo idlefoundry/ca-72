@@ -333,7 +333,7 @@ preset quantization is universally lossless.
 
 The accordion batch keeps the corrected second register and its C4/E4/G4 performance as the
 baseline. Changing only EMPHASIS to 9 recreates the previously rejected extra high tones.
-Its harmonic RMS looks slightly better (6.243 versus 6.283 dB); full-spectrum RMS also looks
+Its harmonic RMS looks slightly better (6.242 versus 6.283 dB); full-spectrum RMS also looks
 better (14.132 versus 16.579 dB). Yet normalized upper-band difference from the actual
 recording jumps from −3.518 to +35.448 dB, with 15 unexplained peak flags including roughly
 6.0, 7.5 and 8.9 kHz. Its envelope changes by up to 6.080 dB regional RMS and 13.949 dB p95,
