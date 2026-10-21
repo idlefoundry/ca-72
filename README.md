@@ -183,6 +183,14 @@ right-click a slot for **REPLACE…** and **REMOVE**. The key is lit while its d
 glows faintly while an effect plays with it shut. An effect that crashes is started again;
 after five crashes it is passed by and its slot says CRASHED; one whose plug-in is not installed says MISSING and keeps its settings. The chain and
 each effect's settings are saved in `effects.json` beside `session.json`.
+Standalone presets also save the chain you hear, including each effect's settings and ON tab.
+With **CHAIN › LOCK** off (the default), choosing a preset replaces the chain; a factory or older
+preset clears it. **LOCK** keeps your chain as you browse and stays set between launches on this
+computer. A dim padlock on **FX** shows it is locked. When a preset's own effects differ, a dim
+**FX** beside its name's arrow and the small names under the slots show what is held back;
+**UNLOCK TO HEAR** reminds you that clicking LOCK loads them. Saving while locked saves what you
+hear. The changed mark includes effects while unlocked. VST3, CLAP and AU instances leave a
+preset's effects unheard and preserve their section when you save the sound again.
 **FIND** searches effects by name, maker or type; **MAKER** and **TYPE** group the list, and
 **RECENT** keeps your last six choices on this computer. The standalone never waits for an
 effect: it opens and plays while they load. One that crashes or stops responding as it loads,

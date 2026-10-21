@@ -47,15 +47,15 @@ const GAP: f64 = 20.0;
 /// A slot across: its screen, the gap and its tab.
 const UNIT: f64 = SCREEN.0 + GAP + TAB.0;
 /// The row's middle; the legends' and the small print's under the screens.
-pub const ROW: f64 = TOP + 96.0;
-const LEGEND_Y: f64 = TOP + 40.0;
+pub const ROW: f64 = TOP + 80.0;
+const LEGEND_Y: f64 = TOP + 29.0;
 const WORD_Y: f64 = TOP + 147.0;
 /// How far round a screen its surround stands (the rail's).
 const SURROUND: f64 = 6.0;
 
 /// Slot `i`'s middle across: the four in equal shares of the drawer.
 fn middle(i: usize) -> f64 {
-    LEFT + (RIGHT - LEFT) / SLOTS as f64 * (i.min(SLOTS - 1) as f64 + 0.5)
+    LEFT + (RIGHT - LEFT - 205.0) / SLOTS as f64 * (i.min(SLOTS - 1) as f64 + 0.5)
 }
 
 /// Slot `i`'s screen's window: left, top, width, height.
@@ -73,6 +73,11 @@ pub fn tab(i: usize) -> (f64, f64) {
     (middle(i) - UNIT / 2.0 + SCREEN.0 + GAP + TAB.0 / 2.0, ROW)
 }
 
+/// The chain’s LOCK at the right end of the row.
+pub fn lock_tab() -> (f64, f64) {
+    (RIGHT - 100.0, ROW)
+}
+
 /// What a pointer finds on the drawer or its list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FxTarget {
@@ -81,6 +86,8 @@ pub enum FxTarget {
     Name(usize),
     /// Slot `i`'s ON tab.
     Tab(usize),
+    /// The whole chain’s lock, kept on this computer.
+    Lock,
     /// The list's line for its row `i` (counted from its first row, not the first in view).
     Row(usize),
     /// A grouping word on FIND’s line.
@@ -106,6 +113,10 @@ pub fn hit(x: f64, y: f64, list: Option<&FxList>) -> Option<FxTarget> {
     if !inside(x, y) {
         return None;
     }
+    let (lx, ly) = lock_tab();
+    if (x - lx).abs() <= TAB.0 / 2.0 && (y - ly).abs() <= TAB.1 / 2.0 + 4.0 {
+        return Some(FxTarget::Lock);
+    }
     (0..SLOTS).find_map(|i| {
         let (sx, sy, sw, sh) = screen(i);
         let (tx, ty) = tab(i);
@@ -129,6 +140,7 @@ pub fn centre(t: FxTarget) -> (f64, f64) {
             (x + w / 2.0, y + h / 2.0)
         }
         FxTarget::Tab(i) => tab(i),
+        FxTarget::Lock => lock_tab(),
         FxTarget::Row(_) | FxTarget::List | FxTarget::Find(_) | FxTarget::Order(_) => (0.0, 0.0),
     }
 }
@@ -244,6 +256,8 @@ pub struct FxList {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FxScene {
     pub slots: [FxSlot; SLOTS],
+    pub locked: bool,
+    pub held: Option<[String; SLOTS]>,
     pub hover: Option<FxTarget>,
     pub drag: Option<(usize, Option<usize>)>,
     pub list: Option<FxList>,
@@ -346,6 +360,7 @@ struct Still {
     words: Vec<(i32, i32, Pixmap)>,
     /// Each slot's small print, a patch for each word, in `FxWord::ALL`'s order.
     small: Vec<Vec<(i32, i32, Pixmap)>>,
+    unlock: Option<(i32, i32, Pixmap)>,
     shadow: Pixmap,
     lighting: Lighting,
     /// The effects' list's plate (its face, its display's bezel, glass and unlit dots, its
@@ -494,6 +509,11 @@ impl FxRenderer {
                 dirty = Some(union(dirty, self.slot_part(i)));
             }
         }
+        if was.as_ref().is_none_or(|w| {
+            w.locked != scene.locked || w.held != scene.held || w.hover != scene.hover
+        }) {
+            dirty = Some(union(dirty, self.lock_part()));
+        }
         // (Each slot's part lies apart from the others': a slot changed is drawn again whole.)
         if let Some(r) = dirty.and_then(|r| within(r, all)) {
             let r = self.closed(r);
@@ -547,12 +567,31 @@ impl FxRenderer {
         ))
     }
 
+    fn lock_part(&self) -> [i32; 4] {
+        let (x, y) = lock_tab();
+        self.pixels((
+            x - TAB.0 / 2.0 - 42.0,
+            y - TAB.1 / 2.0 - 42.0,
+            RIGHT,
+            WORD_Y + 14.0,
+        ))
+    }
+
     /// `r` grown to the whole of each slot's part it reaches into.
     fn closed(&self, mut r: [i32; 4]) -> [i32; 4] {
-        for i in 0..SLOTS {
-            let p = self.slot_part(i);
-            if meets(p, r) {
-                r = union(Some(r), p);
+        loop {
+            let before = r;
+            for i in 0..SLOTS {
+                let p = self.slot_part(i);
+                if meets(p, r) {
+                    r = union(Some(r), p);
+                }
+            }
+            if meets(self.lock_part(), r) {
+                r = union(Some(r), self.lock_part());
+            }
+            if r == before {
+                break;
             }
         }
         r
@@ -592,6 +631,23 @@ impl FxRenderer {
                 &centred(&slot.text, PLACES),
                 level,
             );
+            if let Some(names) = &scene.held {
+                let small = 3.0;
+                let places = 21;
+                let text = format!("▸ {}", names[i].to_uppercase());
+                text_dots(
+                    &mut self.frame,
+                    &mut self.cover,
+                    s,
+                    (
+                        x + (w - places as f64 * 6.0 * small) / 2.0,
+                        TOP + 124.0 - oy,
+                        small,
+                    ),
+                    &centred(&text, places),
+                    0.32,
+                );
+            }
             if let Some(word) = slot.word
                 && let Some(k) = FxWord::ALL.iter().position(|w| *w == word)
                 && let Some((x, y, p)) = still.small.get(i).and_then(|v| v.get(k))
@@ -635,6 +691,31 @@ impl FxRenderer {
                     N(w + 2.0 * SURROUND + 6.0),
                     N(h + 2.0 * SURROUND + 6.0),
                     crate::learn::ACCENT
+                );
+            }
+        }
+        if meets(self.lock_part(), r) {
+            let (x, y) = lock_tab();
+            if scene.locked {
+                self.lit
+                    .light(&mut self.frame, &still.lighting, s, (x, y), oy);
+            }
+            if let Some((px, py, p)) = still.words.get(SLOTS) {
+                crate::render::put(&mut self.frame, p, (*px, *py), 1.0);
+            }
+            if scene.held.is_some()
+                && let Some((px, py, p)) = &still.unlock
+            {
+                crate::render::put(&mut self.frame, p, (*px, *py), 1.0);
+            }
+            if scene.hover == Some(FxTarget::Lock) {
+                put!(
+                    light,
+                    "<rect x='{}' y='{}' width='{}' height='{}' rx='8' fill='#fff' fill-opacity='0.07'/>",
+                    N(x - TAB.0 / 2.0 + 2.0),
+                    N(y - oy - TAB.1 / 2.0 + 2.0),
+                    N(TAB.0 - 4.0),
+                    N(TAB.1 - 4.0)
                 );
             }
         }
@@ -843,7 +924,10 @@ fn slot_changed(was: &FxScene, now: &FxScene, i: usize) -> bool {
         _ => None,
     };
     let dragged = |s: &FxScene| s.drag.map(|(from, over)| (from == i, over == Some(i)));
-    was.slots[i] != now.slots[i] || pointed(was) != pointed(now) || dragged(was) != dragged(now)
+    was.slots[i] != now.slots[i]
+        || was.held != now.held
+        || pointed(was) != pointed(now)
+        || dragged(was) != dragged(now)
 }
 
 /// A screen's (left, top, width, height, its frame's units) dots' first column's left and first
@@ -891,7 +975,12 @@ fn text_dots(
         if *c == ' ' {
             continue;
         }
-        for (j, bits) in font::glyph(*c).iter().enumerate() {
+        let glyph = if *c == '▸' {
+            [0, 8, 12, 14, 15, 14, 12, 8, 0]
+        } else {
+            font::glyph(*c)
+        };
+        for (j, bits) in glyph.iter().enumerate() {
             for col in 0..5 {
                 if bits >> (4 - col) & 1 == 1 {
                     core.push((
@@ -1034,6 +1123,14 @@ fn make_still((scale, skin, lettering): Look) -> Still {
             i + 1
         );
     }
+    put!(
+        print,
+        "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}'>CHAIN</text>",
+        N(lock_tab().0),
+        N(LEGEND_Y - oy),
+        N(lettering.strip_legend()),
+        colour::LEGEND
+    );
     lower::print(&mut plate, s, skin, &options, &print.0);
     // The screens: the rail's name's bezel and glass, every dot faintly there.
     let glass_picture = Pixmap::decode_png(crate::skin::GLASS).expect("a built-in picture decodes");
@@ -1041,6 +1138,10 @@ fn make_still((scale, skin, lettering): Look) -> Still {
     for i in 0..SLOTS {
         let (x, y, w, h) = screen(i);
         super::screen_bezel(&mut bezels, (x, y - oy, w, h));
+    }
+    for i in 0..SLOTS {
+        let (x, _, w, _) = screen(i);
+        super::screen_bezel(&mut bezels, (x, TOP + 118.0 - oy, w, 34.0));
     }
     svg_over(&options, &mut plate, s, &bezels.0);
     let mut cover = vec![0; (plate.width() * plate.height()) as usize];
@@ -1055,13 +1156,17 @@ fn make_still((scale, skin, lettering): Look) -> Still {
         let (x, y) = tab(i);
         sprite(&mut plate, &lighting.unlit, s, (x, y - oy), TAB);
     }
+    let (x, y) = lock_tab();
+    sprite(&mut plate, &lighting.unlit, s, (x, y - oy), TAB);
     lower::lamp(&mut plate, s, skin, (0, top_px(s)));
-    let tabs: Vec<((f64, f64), &str)> = (0..SLOTS).map(|i| (tab(i), "ON")).collect();
+    let mut tabs: Vec<((f64, f64), &str)> = (0..SLOTS).map(|i| (tab(i), "ON")).collect();
+    tabs.push((lock_tab(), "LOCK"));
     let words = lower::tab_words(&options, s, oy, TAB, &tabs);
     // The small print under each screen, each word on a patch of its own.
     let small = (0..SLOTS)
         .map(|i| {
-            let (x, _, w, _) = screen(i);
+            let (tx, _) = tab(i);
+            let (x, w) = (tx - 110.0, 220.0);
             FxWord::ALL
                 .iter()
                 .filter_map(|word| {
@@ -1084,11 +1189,23 @@ fn make_still((scale, skin, lettering): Look) -> Still {
                 .collect()
         })
         .collect();
+    let (lx, _) = lock_tab();
+    let (left, top) = (
+        ((lx - 100.0) * s).floor(),
+        ((WORD_Y - 14.0 - oy) * s).floor(),
+    );
+    let unlock = Pixmap::new((200.0*s).ceil() as u32, (28.0*s).ceil() as u32).map(|mut p| {
+        let mut o = Svg::default();
+        put!(o, "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}' fill-opacity='0.72'>UNLOCK TO HEAR</text>", N(lx-left/s), N(WORD_Y-oy-top/s), N(lettering.strip_small()), colour::LEGEND);
+        svg_over(&options, &mut p, s, &o.0);
+        (left as i32, top as i32, p)
+    });
     Still {
         look: (scale, skin, lettering),
         plate,
         words,
         small,
+        unlock,
         shadow: lower::cast(s, &options),
         lighting,
         list: list_plate(s, skin, &glass_picture),
@@ -1249,7 +1366,7 @@ mod tests {
             assert!(x - SURROUND > LEFT && tx + TAB.0 / 2.0 < RIGHT);
             assert!(tx - TAB.0 / 2.0 > x + w + SURROUND, "the tab has room");
             if i + 1 < SLOTS {
-                assert!(tx + TAB.0 / 2.0 + 42.0 < screen(i + 1).0 - SURROUND - 8.0);
+                assert!(tx + TAB.0 / 2.0 < screen(i + 1).0 - SURROUND - 8.0);
             }
         }
         assert_eq!(hit(LEFT + 10.0, ROW, None), None);
@@ -1341,6 +1458,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_fault_words_and_unlock_caption_fit_with_large_lettering() {
+        let fonts = crate::fonts::Fonts::new();
+        for lettering in [Lettering::Standard, Lettering::Large] {
+            for word in FxWord::ALL {
+                let width = fonts.advance(
+                    word.text(),
+                    lettering.strip_small(),
+                    crate::fonts::Weight::Bold,
+                    1.5,
+                );
+                assert!(width < 190.0, "{} reaches into a held name", word.text());
+            }
+            assert!(
+                fonts.advance(
+                    "UNLOCK TO HEAR",
+                    lettering.strip_small(),
+                    crate::fonts::Weight::Bold,
+                    0.0
+                ) < 200.0
+            );
+        }
+    }
+
     /// A name longer than the screen's twelve places ends in an ellipsis; a short one is centred.
     #[test]
     fn a_name_is_cut_to_the_screen_and_centred() {
@@ -1381,7 +1522,7 @@ mod tests {
             let mut r = FxRenderer::new(scale, skin, Lettering::Standard);
             let mut scene = scene();
             assert!(r.render(&scene));
-            let steps: [&dyn Fn(&mut FxScene); 11] = [
+            let steps: [&dyn Fn(&mut FxScene); 16] = [
                 &|s| s.slots[1].lit = false,
                 &|s| {
                     s.slots[0].dim = true;
@@ -1419,6 +1560,18 @@ mod tests {
                     l.order = FxOrder::Type;
                 },
                 &|s| s.list = None,
+                &|s| s.locked = true,
+                &|s| {
+                    s.held = Some([
+                        "VintageVerb".into(),
+                        "RC-20".into(),
+                        "OTT".into(),
+                        "–".into(),
+                    ]);
+                },
+                &|s| s.hover = Some(FxTarget::Lock),
+                &|s| s.held = None,
+                &|s| s.locked = false,
             ];
             let under = |r: &FxRenderer| {
                 r.under()

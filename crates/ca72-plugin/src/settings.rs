@@ -508,6 +508,25 @@ pub(crate) fn keep_fx_choice(path: &Path, id: crate::fx_view::EffectId) -> Resul
     write(path, &t)
 }
 
+/// The standalone’s whole-chain lock belongs to this computer, never a preset.
+#[cfg(any(feature = "fx-host", test))]
+pub(crate) fn fx_locked(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.parse::<toml::Table>().ok())
+        .and_then(|t| t.get("fx_locked").and_then(toml::Value::as_bool))
+        .unwrap_or(false)
+}
+
+#[cfg(any(feature = "fx-host", test))]
+pub(crate) fn keep_fx_locked(path: &Path, on: bool) -> Result<(), String> {
+    let _guard = lock(path)?;
+    let mut t = table(path)?.unwrap_or_default();
+    t.insert("format".into(), 1.into());
+    t.insert("fx_locked".into(), on.into());
+    write(path, &t)
+}
+
 /// Preset actions belong to this computer, across formats and projects. Each entry names a
 /// channel and exactly one input, with the same channel numbering the menus show.
 pub(crate) fn preset_actions(path: &Path) -> Vec<(usize, crate::learn::Binding)> {
@@ -621,6 +640,23 @@ mod tests {
     use super::*;
 
     /// The chooser’s computer settings survive a fresh read and leave other keys alone.
+    #[test]
+    fn the_chain_lock_is_off_by_default_and_kept_without_changing_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        assert!(!fx_locked(&path));
+        std::fs::write(&path, "format = 1\nskin = 'drawn'\n").unwrap();
+        keep_fx_locked(&path, true).unwrap();
+        assert!(fx_locked(&path));
+        let t = table(&path).unwrap().unwrap();
+        assert_eq!(t.get("skin").and_then(toml::Value::as_str), Some("drawn"));
+        keep_fx_locked(&path, false).unwrap();
+        assert!(!fx_locked(&path));
+        std::fs::write(&path, "broken = [").unwrap();
+        assert!(keep_fx_locked(&path, true).is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "broken = [");
+    }
+
     #[test]
     fn fx_recents_and_grouping_persist_without_overwriting_other_settings() {
         use crate::fx_view::EffectId;

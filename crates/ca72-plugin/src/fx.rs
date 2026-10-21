@@ -4,6 +4,10 @@
 
 use std::sync::Mutex;
 
+mod presets;
+pub use crate::fx_view::PresetStatus;
+pub use presets::PresetChains;
+
 /// The share of a block's period from its start by which every effect must have returned
 /// its block, after the voices' own (`engine::DEADLINE`, 0.75): an effect late past it
 /// passes the sound on dry for that block.
@@ -33,6 +37,7 @@ pub(crate) fn take_runner() -> Option<ca72_fx::Runner> {
 /// still).
 pub struct Host {
     chain: ca72_fx::Chain,
+    presets: PresetChains,
     helper: std::path::PathBuf,
     dirs: Vec<std::path::PathBuf>,
     cache: Option<std::path::PathBuf>,
@@ -80,6 +85,7 @@ pub fn install_host(
     safe: Option<ca72_fx::launch::SafeStart>,
 ) {
     *locked(&HOST) = Some(std::sync::Arc::new(Host {
+        presets: PresetChains::new(chain.clone(), safe.is_some(), crate::settings::file()),
         chain,
         helper,
         dirs,
@@ -174,6 +180,30 @@ impl Host {
 }
 
 impl crate::fx_view::Effects for Host {
+    fn load_preset(&self, section: Option<String>) {
+        self.presets.load(section);
+    }
+
+    fn observe_preset(&self, section: Option<String>) {
+        self.presets.observe(section);
+    }
+
+    fn save_preset(&self) -> Result<Option<String>, String> {
+        self.presets.save()
+    }
+
+    fn prepare_save_preset(&self) -> std::sync::mpsc::Receiver<Result<Option<String>, String>> {
+        self.presets.prepare_save()
+    }
+
+    fn preset_status(&self) -> crate::fx_view::PresetStatus {
+        self.presets.status()
+    }
+
+    fn set_locked(&self, on: bool) {
+        self.presets.set_locked(on);
+    }
+
     fn slots(&self) -> Option<Vec<crate::fx_view::SlotInfo>> {
         use crate::fx_view::{Health, SlotInfo};
         self.chain.try_status().map(|st| {
@@ -341,7 +371,7 @@ impl crate::fx_view::Effects for Host {
 
     fn turn_on(&self) {
         *locked(&self.safe) = None;
-        self.chain.turn_on();
+        self.presets.turn_on();
     }
 
     fn safe_start(&self) -> Option<crate::fx_view::SafeStart> {

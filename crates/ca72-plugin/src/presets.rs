@@ -314,9 +314,62 @@ fn same(a: &str, b: &str) -> bool {
     a.to_lowercase() == b.to_lowercase()
 }
 
+/// A save taking fresh effect snapshots off the editor thread (R-FX-PRESETS).
+#[derive(Debug)]
+pub(crate) struct Saving {
+    before: String,
+    pub(crate) name: String,
+    result: std::sync::mpsc::Receiver<Result<Entry, String>>,
+}
+
+impl Saving {
+    pub(crate) fn poll(&self) -> Option<Result<Entry, String>> {
+        match self.result.try_recv() {
+            Ok(r) => Some(r),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Some(Err("The preset could not be saved.".into()))
+            }
+        }
+    }
+}
+
+struct SaveRequest {
+    library: Library,
+    name: String,
+    values: Vec<(String, f64)>,
+    tags: Vec<String>,
+    curve: (bool, [f32; crate::drive::STEPS]),
+    names: Vec<String>,
+    effects: Option<std::sync::mpsc::Receiver<Result<Option<String>, String>>>,
+    carried: Option<String>,
+    reply: std::sync::mpsc::Sender<Result<Entry, String>>,
+}
+
+impl SaveRequest {
+    fn run(self) {
+        let result = (|| {
+            let section = match self.effects {
+                Some(rx) => rx.recv().map_err(|e| e.to_string())??,
+                None => self.carried,
+            };
+            self.library.save_with(
+                &self.name,
+                self.values,
+                Some(self.tags),
+                Some(self.curve),
+                self.names,
+                section,
+            )
+        })();
+        let _ = self.reply.send(result);
+    }
+}
+
 /// The presets' bar and drawer: what they show and what operating them does.
 pub struct Browser {
     pub library: Library,
+    pub(crate) effects: Option<std::sync::Arc<dyn crate::fx_view::Effects>>,
     pub open: bool,
     /// The drawer sliding: when it began, and whether opening.
     slide: Option<(Instant, bool)>,
@@ -342,6 +395,8 @@ pub struct Browser {
     /// edit stays with it as the list changes, and ends when it is gone or another preset is
     /// set, so it never acts on another (decisions.md R18).
     editing: Option<(String, Origin)>,
+    saving: Option<Saving>,
+    save_queue: std::sync::Mutex<Option<std::sync::mpsc::Sender<SaveRequest>>>,
 }
 
 impl std::fmt::Debug for Browser {
@@ -357,6 +412,7 @@ impl Browser {
     pub fn new(library: Library) -> Self {
         Browser {
             library,
+            effects: crate::fx_view::installed(),
             open: false,
             slide: None,
             bar: BarScene::default(),
@@ -370,6 +426,8 @@ impl Browser {
             below: true,
             last_row: None,
             editing: None,
+            saving: None,
+            save_queue: std::sync::Mutex::new(None),
         }
     }
 
@@ -536,6 +594,16 @@ impl Browser {
 
     /// Brings the bar and the drawer up to the parameters (each frame).
     pub fn tick(&mut self, p: &Ca72Params) {
+        if let Some(saving) = self.saving.take() {
+            if let Some(result) = saving.poll() {
+                if let Ok(e) = &result {
+                    self.finish_save(&saving, e, p);
+                }
+                self.saved_says(result, p);
+            } else {
+                self.saving = Some(saving);
+            }
+        }
         if self.open && self.read.is_none_or(|t| t.elapsed() > REREAD) {
             self.reread(p);
         }
@@ -590,7 +658,15 @@ impl Browser {
                     }
                 }
             });
+        let fx = self
+            .effects
+            .as_ref()
+            .map(|e| e.preset_status())
+            .unwrap_or_default();
+        let changed = changed || (!fx.locked && fx.differs);
         self.bar = BarScene {
+            fx_locked: fx.locked,
+            preset_fx: fx.held.is_some(),
             name: entry.map_or(current.clone(), |e| e.sound.name.clone()),
             found: entry.is_some(),
             changed: entry.is_some() && changed,
@@ -609,6 +685,19 @@ impl Browser {
             macros: self.bar.macros,
             macro_glow: self.bar.macro_glow,
         };
+    }
+
+    fn load_effects(&self, p: &Ca72Params, section: Option<String>, load: bool) {
+        if let Ok(mut raw) = p.preset_effects.write() {
+            *raw = section.clone();
+        }
+        if let Some(effects) = &self.effects {
+            if load {
+                effects.load_preset(section);
+            } else {
+                effects.observe_preset(section);
+            }
+        }
     }
 
     /// Opens or shuts the drawer.
@@ -654,6 +743,7 @@ impl Browser {
         if let Some(db) = e.sound.curve(p.quality.value() == QualityMode::Lo) {
             p.drive_curve.load_preset(db);
         }
+        self.load_effects(p, e.sound.effects.clone(), true);
         Self::set_current(p, &e.sound.name);
         self.wanted = Some((e.sound.name.clone(), targets(p, e)));
         self.rows(p);
@@ -679,6 +769,7 @@ impl Browser {
         p.lfo_patch.clear();
         // (AUTO GAIN's curve a fresh instance's too: the presets' average.)
         p.drive_curve.load(&crate::drive::unmeasured());
+        self.load_effects(p, None, true);
         Self::set_current(p, "");
         self.wanted = None;
         self.last_row = None;
@@ -798,20 +889,109 @@ impl Browser {
                 return;
             }
         };
-        match self.save_sound(&name, tags, p) {
+        if self.saving.is_some() {
+            return;
+        }
+        if self.effects.is_some() {
+            match self.start_save_sound(&name, tags, p) {
+                Ok(saving) => {
+                    self.saving = Some(saving);
+                    self.drawer.hint = "Saving effects…".into();
+                }
+                Err(e) => self.drawer.hint = e,
+            }
+        } else {
+            let result = self.save_sound(&name, tags, p);
+            self.saved_says(result, p);
+        }
+        let _ = s;
+    }
+
+    fn saved_says(&mut self, result: Result<Entry, String>, p: &Ca72Params) {
+        match result {
             Ok(e) => {
                 self.drawer.hint = format!("Saved {}.", e.sound.name);
                 self.drawer.save_name = Field::default();
                 self.drawer.save_tags = Field::default();
                 self.drawer.replace = false;
                 self.end_edit();
-                let _ = s;
                 self.reread(p);
                 self.bring_into_view(&e.sound.name);
-                return;
             }
             Err(e) => self.drawer.hint = e,
         }
+        self.reread(p);
+    }
+
+    pub(crate) fn start_save_sound(
+        &self,
+        name: &str,
+        tags: Vec<String>,
+        p: &Ca72Params,
+    ) -> Result<Saving, String> {
+        library::check_name(name)?;
+        let mut queue = self.save_queue.lock().map_err(|e| e.to_string())?;
+        if queue.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel::<SaveRequest>();
+            std::thread::Builder::new()
+                .name("ca72-preset-save".into())
+                .spawn(move || {
+                    for request in rx {
+                        request.run();
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+            *queue = Some(tx);
+        }
+        let before = Self::current(p);
+        let (reply, result) = std::sync::mpsc::channel();
+        let request = SaveRequest {
+            library: self.library.clone(),
+            name: name.to_owned(),
+            values: values_now(p),
+            tags,
+            curve: (
+                p.quality.value() == QualityMode::Lo,
+                p.drive_curve.saved().db,
+            ),
+            names: names_now(p),
+            effects: self.effects.as_ref().map(|e| e.prepare_save_preset()),
+            carried: p
+                .preset_effects
+                .read()
+                .map(|s| s.clone())
+                .unwrap_or_default(),
+            reply,
+        };
+        queue
+            .as_ref()
+            .ok_or("The preset’s save thread did not start")?
+            .send(request)
+            .map_err(|e| e.to_string())?;
+        Ok(Saving {
+            before,
+            name: name.to_owned(),
+            result,
+        })
+    }
+
+    pub(crate) fn saving_as(&self, name: &str) -> bool {
+        self.saving.as_ref().is_some_and(|s| same(&s.name, name))
+    }
+
+    pub(crate) fn finish_save(&mut self, saving: &Saving, e: &Entry, p: &Ca72Params) {
+        // A save finishing after another preset was chosen never chooses the saved sound.
+        if Self::current(p) == saving.before {
+            self.saved_sound(e, p);
+        } else {
+            self.reread(p);
+        }
+    }
+
+    fn saved_sound(&mut self, e: &Entry, p: &Ca72Params) {
+        self.load_effects(p, e.sound.effects.clone(), false);
+        Self::set_current(p, &e.sound.name);
+        self.wanted = Some((e.sound.name.clone(), targets(p, e)));
         self.reread(p);
     }
 
@@ -828,12 +1008,25 @@ impl Browser {
             p.quality.value() == QualityMode::Lo,
             p.drive_curve.saved().db,
         );
-        let r = self
-            .library
-            .save_with(name, values_now(p), Some(tags), Some(curve), names_now(p));
+        let effects = match &self.effects {
+            Some(effects) => effects.save_preset()?,
+            None => p
+                .preset_effects
+                .read()
+                .map(|s| s.clone())
+                .unwrap_or_default(),
+        };
+        let r = self.library.save_with(
+            name,
+            values_now(p),
+            Some(tags),
+            Some(curve),
+            names_now(p),
+            effects,
+        );
+
         if let Ok(e) = &r {
-            Self::set_current(p, &e.sound.name);
-            self.wanted = Some((e.sound.name.clone(), targets(p, e)));
+            self.saved_sound(e, p);
         }
         self.reread(p);
         r
@@ -1178,6 +1371,124 @@ mod tests {
         fn set_state(&self, _: PluginState) {
             panic!("Init must not replace project state")
         }
+    }
+
+    #[test]
+    fn a_plugin_save_as_keeps_the_selected_presets_effects_verbatim() {
+        let p = Arc::new(Ca72Params::default());
+        let host = ApplyingHost::new(p.clone());
+        let setter = ParamSetter::new(&host);
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let raw = "[effects] # opaque\nchain = 'a future version'\nextra = [42]\n";
+        let e = lib
+            .save_with(
+                "Carried",
+                Vec::new(),
+                None,
+                None,
+                Vec::new(),
+                Some(raw.into()),
+            )
+            .unwrap();
+        let mut b = Browser::new(lib);
+        b.effects = None;
+        b.choose(&e, &p, &setter);
+        let fields = p.serialize_fields();
+        let reopened = Ca72Params::default();
+        reopened.deserialize_fields(&fields);
+        let saved = b.save_sound("Copy", Vec::new(), &reopened).unwrap();
+        assert_eq!(saved.sound.effects.as_deref(), Some(raw));
+        assert!(
+            std::fs::read_to_string(dir.path().join("Copy.toml"))
+                .unwrap()
+                .ends_with(raw)
+        );
+        assert_eq!(crate::library::FORMAT, 1);
+        for old in [None, Some("not JSON")] {
+            *reopened.preset_effects.write().unwrap() = Some(raw.into());
+            let mut state = PluginState {
+                version: "0.2.8".into(),
+                params: Default::default(),
+                fields: Default::default(),
+            };
+            if let Some(old) = old {
+                state.fields.insert("preset_effects".into(), old.into());
+            }
+            crate::Ca72::filter_state(&mut state);
+            reopened.deserialize_fields(&state.fields);
+            assert!(reopened.preset_effects.read().unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn effect_saves_wait_off_the_editor_keep_order_and_never_choose_over_a_new_preset() {
+        let p = Ca72Params::default();
+        let dir = tempfile::tempdir().unwrap();
+        let mut b = Browser::new(Library::at(dir.path()));
+        let fake = crate::fx_view::fake::Fake::with(&[], &[]);
+        fake.delay_save
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        b.effects = Some(fake.clone());
+        let first = b.start_save_sound("Copy", Vec::new(), &p).unwrap();
+        let second = b.start_save_sound("Copy", Vec::new(), &p).unwrap();
+        assert!(first.poll().is_none() && second.poll().is_none());
+        b.tick(&p);
+        Browser::set_current(&p, "Another preset");
+        let mut replies = fake.save_replies.lock().unwrap();
+        let raw = "[effects]\nchain = 'the later save'\n";
+        replies.pop().unwrap().send(Ok(Some(raw.into()))).unwrap();
+        assert!(
+            second.poll().is_none(),
+            "files wait in the order SAVE was pressed"
+        );
+        replies.pop().unwrap().send(Ok(None)).unwrap();
+        drop(replies);
+        for saving in [&first, &second] {
+            let start = Instant::now();
+            let e = loop {
+                if let Some(result) = saving.poll() {
+                    break result.unwrap();
+                }
+                assert!(start.elapsed() < Duration::from_secs(5));
+                std::thread::sleep(Duration::from_millis(2));
+            };
+            b.finish_save(saving, &e, &p);
+            assert_eq!(Browser::current(&p), "Another preset");
+        }
+        assert_eq!(
+            b.library.find("Copy").unwrap().sound.effects.as_deref(),
+            Some(raw)
+        );
+    }
+
+    #[test]
+    fn the_chain_marks_a_preset_changed_except_under_its_lock() {
+        let p = Ca72Params::default();
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let mut b = Browser::new(lib);
+        let e = b.library.find("Felt Bass").unwrap();
+        Browser::set_current(&p, &e.sound.name);
+        let fake = crate::fx_view::fake::Fake::with(&[], &[]);
+        b.effects = Some(fake.clone());
+        b.reread(&p);
+        b.wanted = Some((
+            e.sound.name.clone(),
+            sound_params(&p)
+                .into_iter()
+                .map(|(id, q)| (id, q.normalized()))
+                .collect(),
+        ));
+        b.tick(&p);
+        assert!(!b.bar.changed);
+        fake.preset.lock().unwrap().differs = true;
+        b.tick(&p);
+        assert!(b.bar.changed);
+        fake.preset.lock().unwrap().locked = true;
+        b.tick(&p);
+        assert!(!b.bar.changed);
+        assert!(b.bar.fx_locked);
     }
 
     /// A preset chosen, and Init, set the voices to their knobs at the plug-in's next block, not

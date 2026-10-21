@@ -330,6 +330,7 @@ name = "ca72-fx-helper"
 version = "0.3.0"
 dependencies = [
  "ca72-fx",
+ "ca72-plugin",
  "daw-helper",
  "daw-ipc",
  "daw-test-plugin",
@@ -395,6 +396,7 @@ dependencies = [
  "softbuffer",
  "tempfile",
  "toml",
+ "toml_edit 0.25.15+spec-1.1.0",
  "winapi",
  "x11",
  "x11rb",

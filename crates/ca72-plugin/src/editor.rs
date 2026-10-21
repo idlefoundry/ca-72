@@ -1825,6 +1825,23 @@ impl Editing {
                 self.renderer.lettering(),
             )
         });
+        self.browser.effects = view.effects();
+        if let Some(effects) = &self.browser.effects
+            && !self
+                .params
+                .preset
+                .read()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+        {
+            effects.observe_preset(
+                self.params
+                    .preset_effects
+                    .read()
+                    .map(|s| s.clone())
+                    .unwrap_or_default(),
+            );
+        }
         self.fx_view = view;
         self.strip.set_rail(self.rail);
         self.learning.rail = self.rail;
@@ -4408,6 +4425,18 @@ impl Editing {
             && let Some(t) = self.fx_view.tip()
         {
             return Some(t);
+        }
+        let (px, py) = self.in_drawing(self.pointer);
+        let (nx, ny, nw, nh) = self.rail.name();
+        if self.browser.bar.preset_fx
+            && (nx + nw - 140.0..nx + nw - 52.0).contains(&px)
+            && (ny..ny + nh).contains(&py)
+        {
+            return Some((
+                "This preset has its own effects. Unlock to hear them.".into(),
+                nx + nw - 95.0,
+                ny - 12.0,
+            ));
         }
         let operated = self
             .drag
@@ -9782,6 +9811,85 @@ mod tests {
         e.draw();
         e.draw();
         assert!(e.lower.settled());
+    }
+
+    #[test]
+    fn the_chain_lock_and_held_signs_follow_the_preset_with_the_drawer_open_or_shut() {
+        let (mut e, fake) = editing_effects();
+        e.draw();
+        assert!(!e.browser.bar.fx_locked && !e.browser.bar.preset_fx);
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        let lock = at(&e, fx_ui::lock_tab());
+        click(&mut e, lock);
+        e.draw();
+        assert!(e.fx_scene.locked && e.browser.bar.fx_locked);
+        assert!(!e.browser.bar.preset_fx);
+        fake.preset.lock().unwrap().held = Some([
+            "VintageVerb".into(),
+            "RC-20".into(),
+            "OTT".into(),
+            "–".into(),
+        ]);
+        e.draw();
+        assert!(e.browser.bar.preset_fx && e.fx_scene.held.is_some());
+        let (x, y, w, h) = e.rail.name();
+        let tag = at(&e, (x + w - 95.0, y + h / 2.0));
+        go(&mut e, tag);
+        assert_eq!(
+            e.tip().map(|t| t.0),
+            Some("This preset has its own effects. Unlock to hear them.".into())
+        );
+        let key = at(&e, strip::centre(e.rail, StripTarget::Bar(BarTarget::Fx)));
+        click(&mut e, key);
+        e.lower.slide = None;
+        e.draw();
+        assert!(!e.lower.is_open(Lower::Fx));
+        assert!(e.browser.bar.fx_locked && e.browser.bar.preset_fx);
+        fake.preset.lock().unwrap().held = None;
+        e.draw();
+        assert!(e.browser.bar.fx_locked && !e.browser.bar.preset_fx);
+    }
+
+    /// The agreed LOCK and its signs, drawn by the editor for visual review.
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_fx_lock_pngs() {
+        let out =
+            std::path::PathBuf::from(std::env::var_os("CA72_FX_LOCK_PNG").expect("output folder"));
+        std::fs::create_dir_all(&out).unwrap();
+        for scale in [0.44, 1.0] {
+            for skin in [Skin::Worn, Skin::Drawn] {
+                for lettering in [Lettering::Standard, Lettering::Large] {
+                    let (mut e, fake) = editing_effects();
+                    let width = (art::W * scale).round() as u32;
+                    e.fit(1.0, width, width);
+                    e.set_look(skin);
+                    e.set_lettering(lettering);
+                    *e.params.preset.write().unwrap() = "Felt Bass".into();
+                    e.browser.reread(&e.params);
+                    lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+                    let save = |e: &mut Editing, state: &str| {
+                        window_frame(e)
+                            .save_png(
+                                out.join(format!("{skin:?}-{lettering:?}-{scale}-{state}.png")),
+                            )
+                            .unwrap();
+                    };
+                    save(&mut e, "unlocked");
+                    fake.preset.lock().unwrap().locked = true;
+                    save(&mut e, "locked");
+                    fake.preset.lock().unwrap().held = Some([
+                        "VintageVerb".into(),
+                        "RC-20".into(),
+                        "OTT".into(),
+                        "–".into(),
+                    ]);
+                    save(&mut e, "held");
+                    e.lower.shut();
+                    save(&mut e, "closed");
+                }
+            }
+        }
     }
 
     /// The standalone's rail has the FX key after ARP, the name's display a key shorter for it;

@@ -587,6 +587,16 @@ impl Plugin for Ca72 {
     /// the instance had.
     fn filter_state(state: &mut PluginState) {
         learn::filter_state(&mut state.fields);
+        // A project saved before preset effects has none to carry, whatever this instance
+        // had selected before it was recalled (R-FX-PRESETS).
+        let effects = state
+            .fields
+            .get("preset_effects")
+            .and_then(|s| serde_json::from_str::<Option<String>>(s).ok())
+            .unwrap_or_default();
+        if let Ok(s) = serde_json::to_string(&effects) {
+            state.fields.insert("preset_effects".into(), s);
+        }
         // A state saved before DOUBLE was a switch of its own: DOUBLE where its DETUNE is
         // above 0 (decisions.md R45).
         if !state.params.contains_key("doubled") {

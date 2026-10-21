@@ -17,6 +17,7 @@ daw-helper.workspace = true
 # The chain's tests, here beside the helper they start (`CARGO_BIN_EXE_ca72-fx-helper`), with
 # DAW-v3's test plug-ins, which cargo builds as libraries beside the test binaries.
 [dev-dependencies]
+ca72-plugin = { path = "../ca72-plugin", features = ["fx-host"] }
 ca72-fx.workspace = true
 daw-ipc.workspace = true
 daw-test-plugin = { path = "../../third_party/daw-v3/daw-test-plugin" }

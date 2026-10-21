@@ -131,9 +131,31 @@ pub struct Catalogue {
     pub effects: Vec<Listing>,
 }
 
+/// The preset’s chain compared with the chain heard (R-FX-PRESETS).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PresetStatus {
+    pub locked: bool,
+    pub differs: bool,
+    pub held: Option<[String; SLOTS]>,
+}
+
 /// The chain as the drawer reaches it. What may take a while (loading, a window) is called on
 /// the drawer's threads, never the editor's; the rest returns at once.
 pub trait Effects: Send + Sync {
+    fn load_preset(&self, _section: Option<String>) {}
+    fn observe_preset(&self, _section: Option<String>) {}
+    fn save_preset(&self) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+    fn prepare_save_preset(&self) -> mpsc::Receiver<Result<Option<String>, String>> {
+        let (tx, rx) = mpsc::channel();
+        let _ = tx.send(self.save_preset());
+        rx
+    }
+    fn preset_status(&self) -> PresetStatus {
+        PresetStatus::default()
+    }
+    fn set_locked(&self, _on: bool) {}
     /// The chain's effects in order, or none if it is busy now.
     fn slots(&self) -> Option<Vec<SlotInfo>>;
     /// Whether any effect plays (the FX key's light), or none if the chain is busy now.
@@ -304,6 +326,10 @@ impl FxView {
     }
 
     /// Whether there is a chain (the standalone's): the rail has its FX key.
+    pub(crate) fn effects(&self) -> Option<Arc<dyn Effects>> {
+        self.effects.clone()
+    }
+
     pub fn available(&self) -> bool {
         self.effects.is_some()
     }
@@ -409,11 +435,18 @@ impl FxView {
             FxSlot::default()
         });
         drop(pending);
+        let preset = self
+            .effects
+            .as_ref()
+            .map(|e| e.preset_status())
+            .unwrap_or_default();
         FxScene {
+            locked: preset.locked,
+            held: preset.held,
             slots,
             hover: self
                 .hover
-                .filter(|h| matches!(h, FxTarget::Name(_) | FxTarget::Tab(_))),
+                .filter(|h| matches!(h, FxTarget::Name(_) | FxTarget::Tab(_) | FxTarget::Lock)),
             drag: self.press.filter(|p| p.carried).map(|p| (p.slot, p.over)),
             list: self.open.map(|o| self.list(o)),
         }
@@ -617,6 +650,11 @@ impl FxView {
             return;
         }
         match fx_ui::hit(x, y, None) {
+            Some(FxTarget::Lock) => {
+                if let Some(e) = &self.effects {
+                    e.set_locked(!e.preset_status().locked);
+                }
+            }
             Some(FxTarget::Name(i)) if self.effect(i).is_some() && !self.busy() => {
                 self.press = Some(Press {
                     slot: i,
@@ -909,6 +947,8 @@ pub(crate) mod fake {
 
     use super::*;
 
+    type SaveReply = mpsc::Sender<Result<Option<String>, String>>;
+
     #[derive(Debug, Default)]
     pub struct Fake {
         pub slots: Mutex<Vec<SlotInfo>>,
@@ -918,6 +958,10 @@ pub(crate) mod fake {
         pub safe: Mutex<Option<SafeStart>>,
         pub unlisted: Mutex<usize>,
         pub preferences: Mutex<Preferences>,
+        pub preset: Mutex<PresetStatus>,
+        pub preset_raw: Mutex<Option<String>>,
+        pub delay_save: std::sync::atomic::AtomicBool,
+        pub save_replies: Mutex<Vec<SaveReply>>,
     }
 
     impl Fake {
@@ -959,6 +1003,29 @@ pub(crate) mod fake {
     }
 
     impl Effects for Fake {
+        fn prepare_save_preset(&self) -> mpsc::Receiver<Result<Option<String>, String>> {
+            let (tx, rx) = mpsc::channel();
+            if self.delay_save.load(std::sync::atomic::Ordering::Relaxed) {
+                lock(&self.save_replies).push(tx);
+            } else {
+                let _ = tx.send(self.save_preset());
+            }
+            rx
+        }
+        fn preset_status(&self) -> PresetStatus {
+            lock(&self.preset).clone()
+        }
+        fn set_locked(&self, on: bool) {
+            lock(&self.preset).locked = on;
+            self.note(format!("lock {on}"));
+        }
+        fn load_preset(&self, section: Option<String>) {
+            *lock(&self.preset_raw) = section;
+        }
+        fn save_preset(&self) -> Result<Option<String>, String> {
+            Ok(lock(&self.preset_raw).clone())
+        }
+
         fn slots(&self) -> Option<Vec<SlotInfo>> {
             Some(lock(&self.slots).clone())
         }

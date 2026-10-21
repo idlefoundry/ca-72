@@ -757,3 +757,175 @@ fn third_party_effects_are_heard_in_real_time() {
         c.shutdown().unwrap();
     }
 }
+
+/// A standalone preset uses the session’s state record and restore, including both formats,
+/// bypass and a missing plug-in. The chain’s lock wins until it is opened (R-FX-PRESETS).
+#[test]
+fn preset_chains_restore_lock_unlock_and_save_what_is_heard() {
+    use ca72_plugin::{fx::PresetChains, library::Library};
+    let dir = tempfile::tempdir().unwrap();
+    let (c, mut r) = chain(false);
+    for p in plugins() {
+        c.add(&p).unwrap();
+    }
+    let before = c.saved();
+    c.set_param(0, P_GAIN, value(&c, 0, P_GAIN, 0.37)).unwrap();
+    c.set_bypass(1, true).unwrap();
+    play(&mut r, 0, 2);
+    let presets = PresetChains::new(c.clone(), false, dir.path().join("settings.toml"));
+    let raw = presets.save().unwrap().unwrap();
+    let wanted = c.saved();
+    assert!(wanted.slots.iter().all(|s| s.state.is_some()));
+    assert_ne!(
+        wanted.slots[0].state, before.slots[0].state,
+        "SAVE takes fresh state after the edit"
+    );
+    let library = Library::at(dir.path().join("Presets"));
+    let e = library
+        .save_with(
+            "With effects",
+            Vec::new(),
+            None,
+            None,
+            Vec::new(),
+            Some(raw.clone()),
+        )
+        .unwrap();
+    assert_eq!(e.sound.effects.as_deref(), Some(raw.as_str()));
+    c.restore(&SavedChain {
+        format: 1,
+        slots: Vec::new(),
+    });
+    presets.load(e.sound.effects);
+    let wait = |check: &dyn Fn() -> bool| {
+        let start = Instant::now();
+        while !check() {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "preset change did not finish: {:?}",
+                c.status()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    wait(&|| c.status().len() == 2 && c.status().iter().all(|s| s.health == Health::Running));
+    assert_eq!(c.saved(), wanted);
+    presets.set_locked(true);
+    wait(&|| presets.status().locked);
+    c.set_bypass(0, true).unwrap();
+    let heard = c.saved();
+    let mut other = wanted.clone();
+    other.slots.swap(0, 1);
+    other.slots[0].name = "Preset reverb".into();
+    let raw = format!(
+        "[effects]\nchain = {}\n",
+        serde_json::to_string(&serde_json::to_string(&other).unwrap()).unwrap()
+    );
+    presets.load(Some(raw));
+    wait(&|| {
+        presets
+            .status()
+            .held
+            .as_ref()
+            .is_some_and(|n| n[0] == "Preset reverb")
+    });
+    assert_eq!(c.saved(), heard, "LOCK keeps what is heard");
+    let locked = presets.save().unwrap().unwrap();
+    let e = library
+        .save_with(
+            "Locked copy",
+            Vec::new(),
+            None,
+            None,
+            Vec::new(),
+            Some(locked.clone()),
+        )
+        .unwrap();
+    assert_eq!(e.sound.effects.as_deref(), Some(locked.as_str()));
+    presets.set_locked(false);
+    wait(&|| {
+        !presets.status().locked
+            && c.status().len() == 2
+            && c.status().iter().all(|s| s.health == Health::Running)
+            && c.saved() == other
+    });
+    assert_eq!(c.saved(), other);
+    assert!(presets.status().held.is_none());
+    presets.load(None);
+    wait(&|| c.is_empty());
+    // An absent plug-in stays in its place with its exact state and bypass, as in a session.
+    let mut missing = wanted.clone();
+    missing.slots.truncate(1);
+    missing.slots[0].path = dir.path().join("not-installed.clap");
+    let raw = format!(
+        "[effects]\nchain = {}\n",
+        serde_json::to_string(&serde_json::to_string(&missing).unwrap()).unwrap()
+    );
+    presets.load(Some(raw));
+    wait(&|| c.status().len() == 1 && c.status()[0].health == Health::Missing);
+    assert_eq!(c.saved(), missing);
+    presets.set_locked(true);
+    wait(&|| presets.status().locked);
+    presets.load(None);
+    wait(&|| presets.status().held.is_none() && presets.status().differs);
+    assert_eq!(c.saved(), missing);
+    wait(&|| {
+        std::fs::read_to_string(dir.path().join("settings.toml"))
+            .is_ok_and(|s| s.contains("fx_locked = true"))
+    });
+    drop(presets);
+    let reopened = PresetChains::new(c.clone(), false, dir.path().join("settings.toml"));
+    assert!(
+        reopened.status().locked,
+        "LOCK stays locked across launches"
+    );
+    reopened.load(None);
+    std::thread::sleep(Duration::from_millis(150));
+    assert_eq!(c.saved(), missing);
+    reopened.set_locked(false);
+    wait(&|| c.is_empty());
+    drop(reopened);
+    let safe = PresetChains::new(c.clone(), true, dir.path().join("safe-settings.toml"));
+    let raw = format!(
+        "[effects]\nchain = {}\n",
+        serde_json::to_string(&serde_json::to_string(&wanted).unwrap()).unwrap()
+    );
+    safe.load(Some(raw));
+    wait(&|| c.status().len() == 2 && c.status().iter().all(|s| s.health == Health::Off));
+    assert_eq!(c.saved(), wanted);
+    assert!(c.status().iter().all(|s| s.helper_pid.is_none()));
+    safe.turn_on();
+    wait(&|| c.status().len() == 2 && c.status().iter().all(|s| s.health == Health::Running));
+    safe.observe(None);
+    wait(&|| safe.status().differs);
+    assert_eq!(
+        c.saved(),
+        wanted,
+        "opening an editor observes, never replaces, a session’s chain"
+    );
+    safe.load(None);
+    wait(&|| c.is_empty());
+    c.shutdown().unwrap();
+}
+
+/// No audio device may be running while presets are browsed. A full control queue is an
+/// error, never an endless retry of the same removal (R-FX-PRESETS).
+#[test]
+fn a_full_queue_returns_from_preset_restore_without_retrying_forever() {
+    let (c, _r) = chain(false);
+    c.add(&plugins()[0]).unwrap();
+    let saved = c.saved();
+    let start = Instant::now();
+    let mut failed = false;
+    for _ in 0..1024 {
+        let errors = c.restore_as(&saved, ca72_fx::Restore::Off);
+        if !errors.is_empty() {
+            assert!(errors[0].contains("not taking changes"));
+            failed = true;
+            break;
+        }
+    }
+    assert!(failed, "the stopped audio thread must fill its queue");
+    assert!(start.elapsed() < Duration::from_secs(5));
+    c.shutdown().unwrap();
+}
