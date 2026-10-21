@@ -106,7 +106,7 @@ The prior `Accordion Study` is replayed with each crop's identical MIDI/gates fo
 | Reference register | Prior shared patch | Independent revision | Pitch errors C / E / G |
 |---|---|---|---|
 | 1 | 5.895 dB | 5.413 dB | -4.4 / +5.2 / -3.4 cents |
-| 2 | 4.805 dB | 4.424 dB | -2.8 / +1.0 / -2.0 cents |
+| 2 (later rejected by listening; see correction below) | 4.805 dB | 4.424 dB | -2.8 / +1.0 / -2.0 cents |
 
 These aggregate chord-band improvements are modest, not exact acoustic matches. Individual
 reed balance/tuning, bellows motion, stereo microphone perspective and room still differ.
@@ -180,3 +180,44 @@ denied; formatting and matching-skill validation. Tests cover independent phase/
 mixed FREE/ENV/RETRIG sources, shared/voice-owned and mono/unison/poly paths, exact LO/HI
 main-contour preservation, cross-modulation loop resets, and real offline RISE attenuation
 then audible rebuilding after export/reload with overlapping keys and main RETRIGGER off.
+
+## Second-register correction: reject the invented high tones
+
+The owner approved the first accordion register and rejected the second for an added high
+pitch absent from the original. The second preset's EMPHASIS 9 produced strong narrow tones
+around 8.9, 11.0 and 13.0 kHz. The earlier H1–H8 objective missed most of that range; its
+lower harmonic error did not establish an acceptable sound. The old second-register file
+is superseded, and the accepted first register and current flute are unchanged.
+
+Ablations isolate resonance: EMPHASIS 9 still produces the tones with oscillator 2 off;
+lowering emphasis removes them. Twenty-three same-gate candidates check lower resonance,
+cutoff and reed layers using one-twelfth-octave power bands (about 146 Hz–18.7 kHz) plus a
+separate 6–20 kHz measure. All diagnostic spectra normalize once to 150–1000 Hz power,
+so LUFS matching cannot hide an added whistle. These are diagnostics, not perceptual scores.
+
+The replacement `Accordion Register 2 Corrected` uses CUTOFF +0.5, EMPHASIS 2.5, two saw layers
+in the same octave with +0.06-semitone detuning, second-layer level 3, and the existing
+per-voice bellows ENV. It removes the former upper-octave layer as part of the refit. No
+audio EQ/notch, source processing, Rust change or analogue-model retuning is used.
+
+Delivered-file steady-window power relative to the same low-band reference:
+
+| Band | Original | Rejected preset | Corrected preset |
+|---|---|---|---|
+| 6–20 kHz total | -21.12 dB | +15.16 dB | -23.81 dB |
+| 8.9 kHz ±60 Hz | -44.76 dB | +9.95 dB | -44.43 dB |
+| 11.0 kHz ±60 Hz | -46.25 dB | +9.67 dB | -45.64 dB |
+| 13.0 kHz ±60 Hz | -42.40 dB | +10.18 dB | -49.56 dB |
+
+The corrected H1–H8 error is about 4.57 dB, versus 4.42 for the rejected fit. This small
+metric advantage did not justify the unsupported tones. Actual replay diagnostics also
+check attacks, late hold, release and a four-chord demonstration; the old dominant high
+peaks are absent there too. Remaining upper partial/reed and room differences still need
+the owner's listening review. The corrected example is not claimed an exact reproduction.
+
+The normal preset export/reload has spectral MAE 0.262/0.156/0.086 dB and envelope MAE
+0.0053 dB; the actual reloaded file supplies all revised listening/new-chord audio. The
+original/corrected pair uses MCP LUFS matching followed by one common gain, and the new
+chord sequence is normalized separately. The rejected version remains archived rather than
+appearing as the current preset. First-register and flute preset/audio files and report
+sections are preserved. The engine fingerprint remains the one recorded above.

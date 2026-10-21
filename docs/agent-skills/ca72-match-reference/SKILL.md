@@ -90,6 +90,14 @@ Fit the audible structure, using a small number of changes each iteration:
   For a held-note crop pass its known `fundamental_hz`. Inspect H1 to H8 relative to the
   fundamental and the strongest harmonic, especially a resonant third. A whole-phrase
   average can hide the missing harmonic that matters.
+- Check the full measured spectrum for candidate-only narrow tones, including frequencies
+  above the harmonic fitting bands, before accepting a local harmonic improvement. Strong
+  filter emphasis can invent a whistle while H1–H8 error improves. Compare the actual
+  recording's upper-band energy and peaks, including attack, hold, release and new notes.
+  Use one fixed low-band normalization for diagnosis when an added high tone would dominate
+  whole-signal LUFS; do not hide it with gain, a notch or a limited fitting window. The second
+  accordion register exposed this failure: EMPHASIS 9 generated 8.9/11/13 kHz tones absent
+  from the source, and required a lower-resonance preset despite worse harmonic-band error.
 - Filter and loudness contours from attacks, held levels and releases. Include candidate-only
   tails. Preserve the musical timing while fitting the envelope.
 - Modulation from sideband spacing and level: supply `modulation_hz` and a long enough held

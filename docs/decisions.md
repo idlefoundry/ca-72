@@ -14491,3 +14491,31 @@ dispatch and final artifacts receive independent read-only review.
 **Shared skill lesson:** distinguish an LFO's RETRIG mode from the physical contours'
 RETRIGGER switch. For growing vibrato, phase/RISE must restart without forcing envelope
 rearticulation. Acceptance tests must exercise overlapping keys, not silence between notes.
+
+## R-REFERENCE-UNSUPPORTED-TONES. Reject the second accordion's high resonance
+
+**Owner listening feedback, 2026-10-21:** the first accordion register is approved; the
+second has an awful added high pitch absent from the reference. Preserve the first and
+correct the second.
+
+The second preset's EMPHASIS 9 generated dominant narrow tones at roughly 8.9/11/13 kHz,
+outside most H1–H8 fitting bands. Removing its upper reed layer alone did not fix them;
+lower emphasis did. Its lower harmonic-band score was not a valid acceptance criterion.
+Full-spectrum checks should have rejected this candidate before delivery.
+
+Twenty-three lower-resonance/cutoff/reed-layer candidates were evaluated over 146 Hz–18.7 kHz
+power bands and separate 6–20 kHz energy/peak checks, normalized once to the chord's low
+band so whole-signal LUFS cannot conceal the whistle. The replacement exported preset
+uses CUTOFF +0.5, EMPHASIS 2.5 and two same-octave saw layers, slight detuning and the
+existing per-voice ENV attack. Its 6–20 kHz power is -23.81 dB relative to 150–1000 Hz,
+against original -21.12 and rejected +15.16 dB. The old whistle bands now approximate or
+fall below the original. Attacks, release and new chords are checked as well as the fit
+window. The slightly worse H1–H8 error (about 4.57 versus 4.42 dB) is disclosed.
+
+Actual exported-file replay supplies the listening pair and new chords. No source, Rust,
+analogue DSP or accepted first-register/flute changes. The rejected second version remains
+archived; the corrected sound awaits listening judgement. [Evidence](mcp-acoustic-validation.md).
+
+**Shared skill lesson:** a harmonic-only objective can reward a resonant patch which adds
+an unrelated high tone. Check candidate-only peaks across the full measured spectrum,
+including attacks/releases/new notes, before accepting its local harmonic score.
