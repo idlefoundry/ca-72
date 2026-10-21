@@ -13730,3 +13730,96 @@ WAVEFORM), the pop-up's dial as far. A macro's cord lands on the strip's WIDTH, 
 ENTROPY, DRIVE and (now a target) LEVEL while the strip's page shows, and the strip knobs' menus
 offer every macro; a macro moving DRIVE is corrected by AUTO GAIN's curve at the DRIVE it gives
 and never asks for a measurement.
+
+## R-FX-SEARCH. FIND in the standalone’s effects’ chooser, with grouping and six recent choices
+
+**The owner, 2026-10-20:** "we need to add search functionality to the FX page so people can easily find their plugins."
+The owner approved the recommendations in mock-up A: search inside today’s chooser; NAME with
+nothing typed by default, and RECENT keeping the last six effects chosen. The approved pictures
+and their measurements are in `~/Code/ca72-night/fx-params-mockups/README.md`, section A,
+`sheet-1-search.png` and `a*.png` (drawn by the real panel renderer).
+
+**The chooser** (`fx_view.rs`, `fx_view/search.rs`, `ca72_panel::strip::fx`). The plate is 1480
+units wide (was 1240), still 540 deep: the title, FIND, then ten rows (was eleven). FIND uses the
+presets’ `Field`, its caret and its text editing, with a faint A NAME, MAKER OR TYPE while empty.
+Each word typed must be a case-insensitive substring of a name, maker or type; words may match
+different fields. Matched characters are brighter and underlined. NAME sorts by name, maker and
+format; MAKER and TYPE group the matches under inert heads, each with a dotted rule and its
+filtered count. The grouped column is omitted from each effect’s row, leaving room for the other
+one. The keyboard’s row has a `>`; Up, Down, Page Up and Page Down move it past heads and blank
+lines, keeping it in view. Enter chooses it. Left, Right, Home, End, Backspace and Delete edit
+FIND. Escape clears its text, then closes the empty list. The list takes the keyboard while open;
+the standalone’s quit shortcut still quits. A click on FIND places its caret; long text scrolls
+inside its place, clear of the grouping words. A click elsewhere closes the chooser as before.
+Each filtered or grouped row keeps its original catalogue index and scan generation, so adding
+or replacing still asks for that exact effect.
+
+**Types without another scan.** `catalogue()` now keeps `PluginDesc.features`, and the effect’s
+identity (format, path, plug-in id); the existing scan cache and its format are unchanged. The
+mapping below accepts VST3 categories already split on `|`, or still joined, and ignores case.
+The first matching row wins if a descriptor gives several types; generic format and channel
+features do not affect the type.
+
+| Type | VST3 sub-category | CLAP feature |
+|---|---|---|
+| Reverb | Reverb | reverb |
+| Delay | Delay | delay |
+| Distortion | Distortion | distortion |
+| Dynamics | Dynamics | compressor, limiter, gate, expander, transient-shaper |
+| EQ | EQ, Filter | equalizer, filter |
+| Modulation | Modulation | chorus, flanger, phaser, tremolo, vibrato |
+| Pitch | Pitch Shift | pitch-shifter |
+| Tools | Tools, Analyzer | utility, analyzer |
+
+Unknown or absent categories show Tools. A maker not named has an UNKNOWN MAKER head. These are
+agent choices for incomplete descriptions; no inference is made from an effect’s name.
+
+**On this computer** (`settings.rs`, `fx.rs`). The chosen grouping is `fx_order` in the existing
+`CA-72/settings.toml`. `fx_recent` holds at most six identities, newest first: a successful add or
+replacement moves that identity to the front, dropping its older place. Failed loads do not
+enter RECENT. Two formats, or two paths with the same id, are distinct. Identities absent from
+the current catalogue stay saved but are not offered; no recent entry points at a stale scan
+index. RECENT is filtered by FIND too, and has ALL EFFECTS… (back to NAME) and SCAN AGAIN. The
+settings use the existing lock and atomic write, read again before each change, preserving
+unrelated settings and leaving an unreadable file alone. The drawer’s worker writes them;
+nothing in the sound preset, session or audio thread changes.
+
+**Evidence** (Linux, 2026-10-20; branch `fx-search` from fed586d):
+- `cargo test -p ca72-plugin -p ca72-panel --features ca72-plugin/standalone-production`:
+  768 passed, 0 failed, 76 ignored. New tests cover name, maker and type substrings, words
+  across fields and case; grouped heads and filtered counts; the original catalogue indices;
+  navigation past heads, scrolling and Enter for add and replace; field editing and both
+  Escapes; recent ordering, six-entry limit, stable identities and fresh reads of their file;
+  category aliases; FIND and grouping hit tests; Unicode and overlapping underlines. The
+  editor’s existing chooser test still opens, adds, replaces, scrolls and closes it; a new one
+  checks that typing plays no notes and arrows step no presets. The panel’s parts-equal-whole
+  test includes FIND, a marked row, groups and long text, in both skins and at both scales.
+- **Workspace:** `CA72_REQUIRE_NGSPICE=1 cargo test --workspace --features
+  ca72-plugin/standalone-production -- --test-threads=4` stopped with 873 passed, 1 failed and
+  53 ignored across 62 completed suites. The existing
+  `tests::a_held_drone_plays_through_the_engine_as_held_keys` differed in UNISON, 256-frame
+  realtime blocks, first at sample 21415. It passed in the targeted run above, twice in
+  isolation under the timing lock, and once more when the exact workspace binary was run on
+  its own. Scheduling sensitivity is suspected (its realtime workers use wall-clock
+  deadlines), not proven. No engine code or test was changed to make it pass. The whole
+  workspace run is therefore not claimed green; suites after that failure were not reached.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`, clippy for the two
+  touched crates with default features, `cargo fmt --all -- --check`, and
+  `python3 scripts/notices.py --check`: clean.
+- **Golden:** both `approved.png` and `approved-large.png` pass. The chooser is in neither;
+  no golden image changed or was re-approved.
+- **Pictures:** `the_fx_search_pngs`, run explicitly, writes sixteen images of the real
+  chooser: search, MAKER, TYPE and RECENT, both skins, at 0.44 and 1.0. Checked against A’s
+  approved pictures; these use sixteen fixture effects, hence 7 OF 16 rather than 7 OF 47.
+- **Frames:** `cargo run --release -p ca72-panel --example frames`, two consecutive runs of
+  the final renderer under the timing lock: typing in FIND 2.7 / 6.4 ms at 0.44 / 0.87
+  (median and slowest, rounded to 0.1 ms, both runs). This is the list’s redraw and composition
+  in the frame example with thirty effects; it does not time catalogue filtering. The machine
+  was shared, load 9.7 falling to 6.1. An earlier run at load 24 to 28 was noisy (40.9 / 9.3 ms
+  medians), retained in the worktree’s evidence but not used for the consistent pair.
+
+**Not tried:** live window input or listening with installed third-party effects, Windows,
+macOS or a Mac build (another agent’s job). The fixture chain exercises the same add and
+replace dispatch, but does not load a third-party binary. Unknown categories showing Tools,
+an unnamed maker’s UNKNOWN MAKER head, the category precedence above, and RECENT recording
+successful choices are agent decisions for the owner to confirm.
