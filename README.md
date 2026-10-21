@@ -180,7 +180,10 @@ effects in your CLAP and VST3 folders (scanned the first time you open it, each 
 a process of its own; **SCAN AGAIN** after installing more). Click an effect's name to open its
 window, its **ON** tab to bypass it, drag a name onto another slot to move it there, and
 right-click a slot for **REPLACE…** and **REMOVE**. The key is lit while its drawer is open and
-glows faintly while an effect plays with it shut. An effect that crashes is started again;
+glows faintly while an effect plays with it shut. **PARAMETERS…** in an effect's menu opens a
+searchable list: pin up to four knobs under each effect, then give them LFOs, macros or MIDI
+Learn. The knobs show the effect's own value text; missing or crashed effects keep their pins
+and assignments, dimmed and inert. An effect that crashes is started again;
 after five crashes it is passed by and its slot says CRASHED; one whose plug-in is not installed says MISSING and keeps its settings. The chain and
 each effect's settings are saved in `effects.json` beside `session.json`. The standalone never
 waits for an effect: it opens and plays while they load. One that crashes or stops responding as

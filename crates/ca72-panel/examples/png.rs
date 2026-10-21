@@ -663,6 +663,7 @@ fn drop_fx(
             maker: maker.into(),
             format: format.into(),
             action: false,
+            ..FxRow::default()
         };
         let mut rows = vec![
             row("Dragonfly Early Reflections", "Michael Willis", "CLAP"),
@@ -686,6 +687,7 @@ fn drop_fx(
             rows,
             first: 0,
             hover: Some(1),
+            find: None,
         });
     }
     drawer.render(&scene);

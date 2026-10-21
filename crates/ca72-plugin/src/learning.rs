@@ -34,6 +34,7 @@ pub enum Place {
     Panel(usize),
     Strip(StripControl),
     Preset(BarTarget),
+    Fx(usize),
 }
 
 /// Where learnable parameter `i`'s control is.
@@ -42,6 +43,9 @@ pub fn place(i: usize) -> Option<Place> {
         return Some(Place::Panel(control_index("mod_wheel")?));
     }
     let id = LEARNABLE.get(i)?.id;
+    if let Some(n) = crate::learn::fx_pin(id) {
+        return Some(Place::Fx(n));
+    }
     Some(match id {
         "previous_preset" => Place::Preset(BarTarget::Prev),
         "next_preset" => Place::Preset(BarTarget::Next),
@@ -66,6 +70,7 @@ pub fn place(i: usize) -> Option<Place> {
 /// and 3's FREQUENCY knobs turn their DIVISION now (R-OSC-TIMED).
 pub fn learnable_at(p: Place, timed: [bool; 2]) -> Option<usize> {
     match p {
+        Place::Fx(n) => index(crate::lfo::Target::Fx(n).id()),
         Place::Panel(c) if timed[0] && CONTROLS.get(c)?.param == "osc2_frequency" => {
             index("osc2_division")
         }
@@ -96,6 +101,7 @@ pub fn learnable_at(p: Place, timed: [bool; 2]) -> Option<usize> {
 /// Where a note about a place's control goes: centred above it.
 fn note_point(rail: Rail, p: Place) -> (f64, f64) {
     match p {
+        Place::Fx(_) => (0.0, 0.0),
         Place::Preset(t) => ca72_panel::strip::centre(rail, ca72_panel::strip::StripTarget::Bar(t)),
         Place::Panel(c) => above(&CONTROLS[c]),
         Place::Strip(s) => {
@@ -159,6 +165,7 @@ pub enum Item {
 /// What a modulation item of a menu does (decisions.md R-LFO).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModItem {
+    Unpin(usize),
     /// Source's depth on the knob (its control's index) typed, in its knob's entry field.
     Depth(crate::lfo::Source, crate::lfo::Target, usize),
     Remove(crate::lfo::Source, crate::lfo::Target),
@@ -275,6 +282,7 @@ pub struct Learning {
     pub lfo_timed: [bool; 4],
     /// Which of GLIDE's ranges its knob's menu marks (decisions.md R-GLIDE-LONG).
     pub glide_long: bool,
+    pub fx_pins: Vec<crate::fx_view::PinInfo>,
 }
 
 /// A parameter's name.
@@ -307,6 +315,61 @@ fn not_learnable(t: Target) -> Option<String> {
 }
 
 impl Learning {
+    fn listed(&self) -> usize {
+        if self.rail == Rail::Effects {
+            LEARNABLE.len()
+        } else {
+            LEARNABLE.len() - crate::lfo::FX_PINS
+        }
+    }
+    fn label(&self, i: usize) -> String {
+        if let Some(n) = LEARNABLE.get(i).and_then(|l| crate::learn::fx_pin(l.id))
+            && let Some(p) = self.fx_pins.iter().find(|p| p.target == n)
+        {
+            return format!("{}, {}", p.name, p.effect).to_uppercase();
+        }
+        label(i).into()
+    }
+
+    fn note_point(&self, p: Place) -> (f64, f64) {
+        if let Place::Fx(n) = p
+            && let Some(pin) = self.fx_pins.iter().find(|p| p.target == n)
+            && let Some(place) = self
+                .fx_pins
+                .iter()
+                .filter(|p| p.slot == pin.slot)
+                .position(|p| p.target == n)
+        {
+            let (x, y, w, _) = ca72_panel::strip::fx::pin_screen(pin.slot, place);
+            return (x + w / 2.0, y - 6.0);
+        }
+        note_point(self.rail, p)
+    }
+
+    /// The source heads and UNPIN first, MIDI Learn after them (R-FX-PARAMS).
+    pub fn pin_menu_title(&mut self, title: String) {
+        let Some(open) = &mut self.open else {
+            return;
+        };
+        open.menu.title = title;
+        let first = open
+            .items
+            .iter()
+            .position(|item| matches!(item, Item::Head | Item::Mod(_)))
+            .unwrap_or(open.items.len());
+        open.items.rotate_left(first);
+        open.menu.items.rotate_left(first);
+        let len = open.items.len();
+        for i in open
+            .menu
+            .heads
+            .iter_mut()
+            .chain(open.menu.marked.iter_mut())
+        {
+            *i = (*i + len - first) % len;
+        }
+    }
+
     /// Whether the editor should keep the keyboard: learning, or a menu open.
     pub fn holds_keys(&self, map: &MidiMap) -> bool {
         self.open.is_some() || map.armed().is_some()
@@ -430,7 +493,7 @@ impl Learning {
                         ),
                     ]);
                 }
-                (format!("{} · {cc}", label(i)), items)
+                (format!("{} · {cc}", self.label(i)), items)
             }
             None => match not.and_then(not_learnable) {
                 Some(t) => (
@@ -1013,7 +1076,7 @@ impl Learning {
             self.chosen = i;
         }
         self.say(
-            format!("{}: {}", label(i), instruction(i)),
+            format!("{}: {}", self.label(i), instruction(i)),
             DrawerTone::News,
         );
         self.take_keys = true;
@@ -1023,7 +1086,7 @@ impl Learning {
     pub fn cancel(&mut self, map: &MidiMap) {
         if let Some(i) = map.armed() {
             self.say(
-                format!("{}: MIDI LEARN CANCELLED.", label(i)),
+                format!("{}: MIDI LEARN CANCELLED.", self.label(i)),
                 DrawerTone::Dim,
             );
         }
@@ -1033,7 +1096,7 @@ impl Learning {
     /// Learnable parameter `i`'s controller removed (the sound as it is).
     pub fn remove(&mut self, map: &MidiMap, i: usize) {
         if let Some(cc) = map.remove(i) {
-            let line = format!("{}: {} REMOVED", label(i), cc.text());
+            let line = format!("{}: {} REMOVED", self.label(i), cc.text());
             self.say(format!("{line}."), DrawerTone::Dim);
             self.notice = Some((vec![(line, Tone::Plain)], i, Instant::now()));
             if let Err(error) = map.keep_actions(&[i]) {
@@ -1065,11 +1128,11 @@ impl Learning {
             Binding::Cc(c) if a.param == MOD_WHEEL => format!("CC {} · ALL CHANNELS", c.cc),
             input => input.text(),
         };
-        let head = format!("{}: {}", label(a.param), controller);
+        let head = format!("{}: {}", self.label(a.param), controller);
         let mut lines = vec![(head.clone(), Tone::Accent)];
         let mut status = head;
         if let Some(d) = a.displaced {
-            let t = format!("TAKEN FROM {}, WHICH HAS NONE NOW", label(d));
+            let t = format!("TAKEN FROM {}, WHICH HAS NONE NOW", self.label(d));
             status = format!("{status}, {t}");
             lines.push((t, Tone::Plain));
         }
@@ -1113,7 +1176,7 @@ impl Learning {
         let (panel, strip) = match ring {
             Some(Place::Panel(c)) => (Some(c), None),
             Some(Place::Strip(s)) => (None, Some(s)),
-            Some(Place::Preset(_)) | None => (None, None),
+            Some(Place::Fx(_) | Place::Preset(_)) | None => (None, None),
         };
         let note = match armed {
             Some(i) => place(i).map(|p| {
@@ -1134,13 +1197,13 @@ impl Learning {
                         Tone::Dim,
                     ),
                 };
-                let (x, y) = note_point(self.rail, p);
+                let (x, y) = self.note_point(p);
                 Note {
                     x,
                     y,
                     size,
                     lines: vec![
-                        (format!("MIDI LEARN: {}", label(i)), Tone::Accent),
+                        (format!("MIDI LEARN: {}", self.label(i)), Tone::Accent),
                         (
                             format!("{} · ESC OR CANCEL STOPS", instruction(i)),
                             Tone::Plain,
@@ -1151,7 +1214,7 @@ impl Learning {
             }),
             None => self.notice.as_ref().and_then(|(lines, i, _)| {
                 place(*i).map(|p| {
-                    let (x, y) = note_point(self.rail, p);
+                    let (x, y) = self.note_point(p);
                     Note {
                         x,
                         y,
@@ -1175,10 +1238,10 @@ impl Learning {
         let armed = map.armed();
         let rows: Vec<MidiRow> = LEARNABLE
             .iter()
-            .take(crate::learn::listed())
+            .take(self.listed())
             .enumerate()
-            .map(|(i, l)| MidiRow {
-                name: l.label.to_owned(),
+            .map(|(i, _)| MidiRow {
+                name: self.label(i),
                 assignment: assigned[i].map(Binding::text).unwrap_or_default(),
                 waiting: armed == Some(i),
             })
@@ -1214,7 +1277,7 @@ impl Learning {
     }
 
     fn choose(&mut self, i: usize) {
-        self.chosen = i.min(crate::learn::listed() - 1);
+        self.chosen = i.min(self.listed() - 1);
         if self.chosen < self.first {
             self.first = self.chosen;
         } else if self.chosen >= self.first + ROWS_SHOWN {
@@ -1224,7 +1287,7 @@ impl Learning {
 
     /// The list scrolled by `rows`.
     pub fn scroll(&mut self, rows: i32) {
-        let most = crate::learn::listed().saturating_sub(ROWS_SHOWN) as i32;
+        let most = self.listed().saturating_sub(ROWS_SHOWN) as i32;
         self.first = (self.first as i32 + rows).clamp(0, most) as usize;
     }
 
@@ -1255,7 +1318,7 @@ impl Learning {
             Key::PageDown => self.choose(self.chosen + ROWS_SHOWN),
             Key::PageUp => self.choose(self.chosen.saturating_sub(ROWS_SHOWN)),
             Key::Home => self.choose(0),
-            Key::End => self.choose(crate::learn::listed() - 1),
+            Key::End => self.choose(self.listed() - 1),
             Key::Enter => {
                 if map.armed() == Some(self.chosen) {
                     self.cancel(map);
@@ -1274,7 +1337,7 @@ impl Learning {
             // A letter chooses the next control whose name begins with it.
             Key::Character(c) => {
                 let c = c.to_uppercase();
-                let n = crate::learn::listed();
+                let n = self.listed();
                 if let Some(i) = (1..=n)
                     .map(|k| (self.chosen + k) % n)
                     .find(|&i| LEARNABLE[i].label.starts_with(&c))

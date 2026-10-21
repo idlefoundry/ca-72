@@ -371,12 +371,16 @@ impl Editing {
         .placed(
             self.renderer.fonts(),
             // (A depth on the standalone's TEMPO typed over its screen: R-LFO.)
-            match CONTROLS.get(entry.control) {
-                Some(c) => c.centre(),
-                None => {
-                    let (x, y, w, h) = art::tempo_window(self.renderer.arrangement().plate_at());
-                    (x + w / 2.0, y + h / 2.0)
-                }
+            match super::fx_pins::target(entry.control).and_then(|n| self.fx_pin_at(n)) {
+                Some(at) => at,
+                None => match CONTROLS.get(entry.control) {
+                    Some(c) => c.centre(),
+                    None => {
+                        let (x, y, w, h) =
+                            art::tempo_window(self.renderer.arrangement().plate_at());
+                        (x + w / 2.0, y + h / 2.0)
+                    }
+                },
             },
             [
                 0.0,

@@ -380,6 +380,18 @@ impl Renderer {
 
     /// A renderer drawing the panel in `look` (a skin pack's, or a built-in one).
     pub fn with_pack(look: Look, lettering: Lettering, scale: f64, ui: f64) -> Self {
+        let mut r = Self::blank(look, lettering, scale, ui, true);
+        r.draw_background();
+        r
+    }
+
+    /// A drawer's layers alone, with the same pictures and light, without painting another
+    /// whole panel just to turn its knobs (decisions.md R-FX-PARAMS).
+    pub(crate) fn for_parts(skin: Skin, scale: f64) -> Self {
+        Self::blank(Look::of(skin), Lettering::Standard, scale, 1.0, false)
+    }
+
+    fn blank(look: Look, lettering: Lettering, scale: f64, ui: f64, panel: bool) -> Self {
         let skin = look.base;
         let arrangement = Arc::clone(&look.arrangement);
         let fonts = look
@@ -392,9 +404,13 @@ impl Renderer {
             font_family: FAMILY.into(),
             ..usvg::Options::default()
         };
-        let (w, h) = size_for(scale, arrangement.panel);
+        let (w, h) = if panel {
+            size_for(scale, arrangement.panel)
+        } else {
+            (1, 1)
+        };
         let empty = || Pixmap::new(w, h).expect("a frame of at least a pixel");
-        let mut r = Self {
+        Self {
             fonts,
             look,
             arrangement,
@@ -427,9 +443,7 @@ impl Renderer {
             left_rect: [0; 4],
             glide_rect: [0; 4],
             glide_surface: None,
-        };
-        r.draw_background();
-        r
+        }
     }
 
     /// The skin the panel is drawn in.

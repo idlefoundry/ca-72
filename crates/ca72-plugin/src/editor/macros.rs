@@ -247,7 +247,7 @@ impl Editing {
             };
             rows.push(Row::Head(format!(
                 "{} \u{b7} {}{}",
-                super::lfo_page::control_label(i),
+                self.target_label(a.target),
                 mods::percent(f64::from(a.depth)),
                 self.standalone_only(a.target)
             )));
@@ -339,8 +339,7 @@ impl Editing {
             .into_iter()
             .flatten()
             .map(|a| {
-                let name = super::lfo_page::control_of(a.target)
-                    .map_or(a.target.short(), super::lfo_page::control_label);
+                let name = self.target_label(a.target);
                 format!(
                     "{name} {}{}",
                     mods::percent(f64::from(a.depth)),

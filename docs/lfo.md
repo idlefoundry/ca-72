@@ -344,8 +344,31 @@ the chain through it; `fx_view::installed()` is `None` in the plug-ins), and fre
 | `fx_view::pin_target(params, target) -> Option<lfo::Target>` | The target a cord or a macro may land on: `Some(Target::Fx(n))` while pinned to an effect that runs (`lfo::target_of(p, "fxN")`, from `lfo::FX_PINNED`). Its rings and menus are any target's: `Patch::on_knob(Target::Fx(n))`, `Patch::assign`, `set_depth`, `remove`. |
 | `learn::fx_pin(id)`, `learn::is_fx_pin(i)` | MIDI Learn per pin: arm `learn::index("fxN")` as any learnable; the learning list should leave these out where `fx_view::installed()` is `None`. |
 
-What the view still has to do (the Codex brief, `ca72-night/fx-params-ui.md`): the PARAMETERS list
-(FIND, ALL · PINNED, the rows with their text and sources), the four places under each slot
-(+ PIN, the knob with its eight-character name screen), cords landing on them, their rings, the
-hover pop-up's dials and the tip with the plug-in's text, the menu's heads with UNPIN and MIDI
-LEARN, and the dimmed and MISSING states.
+**The B1 view.** The slot's right-click menu offers **PARAMETERS…**; the first free **+ PIN**
+place opens the same list. Its plate hangs from the original row's foot, over the pins, so its
+12 lines fit inside the window. The title and pin count share line 0, FIND and ALL · PINNED line
+1, and ten rows follow, in name order. Each row gives its pin bullet, name, the plug-in's own
+value text and its sources (a macro's typed name). Matched letters are brighter and underlined.
+Click or Enter toggles a pin; a fifth pin's refusal stays on the plate. Up/Down and Page Up/Down
+move the marked row, the presets' text field supplies caret editing, Escape clears FIND and then
+closes, and Tab switches ALL · PINNED. The list holds the keyboard throughout.
+
+The drawer is 372 units deep with any pins, 170 with none; four places under each effect,
+160 units apart, with eight-character dot screens and each knob's ticks on its 300-degree
+sweep. Its still parts (screens, glass, shadows and ticks) are made on the drawer's thread;
+changed cells alone are drawn again. The parameter catalogue and value text are asked for on
+the drawer's worker, never in the drawing path: the catalogue once on opening, pin text when
+values change. Pins are polled every tenth of a second, retaining the last while the chain is
+busy. Closing and reopening the list lists a changed parameter catalogue again.
+
+`editor/fx_pins.rs` gives each pin a control number past the panel's controls, as TEMPO has one,
+so `editor/lfo_page.rs` supplies the same cord, coloured rings, one-way macro rings, pop-up depth
+dials, Alt-drag, typed depth and source heads as a panel knob. Pins' rings are composed over
+their drawer, under its list. The tip names the parameter and effect, gives its own value text,
+and adds every source's depth. A turn, including scrolling, sets its base and observes its steps.
+A pin travels with its slot while its fixed target and MIDI Learn stay its own.
+
+Unavailable pins keep their names, rings and assignments, dimmed, refusing turns and new cords;
+a parameter no longer found reads MISSING. UNPIN is in each pin's menu, followed by MIDI Learn.
+The learning list names pins by parameter and effect on the standalone's effects rail, never
+on the plug-ins' rail. Both built-in skins and LARGE lettering use the same geometry.

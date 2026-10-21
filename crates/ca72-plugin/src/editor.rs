@@ -61,6 +61,7 @@ use crate::update::Update;
 
 mod agent;
 mod entry;
+mod fx_pins;
 mod lfo_page;
 mod macros;
 use entry::Entry;
@@ -1399,6 +1400,7 @@ struct Editing {
     fx_view: FxView,
     fx: Option<FxRenderer>,
     fx_scene: FxScene,
+    fx_pin_drag: Option<fx_pins::PinDrag>,
     rail: Rail,
     /// The standalone's TEMPO screen (decisions.md R-ARP): dragged (from where, logical pixels
     /// down, at what tempo, SHIFT held; the tempo the drag began at), its last press (for a
@@ -1791,6 +1793,7 @@ impl Editing {
             fx_view: FxView::new(None),
             fx: None,
             fx_scene: FxScene::default(),
+            fx_pin_drag: None,
             rail: Rail::Plugin,
             tempo_drag: None,
             last_tempo_press: None,
@@ -2364,9 +2367,17 @@ impl Editing {
 
     /// The drawer dropped from the rail: its top now (drawing units), while it shows, dropping
     /// down from under the rail, over the lower page.
+    fn lower_depth(&self) -> f64 {
+        if self.lower.which == Lower::Fx {
+            self.fx_scene.depth()
+        } else {
+            self.lower.which.depth()
+        }
+    }
+
     fn lower_top(&self) -> Option<f64> {
         let k = self.lower.reveal();
-        (k > 0.0 && self.expanded()).then_some(lower_ui::TOP - (1.0 - k) * self.lower.which.depth())
+        (k > 0.0 && self.expanded()).then_some(lower_ui::TOP - (1.0 - k) * self.lower_depth())
     }
 
     /// Whether the pointer (the drawing's units) is over the drawer dropped from the rail, as much
@@ -2375,7 +2386,7 @@ impl Editing {
         self.lower_top().is_some_and(|top| {
             let plate = (lower_ui::LEFT..lower_ui::RIGHT).contains(&x)
                 && y >= DRAWER_TOP
-                && y < top + self.lower.which.depth();
+                && y < top + self.lower_depth();
             let list = self.lower.which == Lower::Fx
                 && self.lower.settled()
                 && self
@@ -3527,7 +3538,7 @@ impl Editing {
         }
         // The effects' drawer and its list (decisions.md R-FX-DRAWER).
         if self.in_fx((x, y)) {
-            if self.lower.settled() {
+            if self.lower.settled() && !self.fx_pin_press((x, y), modifiers) {
                 self.fx_view.press(x, y);
             }
             return;
@@ -3735,6 +3746,9 @@ impl Editing {
         }
         // An effects' slot: what its state offers (R-FX-SAFETY), REPLACE… and REMOVE.
         if self.in_fx((x, y)) {
+            if self.fx_pin_menu((x, y)) {
+                return;
+            }
             match self
                 .fx_view
                 .menu_for(x, y)
@@ -3851,8 +3865,22 @@ impl Editing {
             });
             return;
         }
+        if self.fx_pin_moved(modifiers) {
+            return;
+        }
         // An assignment or a depth dragged (decisions.md R-LFO).
         if self.mod_moved((x, y)) {
+            return;
+        }
+        if !self.learning.menu_open()
+            && self
+                .mod_scene
+                .popup
+                .as_ref()
+                .is_some_and(|p| ca72_panel::modulation::on_popup(p, x, y))
+        {
+            self.follow_popup((x, y));
+            self.playing.hover = None;
             return;
         }
         self.playing.hover = if self.expanded()
@@ -3921,9 +3949,12 @@ impl Editing {
                 if self.lower.settled() {
                     self.fx_view.moved(x, y);
                 }
-                self.hover = None;
+                self.hover = self
+                    .fx_pin_hit(at)
+                    .map(|t| Target::Control(fx_pins::FIRST + t));
                 self.strip_scene.hover = None;
                 self.browser.bar.hover = None;
+                self.follow_popup(at);
                 return;
             }
             self.fx_view.hover = None;
@@ -4005,11 +4036,13 @@ impl Editing {
             || self.resizing.is_some()
             || self.playing.dragging()
             || self.fx_view.pressing()
+            || self.fx_pin_drag.is_some()
             || self.tempo_drag.is_some()
     }
 
     fn released(&mut self) {
         self.playing.release_pointer();
+        self.fx_pin_drag = None;
         self.fx_view.released();
         self.tempo_let_go();
         if self.mod_released() {
@@ -4029,6 +4062,7 @@ impl Editing {
     fn end_gestures(&mut self) {
         self.playing.release_pointer();
         self.fx_view.cancel_press();
+        self.fx_pin_drag = None;
         self.tempo_let_go();
         self.typing = None;
         self.knob_entry = None;
@@ -4171,6 +4205,20 @@ impl Editing {
         }
         // The effects' list scrolls a row for each row's travel, as the presets' list does.
         if self.in_fx((x, y)) {
+            if let Some(t) = self.fx_pin_hit((x, y)) {
+                let value = self.fx_view.pin_info(t).map_or(0.0, |p| p.value);
+                let step = self
+                    .fx_view
+                    .pin_info(t)
+                    .filter(|p| p.steps > 0)
+                    .map_or(0.01, |p| 1.0 / f64::from(p.steps));
+                let amount = match delta {
+                    ScrollDelta::Lines { y, .. } => f64::from(y),
+                    ScrollDelta::Pixels { y, .. } => f64::from(y) / 40.0,
+                };
+                self.fx_view.set_pin_value(t, value + amount * step);
+                return;
+            }
             if self.fx_view.list_open() {
                 let rows = match delta {
                     ScrollDelta::Lines { y, .. } => f64::from(y),
@@ -4419,7 +4467,8 @@ impl Editing {
         // while one plays.
         self.fx_view.poll(Instant::now());
         self.browser.bar.fx = self.fx_view.active();
-        self.fx_scene = self.fx_view.scene();
+        self.fx_scene = self.fx_scene_now();
+        self.learning.fx_pins = self.fx_view.pins().to_vec();
         self.arp_scene = arp_scene(
             &self.params,
             &self.scene.values,
@@ -4509,6 +4558,9 @@ impl Editing {
     /// The tip: over the control operated, else over the one under the pointer (an effects'
     /// slot's: its effect's whole name and maker).
     fn tip(&self) -> Option<(String, f64, f64)> {
+        if let Some(t) = self.fx_pin_tip() {
+            return Some(t);
+        }
         if self.drag.is_none()
             && let Some(t) = self.macro_tip()
         {
@@ -4555,7 +4607,11 @@ impl Editing {
         };
         match target {
             // (None for a control gone from the panel under a pointer still: R-OSC-TIMED.)
-            Target::Control(i) | Target::Legend(i, _) if self.off_panel(i) => None,
+            Target::Control(i) | Target::Legend(i, _)
+                if self.off_panel(i) || fx_pins::target(i).is_some() =>
+            {
+                None
+            }
             Target::Control(i) | Target::Legend(i, _) => {
                 let c = *self.renderer.arrangement().control(i);
                 let p = self.operated(i)?;
@@ -4998,7 +5054,7 @@ fn compose(
             let at = lfo_ui::top_px(s) - origin;
             paste(c, p, at, [x0.max(left), y0.max(rail), x1.min(right), y1]);
         }
-        mods.lay_rings(c, [x0, y0, x1, y1]);
+        mods.lay_rings_where(c, [x0, y0, x1, y1], |i| fx_pins::target(i).is_none());
         if let Some(l) = &lower {
             // (Its frame's rows the drawing's from `top_px` down, open; moved up as it slides.)
             let at = lower_ui::top_px(s) - ((lower_ui::TOP - l.top) * s).round() as i32 - origin;
@@ -5014,6 +5070,9 @@ fn compose(
                     place[3].min(at + (l.depth * s).round() as i32),
                 ],
             );
+            if lower.as_ref().is_some_and(|l| l.depth == fx_ui::PIN_DEPTH) {
+                mods.lay_rings_where(c, [x0, y0, x1, y1], |i| fx_pins::target(i).is_some());
+            }
             for &(p, px, py) in &l.under {
                 shade(c, p, (px, at + py), place);
             }
@@ -5087,7 +5146,7 @@ fn lower_frame<'a>(
         },
         (Lower::Fx, Some(fx)) => LowerFrame {
             frame: fx.frame(),
-            depth: fx_ui::DEPTH,
+            depth: fx.depth(),
             top,
             under: fx.under(),
         },
@@ -5556,8 +5615,7 @@ impl Editing {
             self.learning.close_menu();
             return true;
         }
-        if down && k.key == Key::Escape && self.fx_view.list_open() {
-            self.fx_view.close_list();
+        if self.fx_view.list_key(k) {
             return true;
         }
         if self.browser.open && self.learning.list {
@@ -6652,6 +6710,7 @@ fn ultra_note_lines(splits: bool) -> Vec<(&'static str, Tone)> {
 
 #[cfg(test)]
 mod tests {
+    mod fx_pins;
     use std::sync::Mutex;
 
     use baseview::Point;
@@ -10113,6 +10172,7 @@ mod tests {
         assert_eq!(
             menu_items(&e),
             [
+                ("PARAMETERS…".to_owned(), true),
                 ("REPLACE\u{2026}".to_owned(), true),
                 ("REMOVE".into(), true)
             ]
@@ -10219,6 +10279,7 @@ mod tests {
             [
                 "LOAD WITHOUT ITS SETTINGS",
                 "TRY AGAIN",
+                "PARAMETERS…",
                 "REPLACE\u{2026}",
                 "REMOVE"
             ]
@@ -10232,6 +10293,7 @@ mod tests {
             [
                 "TRY AGAIN",
                 "LOAD WITHOUT ITS SETTINGS",
+                "PARAMETERS…",
                 "REPLACE\u{2026}",
                 "REMOVE"
             ]
@@ -10244,7 +10306,12 @@ mod tests {
         right_click(&mut e, p);
         assert_eq!(
             items(&e),
-            ["TRY ITS OLD SETTINGS", "REPLACE\u{2026}", "REMOVE"]
+            [
+                "TRY ITS OLD SETTINGS",
+                "PARAMETERS…",
+                "REPLACE\u{2026}",
+                "REMOVE"
+            ]
         );
         menu_item(&mut e, "TRY ITS OLD SETTINGS");
         assert_eq!(effects_done(&mut e, &fake, 1), ["old settings 0"]);
@@ -10276,6 +10343,7 @@ mod tests {
             [
                 "TURN EFFECTS BACK ON",
                 "TURN THIS ONE ON",
+                "PARAMETERS…",
                 "REPLACE\u{2026}",
                 "REMOVE"
             ]

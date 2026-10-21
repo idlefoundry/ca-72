@@ -7,7 +7,7 @@
 //! there is finished.
 //!
 //! A click on a slot's name opens its effect's window, a drag onto another slot moves it there,
-//! its tab bypasses it; a right click offers REPLACE and REMOVE (the editor's menus, MIDI
+//! its tab bypasses it; a right click offers PARAMETERS, REPLACE and REMOVE (the editor's menus, MIDI
 //! Learn's); the first empty slot reads "+ ADD EFFECT" and drops the effects' list, the effects
 //! on this computer, found by a scan on a thread of its own the first time it is asked for.
 //!
@@ -25,6 +25,9 @@ use std::time::{Duration, Instant};
 use ca72_panel::strip::fx::{
     self as fx_ui, FxList, FxRow, FxScene, FxSlot, FxTarget, FxWord, LIST_ROWS, SLOTS,
 };
+
+mod parameters;
+use parameters::{ParameterReply, Parameters};
 
 /// How an effect in the chain is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -90,6 +93,8 @@ pub type MenuItems = Vec<(FxAction, &'static str)>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FxAction {
     /// The list dropped to put another effect in its place.
+    Parameters(usize),
+    Unpin(usize),
     Replace(usize),
     Remove(usize),
     /// Tried again (turned off, missing), or turned on (off for a safe start).
@@ -279,6 +284,10 @@ enum Job {
     Bypass(usize, bool),
     Window(usize),
     Act(FxAction),
+    Parameters(usize, u64),
+    Pin(usize, u32),
+    Unpin(usize),
+    Texts(Vec<PinInfo>),
 }
 
 /// What the drawer's threads are doing and have done: an effect being loaded (its slot and
@@ -288,6 +297,9 @@ struct Pending {
     loading: Option<(usize, String)>,
     failed: Option<(usize, String, Instant)>,
     done: u64,
+    parameters: Option<ParameterReply>,
+    pin_error: Option<String>,
+    pin_texts: Vec<(PinInfo, String)>,
 }
 
 /// How long an effect that would not load is said so on its slot.
@@ -331,6 +343,10 @@ pub struct FxView {
     open: Option<Open>,
     press: Option<Press>,
     pub hover: Option<FxTarget>,
+    parameters: Option<Parameters>,
+    pins: Vec<PinInfo>,
+    pin_texts: std::collections::BTreeMap<usize, String>,
+    request: u64,
 }
 
 impl std::fmt::Debug for FxView {
@@ -378,6 +394,10 @@ impl FxView {
             open: None,
             press: None,
             hover: None,
+            parameters: None,
+            pins: Vec::new(),
+            pin_texts: Default::default(),
+            request: 0,
         }
     }
 
@@ -408,6 +428,7 @@ impl FxView {
                 o.first = o.first.min(rows(&self.catalogue).saturating_sub(LIST_ROWS));
             }
         }
+        self.poll_parameters();
     }
 
     /// Whether any effect plays: the FX key lit.
@@ -492,7 +513,11 @@ impl FxView {
                 .hover
                 .filter(|h| matches!(h, FxTarget::Name(_) | FxTarget::Tab(_))),
             drag: self.press.filter(|p| p.carried).map(|p| (p.slot, p.over)),
-            list: self.open.map(|o| self.list(o)),
+            list: self
+                .parameters_list()
+                .or_else(|| self.open.map(|o| self.list(o))),
+            pins: self.drawn_pins(),
+            occupied: self.slots.len(),
         }
     }
 
@@ -507,6 +532,7 @@ impl FxView {
                 maker: l.vendor.clone(),
                 format: l.format.to_uppercase(),
                 action: false,
+                ..FxRow::default()
             })
             .collect();
         if !c.scanning {
@@ -542,17 +568,19 @@ impl FxView {
             rows,
             first: o.first,
             hover: o.hover,
+            find: None,
         }
     }
 
     /// Whether the effects' list is open.
     pub fn list_open(&self) -> bool {
-        self.open.is_some()
+        self.open.is_some() || self.parameters.is_some()
     }
 
     /// The effects' list dropped for slot `slot`, to add an effect there or to replace its own;
     /// the effects found the first time it is asked for.
     pub fn open_list(&mut self, slot: usize, replace: bool) {
+        self.close_list();
         self.press = None;
         self.open = Some(Open {
             slot: slot.min(SLOTS - 1),
@@ -568,10 +596,17 @@ impl FxView {
 
     pub fn close_list(&mut self) {
         self.open = None;
+        self.parameters = None;
     }
 
     /// The list scrolled by `rows` (+ down).
     pub fn scroll(&mut self, rows_by: i32) {
+        if let Some(p) = &mut self.parameters {
+            let last = p.found().len().saturating_sub(LIST_ROWS - 1);
+            p.first = p.first.saturating_add_signed(rows_by as isize).min(last);
+            p.chosen = p.chosen.clamp(p.first, p.first + LIST_ROWS - 2);
+            return;
+        }
         let last = rows(&self.catalogue).saturating_sub(LIST_ROWS);
         if let Some(o) = &mut self.open {
             o.first = o.first.saturating_add_signed(rows_by as isize).min(last);
@@ -580,21 +615,43 @@ impl FxView {
 
     /// The list as it shows (for the hit test).
     fn shown_list(&self) -> Option<FxList> {
-        self.open.map(|o| self.list(o))
+        self.parameters_list()
+            .or_else(|| self.open.map(|o| self.list(o)))
     }
 
     /// A press at (`x`, `y`) (drawing units) on the drawer or its list.
     pub fn press(&mut self, x: f64, y: f64) {
         let list = self.shown_list();
         if let Some(l) = &list {
-            match fx_ui::hit(x, y, Some(l)) {
+            match self.scene().hit(x, y) {
+                Some(FxTarget::Row(r)) if l.find.is_some() => self.choose_parameter(r),
+                Some(FxTarget::Filter(pinned)) => {
+                    if let Some(p) = &mut self.parameters {
+                        p.pinned = pinned;
+                        p.chosen = 0;
+                        p.first = 0;
+                        p.refilter();
+                    }
+                }
+                Some(FxTarget::Find) => {
+                    if let Some(p) = &mut self.parameters {
+                        let col = ((x - fx_ui::list_rect(l).0 - 150.0) / 24.0)
+                            .round()
+                            .max(0.0) as usize;
+                        p.field.caret = (p.field.caret.saturating_sub(33) + col)
+                            .min(p.field.text.chars().count());
+                    }
+                }
                 Some(FxTarget::Row(r)) => self.choose(r),
                 Some(FxTarget::List) => {}
-                _ => self.open = None,
+                _ => self.close_list(),
             }
             return;
         }
-        match fx_ui::hit(x, y, None) {
+        match self.scene().hit(x, y) {
+            Some(FxTarget::Pin(slot, place)) if self.scene().pin(slot, place).is_none() => {
+                self.open_parameters(slot)
+            }
             Some(FxTarget::Name(i)) if self.effect(i).is_some() && !self.busy() => {
                 self.press = Some(Press {
                     slot: i,
@@ -621,7 +678,12 @@ impl FxView {
     /// The pointer at (`x`, `y`): a slot carried over another, the part under it lit.
     pub fn moved(&mut self, x: f64, y: f64) {
         let list = self.shown_list();
-        let found = fx_ui::hit(x, y, list.as_ref());
+        let found = self.scene().hit(x, y);
+        if let Some(p) = &mut self.parameters
+            && let Some(FxTarget::Row(row)) = found
+        {
+            p.chosen = row;
+        }
         if let Some(o) = &mut self.open {
             o.hover = match found {
                 Some(FxTarget::Row(r)) => Some(r),
@@ -701,6 +763,7 @@ impl FxView {
             }
             Health::Running | Health::Loading | Health::Restarting => {}
         }
+        items.push((FxAction::Parameters(i), "PARAMETERS…"));
         items.push((FxAction::Replace(i), "REPLACE\u{2026}"));
         items.push((FxAction::Remove(i), "REMOVE"));
         Some((e.name.clone(), items))
@@ -709,6 +772,8 @@ impl FxView {
     /// A slot's menu's item chosen.
     pub fn act(&mut self, a: FxAction) {
         match a {
+            FxAction::Parameters(slot) => self.open_parameters(slot),
+            FxAction::Unpin(target) => self.unpin(target),
             FxAction::Replace(slot) => {
                 if self.effect(slot).is_some() {
                     self.open_list(slot, true);
@@ -837,6 +902,34 @@ fn rows(c: &Catalogue) -> usize {
 /// `job` done to `effects`, on one of the drawer's threads; what it did kept in `pending`.
 fn run(effects: &dyn Effects, pending: &Mutex<Pending>, job: Job) {
     let result = match &job {
+        Job::Parameters(slot, request) => {
+            let result = effects.params(*slot).map(|rows| {
+                let values: Vec<_> = rows.iter().map(|r| (r.id, r.plain)).collect();
+                let texts = effects.param_text(*slot, &values);
+                rows.into_iter()
+                    .enumerate()
+                    .map(|(i, r)| {
+                        (
+                            r,
+                            texts
+                                .get(i)
+                                .cloned()
+                                .flatten()
+                                .unwrap_or_else(|| "…".into()),
+                        )
+                    })
+                    .collect()
+            });
+            lock(pending).parameters = Some((*slot, *request, result));
+            Ok(())
+        }
+        Job::Texts(pins) => {
+            let texts = parameters::texts(effects, pins.clone());
+            lock(pending).pin_texts = texts;
+            Ok(())
+        }
+        Job::Pin(slot, id) => effects.pin(*slot, *id).map(|_| ()),
+        Job::Unpin(target) => effects.unpin(*target),
         Job::Add(g, i) => effects.add(*g, *i),
         Job::Replace(s, g, i) => effects.replace(*s, *g, *i),
         Job::Remove(s) => effects.remove(*s),
@@ -850,7 +943,12 @@ fn run(effects: &dyn Effects, pending: &Mutex<Pending>, job: Job) {
             effects.turn_on();
             Ok(())
         }
-        Job::Act(FxAction::Replace(_) | FxAction::Remove(_)) => Ok(()),
+        Job::Act(
+            FxAction::Parameters(_)
+            | FxAction::Unpin(_)
+            | FxAction::Replace(_)
+            | FxAction::Remove(_),
+        ) => Ok(()),
     };
     let mut p = lock(pending);
     if matches!(job, Job::Add(..) | Job::Replace(..)) {
@@ -861,9 +959,14 @@ fn run(effects: &dyn Effects, pending: &Mutex<Pending>, job: Job) {
             p.failed = Some((slot, name, Instant::now()));
         }
     }
+    if matches!(job, Job::Pin(..) | Job::Unpin(_)) {
+        p.pin_error = result.clone().err();
+    }
     p.done += 1;
     drop(p);
-    if let Err(e) = result {
+    if let Err(e) = result
+        && !matches!(job, Job::Pin(..) | Job::Unpin(_))
+    {
         eprintln!("CA-72 effects: {e}");
     }
 }
@@ -882,6 +985,10 @@ pub(crate) mod fake {
         pub scans: Mutex<u32>,
         pub safe: Mutex<Option<SafeStart>>,
         pub unlisted: Mutex<usize>,
+        pub parameter_rows: Mutex<std::collections::BTreeMap<usize, Vec<ParamRow>>>,
+        pub pins: Mutex<Vec<PinInfo>>,
+        pub pins_busy: std::sync::atomic::AtomicBool,
+        pub param_reads: std::sync::atomic::AtomicUsize,
     }
 
     impl Fake {
@@ -916,7 +1023,116 @@ pub(crate) mod fake {
         }
     }
 
+    impl Fake {
+        pub fn parameters(&self, slot: usize, names: &[&str]) {
+            let rows = names
+                .iter()
+                .enumerate()
+                .map(|(i, name)| ParamRow {
+                    id: slot as u32 * 100 + i as u32,
+                    name: (*name).into(),
+                    short: String::new(),
+                    units: if *name == "Decay" { "s" } else { "%" }.into(),
+                    steps: 0,
+                    value: if *name == "Decay" { 0.42 } else { 0.35 },
+                    plain: if *name == "Decay" { 2.4 } else { 35.0 },
+                    pinned: None,
+                })
+                .collect();
+            lock(&self.parameter_rows).insert(slot, rows);
+        }
+    }
+
     impl Effects for Fake {
+        fn params(&self, slot: usize) -> Result<Vec<ParamRow>, String> {
+            self.param_reads
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut rows = lock(&self.parameter_rows)
+                .get(&slot)
+                .cloned()
+                .unwrap_or_default();
+            let pins = lock(&self.pins);
+            for row in &mut rows {
+                row.pinned = pins
+                    .iter()
+                    .find(|p| p.slot == slot && p.id == row.id)
+                    .map(|p| p.target);
+            }
+            Ok(rows)
+        }
+        fn param_text(&self, slot: usize, values: &[(u32, f64)]) -> Vec<Option<String>> {
+            let rows = lock(&self.parameter_rows);
+            values
+                .iter()
+                .map(|(id, value)| {
+                    rows.get(&slot)?
+                        .iter()
+                        .find(|p| p.id == *id)
+                        .map(|p| format!("{value:.2} {}", p.units))
+                })
+                .collect()
+        }
+        fn pins(&self) -> Option<Vec<PinInfo>> {
+            (!self.pins_busy.load(std::sync::atomic::Ordering::Relaxed))
+                .then(|| lock(&self.pins).clone())
+        }
+        fn pin(&self, slot: usize, id: u32) -> Result<usize, String> {
+            let rows = lock(&self.parameter_rows);
+            let row = rows
+                .get(&slot)
+                .and_then(|r| r.iter().find(|r| r.id == id))
+                .ok_or("no parameter")?;
+            let mut pins = lock(&self.pins);
+            if pins.iter().filter(|p| p.slot == slot).count() >= 4 {
+                return Err("4 OF 4 PINNED".into());
+            }
+            if pins.iter().any(|p| p.slot == slot && p.id == id) {
+                return Err("already pinned".into());
+            }
+            let target = (0..16)
+                .find(|t| pins.iter().all(|p| p.target != *t))
+                .ok_or("16 OF 16 PINNED")?;
+            pins.push(PinInfo {
+                target,
+                slot,
+                id,
+                effect: lock(&self.slots)[slot].name.clone(),
+                name: row.name.clone(),
+                short: row.short.clone(),
+                value: row.value,
+                plain: Some(row.plain),
+                steps: row.steps,
+                live: true,
+                missing: false,
+            });
+            pins.sort_by_key(|p| p.target);
+            self.note(format!("pin {slot} {id}"));
+            Ok(target)
+        }
+        fn unpin(&self, target: usize) -> Result<(), String> {
+            lock(&self.pins).retain(|p| p.target != target);
+            self.note(format!("unpin {target}"));
+            Ok(())
+        }
+        fn set_pin_value(&self, target: usize, value: f64) -> Result<(), String> {
+            let mut pins = lock(&self.pins);
+            let pin = pins
+                .iter_mut()
+                .find(|p| p.target == target)
+                .ok_or("no pin")?;
+            if !pin.live {
+                return Err("not live".into());
+            }
+            let scale = if pin.name == "Decay" {
+                2.4 / 0.42
+            } else {
+                100.0
+            };
+            pin.value = value;
+            pin.plain = Some(scale * value);
+            self.note(format!("value {target} {value}"));
+            Ok(())
+        }
         fn slots(&self) -> Option<Vec<SlotInfo>> {
             Some(lock(&self.slots).clone())
         }
@@ -969,6 +1185,17 @@ pub(crate) mod fake {
             let mut s = lock(&self.slots);
             let e = s.remove(from);
             s.insert(to, e);
+            for pin in lock(&self.pins).iter_mut() {
+                pin.slot = if pin.slot == from {
+                    to
+                } else if from < to && pin.slot > from && pin.slot <= to {
+                    pin.slot - 1
+                } else if to < from && pin.slot >= to && pin.slot < from {
+                    pin.slot + 1
+                } else {
+                    pin.slot
+                };
+            }
             Ok(())
         }
         fn set_bypass(&self, slot: usize, on: bool) -> Result<(), String> {

@@ -346,6 +346,7 @@ pub(super) fn control_of(t: ModTarget) -> Option<usize> {
             return Some(lfo_index(n.min(LFOS - 1), 0));
         }
         ModTarget::Tempo => return Some(TEMPO_CONTROL),
+        ModTarget::Fx(n) => return Some(super::fx_pins::FIRST + n),
         t => t.id(),
     };
     ca72_panel::controls::index(id)
@@ -424,6 +425,9 @@ impl Editing {
     /// The modulation target control `i` is now, if it can take one (TEMPO's screen, the
     /// standalone's: [`TEMPO_CONTROL`]).
     pub(super) fn mod_target(&self, i: usize) -> Option<ModTarget> {
+        if let Some(n) = super::fx_pins::target(i) {
+            return self.fx_view.pin_info(n).map(|_| ModTarget::Fx(n));
+        }
         if i == TEMPO_CONTROL {
             return self.playing.standalone.then_some(ModTarget::Tempo);
         }
@@ -436,6 +440,11 @@ impl Editing {
     /// shows (neither the keyboard nor the LFO page over it), the LFO page's while it shows (its
     /// knobs and jacks take the sources too: R-LFO's addendum).
     fn in_view(&self, i: usize) -> bool {
+        if let Some(n) = super::fx_pins::target(i) {
+            return self.fx_pins_show()
+                && !self.fx_view.list_open()
+                && self.fx_view.pin_info(n).is_some();
+        }
         if i == TEMPO_CONTROL {
             return self.playing.standalone;
         }
@@ -452,6 +461,11 @@ impl Editing {
     /// The control under (`x`, `y`) a source can be given to: the LFO page's while it shows and
     /// the pointer is over it, else the panel's and the strip's.
     pub(super) fn mod_hit(&self, x: f64, y: f64) -> Option<Target> {
+        if self.in_fx((x, y)) {
+            return self
+                .fx_pin_hit((x, y))
+                .map(|n| Target::Control(super::fx_pins::FIRST + n));
+        }
         if self.tempo_hovered((x, y)) {
             return Some(Target::Control(TEMPO_CONTROL));
         }
@@ -485,6 +499,9 @@ impl Editing {
     /// Control `i`'s knob's travel now (0..1, its pointer: a CONTINUOUS WAVEFORM's its shape's;
     /// TEMPO's as it is set, along its range).
     fn travel_of(&self, i: usize) -> f64 {
+        if let Some(n) = super::fx_pins::target(i) {
+            return self.fx_view.pin_info(n).map_or(0.0, |p| p.value);
+        }
         if i == TEMPO_CONTROL {
             return lfo::tempo_travel(self.params.tempo());
         }
@@ -611,7 +628,12 @@ impl Editing {
         });
         // (The panel's knobs, then the standalone's TEMPO screen: R-LFO.)
         let tempo = self.playing.standalone.then_some(TEMPO_CONTROL);
-        for i in (0..CONTROLS.len()).chain(tempo) {
+        for i in (0..CONTROLS.len()).chain(tempo).chain(
+            self.fx_view
+                .pins()
+                .iter()
+                .map(|p| super::fx_pins::FIRST + p.target),
+        ) {
             if !self.in_view(i) {
                 continue;
             }
@@ -619,7 +641,12 @@ impl Editing {
                 continue;
             };
             // Where it is: a knob's centre, skirt and sweep; TEMPO's screen and its rails.
-            let (place, sweep, bar, screen) = if i == TEMPO_CONTROL {
+            let (place, sweep, bar, screen) = if let Some(n) = super::fx_pins::target(i) {
+                let Some(at) = self.fx_pin_at(n) else {
+                    continue;
+                };
+                ((at, art::STD.skirt), (-150.0, 150.0), None, None)
+            } else if i == TEMPO_CONTROL {
                 let (window, foot, half) = self.tempo_place();
                 ((foot, 0.0), (-150.0, 150.0), Some(half), Some(window))
             } else {
@@ -630,7 +657,7 @@ impl Editing {
             if let Some(p) = patching {
                 let room = self.params.lfo_patch.depth(p.source, t).is_some()
                     || self.params.lfo_patch.count(p.source) < lfo::MOST;
-                if room {
+                if room && self.mod_live(i) {
                     under_room |= under == Some(i);
                     match (screen, under == Some(i)) {
                         (Some(w), true) => over_box = Some(w),
@@ -640,7 +667,8 @@ impl Editing {
                     }
                 }
             }
-            let shown = page
+            let shown = super::fx_pins::target(i).is_some()
+                || page
                 || patching.is_some()
                 || hovered == Some(i)
                 || self.modulating.popup == Some(i)
@@ -677,7 +705,7 @@ impl Editing {
                         point: ((page || s.macro_n().is_some()) && moving)
                             .then(|| (travel + f64::from(d) * value).clamp(0.0, 1.0)),
                         one_way,
-                        dim: self.muted(s),
+                        dim: self.muted(s) || !self.mod_live(i),
                     }
                 })
                 .collect();
@@ -718,7 +746,9 @@ impl Editing {
                     return None;
                 }
                 // (Under TEMPO's rails, its dials on a knob's 300 degrees.)
-                let (knob, span) = if i == TEMPO_CONTROL {
+                let (knob, span) = if let Some(n) = super::fx_pins::target(i) {
+                    ((self.fx_pin_at(n)?, art::STD.skirt), 300.0)
+                } else if i == TEMPO_CONTROL {
                     let (_, foot, _) = self.tempo_place();
                     ((foot, mods::rails_depth(on.len())), 300.0)
                 } else {
@@ -737,7 +767,7 @@ impl Editing {
                             depth: f64::from(d),
                             shared: lfo::takes_shared(&self.params, s, t),
                             uni: s.lfo().is_some() && self.one_way(s),
-                            muted: self.muted(s),
+                            muted: self.muted(s) || !self.mod_live(i),
                         })
                         .collect(),
                     hover: self.modulating.popup_hover,
@@ -810,7 +840,7 @@ impl Editing {
                     .into_iter()
                     .flatten()
                     .map(|a| {
-                        let name = control_of(a.target).map_or(a.target.short(), control_label);
+                        let name = self.target_label(a.target);
                         format!(
                             "{name} {}{}",
                             mods::percent(f64::from(a.depth)),
@@ -926,6 +956,7 @@ impl Editing {
         let scene = self.mod_scene.clone();
         if let (Some(p), Some(i)) = (&scene.popup, self.modulating.popup) {
             if let Some(k) = mods::hit_popup(p, x, y)
+                && self.mod_live(i)
                 && let Some(t) = self.mod_target(i)
                 && let Some(&(s, d)) = self.sources_on(t).get(k)
             {
@@ -957,7 +988,8 @@ impl Editing {
         }
         if let Some((k, j)) = mods::hit_ring_end(&scene.knobs, x, y) {
             let i = scene.knobs[k].control;
-            if let Some(t) = self.mod_target(i)
+            if self.mod_live(i)
+                && let Some(t) = self.mod_target(i)
                 && let Some(&(s, d)) = self.sources_on(t).get(j)
             {
                 self.modulating.depth = Some(DepthDrag {
@@ -974,6 +1006,7 @@ impl Editing {
         if modifiers.contains(Modifiers::ALT)
             && let Some(Target::Control(i)) = self.mod_hit(x, y)
             && self.in_view(i)
+            && self.mod_live(i)
             && let Some(t) = self.mod_target(i)
         {
             let s = self.modulating.last.unwrap_or(Source::Lfo(0));
@@ -1004,6 +1037,9 @@ impl Editing {
         let Some(d) = &self.modulating.depth else {
             return false;
         };
+        if !self.mod_live(d.control) {
+            return true;
+        }
         let depth = match d.way {
             DepthWay::Vertical => {
                 (f64::from(d.start) + (d.from.1 - self.pointer.1) / DEPTH_DRAG) as f32
@@ -1035,6 +1071,7 @@ impl Editing {
             }
             if let Some(Target::Control(i) | Target::Legend(i, _)) = self.mod_hit(p.at.0, p.at.1)
                 && self.in_view(i)
+                && self.mod_live(i)
                 && let Some(t) = self.mod_target(i)
                 && self.params.lfo_patch.depth(p.source, t).is_none()
                 // (Let go on its own jack without leaving it: a click, not a cord.)
@@ -1163,7 +1200,7 @@ impl Editing {
 
     /// An LFO head and a MACRO head, each source an item that gives it `t` (those with room
     /// that do not move it yet).
-    fn assign_rows(&self, t: ModTarget) -> Vec<Row> {
+    pub(super) fn assign_rows(&self, t: ModTarget) -> Vec<Row> {
         let mut rows = Vec::new();
         for (head, macros) in [("LFO", false), ("MACRO", true)] {
             rows.push(Row::Head(head.into()));
@@ -1191,7 +1228,7 @@ impl Editing {
     }
 
     /// A head for each source on target `t` (control `i`'s) with DEPTH… and REMOVE.
-    fn depth_rows(&self, t: ModTarget, i: usize) -> Vec<Row> {
+    pub(super) fn depth_rows(&self, t: ModTarget, i: usize) -> Vec<Row> {
         let mut rows = Vec::new();
         for (s, d) in self.sources_on(t) {
             rows.push(Row::Head(format!(
@@ -1266,7 +1303,7 @@ impl Editing {
             };
             rows.push(Row::Head(format!(
                 "{} \u{b7} {}{}",
-                control_label(i),
+                self.target_label(a.target),
                 mods::percent(f64::from(a.depth)),
                 self.standalone_only(a.target)
             )));
@@ -1326,11 +1363,17 @@ impl Editing {
     pub(super) fn mod_item(&mut self, m: ModItem) {
         let patch = std::sync::Arc::clone(&self.params.lfo_patch);
         match m {
+            ModItem::Unpin(n) => self.fx_view.unpin(n),
             ModItem::Depth(s, t, i) => self.start_depth_entry(i, s, t),
             ModItem::Remove(s, t) => {
                 patch.remove(s, t);
             }
             ModItem::Assign(s, t) => {
+                if let ModTarget::Fx(n) = t
+                    && !self.mod_live(super::fx_pins::FIRST + n)
+                {
+                    return;
+                }
                 let _ = patch.assign(s, t, lfo::DEFAULT_DEPTH);
                 self.modulating.last = Some(s);
             }

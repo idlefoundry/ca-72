@@ -490,8 +490,16 @@ impl ModRenderer {
 
     /// The rings laid over `c` (the window's frame) inside `place`: under the drawers.
     pub fn lay_rings(&self, c: &mut Pixmap, place: [i32; 4]) {
-        for (_, p) in &self.knobs {
-            glow::lay(c, &p.pixels, p.at, place);
+        self.lay_rings_where(c, place, |_| true);
+    }
+
+    /// Only the controls accepted by `shown`: drawer controls are laid over their own plate,
+    /// before a list hanging from it (decisions.md R-FX-PARAMS).
+    pub fn lay_rings_where(&self, c: &mut Pixmap, place: [i32; 4], shown: impl Fn(usize) -> bool) {
+        for (knob, p) in &self.knobs {
+            if shown(knob.control) {
+                glow::lay(c, &p.pixels, p.at, place);
+            }
         }
     }
 

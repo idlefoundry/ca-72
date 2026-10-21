@@ -270,6 +270,7 @@ fn fx(s: f64, panel: &Renderer) {
             maker: "A Maker".into(),
             format: if i % 2 == 0 { "CLAP" } else { "VST3" }.into(),
             action: false,
+            ..FxRow::default()
         })
         .collect();
     let list = FxList {
@@ -279,6 +280,7 @@ fn fx(s: f64, panel: &Renderer) {
         rows,
         first: 0,
         hover: None,
+        find: None,
     };
     times("the effects' list dropped", &mut |i, sc| {
         sc.drag = None;
@@ -295,6 +297,59 @@ fn fx(s: f64, panel: &Renderer) {
         sc.list = Some(l);
     });
     times("the effects open, nothing changed", &mut |_, _| {});
+
+    times("16 pins shown in the drawer", &mut |i, sc| {
+        sc.list = None;
+        sc.drag = None;
+        sc.occupied = 4;
+        sc.slots[3] = slot("Plate", true);
+        sc.pins = (0..16)
+            .map(|n| fx::FxPin {
+                target: n,
+                slot: n / 4,
+                name: format!("PIN {}", n + 1),
+                value: 0.35 + (i % 2) as f64 * 0.01,
+                dim: false,
+                learning: false,
+            })
+            .collect();
+    });
+    times("one of 16 pins turned", &mut |i, sc| {
+        sc.pins[6].value = (i % 20) as f64 / 20.0;
+    });
+    times("16 pins, nothing changed", &mut |_, _| {});
+    let mut overlay = ca72_panel::modulation::ModRenderer::new(s);
+    let mut v = Vec::new();
+    for i in 0..40 {
+        let at = fx::pin_at((i / 4) % 4, i % 4);
+        let scene = ca72_panel::modulation::ModScene {
+            cord: Some(ca72_panel::modulation::Cord {
+                from: ca72_panel::strip::lfo::places(0).jack,
+                to: at,
+                colour: [0x81, 0xb1, 0x8a],
+                targets: (0..16)
+                    .filter(|n| *n != i % 16)
+                    .map(|n| (fx::pin_at(n / 4, n % 4), ca72_panel::art::STD.skirt))
+                    .collect(),
+                over: Some((at, ca72_panel::art::STD.skirt)),
+                boxes: Vec::new(),
+                over_box: None,
+            }),
+            ..Default::default()
+        };
+        let start = Instant::now();
+        overlay.render(&scene);
+        put(&d, &mut composed);
+        overlay.lay_over(&mut composed, [0, 0, i32::MAX, i32::MAX]);
+        v.push(start.elapsed());
+    }
+    v.sort();
+    println!(
+        "  {:<36} median {:5.1} ms, slowest {:5.1} ms",
+        "a cord over 16 pins",
+        ms(v[v.len() / 2]),
+        ms(v[v.len() - 1])
+    );
 }
 
 /// The arpeggiator's drawer (decisions.md R-ARP): its first drop (made as the editor opens: on

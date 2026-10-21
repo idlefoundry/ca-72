@@ -13961,3 +13961,50 @@ pins; bpm-target's DAW-v3 change is change 5, this one change 6.
   changes its parameters' titles (the notice's path is built, untriggered), Windows and macOS,
   MIDI Learn on a pin by hand, the agents' new tools through a running standalone, and the
   `fx-presets` job's preset section (its data shape is `SavedSlot::pins`, which it carries).
+
+**The B1 editor (overnight 2026-10-20 to 21, `fx-pins-ui`).** The owner's decisions of
+2026-10-20, as given to this job:
+
+- "B1: up to 4 pinned parameters per effect, shown under each effect in the FX drawer."
+- "MIDI Learn on pins: yes, per pin."
+- "A missing or crashed effect keeps its pins and assignments, dimmed and inert."
+- "Show the plug-in's own value text: yes."
+- "Stepped parameters are allowed and step when modulated."
+- "The parameter list, with nothing typed, is in name order."
+
+The view now implements B1 from the approved drawings (`ca72-night/fx-params-mockups`, sheets 2,
+3 and 6). PARAMETERS… in the slot's menu and the first free + PIN open the same list: a title
+and pin count, FIND using the presets' text field, ALL · PINNED, ten rows in name order, pin
+bullets, the plug-in's own value text and source names (a macro's typed name). Matched letters
+are brighter and underlined. Click or Enter pins or unpins; the plate says why a fifth was
+refused. Up, Down, Page Up and Page Down move the marked row; the editing keys move its caret;
+Escape clears FIND, then closes. Tab also switches ALL · PINNED.
+
+Four places under each slot, 160 units apart, with eight-character dot screens and ticks on the
+knobs' own 300-degree sweep; the drawer is 372 deep with pins, 170 without. Its screens,
+shadows, ticks and the knobs' pictures and fixed light are prepared on the drawer's thread.
+Changed cells alone are drawn again. A layers-only panel renderer paints their knobs, without
+painting a second whole panel. The original slot row keeps its pixels when the drawer deepens.
+The list always hangs from that row's original foot, over the pins, fitting inside the window.
+
+`editor/fx_pins.rs` makes the pins controls past the panel's, as TEMPO is: `editor/lfo_page.rs`
+gives them its cords, coloured rings, one-way macro rings, pop-up depth dials, Alt-drag and
+typed depths, and the menus' source heads. Their rings are composed over their drawer, under its
+list; the tip names the parameter and effect, gives the plug-in's text and every source's depth.
+A turn or scroll sets the base, observing its steps; Shift is fine travel, rebased when changed.
+The base follows the plug-in's own window within the view's tenth-second poll. Pins and MIDI
+Learn follow the target while their slot moves. The learning list names them by parameter and
+effect on the standalone's effects rail; the plug-ins never list them.
+
+An unavailable pin keeps its assignments and shows them dimmed, refusing turns and new cords;
+a parameter the effect no longer has reads MISSING. UNPIN follows the source heads, MIDI Learn
+follows it. Both skins and LARGE lettering use the same places. The helper's parameter catalogue
+is requested once when the list opens, and value text on its worker when bases change, never
+by the drawing path. A busy chain keeps the last pins; closing and reopening the list reads a
+changed catalogue. No engine, chain or helper change was needed.
+
+**Agent choices** (not separately approved): Tab as another way to switch ALL · PINNED; an
+ellipsis while value text is still being asked for; short parameter names on the small screens
+where the effect supplies one, capitals as the macros' screens are. No outstanding owner
+choice blocks this view. Real third-party effects and hardware MIDI Learn remain to be tried
+by hand; the review pictures use the tests' fake chain through the real editor.

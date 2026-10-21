@@ -13,10 +13,11 @@
 //! line of its name, maker and format.
 //!
 //! What does not change is drawn once a scale on a thread of its own, begun as the editor opens;
-//! then only the slots that changed, and the list when it does.
+//! then only the slots and pin cells that changed, and the list when it does. B1 puts four
+//! pin places under each slot and deepens the drawer while any are occupied (R-FX-PARAMS).
 
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use plugin_kit_materials::{Disc, Lighting, discs, font, glass, sprite};
@@ -36,6 +37,39 @@ use crate::svg::{N, Svg, colour, put};
 
 /// How deep it is (the owner's FX-A: "about 170").
 pub const DEPTH: f64 = 170.0;
+/// B1's four places under each effect (decisions.md R-FX-PARAMS).
+pub const PIN_DEPTH: f64 = 372.0;
+pub const PINS: usize = 4;
+const PIN_DOT: f64 = 2.8;
+
+/// A pin's knob and name screen, in its effect's column.
+pub fn pin_at(slot: usize, place: usize) -> (f64, f64) {
+    (middle(slot) + (place as f64 - 1.5) * 160.0, TOP + 290.0)
+}
+
+pub fn pin_screen(slot: usize, place: usize) -> (f64, f64, f64, f64) {
+    let (x, _) = pin_at(slot, place);
+    (x - 70.0, TOP + 180.0, 140.0, 30.0)
+}
+
+/// A pin as the drawer draws it; its target stays its own when the slot moves.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FxPin {
+    pub target: usize,
+    pub slot: usize,
+    pub name: String,
+    pub value: f64,
+    pub dim: bool,
+    pub learning: bool,
+}
+
+/// The PARAMETERS list's FIND and ALL · PINNED line.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FxFind {
+    pub field: crate::presets::Field,
+    pub pinned: bool,
+}
+
 /// The chain's length (the owner: four).
 pub const SLOTS: usize = 4;
 /// A slot's screen (the rail's name's dots, twelve places: "about 400 units wide").
@@ -85,6 +119,9 @@ pub enum FxTarget {
     Row(usize),
     /// The list, but none of its rows.
     List,
+    Find,
+    Filter(bool),
+    Pin(usize, usize),
 }
 
 /// Whether (`x`, `y`) is on the drawer, open.
@@ -125,7 +162,8 @@ pub fn centre(t: FxTarget) -> (f64, f64) {
             (x + w / 2.0, y + h / 2.0)
         }
         FxTarget::Tab(i) => tab(i),
-        FxTarget::Row(_) | FxTarget::List => (0.0, 0.0),
+        FxTarget::Pin(s, p) => pin_at(s, p),
+        _ => (0.0, 0.0),
     }
 }
 
@@ -192,6 +230,8 @@ pub struct FxRow {
     pub maker: String,
     pub format: String,
     pub action: bool,
+    pub pinned: Option<usize>,
+    pub matches: Vec<usize>,
 }
 
 /// The effects' list, dropped for slot `slot`: its title and what it says at the title's right
@@ -204,6 +244,7 @@ pub struct FxList {
     pub rows: Vec<FxRow>,
     pub first: usize,
     pub hover: Option<usize>,
+    pub find: Option<FxFind>,
 }
 
 /// What the drawer shows: its slots; the pointer's part; while a slot is dragged, which it came
@@ -214,6 +255,57 @@ pub struct FxScene {
     pub hover: Option<FxTarget>,
     pub drag: Option<(usize, Option<usize>)>,
     pub list: Option<FxList>,
+    pub pins: Vec<FxPin>,
+    pub occupied: usize,
+}
+
+impl FxScene {
+    pub fn depth(&self) -> f64 {
+        if self.pins.is_empty() {
+            DEPTH
+        } else {
+            PIN_DEPTH
+        }
+    }
+
+    pub fn pin(&self, slot: usize, place: usize) -> Option<&FxPin> {
+        self.pins.iter().filter(|p| p.slot == slot).nth(place)
+    }
+
+    /// Pins and the first free place; the list always takes the pointer first.
+    pub fn hit(&self, x: f64, y: f64) -> Option<FxTarget> {
+        if let Some(l) = &self.list
+            && list_hit(l, x, y).is_some()
+        {
+            if l.find.is_some() && (y - list_rect(l).1 - line_y(1)).abs() < LINE / 2.0 {
+                let col = ((x - list_rect(l).0 - DISPLAY.0 - PAD) / (6.0 * LIST_DOT)).floor();
+                return Some(if col >= 49.0 {
+                    FxTarget::Filter(true)
+                } else if col >= 43.0 {
+                    FxTarget::Filter(false)
+                } else {
+                    FxTarget::Find
+                });
+            }
+            return hit(x, y, Some(l));
+        }
+        if self.depth() > DEPTH {
+            for slot in 0..self.occupied {
+                let count = self.pins.iter().filter(|p| p.slot == slot).count();
+                for place in 0..PINS.min(count + 1) {
+                    let (sx, sy, sw, sh) = pin_screen(slot, place);
+                    let (kx, ky) = pin_at(slot, place);
+                    if ((sx - 4.0..sx + sw + 4.0).contains(&x)
+                        && (sy - 4.0..sy + sh + 4.0).contains(&y))
+                        || (place < count && (x - kx).hypot(y - ky) < crate::art::STD.skirt + 12.0)
+                    {
+                        return Some(FxTarget::Pin(slot, place));
+                    }
+                }
+            }
+        }
+        hit(x, y, None)
+    }
 }
 
 // ---- The list's layout.
@@ -223,7 +315,7 @@ pub struct FxScene {
 pub const LIST_ROWS: usize = 11;
 /// Its plate's width, the margin round its display, the display's own inside its glass, a line's
 /// height and its dots' pitch.
-const LIST_W: f64 = 1240.0;
+const LIST_W: f64 = 1480.0;
 const MARGIN: f64 = 20.0;
 const PAD: f64 = 10.0;
 pub const LINE: f64 = 40.0;
@@ -264,10 +356,11 @@ pub fn list_hit(list: &FxList, x: f64, y: f64) -> Option<Option<usize>> {
         return None;
     }
     let k = ((y - ly - DISPLAY.1 - PAD) / LINE).floor();
-    if k < 1.0 {
+    let head = 1 + usize::from(list.find.is_some());
+    if k < head as f64 {
         return Some(None);
     }
-    let row = list.first + k as usize - 1;
+    let row = list.first + k as usize - head;
     Some((k as usize <= LIST_ROWS && row < list.rows.len()).then_some(row))
 }
 
@@ -276,7 +369,7 @@ pub fn row_centre(list: &FxList, row: usize) -> (f64, f64) {
     let (x, y, _, _) = list_rect(list);
     (
         x + DISPLAY.0 + DISPLAY.2 / 2.0,
-        y + line_y(row.saturating_sub(list.first) + 1),
+        y + line_y(row.saturating_sub(list.first) + 1 + usize::from(list.find.is_some())),
     )
 }
 
@@ -287,6 +380,9 @@ pub fn row_centre(list: &FxList, row: usize) -> (f64, f64) {
 struct Still {
     look: Look,
     plate: Pixmap,
+    deep: Pixmap,
+    painter: Mutex<crate::Renderer>,
+    pin_parts: Vec<(i32, i32, Pixmap)>,
     words: Vec<(i32, i32, Pixmap)>,
     /// Each slot's small print, a patch for each word, in `FxWord::ALL`'s order.
     small: Vec<Vec<(i32, i32, Pixmap)>>,
@@ -391,16 +487,20 @@ impl FxRenderer {
     }
 
     /// The frame: the drawer's, from its top (`top_px`), the drawing's width (only its plate,
-    /// `LEFT` to `RIGHT`, is shown), `DEPTH` deep.
+    /// `LEFT` to `RIGHT`, is shown), at the scene's depth.
     pub fn frame(&self) -> &Pixmap {
         &self.frame
+    }
+
+    pub fn depth(&self) -> f64 {
+        self.shown.as_ref().map_or(DEPTH, FxScene::depth)
     }
 
     /// What is laid over the page under the drawer's foot (premultiplied, partly clear), each
     /// with its top left corner in the frame's pixels: the shadow it casts, and the effects'
     /// list, open, with its own.
     pub fn under(&self) -> Vec<(&Pixmap, i32, i32)> {
-        let foot = (DEPTH * self.scale).round() as i32;
+        let foot = (self.depth() * self.scale).round() as i32;
         let mut out = Vec::new();
         if let Some(s) = &self.still {
             out.push((&s.shadow, 0, foot));
@@ -430,12 +530,33 @@ impl FxRenderer {
             self.still = Some(still);
             self.shown = None;
         }
+        let depth_changed = self.depth() != scene.depth();
+        if depth_changed {
+            let still = self.still.as_ref().expect("the still");
+            self.frame = if scene.pins.is_empty() {
+                still.plate.clone()
+            } else {
+                still.deep.clone()
+            };
+            self.cover = vec![0; (self.frame.width() * self.frame.height()) as usize];
+            self.shown = None;
+        }
         let all = [0, 0, self.frame.width() as i32, self.frame.height() as i32];
         let was = self.shown.take();
         let mut dirty: Option<[i32; 4]> = None;
         for i in 0..SLOTS {
             if was.as_ref().is_none_or(|w| slot_changed(w, scene, i)) {
                 dirty = Some(union(dirty, self.slot_part(i)));
+            }
+        }
+        for slot in 0..SLOTS {
+            for place in 0..PINS {
+                if was.as_ref().is_none_or(|w| {
+                    w.pin(slot, place) != scene.pin(slot, place) || w.occupied != scene.occupied
+                }) && scene.depth() > DEPTH
+                {
+                    dirty = Some(union(dirty, self.pin_part(slot, place)));
+                }
             }
         }
         // (Each slot's part lies apart from the others': a slot changed is drawn again whole.)
@@ -450,6 +571,17 @@ impl FxRenderer {
             for p in [before, self.list_part()].into_iter().flatten() {
                 self.damage = Some(union(self.damage, p));
             }
+        }
+        if depth_changed {
+            self.damage = Some(union(
+                self.damage,
+                [
+                    0,
+                    0,
+                    self.frame.width() as i32,
+                    ((PIN_DEPTH + SHADOW) * self.scale).ceil() as i32 + 2,
+                ],
+            ));
         }
         self.shown = Some(scene.clone());
         self.damage.is_some()
@@ -499,7 +631,20 @@ impl FxRenderer {
                 r = union(Some(r), p);
             }
         }
+        for slot in 0..SLOTS {
+            for place in 0..PINS {
+                let p = self.pin_part(slot, place);
+                if meets(p, r) {
+                    r = union(Some(r), p);
+                }
+            }
+        }
         r
+    }
+
+    fn pin_part(&self, slot: usize, place: usize) -> [i32; 4] {
+        let (x, y) = pin_at(slot, place);
+        self.pixels((x - 78.0, TOP + 172.0, x + 78.0, y + 78.0))
     }
 
     /// The frame drawn again inside `r` (each slot reaching into it lying inside it).
@@ -509,7 +654,15 @@ impl FxRenderer {
         };
         let s = self.scale;
         let oy = f64::from(top_px(s)) / s;
-        copy(&mut self.frame, &still.plate, r);
+        copy(
+            &mut self.frame,
+            if scene.pins.is_empty() {
+                &still.plate
+            } else {
+                &still.deep
+            },
+            r,
+        );
         let mut light = Svg::default();
         for (i, slot) in scene.slots.iter().enumerate() {
             if !meets(self.slot_part(i), r) {
@@ -582,6 +735,77 @@ impl FxRenderer {
                 );
             }
         }
+        if !scene.pins.is_empty() {
+            for slot in 0..SLOTS {
+                let count = scene.pins.iter().filter(|p| p.slot == slot).count();
+                for place in 0..PINS {
+                    if !meets(self.pin_part(slot, place), r) {
+                        continue;
+                    }
+                    let pin = scene.pin(slot, place);
+                    if pin.is_some()
+                        && let Some((px, py, pixels)) = still.pin_parts.get(slot * PINS + place)
+                    {
+                        crate::render::put(&mut self.frame, pixels, (*px, *py), 1.0);
+                    }
+                    let (sx, sy, sw, sh) = pin_screen(slot, place);
+                    let left = sx + (sw - 47.0 * PIN_DOT) / 2.0;
+                    let top = sy - oy + sh / 2.0 - CAP_LIFT * PIN_DOT / 5.0 - 3.0 * PIN_DOT;
+                    let (text, level) = match pin {
+                        Some(p) => (
+                            p.name.as_str(),
+                            if p.dim || scene.drag.is_some_and(|(s, _)| s == slot) {
+                                0.4
+                            } else {
+                                1.0
+                            },
+                        ),
+                        None if slot < scene.occupied && place == count => ("+ PIN", 0.5),
+                        _ => ("", 1.0),
+                    };
+                    text_dots(
+                        &mut self.frame,
+                        &mut self.cover,
+                        s,
+                        (left, top, PIN_DOT),
+                        &centred(text, 8),
+                        level,
+                    );
+                    if let Some(p) = pin {
+                        let (x, y) = pin_at(slot, place);
+                        let mut c = crate::CONTROLS[crate::controls::MACRO_FIRST];
+                        c.x = x;
+                        c.y = y;
+                        let layer = if self.skin == Skin::Worn {
+                            crate::art::control_worn(&c, p.value, 0.0)
+                        } else {
+                            crate::art::control(&c, p.value, 0.0)
+                        };
+                        if let Ok(mut painter) = still.painter.lock()
+                            && let Some((px, py, pixels)) = painter.paint_layer(&layer)
+                        {
+                            crate::render::put(
+                                &mut self.frame,
+                                &pixels,
+                                (px, py - top_px(s)),
+                                level as f32,
+                            );
+                            if p.learning
+                                && let Some((px, py, pixels)) =
+                                    painter.paint_layer(&crate::learn::ring(&c))
+                            {
+                                crate::render::put(
+                                    &mut self.frame,
+                                    &pixels,
+                                    (px, py - top_px(s)),
+                                    1.0,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if !light.0.is_empty() {
             svg_over(&self.options, &mut self.frame, s, &light.0);
         }
@@ -627,51 +851,132 @@ impl FxRenderer {
         let mut line = |frame: &mut Pixmap, (lx, ly): (f64, f64), text: &[char], level: f64| {
             text_dots(frame, &mut cover, s, (lx, ly, LIST_DOT), text, level);
         };
-        // The title, dim; what the list says at its right.
+        // The title and count keep their own places, even for a long effect name.
         let (tx, ty) = at(0, 0);
-        line(&mut frame, (tx, ty), &fit(&list.title, LIST_CHARS), 0.55);
-        let note = fit(&list.note, LIST_CHARS);
+        let note = fit(&list.note, 28);
+        line(
+            &mut frame,
+            (tx, ty),
+            &fit(&list.title, LIST_CHARS.saturating_sub(note.len() + 2)),
+            0.55,
+        );
         line(
             &mut frame,
             (at(LIST_CHARS - note.len(), 0).0, ty),
             &note,
             0.55,
         );
-        for k in 0..LIST_ROWS {
+        let head = 1 + usize::from(list.find.is_some());
+        let mut underlines = Svg::default();
+        if let Some(find) = &list.find {
+            line(&mut frame, at(0, 1), &fit("FIND", 4), 0.55);
+            let chars: Vec<char> = find.field.text.chars().collect();
+            let start = find.field.caret.saturating_sub(33);
+            if chars.is_empty() {
+                line(&mut frame, at(5, 1), &fit("A PARAMETER", 33), 0.25);
+            } else {
+                line(
+                    &mut frame,
+                    at(5, 1),
+                    &chars
+                        .iter()
+                        .skip(start)
+                        .take(33)
+                        .copied()
+                        .collect::<Vec<_>>(),
+                    1.0,
+                );
+            }
+            let (cx, cy) = at(5 + find.field.caret - start, 1);
+            put!(
+                underlines,
+                "<path d='M{} {}v28' stroke='{}' stroke-width='2'/>",
+                N(cx - 2.0),
+                N(cy),
+                "#f0a030"
+            );
+            for (col, text, chosen) in [(43, "ALL", !find.pinned), (49, "PINNED", find.pinned)] {
+                line(
+                    &mut frame,
+                    at(col, 1),
+                    &fit(text, 6),
+                    if chosen { 1.0 } else { 0.4 },
+                );
+                if chosen {
+                    let (x, y) = at(col, 1);
+                    put!(
+                        underlines,
+                        "<path d='M{} {}h{}' stroke='#f0a030' stroke-width='2'/>",
+                        N(x),
+                        N(y + 32.0),
+                        N(text.len() as f64 * 24.0 - 4.0)
+                    );
+                }
+            }
+            line(&mut frame, at(47, 1), &['·'], 0.35);
+        }
+        for k in 0..LIST_ROWS + 1 - head {
             let Some(row) = list.rows.get(list.first + k) else {
                 break;
             };
             let pointed = list.hover == Some(list.first + k);
             let level = if pointed { 1.0 } else { 0.72 };
+            let y = k + head;
             if pointed {
-                line(&mut frame, at(COLS.0, k + 1), &['>'], 1.0);
+                line(&mut frame, at(0, y), &['>'], 1.0);
             }
-            line(
-                &mut frame,
-                at(COLS.1, k + 1),
-                &fit(&row.name, NAME_CHARS),
-                level,
-            );
-            if !row.action {
+            if list.find.is_some() {
                 line(
                     &mut frame,
-                    at(COLS.2, k + 1),
-                    &fit(&row.maker, MAKER_CHARS),
-                    level * 0.75,
+                    at(2, y),
+                    &['•'],
+                    if row.pinned.is_some() { 1.0 } else { 0.22 },
                 );
+                let name = fit(&row.name, 23);
+                line(&mut frame, at(4, y), &name, level);
+                for &j in &row.matches {
+                    if let Some(ch) = name.get(j) {
+                        line(&mut frame, at(4 + j, y), &[*ch], 1.0);
+                        let (x, y) = at(4 + j, y);
+                        put!(
+                            underlines,
+                            "<path d='M{} {}h20' stroke='#f0a030' stroke-width='2'/>",
+                            N(x),
+                            N(y + 32.0)
+                        );
+                    }
+                }
+                line(&mut frame, at(28, y), &fit(&row.maker, 12), level * 0.85);
+                line(&mut frame, at(41, y), &fit(&row.format, 17), level * 0.6);
+            } else {
                 line(
                     &mut frame,
-                    at(COLS.3, k + 1),
-                    &fit(&row.format, FORMAT_CHARS),
-                    level * 0.6,
+                    at(COLS.1, y),
+                    &fit(&row.name, NAME_CHARS),
+                    level,
                 );
+                if !row.action {
+                    line(
+                        &mut frame,
+                        at(COLS.2, y),
+                        &fit(&row.maker, MAKER_CHARS),
+                        level * 0.75,
+                    );
+                    line(
+                        &mut frame,
+                        at(COLS.3, y),
+                        &fit(&row.format, FORMAT_CHARS),
+                        level * 0.6,
+                    );
+                }
             }
         }
+        svg_over(&self.options, &mut frame, s, &underlines.0);
         // More above or below: the presets' list's arrows, at the lines' right end.
         let more = [
-            (list.first > 0, 1, crate::presets::UP),
+            (list.first > 0, head, crate::presets::UP),
             (
-                list.first + LIST_ROWS < list.rows.len(),
+                list.first + LIST_ROWS + 1 - head < list.rows.len(),
                 LIST_ROWS,
                 crate::presets::DOWN,
             ),
@@ -883,7 +1188,110 @@ fn make_still((scale, skin, lettering): Look) -> Still {
                 .collect()
         })
         .collect();
+    let mut deep = lower::plate(s, skin, PIN_DEPTH, &options);
+    let mut bezels = Svg::default();
+    for slot in 0..SLOTS {
+        for place in 0..PINS {
+            let (x, y, w, h) = pin_screen(slot, place);
+            super::screen_bezel(&mut bezels, (x, y - oy, w, h));
+        }
+    }
+    svg_over(&options, &mut deep, s, &bezels.0);
+    let mut cover = vec![0; (deep.width() * deep.height()) as usize];
+    for slot in 0..SLOTS {
+        for place in 0..PINS {
+            let (x, y, w, h) = pin_screen(slot, place);
+            glass(&mut deep, &glass_picture, s, (x, y - oy, w, h), 3.0);
+            unlit_dots(
+                &mut deep,
+                &mut cover,
+                s,
+                (
+                    x + (w - 47.0 * PIN_DOT) / 2.0,
+                    y - oy + h / 2.0 - CAP_LIFT * PIN_DOT / 5.0 - 3.0 * PIN_DOT,
+                    PIN_DOT,
+                ),
+                8,
+                &[0.0],
+            );
+        }
+    }
+    lower::lamp(&mut deep, s, skin, (0, top_px(s)));
+    // The original row keeps exactly its pixels in either depth.
+    let rows = ((DEPTH - 12.0) * s).floor() as u32;
+    crate::glow::copy_in(
+        &mut deep,
+        &plate,
+        (0, 0),
+        [0, 0, plate.width() as i32, rows as i32],
+    );
+    let mut pin_parts = Vec::new();
+    for slot in 0..SLOTS {
+        for place in 0..PINS {
+            let (x, y) = pin_at(slot, place);
+            let rect = [
+                (s * (x - 78.0)).floor() as i32 - 1,
+                (s * (TOP + 172.0)).floor() as i32 - 1 - top_px(s),
+                (s * (x + 78.0)).ceil() as i32 + 1,
+                (s * (y + 78.0)).ceil() as i32 + 1 - top_px(s),
+            ];
+            let mut pixels = crate::glow::crop(&deep, rect).expect("a pin's place");
+            let (ox, py) = (f64::from(rect[0]) / s, f64::from(rect[1] + top_px(s)) / s);
+            let (cx, cy) = (x - ox, y - py);
+            if skin == Skin::Worn {
+                let mut shadow = Svg::default();
+                put!(
+                    shadow,
+                    "<defs><filter id='pin-shadow' x='-0.6' y='-0.6' width='2.2' height='2.2'><feGaussianBlur stdDeviation='7'/></filter></defs><circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.55' filter='url(#pin-shadow)'/>",
+                    N(cx + 10.0),
+                    N(cy + 14.0),
+                    N(crate::art::STD.skirt)
+                );
+                svg_over(&options, &mut pixels, s, &shadow.0);
+            }
+            let mut ticks = Svg::default();
+            for k in 0..11 {
+                let a = (-150.0 + 30.0 * k as f64).to_radians();
+                let (r0, r1) = (
+                    crate::art::STD.skirt + 6.0,
+                    crate::art::STD.skirt + if k % 5 == 0 { 15.0 } else { 11.0 },
+                );
+                put!(
+                    ticks,
+                    "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{}' stroke-width='3' stroke-linecap='round'/>",
+                    N(cx + r0 * a.sin()),
+                    N(cy - r0 * a.cos()),
+                    N(cx + r1 * a.sin()),
+                    N(cy - r1 * a.cos()),
+                    colour::LEGEND
+                );
+            }
+            // The print and its lamp use the drawing's place, as the rest of the drawer's does.
+            lower::print(&mut pixels, s, skin, &options, &ticks.0);
+            pin_parts.push((rect[0], rect[1], pixels));
+        }
+    }
+    // The knob's pictures and its fixed light at each place are prepared here too: the first
+    // pin exposed must not decode the panel's materials on the editor's thread.
+    let mut painter = crate::Renderer::for_parts(skin, s);
+    for slot in 0..SLOTS {
+        for place in 0..PINS {
+            let (x, y) = pin_at(slot, place);
+            let mut c = crate::CONTROLS[crate::controls::MACRO_FIRST];
+            c.x = x;
+            c.y = y;
+            let layer = if skin == Skin::Worn {
+                crate::art::control_worn(&c, 0.5, 0.0)
+            } else {
+                crate::art::control(&c, 0.5, 0.0)
+            };
+            let _ = painter.paint_layer(&layer);
+        }
+    }
     Still {
+        deep,
+        pin_parts,
+        painter: Mutex::new(painter),
         look: (scale, skin, lettering),
         plate,
         words,
@@ -1021,10 +1429,12 @@ mod tests {
                     maker: "Maker".into(),
                     format: "CLAP".into(),
                     action: false,
+                    ..FxRow::default()
                 })
                 .collect(),
             first: 0,
             hover: None,
+            find: None,
         }
     }
 
@@ -1163,6 +1573,90 @@ mod tests {
                 assert!(under(&r) == under(&whole), "the list drawn in parts");
             }
             assert!(!r.render(&scene), "nothing changed");
+        }
+    }
+    #[test]
+    fn the_pins_draw_in_parts_as_they_draw_whole() {
+        for (scale, skin, lettering) in [
+            (0.44, Skin::Worn, Lettering::Standard),
+            (1.0, Skin::Drawn, Lettering::Large),
+        ] {
+            let mut scene = scene();
+            scene.occupied = 4;
+            scene.slots[2].text = "Tape Delay".into();
+            scene.slots[3].text = "Plate".into();
+            let mut r = FxRenderer::new(scale, skin, lettering);
+            r.render(&scene);
+            for step in 0..7 {
+                match step {
+                    0 => {
+                        scene.pins = (0..16)
+                            .map(|n| FxPin {
+                                target: n,
+                                slot: n / 4,
+                                name: format!("PIN {}", n + 1),
+                                value: 0.35,
+                                dim: false,
+                                learning: false,
+                            })
+                            .collect()
+                    }
+                    1 => scene.pins[6].value = 0.8,
+                    2 => {
+                        scene.pins[6].name = "MISSING".into();
+                        scene.pins[6].dim = true;
+                    }
+                    3 => {
+                        scene.pins.swap(0, 4);
+                        scene.pins[0].slot = 0;
+                        scene.pins[4].slot = 1;
+                    }
+                    4 => scene.pins.truncate(3),
+                    5 => {
+                        scene.list = Some(FxList {
+                            slot: 0,
+                            title: "HALL: PARAMETERS".into(),
+                            note: "3 OF 4 PINNED".into(),
+                            find: Some(FxFind::default()),
+                            rows: vec![FxRow {
+                                name: "Decay".into(),
+                                maker: "2.40 s".into(),
+                                pinned: Some(1),
+                                matches: vec![0, 1],
+                                ..FxRow::default()
+                            }],
+                            ..FxList::default()
+                        });
+                    }
+                    _ => {
+                        scene.pins.clear();
+                        scene.list = None;
+                    }
+                }
+                let before = r.frame().clone();
+                r.render(&scene);
+                if step == 0 {
+                    let rows = ((DEPTH - 12.0) * scale).floor() as usize;
+                    let bytes = rows * before.width() as usize * 4;
+                    assert_eq!(
+                        &r.frame().data()[..bytes],
+                        &before.data()[..bytes],
+                        "the original slot row keeps its screens and legends"
+                    );
+                }
+                let mut whole = FxRenderer::new(scale, skin, lettering);
+                whole.render(&scene);
+                assert!(r.frame() == whole.frame(), "{scale} {skin:?}, step {step}");
+                assert_eq!(r.depth(), scene.depth());
+                let under = |r: &FxRenderer| {
+                    r.under()
+                        .into_iter()
+                        .map(|(p, x, y)| (p.clone(), x, y))
+                        .collect::<Vec<_>>()
+                };
+                assert!(under(&r) == under(&whole), "the list and shadow");
+            }
+            assert!(!r.render(&scene));
         }
     }
 }
