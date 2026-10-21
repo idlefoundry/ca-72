@@ -290,18 +290,32 @@ impl Backend for Bridge {
             (Runs::Bridge, "select") => self.select(args),
             (Runs::Bridge, "audio.analyze") => super::audio::analyze(args),
             (Runs::Bridge, "audio.compare") => super::audio::compare(args),
+            (Runs::Bridge, "audio.preset_export") => super::audio::export_preset(args),
             (Runs::Bridge, "audio.render") => {
-                let snapshot = match (super::arg(args, "snapshot"), super::arg(args, "preset")) {
-                    (Some(_), Some(_)) => {
-                        return Err(ApiError::params("choose snapshot or preset, not both"));
+                let mut source = None;
+                let snapshot = match (
+                    super::arg(args, "snapshot"),
+                    super::arg(args, "preset"),
+                    super::arg(args, "preset_file"),
+                ) {
+                    (Some(_), Some(_), _) | (Some(_), _, Some(_)) | (_, Some(_), Some(_)) => {
+                        return Err(ApiError::params(
+                            "choose only one of snapshot, preset or preset_file",
+                        ));
                     }
-                    (Some(v), None) => serde_json::from_value(v.clone())
+                    (Some(v), None, None) => serde_json::from_value(v.clone())
                         .map_err(|e| ApiError::params(format!("snapshot: {e}")))?,
-                    (None, Some(v)) => crate::offline::Snapshot::preset(
+                    (None, Some(v), None) => crate::offline::Snapshot::preset_at_quality(
                         v.as_str()
                             .ok_or_else(|| ApiError::params("preset must be a name"))?,
+                        super::arg(args, "values").and_then(|v| v.get("quality")),
                     )?,
-                    (None, None) => {
+                    (None, None, Some(_)) => {
+                        let (snapshot, provenance) = super::audio::preset_file(args)?;
+                        source = Some(provenance);
+                        snapshot
+                    }
+                    (None, None, None) => {
                         serde_json::from_value(self.forward("render.snapshot", &json!({}))?)
                             .map_err(|e| {
                                 ApiError::refused(format!(
@@ -310,7 +324,7 @@ impl Backend for Bridge {
                             })?
                     }
                 };
-                super::audio::render(args, snapshot)
+                super::audio::render(args, snapshot, source)
             }
             (_, method) => self.forward(method, args),
         }

@@ -4,6 +4,7 @@
 #![allow(unsafe_code)]
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use nih_plug::context::process::TestProcessContext;
@@ -16,6 +17,15 @@ use crate::params::Ca72Params;
 
 pub const FORMAT: u32 = 1;
 pub const BLOCK: usize = 256;
+
+fn fresh_params() -> Arc<Ca72Params> {
+    // Scheduled performance notes must never become this computer's PREVIOUS/NEXT
+    // PRESET shortcuts. Those bindings and the physical wheel source are not sound state.
+    Arc::new(Ca72Params {
+        midi_map: Arc::default(),
+        ..Ca72Params::default()
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -55,13 +65,31 @@ impl Snapshot {
 
     /// Replay a preset through the same targets and patch loading as the browser.
     pub fn preset(name: &str) -> Result<Self, ApiError> {
+        Self::preset_at_quality(name, None)
+    }
+
+    pub fn preset_at_quality(
+        name: &str,
+        quality: Option<&serde_json::Value>,
+    ) -> Result<Self, ApiError> {
         let entry = crate::library::Library::shared()
             .find(name)
             .ok_or_else(|| ApiError::params(format!("no preset `{name}`")))?;
-        let mut p = Ca72::default();
-        let ctx = TestProcessContext::<Ca72>::new(p.params(), 48_000.0, ProcessMode::Offline);
-        let map = p.params.param_map();
-        for (id, value) in crate::presets::targets(&p.params, &entry) {
+        Self::sound_at_quality(&entry.sound, quality)
+    }
+
+    pub fn sound(sound: &crate::library::Sound) -> Result<Self, ApiError> {
+        Self::sound_at_quality(sound, None)
+    }
+
+    pub fn sound_at_quality(
+        sound: &crate::library::Sound,
+        quality: Option<&serde_json::Value>,
+    ) -> Result<Self, ApiError> {
+        let p = fresh_params();
+        let ctx = TestProcessContext::<Ca72>::new(p.clone(), 48_000.0, ProcessMode::Offline);
+        let map = p.param_map();
+        for (id, value) in crate::presets::targets_for_sound(&p, sound) {
             let ptr = map
                 .iter()
                 .find(|(k, ..)| k == id)
@@ -71,15 +99,70 @@ impl Snapshot {
                 return Err(ApiError::refused(format!("cannot restore {id}")));
             }
         }
-        p.params.lfo_patch.load_values(&entry.sound.values);
-        p.params.lfo_patch.load_names(&entry.sound.macro_names);
-        if let Some(db) = entry.sound.curve(p.params.controls().potato) {
-            p.params.drive_curve.load_preset(db);
+        p.lfo_patch.load_values(&sound.values);
+        p.lfo_patch.load_names(&sound.macro_names);
+        // QUALITY is a player preference, absent from preset files. Choose its requested
+        // curve before loading the sound, just as a live instance already at HI/LO does.
+        // Snapshot overrides retain the captured curve instead.
+        if let Some(quality) = quality {
+            let table = values::table(&p);
+            let entry = values::find(&table, "quality").expect("quality parameter");
+            let normalized = entry.parse(quality)?;
+            let ptr = map
+                .iter()
+                .find(|(id, ..)| id == "quality")
+                .expect("quality parameter")
+                .1;
+            if !ctx.automate(ptr, normalized) {
+                return Err(ApiError::refused("cannot restore quality"));
+            }
         }
-        p.params.noise_seed.store(72, Ordering::Relaxed);
+        if let Some(db) = sound.curve(p.controls().potato) {
+            p.drive_curve.load_preset(db);
+        }
+        p.noise_seed.store(72, Ordering::Relaxed);
         // No initialise(): it would load this computer's settings and start live workers.
-        p.engine.stop_workers();
-        Ok(Self::capture(&p.params))
+        Ok(Self::capture(&p))
+    }
+
+    /// Restore through the same normalized parameters and persisted-field decoder used
+    /// by rendering, without constructing an audio engine, window or device.
+    pub fn restore_params(&self) -> Result<Arc<Ca72Params>, ApiError> {
+        self.validate()?;
+        let p = fresh_params();
+        p.deserialize_fields(&self.fields);
+        let restored = p.serialize_fields();
+        for (key, value) in &self.fields {
+            let actual = restored
+                .get(key)
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+            let expected = serde_json::from_str::<serde_json::Value>(value).ok();
+            if actual != expected {
+                return Err(ApiError::params(format!(
+                    "invalid or unsupported snapshot field `{key}`"
+                )));
+            }
+        }
+        let ctx = TestProcessContext::<Ca72>::new(p.clone(), 48_000.0, ProcessMode::Offline);
+        let map = p.param_map();
+        for (id, value) in &self.parameters {
+            let ptr = map
+                .iter()
+                .find(|(k, ..)| k == id)
+                .ok_or_else(|| ApiError::params(format!("unknown parameter `{id}`")))?
+                .1;
+            if !ctx.automate(ptr, *value) {
+                return Err(ApiError::refused(format!("could not restore {id}")));
+            }
+        }
+        p.noise_seed.store(self.seed, Ordering::Relaxed);
+        p.set_tempo(self.tempo);
+        p.set_freq_law(if self.hardware_frequency_dials {
+            ca72::freq_dial::Law::Hardware
+        } else {
+            ca72::freq_dial::Law::Semitones
+        });
+        Ok(p)
     }
 
     pub fn validate(&self) -> Result<(), ApiError> {
@@ -236,47 +319,21 @@ pub fn render(snapshot: &Snapshot, request: &Request) -> Result<Render, ApiError
 fn render_inner(snapshot: &Snapshot, request: &Request) -> Result<Render, ApiError> {
     snapshot.validate()?;
     request.validate()?;
-    let mut p = Ca72::default();
+    let params = Arc::try_unwrap(snapshot.restore_params()?)
+        .map_err(|_| ApiError::refused("detached parameters are unexpectedly shared"))?;
+    let mut p = Ca72::with_params(params);
+    p.params
+        .midi_map
+        .set_wheel_source(crate::mod_wheel::Source::DEFAULT);
     #[cfg(feature = "fx-host")]
     {
         p.fx = None;
-    }
-    p.params.deserialize_fields(&snapshot.fields);
-    let restored = p.params.serialize_fields();
-    for (key, value) in &snapshot.fields {
-        let actual = restored
-            .get(key)
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
-        let expected = serde_json::from_str::<serde_json::Value>(value).ok();
-        if actual != expected {
-            return Err(ApiError::params(format!(
-                "invalid or unsupported snapshot field `{key}`"
-            )));
-        }
     }
     let mut ctx = TestProcessContext::<Ca72>::new(
         p.params(),
         request.sample_rate as f32,
         ProcessMode::Offline,
     );
-    let map = p.params.param_map();
-    for (id, value) in &snapshot.parameters {
-        let ptr = map
-            .iter()
-            .find(|(k, ..)| k == id)
-            .ok_or_else(|| ApiError::params(format!("unknown parameter `{id}`")))?
-            .1;
-        if !ctx.automate(ptr, *value) {
-            return Err(ApiError::refused(format!("could not restore {id}")));
-        }
-    }
-    p.params.noise_seed.store(snapshot.seed, Ordering::Relaxed);
-    p.params.set_tempo(snapshot.tempo);
-    p.params.set_freq_law(if snapshot.hardware_frequency_dials {
-        ca72::freq_dial::Law::Hardware
-    } else {
-        ca72::freq_dial::Law::Semitones
-    });
     p.params.set_standalone(true);
     p.rate = request.sample_rate as f64;
     p.engine.set(&p.params.controls());

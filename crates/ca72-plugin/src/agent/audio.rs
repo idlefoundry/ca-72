@@ -57,16 +57,98 @@ pub fn render_schema(p: &crate::params::Ca72Params) -> Value {
             "effects":{"type":"string","enum":["dry"],"description":"Explicitly render the synth alone; hosted effects are excluded, external input silent."},
             "snapshot":{"type":"object","description":"Exact snapshot returned by ca72_snapshot or a previous ca72_render; excludes preset."},
             "preset":{"type":"string","description":"Library preset to render without loading it into the live synth; excludes snapshot. With neither, captures the selected live instance."},
+            "preset_file":{"type":"string","description":"Absolute path to the exact user-preset TOML to reload, up to 1 MiB. Excludes snapshot and preset. Does not import or change the player's library. Recorded render conditions from ca72_preset_export can be supplied again."},
             "notes":{"type":"array","minItems":1,"maxItems":4096,"items":{
                 "type":"object","properties":{"note":{"type":"integer","minimum":0,"maximum":127},"start":{"type":"number","minimum":0},"duration":{"type":"number","exclusiveMinimum":0}},"required":["note","start","duration"],"additionalProperties":false}},
             "seconds":{"type":"number","minimum":0.05,"maximum":60,"default":3,"description":"Total rendered time, including release tail. Every note must end within it."},
             "sample_rate":{"type":"integer","minimum":8000,"maximum":192000,"default":48000},
             "seed":{"type":"integer","minimum":0,"description":"Random seed for repeatable noise, component variations and arpeggiator randomness; default is captured seed, or 72 for a library preset."},
             "tempo":{"type":"number","minimum":30,"maximum":300,"description":"BPM before modulation; defaults to snapshot tempo (120 for a library preset)."},
+            "frequency_dials":{"type":"string","enum":["SEMITONES","HARDWARE"],"description":"Frequency modulation travel preference; defaults to snapshot law. A preset file does not store this player preference."},
             "values":{"type":"object","properties":values,"additionalProperties":false,"description":"Candidate overrides in ca72_set's panel units. Only this offline copy is changed."}
         }),
         &["output_dir", "effects", "notes"],
     )
+}
+
+pub fn export_schema(_: &crate::params::Ca72Params) -> Value {
+    schema(
+        json!({
+            "snapshot":{"type":"object","description":"Exact candidate snapshot returned by ca72_render or ca72_snapshot."},
+            "name":{"type":"string","description":"Preset name, following the normal library naming rules."},
+            "tags":{"type":"array","items":{"type":"string"}},
+            "output_dir":{"type":"string","description":"New absolute local directory; parent must exist. Never overwrites or installs into the player's library."}
+        }),
+        &["snapshot", "name", "output_dir"],
+    )
+}
+
+pub fn preset_file(args: &Value) -> Result<(Snapshot, Value), ApiError> {
+    let path = path(args, "preset_file")?;
+    let mut bytes = Vec::new();
+    std::fs::File::open(&path)
+        .map_err(io_error)?
+        .take(1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(io_error)?;
+    if bytes.len() > 1024 * 1024 {
+        return Err(ApiError::params("preset file exceeds 1 MiB"));
+    }
+    let text = std::str::from_utf8(&bytes).map_err(io_error)?;
+    let sound = crate::library::parse_user_sound(text).map_err(ApiError::params)?;
+    Ok((
+        Snapshot::sound_at_quality(&sound, arg(args, "values").and_then(|v| v.get("quality")))?,
+        json!({"path":path,"sha256":sha(&bytes),"name":sound.name}),
+    ))
+}
+
+pub fn export_preset(args: &Value) -> Reply {
+    let snapshot: Snapshot = serde_json::from_value(
+        arg(args, "snapshot")
+            .cloned()
+            .ok_or_else(|| ApiError::params("snapshot is required"))?,
+    )
+    .map_err(|e| ApiError::params(format!("snapshot: {e}")))?;
+    let p = snapshot.restore_params()?;
+    let tags = arg(args, "tags")
+        .map(|v| {
+            serde_json::from_value::<Vec<String>>(v.clone())
+                .map_err(|e| ApiError::params(format!("tags: {e}")))
+        })
+        .transpose()?;
+    let dir = directory(args)?;
+    let lo = p.controls().potato;
+    let entry = crate::library::Library::at(&dir)
+        .save_with(
+            text_arg(args, "name")?,
+            crate::presets::values_now(&p),
+            tags,
+            Some((lo, p.drive_curve.saved().db)),
+            crate::presets::names_now(&p),
+            None,
+        )
+        .map_err(io_error)?;
+    let file = entry
+        .file()
+        .ok_or_else(|| ApiError::refused("preset export has no file"))?;
+    let table = super::values::table(&p);
+    let mut kept = serde_json::Map::new();
+    for id in crate::library::KEPT.iter().chain(crate::presets::PLAYERS) {
+        let e = super::values::find(&table, id)
+            .ok_or_else(|| ApiError::refused(format!("missing {id}")))?;
+        kept.insert((*id).into(), e.read()["value"].clone());
+    }
+    let conditions = json!({"values":kept,"seed":snapshot.seed,"tempo":snapshot.tempo,
+        "frequency_dials":if snapshot.hardware_frequency_dials {"HARDWARE"} else {"SEMITONES"}});
+    let result = json!({"preset_file":file,"preset_sha256":sha(&std::fs::read(file).map_err(io_error)?),
+        "name":entry.sound.name,"render_conditions":conditions,"manifest_path":dir.join("manifest.json"),
+        "processing":"export only; player's library and live instrument unchanged; hosted effects excluded",
+        "serialization":"normal user preset format; values rounded to four decimal places"});
+    json_file(
+        &dir.join("manifest.json"),
+        &json!({"format":1,"snapshot":snapshot,"export":result}),
+    )?;
+    Ok(result)
 }
 
 pub fn number(args: &Value, key: &str, default: f64) -> Result<f64, ApiError> {
@@ -390,7 +472,7 @@ pub fn compare(args: &Value) -> Reply {
     Ok(result)
 }
 
-pub fn render(args: &Value, mut snapshot: Snapshot) -> Reply {
+pub fn render(args: &Value, mut snapshot: Snapshot, preset_source: Option<Value>) -> Reply {
     if text_arg(args, "effects")? != "dry" {
         return Err(ApiError::params(
             "effects must be explicitly dry; hosted third-party effects and external input are not rendered",
@@ -409,6 +491,17 @@ pub fn render(args: &Value, mut snapshot: Snapshot) -> Reply {
             return Err(ApiError::params("tempo must be 30 to 300 BPM"));
         }
         snapshot.tempo = v.round();
+    }
+    if let Some(v) = arg(args, "frequency_dials") {
+        snapshot.hardware_frequency_dials = match v.as_str() {
+            Some("HARDWARE") => true,
+            Some("SEMITONES") => false,
+            _ => {
+                return Err(ApiError::params(
+                    "frequency_dials must be SEMITONES or HARDWARE",
+                ));
+            }
+        };
     }
     let request = Request {
         notes: serde_json::from_value(
@@ -437,6 +530,7 @@ pub fn render(args: &Value, mut snapshot: Snapshot) -> Reply {
     write(&dir.join("render.wav"), &bytes)?;
     let manifest = json!({"format":1,"engine_version":env!("CARGO_PKG_VERSION"),"engine_source_sha256":env!("CA72_ENGINE_SOURCE_SHA256"),
         "snapshot":snapshot,"snapshot_sha256":snapshot_hash,"request":request,"wav_sha256":wave_hash,
+        "preset_file_source":preset_source,
         "latency_compensated_samples":result.latency_compensated_samples,"block_frames":crate::offline::BLOCK,
         "effects":"dry","external_input":"silence","initial_state":"fresh voices; seed resets noise and component variations; no live held notes or oscillator phase copied",
         "processing":"same Ca72::process as playback; offline, no device, real-time workers or live-state changes"});
@@ -450,6 +544,69 @@ pub fn render(args: &Value, mut snapshot: Snapshot) -> Reply {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn exported_files_keep_modulation_curves_pot_positions_and_replay_conditions() {
+        let dir = tempfile::tempdir().expect("dir");
+        let p = crate::params::Ca72Params::default();
+        crate::agent::modulation::set(
+            &p,
+            &json!({"source":"lfo1","target":"osc2_frequency","depth":20}),
+        )
+        .expect("assignment");
+        p.drive_curve.load_preset([-2.0, -4.0, -5.0, -6.0]);
+        let mut snapshot = Snapshot::capture(&p);
+        snapshot.hardware_frequency_dials = true;
+        snapshot.seed = 981;
+        snapshot.tempo = 131.0;
+        snapshot.override_values(&json!({"quality":"HI","osc3_frequency":8.15,"pitch_wheel":0.12,"midi_bend_range":7,"lfo1_rate":3})).expect("values");
+        let result=export_preset(&json!({"snapshot":snapshot,"name":"Reference Fit","output_dir":dir.path().join("export")})).expect("export");
+        let source =
+            std::fs::read_to_string(result["preset_file"].as_str().expect("path")).expect("file");
+        let sound = crate::library::parse_user_sound(&source).expect("parse");
+        let (_, pot) = sound
+            .values
+            .iter()
+            .find(|(id, _)| id == "osc3_frequency")
+            .expect("pot");
+        assert!(
+            (7.4..7.5).contains(pot),
+            "stored physical pot, not the agent's 8.15 semitones: {pot}"
+        );
+        assert!(
+            crate::library::KEPT
+                .iter()
+                .chain(crate::presets::PLAYERS)
+                .all(|id| !sound.values.iter().any(|(k, _)| k == id))
+        );
+        assert_eq!(sound.drive_curve, Some([-2.0, -4.0, -5.0, -6.0]));
+        let mut restored = Snapshot::sound(&sound).expect("sound");
+        restored
+            .override_values(&result["render_conditions"]["values"])
+            .expect("player conditions are valid tool inputs");
+        let params = restored.restore_params().expect("restore");
+        assert!(params.lfo_patch.same_as_values(&sound.values));
+        assert_eq!(result["render_conditions"]["frequency_dials"], "HARDWARE");
+        assert_eq!(result["render_conditions"]["seed"], 981);
+        assert_eq!(result["render_conditions"]["tempo"], 131.0);
+        assert!(source.contains("lfo1_to_osc2_frequency"));
+        let invalid = dir.path().join("invalid.toml");
+        std::fs::write(&invalid, "format = 88\nname = 'Reference Fit'\n[values]\n").expect("write");
+        assert!(preset_file(&json!({"preset_file":invalid})).is_err());
+        let dual = dir.path().join("dual.toml");
+        std::fs::write(&dual,"format = 1\nname = 'Two curves'\ndrive_curve = [-1,-2,-3,-4]\ndrive_curve_lo = [-5,-6,-7,-8]\n[values]\ndrive = 12\n").expect("write");
+        for (quality, expected) in [
+            ("HI", [-1.0, -2.0, -3.0, -4.0]),
+            ("LO", [-5.0, -6.0, -7.0, -8.0]),
+            ("ULTRA", [-1.0, -2.0, -3.0, -4.0]),
+        ] {
+            let (s, _) = preset_file(&json!({"preset_file":dual,"values":{"quality":quality}}))
+                .expect("quality-specific preset");
+            assert_eq!(
+                s.restore_params().expect("restore").drive_curve.saved().db,
+                expected
+            );
+        }
+    }
     #[test]
     fn files_round_trip_but_truncation_non_finite_and_partial_frames_are_refused() {
         let c = vec![vec![0.25; 4096], vec![-0.5; 4096]];

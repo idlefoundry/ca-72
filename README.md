@@ -698,7 +698,8 @@ arrows, Enter and Delete reach the MIDI list either way.
 
 The 0.3 MCP bridge lets an agent inspect the standalone, adjust controls and save presets.
 It also renders detached candidates and measures local WAV references: spectrograms, pitch,
-harmonics, modulation sidebands, envelopes and level-matched comparisons. Use the
+harmonics, modulation sidebands, envelopes and level-matched comparisons. It can export the
+selected snapshot as a preset file and reload that exact file without an open app. Use the
 `ca72_match_reference` MCP prompt for the fitting workflow. Processing stays on your computer;
 offline rendering explicitly uses the dry synth. See [MCP and reference matching](docs/mcp.md)
 for setup, tools, replay conditions and current platform limits.

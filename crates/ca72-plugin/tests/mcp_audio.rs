@@ -121,4 +121,101 @@ fn a_synthetic_white_lotus_reference_is_measured_fitted_and_replayed_without_a_d
     assert_eq!(manifest["wav_sha256"], reference["wav_sha256"]);
     assert!(manifest["engine_source_sha256"].as_str().unwrap().len() == 64);
     assert_eq!(manifest["effects"], "dry");
+    // A real preset file delivered without opening or changing an application or the
+    // player's library; reloading this exact file does not resolve a factory name.
+    let exported = ok(c.tool("ca72_preset_export", json!({"snapshot":reference["snapshot"],"name":"White Lotus","tags":["bass"],"output_dir":dir.path().join("export")})));
+    let mut replay = exported["render_conditions"].clone();
+    replay["preset_file"] = exported["preset_file"].clone();
+    replay["effects"] = json!("dry");
+    replay["notes"] = notes.clone();
+    replay["seconds"] = json!(0.65);
+    replay["output_dir"] = json!(dir.path().join("file-replay"));
+    let reloaded = ok(c.tool("ca72_render", replay));
+    let same = ok(c.tool("ca72_compare", json!({"reference":reference["path"],"candidate":reloaded["path"],"include_image":false,"output_dir":dir.path().join("file-replay-check")})));
+    assert!(same["candidate_gain_db"].as_f64().unwrap().abs() < 0.1);
+    assert!(
+        same["resolutions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["spectral_mae_db"].as_f64().unwrap() < 0.5)
+    );
+    let source: Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join("file-replay/manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        source["preset_file_source"]["sha256"],
+        exported["preset_sha256"]
+    );
+    assert!(
+        !dir.path().join("isolated-presets").exists(),
+        "no library installation"
+    );
+    let refused=c.tool("ca72_render",json!({"preset":"White Lotus","preset_file":exported["preset_file"],"effects":"dry","notes":notes,"output_dir":dir.path().join("ambiguous-file")}));
+    assert_eq!(refused["isError"], true);
+    let existing=c.tool("ca72_preset_export",json!({"snapshot":reference["snapshot"],"name":"Overwrite","output_dir":dir.path().join("export")}));
+    assert_eq!(existing["isError"], true);
+}
+
+#[test]
+fn computer_preset_shortcuts_cannot_consume_offline_performance_notes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = Client::new(dir.path());
+    let notes = json!([{"note":38,"start":0,"duration":0.2}]);
+    let before=ok(c.tool("ca72_render",json!({"preset":"White Lotus","effects":"dry","notes":notes,"seconds":0.3,"output_dir":dir.path().join("before")})));
+    let settings = dir.path().join("isolated-presets/CA-72");
+    std::fs::create_dir_all(&settings).unwrap();
+    let text = "[preset_actions.next_preset]\nchannel = 1\nnote = 38\n";
+    std::fs::write(settings.join("settings.toml"), text).unwrap();
+    let mut other = Client::new(dir.path());
+    let after=ok(other.tool("ca72_render",json!({"snapshot":before["snapshot"],"effects":"dry","notes":notes,"seconds":0.3,"output_dir":dir.path().join("after")})));
+    assert_eq!(before["wav_sha256"], after["wav_sha256"]);
+    let analyzed = ok(other.tool(
+        "ca72_analyze",
+        json!({"path":after["path"],"include_image":false,"output_dir":dir.path().join("audible")}),
+    ));
+    assert!(analyzed["features"]["peak_dbfs"].as_f64().unwrap() > -60.0);
+    assert_eq!(
+        std::fs::read_to_string(settings.join("settings.toml")).unwrap(),
+        text
+    );
+}
+
+#[test]
+fn named_preset_rendering_selects_the_requested_qualitys_curve() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = Client::new(dir.path());
+    let factory: toml::Value = toml::from_str(include_str!("../sounds/presets.toml")).unwrap();
+    let preset = factory["preset"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"].as_str() == Some("White Lotus"))
+        .unwrap();
+    for quality in ["LO", "HI", "ULTRA"] {
+        let render=ok(c.tool("ca72_render",json!({"preset":"White Lotus","effects":"dry","values":{"quality":quality,"drive":12},"notes":[{"note":38,"start":0,"duration":0.08}],"seconds":0.12,"output_dir":dir.path().join(quality)})));
+        let actual: Value = serde_json::from_str(
+            render["snapshot"]["fields"]["drive_curve"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let key = if quality == "LO" {
+            "drive_curve_lo"
+        } else {
+            "drive_curve"
+        };
+        for (a, b) in actual["db"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(preset[key].as_array().unwrap())
+        {
+            assert!(
+                (a.as_f64().unwrap() - b.as_float().unwrap()).abs() < 1e-5,
+                "{quality}: wrong AUTO GAIN curve"
+            );
+        }
+    }
 }

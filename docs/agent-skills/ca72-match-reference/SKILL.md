@@ -15,6 +15,8 @@ Keep the original intact. Processing in these tools is local: mono/stereo PCM or
 8 to 192 kHz, excerpts up to 60 s and files up to 128 MiB. An existing local converter may
 make a WAV copy of another format. Source separation is optional and outside these tools:
 agree any external processing with the user before uploading audio or downloading models.
+When the user supplied a recording, that recording is the target. A render of an existing
+preset is a synthetic regression fixture and does not establish reference-to-preset fitting.
 
 Choose an isolated part or the clearest passage. For a full mix, establish which part the
 user means and avoid fitting other instruments. A separated stem can help with note timing
@@ -26,6 +28,8 @@ and a fresh absolute `output_dir` whose parent exists. Keep the source hash and 
 the spectrogram, pitch track and onsets; establish the notes and their gates before timbre.
 Pitch tracking assumes a predominant monophonic part. Check uncertain octaves and transients
 by ear and the harmonic spacing; a full mix does not become a trustworthy transcription.
+If using an existing transcription, identify its provenance and recheck pitches and timing
+against the recording. Reserve some notes or passages for validation after fitting.
 
 ## Repeatable candidates
 
@@ -93,8 +97,26 @@ Stop when remaining differences reflect the synth's capabilities, evidence is in
 or several targeted trials make no useful progress; describe that limit instead of claiming
 an exact match. Do not invent an optimisation algorithm or an arbitrary numeric pass mark.
 
+For a mix containing other parts, whole-mix LUFS does not establish matched bass loudness,
+and whole-mix spectral error must not drive a dry bass fit. Use the clearest note's harmonic
+energy to set listening gain, or provide the same clearly labelled local band-pass listening
+aid for both signals. Include the unprocessed recording too. Explain any filtering and gain.
+
 ## Deliver a preset, then verify it
 
+For a file deliverable without an open app, call `ca72_preset_export` with the selected
+`snapshot`, `name`, optional `tags` and a new `output_dir`. It uses the normal preset writer,
+preserving assignments, macro names and AUTO GAIN; it does not install into the player's
+library. Then call `ca72_render` with that exact returned `preset_file`, its
+`render_conditions`, the same notes, duration and sample rate. Compare this reload against
+the selected candidate and the recording. Keep the exported file and manifest. The conditions
+include quality, pitch wheel, bypass, MIDI bend range, tempo, seed and frequency-dial law,
+which presets do not store. Frequency overrides are agent semitones; the preset writer
+converts them to the correct stored pot positions. Do not write panel overrides as TOML
+values yourself. Named/file preset rendering selects the requested quality's AUTO GAIN curve;
+snapshot overrides retain the captured curve.
+
+To install into the player's live library:
 If candidates began with a library preset, load that starting preset into the intended
 instance first. Apply the best candidate's plain values and assignments through `ca72_set` and modulation
 tools to the intended instance, setting its captured quality with ca72_set, and tempo and frequency_dials with
@@ -112,5 +134,5 @@ quality, tempo, seed and frequency-dial preference: keep and report those render
 
 Deliver the preset name, replay conditions, level-matched A/B audio, and the most useful
 spectrograms/measurements. Distinguish measured facts from listening judgements and unresolved
-differences. If the app cannot be reached, retain candidate WAVs and the complete snapshot,
-but state plainly that the preset has not yet been saved and reloaded.
+differences. Keep candidate WAVs and the complete snapshot. Distinguish a file export/reload
+from installation into the player's live library.

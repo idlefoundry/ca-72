@@ -466,7 +466,7 @@ What is needed, in order:
 
 ## Offline reference matching (#77)
 
-The bridge offers `ca72_render`, `ca72_analyze` and `ca72_compare` without a device or a
+The bridge offers `ca72_render`, `ca72_analyze`, `ca72_compare` and `ca72_preset_export` without a device or a
 running application. `ca72_snapshot` captures the selected live instance, including unsaved
 edits. The MCP prompt `ca72_match_reference` (`prompts/get`, `arguments.reference`) supplies
 [the fitting skill](agent-skills/ca72-match-reference/SKILL.md) to any client which supports
@@ -475,7 +475,8 @@ prompts; the same file can be installed as an agent skill. It is included in the
 | Tool | Input | Result |
 |---|---|---|
 | `ca72_snapshot` | None; chosen live instance | Every normalized parameter, assignments and macro names, AUTO GAIN curve, seed, tempo, frequency-dial law and engine fingerprint |
-| `ca72_render` | `snapshot` or `preset`, else current sound; `notes [{note, start, duration}]`; `seconds` including tail (default 3); `sample_rate` (default 48000); optional `values`, `seed`, `tempo`; required `effects: "dry"`, new absolute `output_dir` | `render.wav` (stereo float), `manifest.json`, complete candidate snapshot and SHA-256 hashes |
+| `ca72_render` | One of `snapshot`, library `preset` or exact `preset_file`, else current sound; `notes [{note, start, duration}]`; `seconds` including tail (default 3); `sample_rate` (default 48000); optional `values`, `seed`, `tempo`, `frequency_dials`; required `effects: "dry"`, new absolute `output_dir` | `render.wav` (stereo float), `manifest.json`, complete candidate snapshot and SHA-256 hashes, including the exact preset file source when used |
+| `ca72_preset_export` | Candidate `snapshot`, `name`, optional `tags`, new absolute `output_dir` | Normal user-preset TOML, its exact path/hash and manifest with `render_conditions`; does not install into the player's library |
 | `ca72_analyze` | Absolute WAV `path`, optional `start`, `seconds`, `fundamental_hz`, `modulation_hz`; new `output_dir` | Pitch, loudness, onsets, 10 ms envelope, harmonics and optional sidebands; full `metrics.json` and a labelled spectrogram PNG, also returned inline |
 | `ca72_compare` | Absolute `reference` and `candidate` WAV paths, optional `reference_start`, `candidate_start`, `seconds`, harmonic/sideband arguments; new `output_dir` | Gain correction, spectral errors at 512/2048/8192 samples, envelope and pitch differences, full metrics, spectrograms on the same scale and two level-matched A/B WAVs |
 
@@ -499,7 +500,9 @@ real-time workers, a device or the live helper. It uses the framework's scoped f
 flush-to-zero setting and no audio deadlines. Non-finite samples, voice recovery or output
 sanitisation refuse the render. AUTO GAIN fields are typed and bounded before rendering.
 
-Offline overrides retain the captured AUTO GAIN curve. To recalibrate it after changing DRIVE
+Snapshot overrides retain the captured AUTO GAIN curve. Named/file presets select the curve
+for the requested quality (LO or HI/ULTRA) before rendering, as loading into a live instance does.
+To recalibrate it after changing DRIVE
 or AUTO GAIN, use the live controls, release notes, then capture again; `ca72_snapshot` returns
 BUSY while measurement is pending. Verify the settled curve before saving.
 
@@ -519,7 +522,8 @@ latency by rendering extra samples and removing that initial delay; the removed 
 
 Every render explicitly requests dry output. Hosted effects and external audio are excluded
 (the external jack receives silence); output gain and synth feedback remain part of the synth.
-Oscillators, LFO runtime phase and MIDI controllers start fresh. This is a settings snapshot,
+Computer MIDI preset-action bindings are excluded, so a scheduled note cannot be consumed by
+the player's NEXT/PREVIOUS PRESET shortcut. Oscillators, LFO runtime phase and MIDI controllers start fresh. This is a settings snapshot,
 not a capture of already sounding notes, pedals, pressure, wheel offsets or an effect's tail.
 
 ### Interpreting a comparison
@@ -536,12 +540,24 @@ Pitch tracking assumes one predominant part. Use individual held-note crops and 
 A sideband closer than three analysis bins is unresolved (`null`). Reference harmonics in a
 full mix include other instruments. These metrics guide fitting; none is an automatic pass,
 a perceptual similarity percentage or proof of an exact match. Listen to the A/B pair.
+Whole-mix LUFS and spectral error include other parts: do not use them as a bass-only fitting
+objective. For listening, establish gain on the clearest bass note or provide an explicitly
+labelled, identically filtered aid, alongside the original unprocessed recording.
 
-The skill ends by applying the selected candidate through the live controls, saving with
-`ca72_preset_save`, loading it again, then re-rendering. Presets round values to four decimal
+Without the app, export the selected snapshot with `ca72_preset_export`, then pass the returned
+`preset_file` and `render_conditions` to `ca72_render` with the same notes, rate and duration.
+The file is parsed directly with the browser's preset parser (at most 1 MiB), without resolving
+factory overlays or another file of the same name. Conditions include the quality, pitch wheel,
+bypass, MIDI bend range, seed, tempo and frequency law which a preset excludes.
+For live installation, apply the selected candidate through the live controls, save with
+`ca72_preset_save`, load it again, then re-render. Presets round values to four decimal
 places and exclude the player's quality, seed, tempo and dial preference. Keep those render
 conditions fixed and report material save/reload differences. No automatic transcription,
 source separation or parameter optimiser is claimed.
+
+The [2026-10-21 original-recording validation](mcp-recording-validation.md) records a full
+52-second fit from the actual White Lotus source excerpt, independent validation notes,
+preset export/reload, measured residuals and its remaining listening/coverage limits.
 
 ## Tests
 

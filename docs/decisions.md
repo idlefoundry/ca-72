@@ -14358,3 +14358,48 @@ No release was tagged, published or installed on the player's machine for this c
 **Shared skill lesson.** Offline parity includes DSP-affecting preferences, the wrapper's
 floating point mode and internal recovery diagnostics. Calling the same process function
 and checking finite WAV samples alone does not establish a valid calibration render.
+
+## R-REFERENCE-RECORDING. Fit the actual original excerpt and deliver a preset file
+
+**Owner decision, 2026-10-21:** use the original track excerpt which the agent used to
+create White Lotus. A synthetic render of that preset does not validate this use case.
+
+**Implementation and evidence:** [the recording validation](mcp-recording-validation.md)
+records the original file's hash, matching the October 9 session, and its first 52 seconds.
+A neutral single-saw patch, without loading White Lotus, was fitted through the MCP bridge:
+112 tonal/modulation candidates, 9 envelope candidates and a measured tuning adjustment.
+The earlier MIDI transcription was reused with pitches rechecked and the opening onset
+corrected; no fresh transcription or source separation is claimed. D2/C2 guide the fit,
+G2/B2 are held out. Weighted harmonic error falls from 11.412 to 2.510 dB in the final
+phrase; held-out errors are 3.300/4.740 dB, with differences left for listening review.
+Sideband spacing is 11.25 Hz in both recording and candidate. Listening gain is calibrated
+on the clearest bass note; full-mix LUFS/spectral error is diagnostic only.
+
+The full test exposed a headless delivery gap. `ca72_preset_export` now restores the exact
+snapshot and uses the normal library serializer to write a preset only into a fresh output
+directory. It returns player render conditions. `ca72_render.preset_file` reloads that exact
+file with the browser's parser, without installation or name/overlay lookup. Frequency
+values are correctly serialized as pot positions, LFO/macros and AUTO GAIN retained, and
+player settings recorded separately. Re-export/reload of the selected 52-second candidate
+has spectral errors 0.06360/0.03358/0.06395 dB and an envelope error of 0.01462 dB, consistent
+with four-decimal preset quantization. Regenerating it after review fixes leaves the selected
+WAV hash identical; no snapshot fingerprint was rewritten.
+
+A fresh read-only critic found two defects: named/file presets selected LO's AUTO GAIN curve
+before a requested HI/ULTRA override; computer MIDI note shortcuts could consume offline
+performance notes. Both are fixed and have regressions, including production-binary tests.
+The old binary was demonstrated to render a bound D2 silently; the new binary renders the
+same audible waveform with or without that setting. Offline construction now also keeps
+all internal handles on the restored parameters and resets the physical wheel source.
+
+**Local checks:** 33 agent, 6 offline, 22 library unit tests; 3 audio-bridge and 2 existing
+bridge integration tests; clippy with warnings denied; skill validation. The private
+listening report includes original/candidate audio, bass-band aids, spectrograms, the
+exported preset, all trials and source/reload manifests. It is a measured file-delivery
+test, not installation into the personal library, perceptual approval, or validation of
+every recording and platform. No release or merge is performed by this follow-up.
+
+**Shared skill lesson:** a real recording is the acceptance target when one is supplied;
+synthetic preset recovery is a regression fixture. Offline rendering must exclude computer
+MIDI preset-action bindings as well as live controllers, and whole-mix loudness is not a
+bass-only calibration metric.

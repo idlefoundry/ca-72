@@ -501,6 +501,15 @@ pub fn tools() -> Vec<Tool> {
             Instance,
         ),
         t(
+            "ca72_preset_export",
+            "audio.preset_export",
+            "Export a fitted candidate snapshot as a normal user-preset TOML into a new absolute output_dir. Does not need the app or install into the player's library. Preserves assignments, macro names and AUTO GAIN with the normal four-decimal preset serialization. Returns the exact preset_file, hash and render_conditions (quality, player controls, tempo, frequency-dial law, seed). Reload using ca72_render with preset_file and those conditions to verify the delivered file.",
+            super::audio::export_schema,
+            false,
+            false,
+            Bridge,
+        ),
+        t(
             "ca72_render",
             "audio.render",
             "Render the current sound, a named library preset, or a previous snapshot through the same synth process as playback, without an audio device or changing the live instrument. Supply MIDI notes with start and duration in seconds, total seconds including the release tail, and a new absolute output_dir. A preset or snapshot also works with no application open. effects must explicitly be dry: third-party effects are excluded and external input is silent. Returns a float WAV, exact snapshot, hashes and manifest. Fixed seed and settings repeat the render; latency is compensated. Optional values use ca72_set's parameter IDs and panel units, applied only to this candidate.",
