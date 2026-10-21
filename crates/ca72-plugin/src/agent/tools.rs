@@ -510,7 +510,7 @@ pub fn tools() -> Vec<Tool> {
         t(
             "ca72_analyze",
             "audio.analyze",
-            "Measure a local WAV reference or candidate: pitch track, loudness, 10 ms RMS envelope, onsets, harmonics and optional modulation sidebands, plus a log-frequency spectrogram PNG. Works without the app. Supply a new output_dir, optional start and seconds (up to 60), fundamental_hz for a selected held note, modulation_hz for its sidebands. No upload or source separation. A full mix's measurements include its other parts; isolate notes to interpret harmonics. Full metrics are written to JSON; PNG returned inline unless include_image=false.",
+            "Optionally supply named regions for separate notes/chords/attacks/releases, several known fundamentals and approximate modulation depth. Decode once per call. Measure a local WAV reference or candidate: pitch track, loudness, 10 ms RMS envelope, onsets, harmonics and optional modulation sidebands, plus a log-frequency spectrogram PNG. Works without the app. Supply a new output_dir, optional start and seconds (up to 60), fundamental_hz for a selected held note, modulation_hz for its sidebands. No upload or source separation. A full mix's measurements include its other parts; isolate notes to interpret harmonics. Full metrics are written to JSON; PNG returned inline unless include_image=false.",
             super::audio::analyze_schema,
             false,
             false,
@@ -519,8 +519,17 @@ pub fn tools() -> Vec<Tool> {
         t(
             "ca72_compare",
             "audio.compare",
-            "Compare a reference WAV and candidate WAV locally at the same rate and duration, with explicit crop starts and optional seconds. Level matches by LUFS (RMS for short clips), compares time-varying spectra at three resolutions, envelopes, pitch and selected-note harmonics/sidebands. Writes full metrics, two spectrograms on one colour scale and level-matched A/B WAVs to a new output_dir. No hidden time/pitch alignment, truncation or similarity percentage. Choose matching notes/timing first, inspect individual notes, and listen. Works without the app.",
+            "Optional named regions return separate harmonic/full-spectrum/peak diagnostics. Optional approved audio and explicit preservation_limits check actual expression separately; unresolved requested measurements cannot pass. Compare a reference WAV and candidate WAV locally at the same rate and duration, with explicit crop starts and optional seconds. Level matches by LUFS (RMS for short clips), compares time-varying spectra at three resolutions, envelopes, pitch and selected-note harmonics/sidebands. Writes full metrics, two spectrograms on one colour scale and level-matched A/B WAVs to a new output_dir. No hidden time/pitch alignment, truncation or similarity percentage. Choose matching notes/timing first, inspect individual notes, and listen. Works without the app.",
             super::audio::compare_schema,
+            false,
+            false,
+            Bridge,
+        ),
+        t(
+            "ca72_experiment",
+            "audio.experiment",
+            "Run 1 to 8 independent offline candidate variations against named regions of an original local WAV, with optional approved-expression baseline and explicit preservation limits. Decode/analyze reference regions once per batch, validate all candidates before output, retain exact render manifests/snapshots and separate timbre/peak/expression diagnostics. Bounded to 120 rendered seconds/12 million frames. Write a common-level audition report and complete experiment.json; no automatic winner, preset installation or live-state changes. Use the chosen manifest's snapshot with ca72_preset_export, then reload the exact file for delivery.",
+            super::audio::experiment::schema,
             false,
             false,
             Bridge,

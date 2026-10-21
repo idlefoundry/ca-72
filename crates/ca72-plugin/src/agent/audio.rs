@@ -12,6 +12,8 @@ use super::{ApiError, Reply, arg, flag_arg, text_arg};
 use crate::offline::{Request, Snapshot};
 use ca72_analysis::matching::{self, Features};
 
+pub mod experiment;
+
 const MAX_BYTES: u64 = 128 * 1024 * 1024;
 
 fn schema(props: Value, required: &[&str]) -> Value {
@@ -24,6 +26,7 @@ fn measurement_properties() -> Value {
         "seconds":{"type":"number","exclusiveMinimum":0,"maximum":60,"description":"Duration to select from each crop start; omitted selects the complete remainder, which must be at most 60 seconds."},
         "fundamental_hz":{"type":"number","exclusiveMinimum":0,"description":"Known fundamental of a held note, to measure its harmonics; otherwise estimated from the predominant channel."},
         "modulation_hz":{"type":"number","exclusiveMinimum":0,"description":"Expected spacing of modulation sidebands around each harmonic. Use a held-note crop long enough to resolve them."},
+        "regions":experiment::regions_schema(),
         "include_image":{"type":"boolean","default":true}
     })
 }
@@ -43,6 +46,9 @@ pub fn compare_schema(_: &crate::params::Ca72Params) -> Value {
     for key in ["reference_start", "candidate_start"] {
         p[key] = json!({"type":"number","minimum":0,"default":0});
     }
+    p["approved"] = json!({"type":"string","description":"Optional approved baseline WAV. Requires regions; compares expression against this baseline separately from matching the reference."});
+    p["approved_start"] = json!({"type":"number","minimum":0,"default":0});
+    p["preservation_limits"] = experiment::limits_schema();
     schema(p, &["reference", "candidate", "output_dir"])
 }
 
@@ -57,7 +63,9 @@ pub fn render_schema(p: &crate::params::Ca72Params) -> Value {
         json!({
             "output_dir":{"type":"string","description":"New absolute local directory; parent must exist. Never overwrites a previous render."},
             "effects":{"type":"string","enum":["dry"],"description":"Explicitly render the synth alone; hosted effects are excluded, external input silent."},
-            "snapshot":{"type":"object","description":"Exact snapshot returned by ca72_snapshot or a previous ca72_render; excludes preset."},
+            "init":{"type":"boolean","const":true,"description":"Start from factory parameter defaults without a library or live app. Excludes every other sound source."},
+            "snapshot":{"type":"object","description":"Exact snapshot returned by ca72_snapshot or ca72_render; choose only one sound source."},
+            "snapshot_file":{"type":"string","description":"Absolute path to an exact snapshot.json returned by ca72_experiment, at most1MiB. Same engine fingerprint required. Excludes snapshot/preset/preset_file."},
             "preset":{"type":"string","description":"Library preset to render without loading it into the live synth; excludes snapshot. With neither, captures the selected live instance."},
             "preset_file":{"type":"string","description":"Absolute path to the exact user-preset TOML to reload, up to 1 MiB. Excludes snapshot and preset. Does not import or change the player's library. Recorded render conditions from ca72_preset_export can be supplied again."},
             "notes":{"type":"array","minItems":1,"maxItems":4096,"items":{
@@ -67,7 +75,7 @@ pub fn render_schema(p: &crate::params::Ca72Params) -> Value {
             "seed":{"type":"integer","minimum":0,"description":"Random seed for repeatable noise, component variations and arpeggiator randomness; default is captured seed, or 72 for a library preset."},
             "tempo":{"type":"number","minimum":30,"maximum":300,"description":"BPM before modulation; defaults to snapshot tempo (120 for a library preset)."},
             "frequency_dials":{"type":"string","enum":["SEMITONES","HARDWARE"],"description":"Frequency modulation travel preference; defaults to snapshot law. A preset file does not store this player preference."},
-            "values":{"type":"object","properties":values,"additionalProperties":false,"description":"Candidate overrides in ca72_set's panel units, including all four LFOs' mode (Env for one cycle), rate, phase, rise, polarity, reverse, mono and level. Applied before modulations; only this offline copy is changed."},
+            "values":{"type":"object","properties":values,"additionalProperties":false,"description":"Candidate overrides in ca72_set's panel units, including all four LFOs' mode (Env for one cycle), rate, phase, rise, polarity, reverse, mono and level. Applied before modulations; only this offline copy is changed. Each LFO Retrig resets phase/RISE on every note independently of main retrigger; shared Env follows phrase/main-envelope triggers. MONO-off mixer/filter routes can be per voice; main volume/output remain shared."},
             "modulations":{"type":"array","maxItems":128,"items":modulation,"description":"Routing edits in order, using ca72_modulation_set's source/target/depth/edges/name, or remove:true. Configure LFO controls in values. Allows secondary envelopes (Env), vibrato and macro routing with no app. Existing routing is retained unless edited; a rejected batch changes nothing. Effects pins are unavailable in a dry render."}
         }),
         &["output_dir", "effects", "notes"],
@@ -77,12 +85,13 @@ pub fn render_schema(p: &crate::params::Ca72Params) -> Value {
 pub fn export_schema(_: &crate::params::Ca72Params) -> Value {
     schema(
         json!({
-            "snapshot":{"type":"object","description":"Exact candidate snapshot returned by ca72_render or ca72_snapshot."},
+            "snapshot":{"type":"object","description":"Exact candidate snapshot; choose snapshot or snapshot_file."},
+            "snapshot_file":{"type":"string","description":"Absolute path to an exact experiment snapshot.json, at most1MiB. Avoids copying large state through the agent context."},
             "name":{"type":"string","description":"Preset name, following the normal library naming rules."},
             "tags":{"type":"array","items":{"type":"string"}},
             "output_dir":{"type":"string","description":"New absolute local directory; parent must exist. Never overwrites or installs into the player's library."}
         }),
-        &["snapshot", "name", "output_dir"],
+        &["name", "output_dir"],
     )
 }
 
@@ -105,13 +114,37 @@ pub fn preset_file(args: &Value) -> Result<(Snapshot, Value), ApiError> {
     ))
 }
 
+pub fn snapshot_file(args: &Value) -> Result<(Snapshot, Value), ApiError> {
+    let path = path(args, "snapshot_file")?;
+    let mut bytes = Vec::new();
+    std::fs::File::open(&path)
+        .map_err(io_error)?
+        .take(1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(io_error)?;
+    if bytes.len() > 1024 * 1024 {
+        return Err(ApiError::params("snapshot file exceeds1MiB"));
+    }
+    let snapshot: Snapshot = serde_json::from_slice(&bytes)
+        .map_err(|e| ApiError::params(format!("snapshot_file: {e}")))?;
+    snapshot.validate()?;
+    Ok((
+        snapshot,
+        json!({"kind":"snapshot_file","path":path,"sha256":sha(&bytes)}),
+    ))
+}
+
 pub fn export_preset(args: &Value) -> Reply {
-    let snapshot: Snapshot = serde_json::from_value(
-        arg(args, "snapshot")
-            .cloned()
-            .ok_or_else(|| ApiError::params("snapshot is required"))?,
-    )
-    .map_err(|e| ApiError::params(format!("snapshot: {e}")))?;
+    let snapshot: Snapshot = match (arg(args, "snapshot"), arg(args, "snapshot_file")) {
+        (Some(v), None) => serde_json::from_value(v.clone())
+            .map_err(|e| ApiError::params(format!("snapshot: {e}")))?,
+        (None, Some(_)) => snapshot_file(args)?.0,
+        _ => {
+            return Err(ApiError::params(
+                "choose exactly one of snapshot or snapshot_file",
+            ));
+        }
+    };
     let p = snapshot.restore_params()?;
     let tags = arg(args, "tags")
         .map(|v| {
@@ -399,13 +432,21 @@ pub fn analyze(args: &Value) -> Reply {
         optional_number(args, "modulation_hz")?,
     )
     .map_err(ApiError::params)?;
+    let regions = experiment::optional_regions(args)?;
+    let region_measurements = regions
+        .as_ref()
+        .map(|r| matching::regions::analyze(&clip.channels, clip.rate, r).map_err(ApiError::params))
+        .transpose()?;
     let (png, top) =
         matching::spectrogram(&clip.channels, clip.rate, 0.0, None).map_err(io_error)?;
     let dir = directory(args)?;
     write(&dir.join("spectrogram.png"), &png)?;
-    let metrics = json!({"source":clip.provenance,"features":f,"spectrogram_axes":axes(clip.rate,clip.channels[0].len(),top),"processing":"local; no upload or source separation"});
+    let metrics = json!({"source":clip.provenance,"features":f,"regions":region_measurements,"spectrogram_axes":axes(clip.rate,clip.channels[0].len(),top),"processing":"local; no upload or source separation"});
     json_file(&dir.join("metrics.json"), &metrics)?;
     let mut result = json!({"metrics_path":dir.join("metrics.json"),"spectrogram_path":dir.join("spectrogram.png"),"source":clip.provenance,"features":summary(&f),"spectrogram_axes":metrics["spectrogram_axes"]});
+    if let Some(regions) = &region_measurements {
+        result["regions"] = experiment::measurement_summary(regions);
+    }
     if include_image {
         result["__mcp_images"] = json!([image(&png)]);
     }
@@ -421,6 +462,7 @@ pub fn compare(args: &Value) -> Reply {
             "sample rates differ; render the candidate at the reference's sample_rate",
         ));
     }
+    let region_comparison = experiment::compare_regions(args, &a, &b)?;
     let m = matching::compare(
         &a.channels,
         &b.channels,
@@ -462,20 +504,24 @@ pub fn compare(args: &Value) -> Reply {
     ] {
         write(&dir.join(name), bytes)?;
     }
-    let metrics = json!({"reference_source":a.provenance,"candidate_source":b.provenance,"comparison":m,
+    let metrics = json!({"reference_source":a.provenance,"candidate_source":b.provenance,"comparison":m,"regions":region_comparison,
         "ab_common_gain_db":20.0*common.log10(),"spectrogram_axes":axes(a.rate,a.channels[0].len(),top),"processing":"local; no upload, time alignment, pitch shift or source separation"});
     json_file(&dir.join("metrics.json"), &metrics)?;
     let mut result = json!({"metrics_path":dir.join("metrics.json"),"reference_spectrogram":dir.join("reference.png"),"candidate_spectrogram":dir.join("candidate.png"),
         "reference_ab":dir.join("reference_ab.wav"),"candidate_ab":dir.join("candidate_ab.wav"),"candidate_gain_db":m.candidate_gain_db,"level_matching":m.level_matching,
         "resolutions":m.resolutions,"envelope_mae_db":m.envelope_mae_db,"median_pitch_difference_cents":m.median_pitch_difference_cents,"harmonic_differences_db":m.harmonic_differences_db,
         "reference":summary(&m.reference),"candidate":summary(&m.candidate),"interpretation":m.interpretation,"spectrogram_axes":metrics["spectrogram_axes"],"ab_common_gain_db":metrics["ab_common_gain_db"]});
+    if let Some(regions) = &region_comparison {
+        result["regions"] = regions["differences"].clone();
+        result["preservation"] = regions["preservation"].clone();
+    }
     if include_image {
         result["__mcp_images"] = json!([image(&pa), image(&pb)]);
     }
     Ok(result)
 }
 
-pub fn render(args: &Value, mut snapshot: Snapshot, preset_source: Option<Value>) -> Reply {
+fn prepare_render(args: &Value, mut snapshot: Snapshot) -> Result<(Snapshot, Request), ApiError> {
     if text_arg(args, "effects")? != "dry" {
         return Err(ApiError::params(
             "effects must be explicitly dry; hosted third-party effects and external input are not rendered",
@@ -527,6 +573,11 @@ pub fn render(args: &Value, mut snapshot: Snapshot, preset_source: Option<Value>
     };
     snapshot.validate()?;
     request.validate()?;
+    Ok((snapshot, request))
+}
+
+pub fn render(args: &Value, snapshot: Snapshot, preset_source: Option<Value>) -> Reply {
+    let (snapshot, request) = prepare_render(args, snapshot)?;
     // Check the output before expensive work; all writes are confined to the new folder.
     let dir = directory(args)?;
     let result = crate::offline::render(&snapshot, &request)?;
@@ -536,7 +587,7 @@ pub fn render(args: &Value, mut snapshot: Snapshot, preset_source: Option<Value>
     write(&dir.join("render.wav"), &bytes)?;
     let manifest = json!({"format":1,"engine_version":env!("CARGO_PKG_VERSION"),"engine_source_sha256":env!("CA72_ENGINE_SOURCE_SHA256"),
         "snapshot":snapshot,"snapshot_sha256":snapshot_hash,"request":request,"wav_sha256":wave_hash,
-        "preset_file_source":preset_source,"modulation_edits":arg(args,"modulations"),
+        "preset_file_source":if arg(args,"preset_file").is_some() {preset_source.clone()} else {None},"input_source":preset_source,"modulation_edits":arg(args,"modulations"),
         "latency_compensated_samples":result.latency_compensated_samples,"block_frames":crate::offline::BLOCK,
         "effects":"dry","external_input":"silence","initial_state":"fresh voices; seed resets noise and component variations; no live held notes or oscillator phase copied",
         "processing":"same Ca72::process as playback; offline, no device, real-time workers or live-state changes"});

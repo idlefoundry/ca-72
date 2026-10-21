@@ -4,6 +4,8 @@
 use crate::fft::{hann, power};
 use serde::Serialize;
 
+pub mod regions;
+
 pub const MAX_SECONDS: f64 = 60.0;
 const FLOOR: f64 = -120.0;
 

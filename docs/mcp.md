@@ -475,10 +475,18 @@ prompts; the same file can be installed as an agent skill. It is included in the
 | Tool | Input | Result |
 |---|---|---|
 | `ca72_snapshot` | None; chosen live instance | Every normalized parameter, assignments and macro names, AUTO GAIN curve, seed, tempo, frequency-dial law and engine fingerprint |
-| `ca72_render` | One of `snapshot`, library `preset` or exact `preset_file`, else current sound; `notes [{note, start, duration}]`; `seconds` including tail (default 3); `sample_rate` (default 48000); optional `values`, `modulations`, `seed`, `tempo`, `frequency_dials`; required `effects: "dry"`, new absolute `output_dir` | `render.wav` (stereo float), `manifest.json`, complete candidate snapshot and SHA-256 hashes, including routing edits and the exact preset file source when used |
-| `ca72_preset_export` | Candidate `snapshot`, `name`, optional `tags`, new absolute `output_dir` | Normal user-preset TOML, its exact path/hash and manifest with `render_conditions`; does not install into the player's library |
-| `ca72_analyze` | Absolute WAV `path`, optional `start`, `seconds`, `fundamental_hz`, `modulation_hz`; new `output_dir` | Pitch, loudness, onsets, 10 ms envelope, harmonics and optional sidebands; full `metrics.json` and a labelled spectrogram PNG, also returned inline |
-| `ca72_compare` | Absolute `reference` and `candidate` WAV paths, optional `reference_start`, `candidate_start`, `seconds`, harmonic/sideband arguments; new `output_dir` | Gain correction, spectral errors at 512/2048/8192 samples, envelope and pitch differences, full metrics, spectrograms on the same scale and two level-matched A/B WAVs |
+| `ca72_render` | One of `init:true`, `snapshot`, `snapshot_file`, library `preset` or exact `preset_file`, else current sound; `notes [{note, start, duration}]`; `seconds` including tail (default 3); `sample_rate` (default 48000); optional `values`, `modulations`, `seed`, `tempo`, `frequency_dials`; required `effects: "dry"`, new absolute `output_dir` | `render.wav` (stereo float), `manifest.json`, complete candidate snapshot and SHA-256 hashes, including routing edits and the exact preset file source when used |
+| `ca72_preset_export` | Candidate `snapshot` or exact `snapshot_file`, `name`, optional `tags`, new absolute `output_dir` | Normal user-preset TOML, its exact path/hash and manifest with `render_conditions`; does not install into the player's library |
+| `ca72_analyze` | Absolute WAV `path`, optional `start`, `seconds`, `fundamental_hz`, `modulation_hz`, named `regions`; new `output_dir` | Pitch, loudness, onsets, 10 ms envelope, harmonics and optional sidebands; full `metrics.json` and a labelled spectrogram PNG, also returned inline |
+| `ca72_compare` | Absolute `reference` and `candidate` WAV paths, optional `reference_start`, `candidate_start`, `seconds`, harmonic/sideband arguments, named `regions`, optional `approved` and `preservation_limits`; new `output_dir` | Gain correction, spectral errors at 512/2048/8192 samples, envelope and pitch differences, full metrics, spectrograms on the same scale and two level-matched A/B WAVs |
+
+`ca72_experiment` adds bounded candidate sweeps with cached reference regions, optional
+approved-expression preservation and a common-level HTML audition report. It accepts the
+render inputs plus `reference`, `regions`, up to eight independent `{id,values?,modulations?}`
+candidates, optional `approved` and explicit `preservation_limits`. Every candidate validates
+before output; limits are 120 rendered seconds and 12 million frames per batch. Exact snapshot
+files support continuation/export without large JSON state copies. No automatic winner is
+selected. See [experiment inputs, measurements and limits](mcp-experiments.md).
 
 `start`, `duration` and `seconds` are seconds; `note` is MIDI 0 to 127 (C4 = 60). Gates are
 rounded to samples and must span at least one. A repeated note cannot overlap itself. Each

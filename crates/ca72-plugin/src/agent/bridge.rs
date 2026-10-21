@@ -291,40 +291,57 @@ impl Backend for Bridge {
             (Runs::Bridge, "audio.analyze") => super::audio::analyze(args),
             (Runs::Bridge, "audio.compare") => super::audio::compare(args),
             (Runs::Bridge, "audio.preset_export") => super::audio::export_preset(args),
-            (Runs::Bridge, "audio.render") => {
+            (Runs::Bridge, "audio.render" | "audio.experiment") => {
                 let mut source = None;
-                let snapshot = match (
-                    super::arg(args, "snapshot"),
-                    super::arg(args, "preset"),
-                    super::arg(args, "preset_file"),
-                ) {
-                    (Some(_), Some(_), _) | (Some(_), _, Some(_)) | (_, Some(_), Some(_)) => {
-                        return Err(ApiError::params(
-                            "choose only one of snapshot, preset or preset_file",
-                        ));
+                let sources: Vec<_> =
+                    ["snapshot", "snapshot_file", "preset", "preset_file", "init"]
+                        .into_iter()
+                        .filter(|k| super::arg(args, k).is_some())
+                        .collect();
+                if sources.len() > 1 {
+                    return Err(ApiError::params(
+                        "choose only one of init, snapshot, snapshot_file, preset or preset_file",
+                    ));
+                }
+                let snapshot = match sources.first().copied() {
+                    Some("init")
+                        if super::arg(args, "init").and_then(Value::as_bool) == Some(true) =>
+                    {
+                        crate::offline::Snapshot::initial()
                     }
-                    (Some(v), None, None) => serde_json::from_value(v.clone())
-                        .map_err(|e| ApiError::params(format!("snapshot: {e}")))?,
-                    (None, Some(v), None) => crate::offline::Snapshot::preset_at_quality(
-                        v.as_str()
-                            .ok_or_else(|| ApiError::params("preset must be a name"))?,
+                    Some("init") => return Err(ApiError::params("init must be true")),
+                    Some("snapshot") => serde_json::from_value(
+                        super::arg(args, "snapshot")
+                            .expect("present source")
+                            .clone(),
+                    )
+                    .map_err(|e| ApiError::params(format!("snapshot: {e}")))?,
+                    Some("snapshot_file") => {
+                        let (s, p) = super::audio::snapshot_file(args)?;
+                        source = Some(p);
+                        s
+                    }
+                    Some("preset") => crate::offline::Snapshot::preset_at_quality(
+                        super::text_arg(args, "preset")?,
                         super::arg(args, "values").and_then(|v| v.get("quality")),
                     )?,
-                    (None, None, Some(_)) => {
-                        let (snapshot, provenance) = super::audio::preset_file(args)?;
-                        source = Some(provenance);
-                        snapshot
+                    Some("preset_file") => {
+                        let (s, p) = super::audio::preset_file(args)?;
+                        source = Some(p);
+                        s
                     }
-                    (None, None, None) => {
-                        serde_json::from_value(self.forward("render.snapshot", &json!({}))?)
-                            .map_err(|e| {
-                                ApiError::refused(format!(
-                                    "instance returned an incompatible render snapshot: {e}"
-                                ))
-                            })?
-                    }
+                    _ => serde_json::from_value(self.forward("render.snapshot", &json!({}))?)
+                        .map_err(|e| {
+                            ApiError::refused(format!(
+                                "instance returned an incompatible render snapshot: {e}"
+                            ))
+                        })?,
                 };
-                super::audio::render(args, snapshot, source)
+                if tool.method == "audio.experiment" {
+                    super::audio::experiment::run(args, snapshot, source)
+                } else {
+                    super::audio::render(args, snapshot, source)
+                }
             }
             (_, method) => self.forward(method, args),
         }

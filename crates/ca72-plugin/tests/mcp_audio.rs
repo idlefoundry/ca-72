@@ -392,3 +392,83 @@ fn offline_individual_retrig_restarts_rise_on_legato_notes() {
     assert!(reload_reset < late_first * 0.2);
     assert!(reload_late > 1e-4 && reload_late > reload_reset * 4.0);
 }
+
+#[test]
+fn named_regions_preservation_and_experiments_work_through_production_stdio() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = Client::new(dir.path());
+    c.rpc(
+        "initialize",
+        json!({"protocolVersion":"2025-11-25","clientInfo":{"name":"experiment-test"}}),
+    );
+    let init=ok(c.tool("ca72_render",json!({"init":true,"effects":"dry","notes":[{"note":60,"start":0.0,"duration":0.1}],"seconds":0.15,"values":{"quality":"LO"},"output_dir":dir.path().join("init")})));
+    assert_eq!(init["frames"], 7200);
+    let invalid_init=c.tool("ca72_render",json!({"init":false,"effects":"dry","notes":[{"note":60,"start":0.0,"duration":0.1}],"seconds":0.15,"output_dir":dir.path().join("invalid-init")}));
+    assert_eq!(invalid_init["isError"], true);
+    assert!(!dir.path().join("invalid-init").exists());
+    let notes = json!([{"note":69,"start":0.05,"duration":0.7}]);
+    let reference=ok(c.tool("ca72_render",json!({"preset":"White Lotus","effects":"dry","values":{"quality":"LO","cutoff":-1.0},"notes":notes,"seconds":0.9,"seed":72,"output_dir":dir.path().join("reference")})));
+    let regions = json!([{"id":"hold","start":0.15,"seconds":0.5,"fundamentals_hz":[440.0]}]);
+    let analyzed=ok(c.tool("ca72_analyze",json!({"path":reference["path"],"regions":regions,"include_image":false,"output_dir":dir.path().join("regions")})));
+    assert_eq!(analyzed["regions"][0]["id"], "hold");
+    assert_eq!(
+        analyzed["regions"][0]["harmonic_levels_db"]
+            .as_array()
+            .unwrap()
+            .len(),
+        8
+    );
+    let args = json!({"snapshot":reference["snapshot"],"reference":reference["path"],"approved":reference["path"],"effects":"dry","notes":notes,"seconds":0.9,"regions":regions,"preservation_limits":{"envelope_rmse_db":0.1,"envelope_p95_db":0.2},"candidates":[{"id":"control"},{"id":"darker","values":{"cutoff":-2.0}}],"output_dir":dir.path().join("experiment")});
+    let mut invalid = args.clone();
+    invalid["output_dir"] = json!(dir.path().join("invalid"));
+    invalid["candidates"][1]["values"] = json!({"cutoff":900});
+    assert_eq!(c.tool("ca72_experiment", invalid)["isError"], true);
+    assert!(
+        !dir.path().join("invalid").exists(),
+        "validate the entire batch before output"
+    );
+    let mut oversized = args.clone();
+    oversized["output_dir"] = json!(dir.path().join("oversized"));
+    oversized["candidates"] = json!(
+        (0..9)
+            .map(|i| json!({"id":format!("c{i}")}))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(c.tool("ca72_experiment", oversized)["isError"], true);
+    assert!(!dir.path().join("oversized").exists());
+    let run = ok(c.tool("ca72_experiment", args));
+    assert_eq!(run["reference_decodes"], 1);
+    assert_eq!(run["reference_region_analysis_passes"], 1);
+    let rows = run["candidates"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["wav_sha256"], reference["wav_sha256"]);
+    assert_eq!(rows[0]["preservation"]["within_limits"], true);
+    assert!(rows[0]["regions"][0]["harmonic_rmse_db"].as_f64().unwrap() < 1e-8);
+    assert!(std::path::Path::new(run["report_path"].as_str().unwrap()).is_file());
+    let replay=ok(c.tool("ca72_render",json!({"snapshot_file":rows[0]["snapshot_path"],"effects":"dry","notes":notes,"seconds":0.9,"output_dir":dir.path().join("file-replay")})));
+    assert_eq!(replay["wav_sha256"], reference["wav_sha256"]);
+    let exported=ok(c.tool("ca72_preset_export",json!({"snapshot_file":rows[0]["snapshot_path"],"name":"Experiment Winner","output_dir":dir.path().join("export")})));
+    assert!(std::path::Path::new(exported["preset_file"].as_str().unwrap()).is_file());
+    let compared=ok(c.tool("ca72_compare",json!({"reference":reference["path"],"candidate":rows[0]["render_path"],"approved":reference["path"],"regions":regions,"preservation_limits":{"envelope_rmse_db":0.1},"include_image":false,"output_dir":dir.path().join("compare-regions")})));
+    assert_eq!(compared["preservation"]["within_limits"], true);
+    assert_eq!(compared["regions"][0]["id"], "hold");
+    let mut bad = json!({"reference":reference["path"],"candidate":reference["path"],"approved":reference["path"],"regions":regions,"preservation_limits":{"am_depth_db":0.1},"include_image":false,"output_dir":dir.path().join("missing-motion")});
+    assert_eq!(c.tool("ca72_compare", bad.clone())["isError"], true);
+    assert!(!dir.path().join("missing-motion").exists());
+    bad["preservation_limits"] = json!({"envelope_rmse_db":0.1});
+    bad["regions"][0]["modulation_hz"] = json!(4.2);
+    bad["output_dir"] = json!(dir.path().join("short-motion"));
+    bad["preservation_limits"]["am_depth_db"] = json!(0.1);
+    let unresolved = ok(c.tool("ca72_compare", bad));
+    assert!(
+        unresolved["preservation"]["within_limits"].is_null(),
+        "unresolved requested motion cannot pass"
+    );
+    assert!(
+        c.rpc("tools/list", json!({}))["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["name"] == "ca72_experiment")
+    );
+}

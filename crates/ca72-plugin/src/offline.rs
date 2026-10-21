@@ -43,6 +43,11 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// A neutral, explicit offline starting state without a library or live instance.
+    pub fn initial() -> Self {
+        Self::capture(&fresh_params())
+    }
+
     pub fn capture(p: &Ca72Params) -> Self {
         Self {
             format: FORMAT,
