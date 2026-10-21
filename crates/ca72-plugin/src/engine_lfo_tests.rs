@@ -801,3 +801,42 @@ fn lfo_cost() {
         );
     }
 }
+
+/// The effects' pins (decisions.md R-FX-PARAMS): an LFO assigned to one gives the block a point
+/// every 32 samples, at its frame, its offset depth × the LFO's shared value; the synth's
+/// sound as without it, to the bit; and none is recorded where nothing moves a pin.
+#[test]
+fn an_effects_pin_gets_a_point_every_step() {
+    let s = sharp(Mode::Free, 0.0, 5.0);
+    let plain = with(controls(), 0, s, Target::Cutoff, 0.0, 0.5);
+    let pinned = with(controls(), 0, s, Target::Fx(3), 0.5, 0.0);
+    let (mut a, mut b) = (engine(&plain), engine(&pinned));
+    let pos = crate::timed::Position::start(crate::timed::FALLBACK_TEMPO, RATE);
+    let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+    let (mut l2, mut r2) = ([0.0f32; 256], [0.0f32; 256]);
+    key(&mut a, 60, true);
+    key(&mut b, 60, true);
+    for _ in 0..4 {
+        a.set_position(pos);
+        b.set_position(pos);
+        a.render(&[], &mut l, &mut r);
+        b.render(&[], &mut l2, &mut r2);
+        a.end_block(256);
+        b.end_block(256);
+        assert_eq!(
+            l.map(f32::to_bits),
+            l2.map(f32::to_bits),
+            "the synth as without it"
+        );
+        let p = b.fx_points();
+        assert_eq!((p.n, p.moved), (8, 1 << 3));
+        assert_eq!(&p.at[..8], &[0, 32, 64, 96, 128, 160, 192, 224]);
+        assert!(
+            p.offsets[..8]
+                .iter()
+                .all(|o| o[3].abs() <= 0.5 && o[0] == 0.0)
+        );
+        assert!(p.offsets[..8].iter().any(|o| o[3] != 0.0), "it moves");
+        assert_eq!(a.fx_points().n, 0, "nothing moves a pin: no point");
+    }
+}

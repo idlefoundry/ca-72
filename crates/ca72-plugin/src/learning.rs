@@ -1175,6 +1175,7 @@ impl Learning {
         let armed = map.armed();
         let rows: Vec<MidiRow> = LEARNABLE
             .iter()
+            .take(crate::learn::listed())
             .enumerate()
             .map(|(i, l)| MidiRow {
                 name: l.label.to_owned(),
@@ -1213,7 +1214,7 @@ impl Learning {
     }
 
     fn choose(&mut self, i: usize) {
-        self.chosen = i.min(LEARNABLE.len() - 1);
+        self.chosen = i.min(crate::learn::listed() - 1);
         if self.chosen < self.first {
             self.first = self.chosen;
         } else if self.chosen >= self.first + ROWS_SHOWN {
@@ -1223,7 +1224,7 @@ impl Learning {
 
     /// The list scrolled by `rows`.
     pub fn scroll(&mut self, rows: i32) {
-        let most = LEARNABLE.len().saturating_sub(ROWS_SHOWN) as i32;
+        let most = crate::learn::listed().saturating_sub(ROWS_SHOWN) as i32;
         self.first = (self.first as i32 + rows).clamp(0, most) as usize;
     }
 
@@ -1254,7 +1255,7 @@ impl Learning {
             Key::PageDown => self.choose(self.chosen + ROWS_SHOWN),
             Key::PageUp => self.choose(self.chosen.saturating_sub(ROWS_SHOWN)),
             Key::Home => self.choose(0),
-            Key::End => self.choose(LEARNABLE.len() - 1),
+            Key::End => self.choose(crate::learn::listed() - 1),
             Key::Enter => {
                 if map.armed() == Some(self.chosen) {
                     self.cancel(map);
@@ -1273,7 +1274,7 @@ impl Learning {
             // A letter chooses the next control whose name begins with it.
             Key::Character(c) => {
                 let c = c.to_uppercase();
-                let n = LEARNABLE.len();
+                let n = crate::learn::listed();
                 if let Some(i) = (1..=n)
                     .map(|k| (self.chosen + k) % n)
                     .find(|&i| LEARNABLE[i].label.starts_with(&c))

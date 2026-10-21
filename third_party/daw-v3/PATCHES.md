@@ -1,6 +1,6 @@
 # DAW-v3's plug-in hosting, patched
 
-The four crates as VENDORED.md says, with five changes, to be offered to DAW-v3 itself:
+The four crates as VENDORED.md says, with six changes, to be offered to DAW-v3 itself:
 
 1. **A VST3 editor on Linux gets the host's run loop (`IRunLoop`)** (`daw-helper/src/vst3.rs`;
    DAW-v3's D78 lists it as not yet done). DAW-v3's `Frame`, the
@@ -72,3 +72,25 @@ The four crates as VENDORED.md says, with five changes, to be offered to DAW-v3 
    gives none, as before. `Transport::write_block` and `Processor::process` take the timing;
    the helper's tests pass none. Tried through the layout's round trip; no third-party effect
    that reads the tempo was tried.
+
+6. **A plugin's parameters listed again, their text, and modulation the VST3 window does not
+   see** (`daw-ipc/src/protocol.rs`, `daw-helper/src/{lib,plugin,vst3,clap}.rs`; the CA-72's
+   decisions.md R-FX-PARAMS, its effects' pinned parameters). Protocol version 4:
+   - `ParamInfo` gains `short` (VST3's `shortTitle`), `units`, `steps` (VST3's `stepCount`, a
+     CLAP stepped parameter's range; a VST3 parameter stays normalized, `stepped` false),
+     `read_only` and `bypass`;
+   - `Op::Params {instance}` lists the parameters again with their values now; `Op::ParamText
+     {instance, values}` gives the plugin's own text for each (parameter, value) pair (VST3
+     `getParamStringByValue`, its `units` put after a number given alone; CLAP `value_to_text`),
+     `null` where it gives none;
+   - a `params_changed` notice when the plugin says its parameters' names or list changed
+     (VST3 `restartComponent(kParamTitlesChanged)` or `kReloadComponent`, CLAP
+     `clap_host_params.rescan` of info, text or all), for the host to list them again;
+   - a VST3 controller (its editor) is told a parameter's base alone, never its modulation:
+     `EV_PARAM_MOD` reaches the processor as base plus amount and is no longer mirrored every
+     10 ms (the window chased an LFO, and a drag there fought it). The processor's own state
+     may then hold a modulated instant: the host gives the base back after a state.
+   Tried with both test plugins through the CA-72's chain (`ca72-fx-helper/tests/params.rs`):
+   listings, units and steps, texts, a title-change word's path (not triggered: the test
+   effects never change their titles), the modulation's offsets and the window left at its
+   base. DAW-v3's own tests pass.

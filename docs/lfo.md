@@ -287,3 +287,65 @@ one a session brought there listed `inert`).
   Alt-drag and the menus' heads are `lfo_page`'s, over sources (`colour`, `label` with the typed
   name). A macro's ring is one way (`modulation::Ring::one_way`) and shows on every knob it moves
   whenever the macros show, its point where the macro has it.
+
+## Effect parameters (R-FX-PARAMS)
+
+The standalone's effects' parameters as modulation targets (decisions.md R-FX-PARAMS; the
+mock-ups and layout B1 in `ca72-night/fx-params-mockups`). Up to four parameters of each effect
+are **pinned**; each pin is one of sixteen fixed targets, `lfo::Target::Fx(0..16)` (ids `fx1` to
+`fx16`), which stays the pin's while its effect is moved in the chain. The plug-ins have none.
+
+- **The engine** (`engine.rs`, `Engine::modulate`): at each step of the LFOs (32 samples) where a
+  source moves a pin, `FxPoints` records the step's frame in the block and each pin's offset on
+  its travel (Σ depth × source, the sources' shared copies: an effect has no voices), asleep or
+  not. `Lfos::modulated` leaves the pins out: they move no control of the synth's, and the synth's
+  sound with a pin moved is the same to the bit. `Ca72::process` hands the block's points to the
+  chain (`Runner::process_modulated`) after the synth.
+- **The chain** (`ca72_fx::chain`): `Chain::pin`/`unpin`, `list_params`, `param_text`, `pins`,
+  `set_pin_value`; each slot's pins saved beside its state (`SavedSlot::pins`, `SavedPin {id,
+  name, base, target, mods}`) in `effects.json`, and so in a session and in a preset that carries
+  the chain. The runner turns the points into the effect's events: CLAP's own modulation
+  (`EV_PARAM_MOD`, the amount in its units) where the parameter is modulatable, else (CLAP) base
+  plus offset as its value; VST3 an `EV_PARAM_MOD` the helper adds to the base for the processor
+  alone (the window never chases it). At most 32 points a block (thinned past 1024 samples); a pin
+  no longer moved gets one point at its base; nothing is sent for a pin nothing moves. The points
+  never go through the values the host set (no snapshot, no `effects.json` written while an LFO
+  moves a pin).
+- **The base** is the plug-in's own value: its window's edits (the helper's `param_edits`
+  notices), the drawer's knob (`set_pin_value`), a learned controller (`Runner::set_pin_value`,
+  on the audio thread). It is saved, and given to the plug-in after its state at every load,
+  restart and restore (its state may hold a modulated instant).
+- **The assignments** to the pins are the chain's, not the sound's: `lfo::Patch` keeps them for
+  the engine and the editor (rings, cords, menus as any knob's), but `Patch::saved` and
+  `Patch::values` leave them out, and `Patch::load`, `clear` and `copy_from` keep them as they
+  are. The chain reads and gives them through `ca72_fx::PinMods` (`fx::PatchMods`), and saves
+  again when `Patch::fx_changes` moves.
+- **Missing, crashed, restarting:** the pin and its assignments are kept, inert (nothing sent);
+  `PinStatus::live` false (dimmed). A pin whose parameter the plug-in no longer lists reads
+  `missing` (MISSING, UNPIN in its menu). They work again when the effect runs.
+- **MIDI Learn** learns a pin by its target (`learn::LEARNABLE`'s `fx1` to `fx16`, EFFECT PIN 1 to
+  16): the controller follows the pin, not its slot. In a plug-in they do nothing.
+- **MCP:** `ca72_modulations` lists the pins (`pins`) and labels their assignments with the
+  effect's and parameter's names; `ca72_modulation_set`/`_remove` take `fx1` to `fx16` while
+  pinned to an effect that runs; `ca72_effect_parameters`, `ca72_effect_pin` and
+  `ca72_effect_unpin` list, pin and unpin.
+
+**The editor's hooks, for the pins' view (B1).** All on `fx_view::Effects` (the drawer reaches
+the chain through it; `fx_view::installed()` is `None` in the plug-ins), and free functions:
+
+| Hook | What it gives |
+|---|---|
+| `Effects::params(slot) -> Result<Vec<ParamRow>>` | The effect's parameters a player may pin (`ca72_fx::pinnable`: automatable, not hidden, read-only, a program change or the bypass), with their values now (`value` 0..1, `plain` in the plug-in's units), names, short names, units, steps, and the pin target if pinned. Asks the helper (milliseconds): call it as the PARAMETERS list opens and again when it is told the parameters changed, not every frame. |
+| `fx_view::search_params(rows, typed, pinned) -> Vec<usize>` | The rows the list shows, by index: every typed word in the name, short name or units (case aside); `pinned` for ALL · PINNED's PINNED; in name order, then ID (the owner: "the parameter list, with nothing typed, is in name order"). |
+| `Effects::param_text(slot, &[(id, plain)]) -> Vec<Option<String>>` | The plug-in's own text for each value ("2.40 s"; VST3's units put after a bare number): the list's value column, the tip and the pop-up. Asks the helper: once a list's rows, or a tip's value as it changes, not every frame. |
+| `Effects::pins() -> Option<Vec<PinInfo>>` | Every pin by target: its slot now, effect, parameter, names, base (`value` 0..1, `plain`), steps, `live` (dim it when false), `missing`. Cheap (the chain's own table; `None` while the chain is busy: keep the last). Also publishes which targets can take a cord. |
+| `Effects::pin(slot, id) -> Result<usize>` / `Effects::unpin(target)` | A click or Enter on a row; UNPIN. A fifth pin of an effect is refused (the error says so). Unpinning lets go of what moved it. |
+| `Effects::set_pin_value(target, travel)` | The pin's knob turned in the drawer: the plug-in's value from the next block, its window following. |
+| `fx_view::pin_target(params, target) -> Option<lfo::Target>` | The target a cord or a macro may land on: `Some(Target::Fx(n))` while pinned to an effect that runs (`lfo::target_of(p, "fxN")`, from `lfo::FX_PINNED`). Its rings and menus are any target's: `Patch::on_knob(Target::Fx(n))`, `Patch::assign`, `set_depth`, `remove`. |
+| `learn::fx_pin(id)`, `learn::is_fx_pin(i)` | MIDI Learn per pin: arm `learn::index("fxN")` as any learnable; the learning list should leave these out where `fx_view::installed()` is `None`. |
+
+What the view still has to do (the Codex brief, `ca72-night/fx-params-ui.md`): the PARAMETERS list
+(FIND, ALL · PINNED, the rows with their text and sources), the four places under each slot
+(+ PIN, the knob with its eight-character name screen), cords landing on them, their rings, the
+hover pop-up's dials and the tip with the plug-in's text, the menu's heads with UNPIN and MIDI
+LEARN, and the dimmed and MISSING states.

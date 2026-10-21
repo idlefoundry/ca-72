@@ -267,8 +267,19 @@ pub const LEARNABLE: [Learnable; 166] = [
     knob("lfo2_level", "LFO 2 LEVEL"),
     knob("lfo3_level", "LFO 3 LEVEL"),
     knob("lfo4_level", "LFO 4 LEVEL"),
+    Learnable {
+        id: "previous_preset",
+        label: "PREVIOUS PRESET",
+        kind: Kind::Action,
+    },
+    Learnable {
+        id: "next_preset",
+        label: "NEXT PRESET",
+        kind: Kind::Action,
+    },
     // The standalone's effects' pins, learned by the pin (decisions.md R-FX-PARAMS): the
-    // controller follows the pin, not its slot.
+    // controller follows the pin, not its slot. Last, and listed only where there are effects
+    // ([`listed`]), so that no other's place in the list moves.
     knob("fx1", "EFFECT PIN 1"),
     knob("fx2", "EFFECT PIN 2"),
     knob("fx3", "EFFECT PIN 3"),
@@ -285,22 +296,22 @@ pub const LEARNABLE: [Learnable; 166] = [
     knob("fx14", "EFFECT PIN 14"),
     knob("fx15", "EFFECT PIN 15"),
     knob("fx16", "EFFECT PIN 16"),
-    Learnable {
-        id: "previous_preset",
-        label: "PREVIOUS PRESET",
-        kind: Kind::Action,
-    },
-    Learnable {
-        id: "next_preset",
-        label: "NEXT PRESET",
-        kind: Kind::Action,
-    },
 ];
 
 /// The effects' pin (0 to 15) a learnable id is, if it is one (`fx1` to `fx16`: R-FX-PARAMS).
 pub fn fx_pin(id: &str) -> Option<usize> {
     let k: usize = id.strip_prefix("fx")?.parse().ok()?;
     (1..=crate::lfo::FX_PINS).contains(&k).then(|| k - 1)
+}
+
+/// How many of [`LEARNABLE`] the learning list shows: every one with the standalone's effects,
+/// else all but the effects' pins, which are last.
+pub fn listed() -> usize {
+    if crate::fx_view::installed().is_some() {
+        LEARNABLE.len()
+    } else {
+        LEARNABLE.len() - crate::lfo::FX_PINS
+    }
 }
 
 /// Whether learnable `i` is an effects' pin: the standalone's alone (its learning list leaves
@@ -1274,14 +1285,24 @@ mod tests {
     #[test]
     fn every_sound_parameter_but_the_wheels_bypass_and_bend_range_is_learnable() {
         let p = Ca72Params::default();
+        // (The effects' pins are the standalone's effects', not the sound's: R-FX-PARAMS.)
         let mut ids: Vec<&str> = LEARNABLE
             .iter()
-            .filter(|l| l.kind != Kind::Action)
+            .filter(|l| l.kind != Kind::Action && fx_pin(l.id).is_none())
             .map(|l| l.id)
             .collect();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len() + 2, LEARNABLE.len(), "an id twice");
+        assert_eq!(
+            ids.len() + 2 + crate::lfo::FX_PINS,
+            LEARNABLE.len(),
+            "an id twice"
+        );
+        assert!(
+            (0..LEARNABLE.len())
+                .filter(|&i| is_fx_pin(i))
+                .eq(listed()..LEARNABLE.len())
+        );
         let mut sound: Vec<&str> = crate::presets::sound_params(&p)
             .into_iter()
             .map(|(id, _)| id)
@@ -1293,7 +1314,7 @@ mod tests {
             assert_eq!(index(id), None, "{id} is not learnable");
         }
         for (i, l) in LEARNABLE.iter().enumerate() {
-            if l.kind == Kind::Action {
+            if l.kind == Kind::Action || is_fx_pin(i) {
                 assert!(target(&p, i).is_none());
                 continue;
             }
@@ -1314,7 +1335,12 @@ mod tests {
                 assert_eq!(t.ptr(), k.as_ptr(), "{}", l.id);
             }
         }
-        let counts = |k: Kind| LEARNABLE.iter().filter(|l| l.kind == k).count();
+        let counts = |k: Kind| {
+            LEARNABLE
+                .iter()
+                .filter(|l| l.kind == k && fx_pin(l.id).is_none())
+                .count()
+        };
         assert_eq!(
             (
                 counts(Kind::Continuous),

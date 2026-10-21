@@ -275,7 +275,7 @@ struct HostData {
     /// state dirty (`clap_host_state.mark_dirty`). Read again for the project.
     values: AtomicBool,
     /// Its parameters' descriptions or texts changed (`clap_host_params.rescan` of info, text
-    /// or all): listed again by the host (PATCHES.md change 5).
+    /// or all): listed again by the host (PATCHES.md change 6).
     infos: AtomicBool,
     /// Its names for its keys may have changed (D216): the plugin said so
     /// (`clap_host_note_name.changed`, a parameter rescan) or edited a parameter itself
@@ -807,12 +807,12 @@ impl Instance {
     }
 
     /// Whether it rescanned its parameters' descriptions or texts since the last call
-    /// (PATCHES.md change 5).
+    /// (PATCHES.md change 6).
     pub fn take_params_changed(&self) -> bool {
         self.host.infos.swap(false, Ordering::AcqRel)
     }
 
-    /// Its text for each value (plain; PATCHES.md change 5): `value_to_text`.
+    /// Its text for each value (plain; PATCHES.md change 6): `value_to_text`.
     pub fn param_text(&self, values: &[(u32, f64)]) -> Vec<Option<String>> {
         let Some(f) = self
             .ext::<clap_plugin_params>(CLAP_EXT_PARAMS)

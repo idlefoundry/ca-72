@@ -88,10 +88,10 @@ struct Mods {
 
 impl PinMods for Mods {
     fn get(&self, target: usize) -> Vec<(String, f32)> {
-        self.by.lock().unwrap()[target].clone()
+        self.by.lock().expect("the mods")[target].clone()
     }
     fn set(&self, target: usize, mods: &[(String, f32)]) {
-        self.by.lock().unwrap()[target] = mods.to_vec();
+        self.by.lock().expect("the mods")[target] = mods.to_vec();
         self.rev.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
     fn revision(&self) -> u64 {

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// Protocol version; the helper refuses a host with another version (3: `LoadState`, a
 /// running plugin's state in `param_values`, D234; 4: `Params`, `ParamText`, the
-/// `params_changed` notice and `ParamInfo`'s new fields, the CA-72's PATCHES.md change 5).
+/// `params_changed` notice and `ParamInfo`'s new fields, the CA-72's PATCHES.md change 6).
 pub const VERSION: u32 = 4;
 
 /// Starts every protocol line in both directions.
@@ -71,7 +71,7 @@ pub enum Op {
         y: Option<i32>,
     },
     /// Lists the instance's parameters again, with their values now: a list of
-    /// [`ParamInfo`] (PATCHES.md change 5).
+    /// [`ParamInfo`] (PATCHES.md change 6).
     Params { instance: u32 },
     /// The plugin's own text for each (parameter ID, value) pair, the value in its units
     /// (`ParamInfo`'s): VST3's `getParamStringByValue` (with its units after a bare number),
@@ -241,7 +241,7 @@ pub const NOTICE_PARAM_VALUES: &str = "param_values";
 /// A notice the helper sends on its own when a running plugin said its parameters' names,
 /// ranges or list changed (VST3's `restartComponent(kParamTitlesChanged)`, CLAP's
 /// `clap_host_params.rescan` of info, text or all): `{"notice": "params_changed",
-/// "instance"}`. The host lists them again ([`Op::Params`]; PATCHES.md change 5).
+/// "instance"}`. The host lists them again ([`Op::Params`]; PATCHES.md change 6).
 pub const NOTICE_PARAMS_CHANGED: &str = "params_changed";
 
 /// What a plugin's own edit of a parameter is (D222): a gesture's beginning or end (VST3's

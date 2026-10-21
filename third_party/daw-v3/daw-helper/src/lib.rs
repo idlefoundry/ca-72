@@ -307,7 +307,7 @@ impl Helper {
                 None => Err(format!("no instance {instance}")),
             },
             // Listed again with their values now, and the plugin's text for values
-            // (PATCHES.md change 5).
+            // (PATCHES.md change 6).
             Op::Params { instance } => match self.instances.get(&instance) {
                 Some(h) => serde_json::to_value(h.inst.params()).map_err(|e| e.to_string()),
                 None => Err(format!("no instance {instance}")),
@@ -565,7 +565,7 @@ impl Helper {
                     notices.push(ok(0, h.reading(*i, now)));
                 }
                 // Its parameters' names or list changed: the host lists them again
-                // (PATCHES.md change 5).
+                // (PATCHES.md change 6).
                 if h.inst.take_params_changed() {
                     notices.push(ok(
                         0,

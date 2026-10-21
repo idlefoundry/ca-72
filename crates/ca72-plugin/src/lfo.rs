@@ -3499,7 +3499,11 @@ mod tests {
             ("tempo", "TEMPO", "TEMPO".to_owned())
         );
         assert_eq!(Target::of_id("tempo"), Some(t));
-        assert_eq!(t.index(), TARGETS - 1);
+        assert_eq!(
+            t.index(),
+            TEMPO_AT,
+            "after the LFOs' own, before the effects' pins"
+        );
         assert!(!t.per_voice() && t.ticks() && !t.is_lfo());
         assert_eq!(
             (tempo_at(0.0), tempo_at(1.0), tempo_at(2.0)),
@@ -3713,5 +3717,73 @@ mod tests {
         assert_eq!(l.to[1][0].map(|a| a.depth), Some(0.3));
         assert!(l.active() && !l.per_voice());
         assert_eq!(p.controls_with(&gliding).lfo, l);
+    }
+
+    /// The effects' pins' assignments are the chain's (decisions.md R-FX-PARAMS): kept by the
+    /// patch for the engine and the editor, never saved with the sound, left as they are by a
+    /// preset's or session's assignments, Init and a pad's preset, and counted apart; a pin
+    /// takes a source only while it is pinned to an effect that runs.
+    #[test]
+    fn the_effects_pins_assignments_are_the_chains() {
+        let p = Patch::default();
+        let before = p.fx_changes();
+        p.assign(Source::Lfo(0), Target::Cutoff, 0.5).unwrap();
+        assert_eq!(p.fx_changes(), before, "a panel knob's is the sound's");
+        p.assign(Source::Lfo(0), Target::Fx(2), 0.3).unwrap();
+        p.assign(Source::Macro(1), Target::Fx(15), -0.4).unwrap();
+        assert_eq!(p.fx_changes(), before + 2);
+        assert_eq!(Target::Fx(2).id(), "fx3");
+        assert_eq!(Target::of_id("fx16"), Some(Target::Fx(15)));
+        assert_eq!(Target::ALL[TARGETS - 1], Target::Fx(15));
+        // Not the sound's.
+        let saved = p.saved();
+        assert!(
+            saved
+                .sources
+                .iter()
+                .all(|s| s.to.iter().all(|(t, _)| !t.starts_with("fx")))
+        );
+        assert!(p.values().iter().all(|(k, _)| !k.contains("_to_fx")));
+        // A session's assignments, Init, and a pad's preset leave them.
+        let other = Patch::default();
+        other.assign(Source::Lfo(2), Target::Emphasis, 0.2).unwrap();
+        other.assign(Source::Lfo(0), Target::Fx(0), 0.9).unwrap();
+        p.load(&other.saved());
+        assert_eq!(p.depth(Source::Lfo(0), Target::Fx(2)), Some(0.3));
+        assert_eq!(p.depth(Source::Lfo(0), Target::Cutoff), None);
+        assert_eq!(p.depth(Source::Lfo(2), Target::Emphasis), Some(0.2));
+        p.copy_from(&other);
+        assert_eq!(p.depth(Source::Lfo(0), Target::Fx(2)), Some(0.3));
+        assert_eq!(
+            p.depth(Source::Lfo(0), Target::Fx(0)),
+            None,
+            "not the other's"
+        );
+        p.clear();
+        assert_eq!(p.depth(Source::Macro(1), Target::Fx(15)), Some(-0.4));
+        assert_eq!(p.count(Source::Lfo(2)), 0);
+        assert!(
+            p.same_as_values(&[]),
+            "a preset with nothing: the same sound"
+        );
+        // Taken where pinned to an effect that runs.
+        let params = Ca72Params::default();
+        let was = FX_PINNED.swap(0, Ordering::AcqRel);
+        assert_eq!(target_of(&params, "fx3"), None);
+        FX_PINNED.store(1 << 2, Ordering::Release);
+        assert_eq!(target_of(&params, "fx3"), Some(Target::Fx(2)));
+        FX_PINNED.store(was, Ordering::Release);
+        // The engine's controls: their offsets, the shared values, and the pins moved.
+        let l = Lfos {
+            to: std::array::from_fn(|i| p.assignments(Source::of_index(i).unwrap())),
+            ..Lfos::default()
+        };
+        assert_eq!(l.fx_moved(), (1 << 15) | (1 << 2));
+        let mut v = [0.0; SOURCES];
+        v[Source::Macro(1).index()] = 0.5;
+        assert!((l.fx_offsets(&v)[15] + 0.2).abs() < 1e-6);
+        // They move no control of the synth's.
+        let c = Controls::default();
+        assert_eq!(l.modulated(&c, &v), c);
     }
 }

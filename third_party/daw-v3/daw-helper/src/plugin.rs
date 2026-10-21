@@ -178,7 +178,7 @@ impl Instance {
     }
 
     /// Whether it said since the last call that its parameters' names or list changed
-    /// (PATCHES.md change 5).
+    /// (PATCHES.md change 6).
     pub fn take_params_changed(&self) -> bool {
         match self {
             Instance::Clap(i) => i.take_params_changed(),
@@ -187,7 +187,7 @@ impl Instance {
     }
 
     /// The plugin's own text for each (parameter, value in its units) pair (PATCHES.md
-    /// change 5); `None` where it gave none.
+    /// change 6); `None` where it gave none.
     pub fn param_text(&self, values: &[(u32, f64)]) -> Vec<Option<String>> {
         match self {
             Instance::Clap(i) => i.param_text(values),

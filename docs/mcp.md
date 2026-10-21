@@ -210,6 +210,9 @@ agent to use the bridge that came with that instance.
 | `ca72_modulations` | Lists what each modulation source (LFO 1 to 4, MACRO 1 to 6) modulates: each knob (an LFO's own RATE, PHASE, RISE, shape or LEVEL among them, `lfo2_rate`, `lfo2_level`), its depth in %, `shared` (an LFO with MONO off on a knob every voice shares, or on a MONO LFO's own knob) and `inert`; each LFO's EDGES and MONO; each macro's `name` ("" for none) and its knob's `value` in %; the knobs that can take one now (decisions.md R-LFO, R-MACROS) | none |
 | `ca72_modulation_set` | Assigns a source to a knob, as a drag from its OUT jack or a macro's jack (25 % if no depth), or changes its depth; sets an LFO's EDGES; names a macro | `source` (lfo1 to lfo4, "LFO 1", 1 to 4; macro1 to macro6, "MACRO 1" or a macro's name), `target?`, `depth?` (-100 to 100), `edges?` (SOFT, SHARP), `name?` (a macro's, 7 characters, "" for none) |
 | `ca72_modulation_remove` | REMOVE, for one knob or all of a source's | `source`, `target?` |
+| `ca72_effect_parameters` | The standalone's effects only: an effect's parameters a player may pin, in name order, with their IDs, names, units, steps, value in %, the plug-in's own text and their pin targets (decisions.md R-FX-PARAMS) | `slot` (1 to 4), `find?` |
+| `ca72_effect_pin` | Pins an effect's parameter (at most 4 an effect): a knob under its effect and a modulation target, `fx1` to `fx16`, that `ca72_modulation_set` then takes | `slot`, `parameter` (its ID or name) |
+| `ca72_effect_unpin` | Unpins one, what moved it let go of | `target` (`fx1` to `fx16`) |
 | `ca72_audio` | Reads AUDIO & MIDI (read only) | none |
 | `ca72_version` | Returns the version and the update check | `check?` |
 

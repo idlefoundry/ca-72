@@ -13856,3 +13856,108 @@ WAVEFORM), the pop-up's dial as far. A macro's cord lands on the strip's WIDTH, 
 ENTROPY, DRIVE and (now a target) LEVEL while the strip's page shows, and the strip knobs' menus
 offer every macro; a macro moving DRIVE is corrected by AUTO GAIN's curve at the DRIVE it gives
 and never asks for a measurement.
+
+## R-FX-PARAMS. The standalone's effects' parameters as modulation targets: pins, the helper, the engine
+
+**The owner (2026-10-20):** "we need to add search functionality to the FX page so people can
+easily find their plugins. And then we also need to expose plugin parameters so that those can
+also be modulated by our LFOs and Macros. The plugin parameters should also be searchable, so the
+user can effectively pin the parameters that they want to expose for modulation." Of the mock-ups'
+questions (`ca72-night/fx-params-mockups/README.md`), the owner chose: **B1**, up to 4 pinned
+parameters per effect, shown under each effect in the FX drawer; **MIDI Learn on pins, per pin**;
+**a missing or crashed effect keeps its pins and assignments, dimmed and inert**; **pins and their
+assignments are saved with the chain** (presets carry chains in the standalone only, the
+`fx-presets` job's); **the plug-in's own value text, shown**; **stepped parameters allowed,
+stepping when modulated**; **the parameter list, with nothing typed, in name order**.
+
+This record is the architecture: the helper's protocol, the pins and their targets, sending the
+modulation, crashes, saving, the agents, and the editor's hooks (docs/lfo.md, "Effect
+parameters"). The pins' view in the drawer is a job of its own (`ca72-night/fx-params-ui.md`).
+
+**What was done:**
+- **The helper** (DAW-v3's, PATCHES.md change 6, protocol 4): `ParamInfo` gains `short`, `units`,
+  `steps`, `read_only`, `bypass`; `Op::Params` lists an effect's parameters again with their values
+  now (asked after every load, on the `params_changed` notice, and by the drawer); `Op::ParamText`
+  gives the plug-in's own text (VST3 `getParamStringByValue` with its units after a bare number,
+  CLAP `value_to_text`); `params_changed` on VST3 `kParamTitlesChanged` and CLAP's rescan of info
+  or text. A VST3 controller is told a parameter's base alone: the 10 ms mirroring no longer gives
+  it the modulated value (the window chased the LFO and a drag there fought it).
+- **The plug-in's window's edits** (the `param_edits` notices, before thrown away in ca72-fx's
+  helper reader) are kept, the latest of each, and become a pinned parameter's base, recorded for
+  restores without marking the state changed (the edit that gave them did).
+- **Pins and targets:** `lfo::Target::Fx(0..16)` (`fx1` to `fx16`), after TEMPO (merged from
+  `bpm-target`), a fixed target each; the chain's table maps each to its slot (by the slot's own
+  number, not its place) and parameter, so a slot moved changes nothing saved. `Chain::pin`
+  refuses a fifth of an effect, a parameter pinned already, and one a player may not automate
+  (hidden, read-only, a program change, the plug-in's bypass: `ca72_fx::pinnable`).
+- **Saving:** each slot's pins beside its state in `effects.json` (`SavedSlot::pins`, `SavedPin
+  {id, name, base, target, mods}`), so a session and a preset carrying the chain carry them. The
+  assignments are the chain's: `lfo::Patch` keeps them for the engine and the editor, but never in
+  its `saved()` or `values()`, and keeps them through `load`, `clear` (Init) and `copy_from` (a
+  pad's preset). The chain reads and gives them through `ca72_fx::PinMods` (`fx::PatchMods`), and
+  saves when `Patch::fx_changes` or a pin moves, at most once a second. A chain saved before pins
+  reads as before; one with them read by an older build loses its pins and nothing else.
+- **Sending the modulation:** the engine records, at each LFO step (32 samples), each pin's offset
+  (Σ depth × source, shared copies) in a fixed `FxPoints`; `Runner::process_modulated` sends at
+  most 32 points a pin a block (thinned past 1024 samples) over the existing shared-memory events
+  at their offsets: CLAP's own modulation where the parameter is modulatable (the amount in its
+  units), else (CLAP) base plus offset as its value; VST3 an `EV_PARAM_MOD` the helper adds to the
+  base for the processor alone. A pin no longer moved gets one point back at its base; nothing is
+  sent for a pin nothing moves; no allocation on the audio thread. The points never pass through
+  the node's delivered values: no `mark_dirty`, no snapshot, no `effects.json` write while an LFO
+  moves a pin. Each pin's base is given to the plug-in after its state at every load, restart and
+  restore (VST3's processor state may hold a modulated instant).
+- **Crashes:** a pin of an effect missing, turned off, restarting or off for a safe start is kept
+  with its assignments, `live` false (dimmed, inert: nothing sent); back when the effect runs. A
+  parameter the plug-in no longer lists reads `missing`.
+- **MIDI Learn per pin:** `LEARNABLE` gains `fx1` to `fx16` (EFFECT PIN 1 to 16), last, listed
+  only where the standalone's effects are; a learned controller sets the pin on the audio thread
+  (`Runner::set_pin_value`) and its base follows within a tenth of a second. It follows the pin.
+- **The agents:** `ca72_modulations` lists the pins and names their assignments by effect and
+  parameter; `ca72_modulation_set`/`_remove` take `fx1` to `fx16` while pinned to an effect that
+  runs; `ca72_effect_parameters` (name order, `find`), `ca72_effect_pin`, `ca72_effect_unpin`.
+- **The editor's hooks** (`fx_view::Effects::params`, `param_text`, `pins`, `pin`, `unpin`,
+  `set_pin_value`; `fx_view::search_params`, `fx_view::pin_target`; `learn::fx_pin`), for the
+  view's job: docs/lfo.md's table.
+
+**Merged:** `github/bpm-target` (cd84a83, TEMPO as a target and the effects' timing) into
+`fx-params` before this record's checks, as asked: TEMPO keeps its place after the LFOs' own
+knobs (index 50), the pins follow it (51 to 66); the chain's runner keeps both its timing and its
+pins; bpm-target's DAW-v3 change is change 5, this one change 6.
+
+**Evidence (this computer, 2026-10-20):**
+- `crates/ca72-fx-helper/tests/params.rs` with both test plug-ins (9 tests): listings with names,
+  units ("frames", VST3), steps (Delay 4799) and their own text ("1.500", "480 frames" with
+  VST3's units put after its number, "480 samples" CLAP's, `None` for no parameter); a hidden
+  parameter refused, a second pin of one refused, unpinning and a slot taken out letting go of
+  what moved them; the CLAP plug-in's window's edit (its `nudge gain`) becoming the base, which
+  modulation then adds to and a restart gives back; the drawer's knob setting the plug-in's value
+  and its window following; a ramp of offsets arriving at every 32-sample step to 1e-5 in both
+  formats, the VST3 window left at its base, and one point back at the base when nothing moves
+  it; a 4096-sample block thinned to a point every 128 samples; the VST3 base (0.25) coming back
+  after a killed helper and after a restore from the saved chain, though the processor had played
+  at 0.75; 1.5 s of an LFO moving a pin with no snapshot and `effects.json` not written (both
+  formats); a crashed effect's pin back when it runs, a missing effect's pin kept with its name
+  and assignments, inert, saved again unchanged; pins, their targets and assignments through
+  the saved chain's JSON, given to the synth's side before and after it was set; a chain saved
+  before pins read as before.
+- `no_alloc.rs`: both effects' gains pinned and modulated through the parameter change, bypass,
+  move, kill, removal and restore, a learned value set on the audio thread, 50 blocks unmoved (the
+  bases sent back): no allocation or free on the audio side.
+- The plug-in: `lfo::tests::the_effects_pins_assignments_are_the_chains` (not in `saved()` or
+  `values()`, kept through `load`, `copy_from` and `clear`, counted apart, a target only while
+  pinned, no synth control moved); `engine::lfo_tests::an_effects_pin_gets_a_point_every_step`
+  (8 points a 256-sample block at 0, 32, … 224, the synth's output the same to the bit as with
+  nothing assigned); the learnables' test with the sixteen pins last and listed only with effects.
+- `preset_render`, 19 presets, ten voices, 2 s, HI, LO and ULTRA, against references rendered from
+  393588a: every preset the same to the bit at each.
+- `cargo test -p ca72-plugin -p ca72-panel -p ca72-fx -p ca72-fx-helper -p daw-ipc -p daw-helper`
+  (the plug-in with `standalone-production`) pass; `cargo clippy --workspace --all-targets
+  --all-features -- -D warnings`, `cargo fmt --all -- --check` and `scripts/notices.py --check`
+  clean.
+- **Not tried:** the pins' view (not built: the next job's), a real third-party effect (ValhallaRoom,
+  kHs, Dragonfly) on any system, the VST3 window's own edits becoming the base (the VST3 test
+  effect has no editor stand-in; the notice is the same as CLAP's, DAW-v3's D222), a plug-in that
+  changes its parameters' titles (the notice's path is built, untriggered), Windows and macOS,
+  MIDI Learn on a pin by hand, the agents' new tools through a running standalone, and the
+  `fx-presets` job's preset section (its data shape is `SavedSlot::pins`, which it carries).

@@ -15,7 +15,7 @@
 //! - **Modulation** is destructive (DESIGN 11.4): VST3 has no modulation of its own, so a
 //!   modulated parameter's processor is sent its base value plus the modulation amount as
 //!   its value. Its controller (its editor) is told the base alone (the CA-72's PATCHES.md
-//!   change 5: the window neither chases the modulation nor fights a drag there); the
+//!   change 6: the window neither chases the modulation nor fights a drag there); the
 //!   processor's own state may hold a modulated instant, so the host gives the base back
 //!   after a state is loaded.
 //! - **State** is the processor's (`IComponent::getState`) and the controller's, in one
@@ -824,7 +824,7 @@ struct Handler {
     /// Something besides its parameters changed (D234: `setDirty`).
     dirty: AtomicBool,
     /// Its parameters' names or list changed (`restartComponent(kParamTitlesChanged)`):
-    /// listed again by the host (PATCHES.md change 5).
+    /// listed again by the host (PATCHES.md change 6).
     titles: AtomicBool,
     /// The controller's program changes, whose edits may rename its keys (D216); set once
     /// the controller is ready.
@@ -926,7 +926,7 @@ impl IComponentHandlerTrait for Handler {
         if flags & (kReloadComponent | kParamValuesChanged) != 0 {
             self.values.store(true, Ordering::Release);
         }
-        // Names or the list changed: listed again by the host (PATCHES.md change 5).
+        // Names or the list changed: listed again by the host (PATCHES.md change 6).
         if flags & (kReloadComponent | kParamTitlesChanged) != 0 {
             self.titles.store(true, Ordering::Release);
         }
@@ -1349,15 +1349,15 @@ impl Instance {
                 continue;
             }
             let flags = info.flags as u32;
-            let flag = |f: i32| flags & f as u32 != 0;
+            let flag = |f: u32| flags & f != 0;
             out.push(ParamInfo {
                 id: info.id,
                 name: wstr(&info.title),
                 short: wstr(&info.shortTitle),
                 units: wstr(&info.units),
                 steps: info.stepCount.max(0) as u32,
-                read_only: flag(ParameterInfo_::ParameterFlags_::kIsReadOnly as i32),
-                bypass: flag(ParameterInfo_::ParameterFlags_::kIsBypass as i32),
+                read_only: flag(ParameterInfo_::ParameterFlags_::kIsReadOnly as u32),
+                bypass: flag(ParameterInfo_::ParameterFlags_::kIsBypass as u32),
                 module: String::new(),
                 min: 0.0,
                 max: 1.0,
@@ -1935,12 +1935,12 @@ impl Instance {
     }
 
     /// Whether it said since the last call that its parameters' names or list changed
-    /// (`restartComponent(kParamTitlesChanged)`; PATCHES.md change 5).
+    /// (`restartComponent(kParamTitlesChanged)`; PATCHES.md change 6).
     pub fn take_params_changed(&self) -> bool {
         self.handler.titles.swap(false, Ordering::AcqRel)
     }
 
-    /// The controller's text for each value (normalized; PATCHES.md change 5):
+    /// The controller's text for each value (normalized; PATCHES.md change 6):
     /// `getParamStringByValue`, its units after it where it gave a number alone.
     pub fn param_text(&self, values: &[(u32, f64)]) -> Vec<Option<String>> {
         let Some(c) = &self.controller else {
@@ -2561,7 +2561,7 @@ impl Processor {
             }
             // The controller (its editor) is told the base alone, never the modulation: a
             // modulated parameter's window does not chase it, and a drag there moves the
-            // base (PATCHES.md change 5).
+            // base (PATCHES.md change 6).
             if e.kind == EV_PARAM {
                 self.mirror.set(e.param, self.base[place]);
             }

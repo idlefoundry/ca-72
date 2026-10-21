@@ -10945,7 +10945,13 @@ mod tests {
         assert!(e.learning.list);
         e.draw();
         let list = e.browser.drawer.midi.clone().expect("the list shown");
-        assert_eq!(list.rows.len(), crate::learn::LEARNABLE.len());
+        // (Every learnable control but the effects' pins, the standalone's with effects alone:
+        // R-FX-PARAMS.)
+        assert_eq!(
+            list.rows.len(),
+            crate::learn::LEARNABLE.len() - crate::lfo::FX_PINS
+        );
+        assert_eq!(list.rows.len(), crate::learn::listed());
         assert_eq!(list.rows[0].name, "TUNE");
         assert!(keyed(&mut e, Key::ArrowDown));
         assert!(keyed(&mut e, Key::ArrowDown));
