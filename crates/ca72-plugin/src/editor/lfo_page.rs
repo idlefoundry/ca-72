@@ -1200,7 +1200,7 @@ impl Editing {
 
     /// An LFO head and a MACRO head, each source an item that gives it `t` (those with room
     /// that do not move it yet).
-    pub(super) fn assign_rows(&self, t: ModTarget) -> Vec<Row> {
+    fn assign_rows(&self, t: ModTarget) -> Vec<Row> {
         let mut rows = Vec::new();
         for (head, macros) in [("LFO", false), ("MACRO", true)] {
             rows.push(Row::Head(head.into()));

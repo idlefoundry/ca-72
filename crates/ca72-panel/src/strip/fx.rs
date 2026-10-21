@@ -1638,9 +1638,8 @@ mod tests {
                 if step == 0 {
                     let rows = ((DEPTH - 12.0) * scale).floor() as usize;
                     let bytes = rows * before.width() as usize * 4;
-                    assert_eq!(
-                        &r.frame().data()[..bytes],
-                        &before.data()[..bytes],
+                    assert!(
+                        r.frame().data()[..bytes] == before.data()[..bytes],
                         "the original slot row keeps its screens and legends"
                     );
                 }

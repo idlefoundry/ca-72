@@ -106,9 +106,6 @@ impl Editing {
         let pin = self.fx_view.pin_info(t).expect("a pin");
         let title = format!("{}, {}", pin.name, pin.effect).to_uppercase();
         let mut rows = self.depth_rows(ModTarget::Fx(t), FIRST + t);
-        if pin.live {
-            rows.extend(self.assign_rows(ModTarget::Fx(t)));
-        }
         if !pin.live {
             for row in &mut rows {
                 if let Row::Item(_, _, enabled, _) = row {

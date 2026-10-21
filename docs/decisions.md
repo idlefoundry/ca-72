@@ -14008,3 +14008,52 @@ ellipsis while value text is still being asked for; short parameter names on the
 where the effect supplies one, capitals as the macros' screens are. No outstanding owner
 choice blocks this view. Real third-party effects and hardware MIDI Learn remain to be tried
 by hand; the review pictures use the tests' fake chain through the real editor.
+
+**Evidence (this computer, 2026-10-21):**
+
+- `cargo test -p ca72-plugin -p ca72-panel -p ca72-fx -p ca72-fx-helper --features
+  ca72-plugin/standalone-production`: **807 passed, 0 failed, 78 ignored**. The new editor tests
+  cover turns and steps, the effect's window's edits followed at the next poll, LFO and macro
+  cords, rings and one-way rings, pop-up depths above the keyboard, the tip's own value text,
+  source heads, MIDI Learn armed on its pin and pins absent from the plug-ins' learning list,
+  unavailable and MISSING pins, refusals while unavailable, moving a slot without moving its
+  targets, + PIN and both drawer depths. The view's tests cover name order, matched letters,
+  search and caret keys, row keys, click and Enter pinning and unpinning, ALL · PINNED, a fifth
+  refused on the plate, and retaining pins while the chain is busy. The panel tests compare
+  parts with whole in both skins and LARGE lettering, including all sixteen places, a turn,
+  dimming, MISSING, moving, removing, the list and both depths; they also compare the original
+  slot row before and after deepening, pixel for pixel. The real chain's nine parameter tests
+  and its no-allocation test pass too.
+- The final pin-menu layout was checked again with `cargo test -p ca72-plugin --lib --features
+  standalone-production fx_pins`: **3 passed, 1 image-writing test ignored**. Its source heads
+  are the assigned sources' heads, as a panel knob's, followed by UNPIN and MIDI Learn.
+- `cargo test --workspace --features ca72-plugin/standalone-production` was run once:
+  **888 passed, 2 failed, 53 ignored**, stopping at two old FX menu assertions that still
+  expected REPLACE and REMOVE alone. Those assertions were updated to include PARAMETERS;
+  both pass in the fresh four-crate run above. The packages after that stop were checked with
+  `cargo test -p ca72-rt -p ca72-spice -p skin-pack -p daw-helper -p daw-ipc -p daw-test-plugin
+  -p daw-test-vst3 -p xtask`: **147 passed, 0 failed**. An earlier four-crate run during a
+  rebuild also lost its executable for three process-spawn tests; the fresh run was serial
+  with builds, and all three pass. The single workspace command was not rerun.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo fmt --all --
+  --check`, `python3 scripts/notices.py --check` and `git diff --check`: clean. All builds use
+  this worktree's `target`, four build jobs; the final tests four test threads, an isolated
+  shared folder under this worktree and `TMPDIR` outside `/tmp` and every git tree.
+- The two approved panel image checks pass, including LARGE. **No golden image re-approved.**
+- `cargo run --release -p ca72-panel --example frames -- 0.44 1.0` (worn skin, wall time on this
+  shared computer): all sixteen pins changed, median **1.5 / 6.4 ms**, slowest **3.5 / 9.8**;
+  one of sixteen turned **0.4 / 0.7**, slowest **0.5 / 1.0**; a cord over sixteen **3.2 / 12.1**,
+  slowest **5.8 / 23.9**; unchanged **0.0**. The first drop after its still is ready **1.9 / 5.9
+  ms**; pressed before the thread finishes, **246 / 392 ms** including that preparation. The
+  knob materials and fixed lights are prepared on that thread too, rather than decoded when
+  the first pin is exposed.
+- **Pictures:** `target/fx-pins-ui-frames/README.md` in this worktree indexes forty real editor
+  frames at **0.44 and 1.0**, worn and drawn: B1, a cord, pop-up and tip, menu, MIDI Learn, the
+  parameter list, FIND, a crashed effect's dimmed pins, a missing parameter, and LARGE. Made by
+  `CA72_FX_PIN_PNG=<folder> cargo test -p ca72-plugin --lib --features standalone-production
+  the_fx_pin_pngs -- --ignored --nocapture` (**1 passed**). The fake chain supplies the example
+  effects; the real editor composes their frames.
+- **Not tried:** real pointer clicks in a running native editor, a third-party effect or its
+  actual window, hardware MIDI Learn, Windows or macOS (no Mac build), and a parameter-catalogue
+  rescan while the list stays open (reopen to list it again). The engine and helper are the
+  existing R-FX-PARAMS implementation; none was changed for the view.

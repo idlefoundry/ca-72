@@ -191,6 +191,18 @@ fn a_pin_takes_cords_rings_popups_tips_and_its_own_midi_learn() {
     let list = e.learning.list_scene(&e.params.midi_map);
     assert!(list.rows.iter().any(|r| r.name == "DECAY, HALL REVERB"));
     {
+        let (mut plugin, _, _) = editing();
+        assert!(plugin.fx.is_none());
+        assert!(
+            plugin
+                .learning
+                .list_scene(&plugin.params.midi_map)
+                .rows
+                .iter()
+                .all(|r| !r.name.starts_with("EFFECT PIN"))
+        );
+    }
+    {
         let mut pins = fake.pins.lock().unwrap();
         pins[1].live = false;
         pins[1].missing = true;
@@ -337,13 +349,19 @@ fn the_fx_pin_pngs() {
             keyed(&mut e, Key::Character("d".into()));
             save(&mut e, "find");
             e.fx_view.close_list();
+            fake.slots.lock().unwrap()[1].health = crate::fx_view::Health::Crashed;
             {
-                fake.pins.lock().unwrap()[1].live = false;
+                let mut pins = fake.pins.lock().unwrap();
+                pins[0].live = false;
+                pins[1].live = false;
             }
             poll(&mut e);
             save(&mut e, "dimmed");
+            fake.slots.lock().unwrap()[1].health = crate::fx_view::Health::Running;
             {
-                fake.pins.lock().unwrap()[1].missing = true;
+                let mut pins = fake.pins.lock().unwrap();
+                pins[0].live = true;
+                pins[1].missing = true;
             }
             poll(&mut e);
             save(&mut e, "missing");
