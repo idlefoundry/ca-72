@@ -16,7 +16,7 @@
 
 use crate::sandbox::{Instance, RUNNING};
 use daw_ipc::layout::{EV_PARAM, SEQ_MASK, STATUS_OK};
-use daw_ipc::{Done, Event, MAX_BLOCK, MAX_EVENTS, SLOTS};
+use daw_ipc::{Done, Event, MAX_BLOCK, MAX_EVENTS, SLOTS, Timing};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -92,6 +92,8 @@ struct Flight {
     active: bool,
     seq: u32,
     frame: i64,
+    /// Where the music is at its first frame (the host's tempo and place).
+    timing: Timing,
     len: usize,
     l: Vec<f32>,
     r: Vec<f32>,
@@ -122,6 +124,9 @@ pub struct Node {
     acc_len: usize,
     acc_start: i64,
     fifo: Fifo,
+    /// The present block's first frame and where the music is there.
+    timing_frame: i64,
+    timing: Timing,
     /// The deadline of the block being processed (real time).
     deadline: Option<Instant>,
 }
@@ -167,6 +172,7 @@ impl Node {
                 active: false,
                 seq: 0,
                 frame: 0,
+                timing: Timing::default(),
                 len: 0,
                 l: vec![0.0; MAX_BLOCK],
                 r: vec![0.0; MAX_BLOCK],
@@ -180,6 +186,8 @@ impl Node {
             acc_len: 0,
             acc_start: 0,
             fifo,
+            timing_frame: 0,
+            timing: Timing::default(),
             deadline: None,
         }
     }
@@ -283,6 +291,7 @@ impl Node {
         self.inst.transport.write_block(
             seq as usize % SLOTS,
             self.flight.frame,
+            self.flight.timing,
             &self.flight.events,
             &self.flight.l[..n],
             &self.flight.r[..n],
@@ -429,6 +438,7 @@ impl Node {
     fn process_sync(&mut self, frame: i64, l: &mut [f32], r: &mut [f32]) {
         let n = l.len();
         self.flight.frame = frame;
+        self.flight.timing = self.timing;
         self.flight.len = n;
         self.flight.l[..n].copy_from_slice(l);
         self.flight.r[..n].copy_from_slice(r);
@@ -469,6 +479,8 @@ impl Node {
     fn launch(&mut self) {
         let n = self.acc_len;
         self.flight.frame = self.acc_start;
+        // (The chunk's start may be in an earlier block: its place from this one's, back.)
+        self.flight.timing = self.timing.at((self.acc_start - self.timing_frame) as f64);
         self.flight.len = n;
         self.flight.l[..n].copy_from_slice(&self.acc_l[..n]);
         self.flight.r[..n].copy_from_slice(&self.acc_r[..n]);
@@ -506,6 +518,19 @@ impl Node {
     /// Processes `l` and `r` (at most `MAX_BLOCK` frames, the block at `frame`) in place.
     /// In real time the helper's block is waited for until `deadline`.
     pub fn process(&mut self, frame: i64, l: &mut [f32], r: &mut [f32], deadline: Option<Instant>) {
+        self.process_at(frame, Timing::default(), l, r, deadline);
+    }
+
+    /// [`Node::process`], the music at `timing` at `frame` (the host's tempo and place).
+    pub fn process_at(
+        &mut self,
+        frame: i64,
+        timing: Timing,
+        l: &mut [f32],
+        r: &mut [f32],
+        deadline: Option<Instant>,
+    ) {
+        (self.timing, self.timing_frame) = (timing, frame);
         debug_assert!(l.len() == r.len() && l.len() <= MAX_BLOCK);
         let n = l.len().min(r.len()).min(MAX_BLOCK);
         self.deadline = deadline;

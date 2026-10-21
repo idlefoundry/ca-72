@@ -392,6 +392,8 @@ pub struct TestProcessContext<P: Plugin> {
     events: VecDeque<PluginNoteEvent<P>>,
     transport: Transport,
     process_mode: ProcessMode,
+    /// The API it says it is: the standalone's until told ([`Self::set_plugin_api`]).
+    plugin_api: PluginApi,
     /// The changes the plugin made itself, as the host would be told them: the parameter, its
     /// normalized value as set, and when in the block.
     pub reported: Vec<(ParamPtr, f32, u32)>,
@@ -420,8 +422,15 @@ impl<P: Plugin> TestProcessContext<P> {
             events: VecDeque::new(),
             transport: Transport::new(sample_rate),
             process_mode,
+            plugin_api: PluginApi::Standalone,
             reported: Vec::new(),
         }
+    }
+
+    /// The API the next `process()` calls say it is (a plug-in's, for what the standalone alone
+    /// does).
+    pub fn set_plugin_api(&mut self, api: PluginApi) {
+        self.plugin_api = api;
     }
 
     /// An event for the next `process()` call (or the rest of this one), after those pushed.
@@ -464,7 +473,7 @@ impl<P: Plugin> TestProcessContext<P> {
 
 impl<P: Plugin> ProcessContext<P> for TestProcessContext<P> {
     fn plugin_api(&self) -> PluginApi {
-        PluginApi::Standalone
+        self.plugin_api
     }
 
     fn execute_background(&self, _task: P::BackgroundTask) {}

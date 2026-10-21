@@ -56,13 +56,46 @@ pub struct Event {
 pub const STATUS_OK: i32 = 0;
 pub const STATUS_ERROR: i32 = 1;
 
+/// Where the music is as a block begins, as the host gives it to the plugin (CA-72's change 5,
+/// PATCHES.md): its tempo (BPM; none at 0 or below, or not finite), its place in quarter notes,
+/// and the sample rate. The transport itself is stopped: a host running on at its tempo.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Timing {
+    pub tempo: f64,
+    pub beats: f64,
+    pub rate: f64,
+}
+
+impl Timing {
+    /// Whether it gives a tempo.
+    pub fn has_tempo(&self) -> bool {
+        self.tempo.is_finite() && self.tempo > 0.0 && self.beats.is_finite()
+    }
+
+    /// `frames` frames on (possibly back: negative) at its tempo.
+    pub fn at(self, frames: f64) -> Timing {
+        if !self.has_tempo() || !(self.rate.is_finite() && self.rate > 0.0) {
+            return self;
+        }
+        Timing {
+            beats: self.beats + frames * self.tempo / 60.0 / self.rate,
+            ..self
+        }
+    }
+}
+
 #[repr(C)]
 pub struct Slot {
     pub steady_time: i64,
     pub frames: u32,
     pub n_events: u32,
     pub status: i32,
-    pub _pad: [u32; 11],
+    pub _pad0: u32,
+    /// The block's [`Timing`] (in what was padding: the slot's size and its events' place as
+    /// before).
+    pub timing: Timing,
+    pub _pad: [u32; 4],
     pub events: [Event; MAX_EVENTS],
     pub input: [[f32; MAX_BLOCK]; 2],
     pub output: [[f32; MAX_BLOCK]; 2],
@@ -205,6 +238,7 @@ impl Transport {
         &self,
         slot: usize,
         steady_time: i64,
+        timing: Timing,
         events: &[Event],
         left: &[f32],
         right: &[f32],
@@ -220,6 +254,7 @@ impl Transport {
             (&raw mut (*s).frames).write_volatile(frames as u32);
             (&raw mut (*s).n_events).write_volatile(n_events as u32);
             (&raw mut (*s).status).write_volatile(STATUS_OK);
+            (&raw mut (*s).timing).write_volatile(timing);
             std::ptr::copy_nonoverlapping(
                 events.as_ptr(),
                 (&raw mut (*s).events) as *mut Event,
@@ -348,6 +383,13 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    /// The timing took the padding: a slot's events where they were (CA-72's change 5).
+    #[test]
+    fn the_timing_keeps_the_slots_layout() {
+        assert_eq!(std::mem::offset_of!(Slot, timing), 24);
+        assert_eq!(std::mem::offset_of!(Slot, events), 64);
+    }
+
     #[test]
     fn a_block_round_trips_through_a_second_mapping() {
         let host = Transport::create().unwrap();
@@ -361,7 +403,12 @@ mod tests {
             value: 0.25,
             ..Event::default()
         };
-        host.write_block(1, 1000, &[ev], &left, &right);
+        let timing = Timing {
+            tempo: 97.5,
+            beats: 12.25,
+            rate: 48_000.0,
+        };
+        host.write_block(1, 1000, timing, &[ev], &left, &right);
         let t = std::thread::spawn(move || {
             let req = helper.wait_request(0, None).unwrap();
             assert_eq!(req, 1);
@@ -370,6 +417,7 @@ mod tests {
                 let s = helper.slot(1);
                 assert_eq!((*s).frames, 64);
                 assert_eq!((*s).steady_time, 1000);
+                assert_eq!((*s).timing, timing);
                 assert_eq!((*s).events[0], ev);
                 for i in 0..64 {
                     (*s).output[0][i] = (*s).input[0][i] * 2.0;

@@ -2001,6 +2001,39 @@ impl Engine {
         self.block_from = self.played;
     }
 
+    /// The block's place on the clock from here on, the tempo having changed within it (the
+    /// standalone's TEMPO moved by a modulation source: decisions.md R-LFO): `p` the block's
+    /// start as the samples from here have it ([`crate::timed::Clock::retime`]), the samples'
+    /// count since the block began kept.
+    pub fn retime(&mut self, p: Position) {
+        self.position = p;
+    }
+
+    /// The tempo the modulation sources have the standalone's TEMPO at now (BPM: in force since
+    /// the latest of the LFOs' ticks), if any moves it (decisions.md R-LFO). Never in a plug-in,
+    /// whose controls leave TEMPO's assignments out.
+    pub fn tempo(&self) -> Option<f64> {
+        if self.bank.cross.on && self.base.lfo.tempo_moved() {
+            self.bank.cross.tempo
+        } else {
+            None
+        }
+    }
+
+    /// Where in the present block the LFOs' next tick falls (host samples from its start: the
+    /// first sample on or after its time), while a source moves TEMPO: the tempo in force
+    /// changes there.
+    pub fn next_tempo_tick(&self) -> Option<usize> {
+        self.tempo()?;
+        let rate = self.lfo_rate();
+        let next = self.bank.cross.latest() + 1;
+        let mut s = (next as f64 * rate / crate::lfo::TICKS_A_SECOND).ceil() as u64;
+        while crate::lfo::tick_at(s, rate) < next {
+            s += 1;
+        }
+        Some(s.saturating_sub(self.block_from) as usize)
+    }
+
     /// Each oscillator's place on the clock `at` host samples after the block's start, and its
     /// cycles a voice's sample, if it is timed and its RANGE is at LO (at any other RANGE timed
     /// mode does nothing).

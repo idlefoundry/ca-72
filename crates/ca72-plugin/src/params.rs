@@ -560,6 +560,14 @@ pub struct Ca72Params {
     /// Each LFO's present value and phase from the audio thread, for the editor (R-LFO). Not
     /// the session's.
     pub lfo_scope: Arc<crate::lfo::Scope>,
+    /// Whether this is the standalone application (its host's API, told at initialisation and
+    /// every block; a plug-in until then): its TEMPO a modulation target there alone
+    /// (`lfo::Target::Tempo`, decisions.md R-LFO), the plug-ins following their host's.
+    pub standalone: Arc<AtomicBool>,
+    /// TEMPO's travel as a knob's (`TEMPO_RANGE`, straight along it), for its modulation's
+    /// depths (a share of its travel: `lfo::Target::Tempo`). Not a host parameter: never
+    /// registered, its value never read.
+    pub tempo_knob: FloatParam,
 
     /// POWER off: the host's bypass, the output faded out.
     #[id = "bypass"]
@@ -1070,6 +1078,15 @@ impl Default for Ca72Params {
             lands: crate::smooth::Lands::default(),
             lfo_patch: Arc::default(),
             lfo_scope: Arc::default(),
+            standalone: Arc::new(AtomicBool::new(false)),
+            tempo_knob: FloatParam::new(
+                "Tempo",
+                DEFAULT_TEMPO as f32,
+                FloatRange::Linear {
+                    min: TEMPO_RANGE.0 as f32,
+                    max: TEMPO_RANGE.1 as f32,
+                },
+            ),
             drive_curve: Calibration::default(),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             tune: dial("Tune", -2.5, 2.5, 0.0),
@@ -1322,6 +1339,17 @@ impl Ca72Params {
             DEFAULT_TEMPO
         };
         self.tempo.store(t.to_bits(), Ordering::Relaxed);
+    }
+
+    /// Whether this is the standalone application ([`Ca72Params::standalone`]).
+    pub fn is_standalone(&self) -> bool {
+        self.standalone.load(Ordering::Relaxed)
+    }
+
+    pub fn set_standalone(&self, standalone: bool) {
+        if self.is_standalone() != standalone {
+            self.standalone.store(standalone, Ordering::Relaxed);
+        }
     }
 
     /// The arpeggiator's settings, as its parameters have them.

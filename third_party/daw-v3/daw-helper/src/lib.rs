@@ -757,6 +757,7 @@ fn audio_loop(mut p: Processor, t: &Transport, start: u32) {
             let frames = ((&raw const (*s).frames).read_volatile() as usize).min(MAX_BLOCK);
             let n = ((&raw const (*s).n_events).read_volatile() as usize).min(MAX_EVENTS);
             let steady = (&raw const (*s).steady_time).read_volatile();
+            let timing = (&raw const (*s).timing).read_volatile();
             std::ptr::copy_nonoverlapping(
                 (&raw const (*s).events) as *const Event,
                 events.as_mut_ptr(),
@@ -771,7 +772,7 @@ fn audio_loop(mut p: Processor, t: &Transport, start: u32) {
                 (&raw mut (*s).output[1]) as *mut f32,
             ];
             let status = if started {
-                p.process(steady, frames, &events[..n], input, output)
+                p.process(steady, timing, frames, &events[..n], input, output)
             } else {
                 daw_ipc::layout::STATUS_ERROR
             };

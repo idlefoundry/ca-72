@@ -326,6 +326,8 @@ pub struct Runner {
     to_control: rtrb::Producer<Stage>,
     stages: Vec<Stage>,
     frame: i64,
+    /// The tempo and place the next block begins at, for the effects (decisions.md R-LFO).
+    timing: daw_ipc::Timing,
 }
 
 impl std::fmt::Debug for Runner {
@@ -377,6 +379,7 @@ impl Chain {
             to_control,
             stages: Vec::with_capacity(MAX_SLOTS),
             frame: 0,
+            timing: daw_ipc::Timing::default(),
         };
         (Chain { shared }, runner)
     }
@@ -1559,6 +1562,13 @@ impl Runner {
         }
     }
 
+    /// Where the music is as the next block begins (the standalone's tempo, as its clock has
+    /// it: decisions.md R-LFO), given to each effect with its blocks as a host's stopped
+    /// transport; none until told.
+    pub fn set_timing(&mut self, timing: daw_ipc::Timing) {
+        self.timing = timing;
+    }
+
     /// The synth's output through the chain, in place (audio thread). In real time each
     /// effect's block is waited for until `deadline` at the latest; past it, and for any
     /// effect not running, its input goes on untouched.
@@ -1573,8 +1583,9 @@ impl Runner {
                     continue;
                 }
                 if let Some(node) = &mut stage.node {
-                    node.process(
+                    node.process_at(
                         self.frame + off as i64,
+                        self.timing.at(off as f64),
                         &mut left[off..end],
                         &mut right[off..end],
                         deadline,

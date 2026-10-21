@@ -1507,9 +1507,22 @@ mod tests {
             .assign(Source::Lfo(0), Target::Osc2Frequency, -0.125)
             .unwrap();
         patch.assign(Source::Lfo(3), Target::Volume, -0.5).unwrap();
+        // (The standalone's TEMPO a preset's too, an LFO's and a macro's: decisions.md R-LFO.)
+        patch.assign(Source::Lfo(2), Target::Tempo, 0.3).unwrap();
+        patch.assign(Source::Macro(1), Target::Tempo, -0.6).unwrap();
         patch.set_edges(1, Edges::Sharp);
         let before = sorted(&p);
         let values = values_now(&p);
+        assert!(
+            values
+                .iter()
+                .any(|(k, v)| k == "lfo3_to_tempo" && (*v - 30.0).abs() < 1e-3)
+        );
+        assert!(
+            values
+                .iter()
+                .any(|(k, v)| k == "macro2_to_tempo" && (*v + 60.0).abs() < 1e-3)
+        );
         assert!(
             values
                 .iter()

@@ -1,6 +1,6 @@
 # DAW-v3's plug-in hosting, patched
 
-The four crates as VENDORED.md says, with four changes, to be offered to DAW-v3 itself:
+The four crates as VENDORED.md says, with five changes, to be offered to DAW-v3 itself:
 
 1. **A VST3 editor on Linux gets the host's run loop (`IRunLoop`)** (`daw-helper/src/vst3.rs`;
    DAW-v3's D78 lists it as not yet done). DAW-v3's `Frame`, the
@@ -58,3 +58,17 @@ The four crates as VENDORED.md says, with four changes, to be offered to DAW-v3 
      `crash-at-scan` or `hang-at-scan`, so as a host lists it (and loads it).
    States without the pair, the listed plug-ins and every other behaviour are as before; their
    own tests pass, and clippy is clean.
+
+5. **A block carries the host's tempo and place to the plugin** (`daw-ipc/src/layout.rs`'s
+   `Timing`, `daw-helper/src/{lib,plugin,clap,vst3}.rs`; the CA-72's `docs/decisions.md` R-LFO).
+   Before, a block's plugin had no transport at all: CLAP's `transport` and VST3's
+   `processContext` were null, so a tempo-synced effect after the CA-72's standalone ran at its
+   own default. Now the host writes each block's tempo (BPM), its place in quarter notes and the
+   sample rate into the slot, in what was its padding (the slot's size and its events' offset,
+   64, unchanged: a test holds them), and the helper gives them as a stopped transport: CLAP's
+   `clap_event_transport` with `HAS_TEMPO`, `HAS_BEATS_TIMELINE` and `HAS_TIME_SIGNATURE` (4/4,
+   the bar from the place), VST3's `ProcessContext` with `kTempoValid`,
+   `kProjectTimeMusicValid`, `kBarPositionValid` and `kTimeSigValid`. A block with no tempo (0)
+   gives none, as before. `Transport::write_block` and `Processor::process` take the timing;
+   the helper's tests pass none. Tried through the layout's round trip; no third-party effect
+   that reads the tempo was tried.

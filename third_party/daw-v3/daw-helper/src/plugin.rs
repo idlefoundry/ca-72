@@ -318,6 +318,7 @@ impl Processor {
     pub unsafe fn process(
         &mut self,
         steady_time: i64,
+        timing: daw_ipc::Timing,
         frames: usize,
         events: &[Event],
         input: [*mut f32; 2],
@@ -325,9 +326,13 @@ impl Processor {
     ) -> i32 {
         match self {
             // SAFETY: the caller's contract is the backends'.
-            Processor::Clap(p) => unsafe { p.process(steady_time, frames, events, input, output) },
+            Processor::Clap(p) => unsafe {
+                p.process(steady_time, timing, frames, events, input, output)
+            },
             // SAFETY: as above.
-            Processor::Vst3(p) => unsafe { p.process(steady_time, frames, events, input, output) },
+            Processor::Vst3(p) => unsafe {
+                p.process(steady_time, timing, frames, events, input, output)
+            },
         }
     }
 }

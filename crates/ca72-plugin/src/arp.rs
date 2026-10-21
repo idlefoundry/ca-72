@@ -519,6 +519,39 @@ impl Arp {
         (self.pos, self.per)
     }
 
+    /// The tempo changed `at` samples into a block of `len` to `tempo` (BPM, at `rate` samples a
+    /// second), the standalone's TEMPO moved by a modulation source (decisions.md R-LFO): from
+    /// here its beats go on at the new tempo from where they had come, so that nothing jumps.
+    /// A note sounding is held at least [`SHORTEST`] at the faster tempo, so that a tempo
+    /// raised under it never cuts it short of the circuit's trigger (beats at the new tempo are
+    /// fewer seconds; R-ARP's floor). Whether it changed.
+    pub fn retime(&mut self, at: usize, tempo: f64, rate: f64, len: usize) -> bool {
+        if !(tempo.is_finite() && tempo > 0.0 && rate.is_finite() && rate > 0.0) {
+            return false;
+        }
+        let bps = tempo.clamp(1.0, 1000.0) / 60.0;
+        let per = bps / rate;
+        if per == self.per {
+            return false;
+        }
+        let now = self.beat(at);
+        self.pos = now - at as f64 * per;
+        self.per = per;
+        if bps > self.bps {
+            let shortest = SHORTEST * bps;
+            for h in self.sounding.iter_mut().flatten() {
+                if let Some(off) = &mut h.off
+                    && *off < h.on + shortest
+                {
+                    *off = h.on + shortest;
+                }
+            }
+        }
+        self.bps = bps;
+        self.expected = self.pos + len as f64 * per;
+        true
+    }
+
     /// A key pressed or let go `at` samples into the block.
     pub fn key(&mut self, key: u8, on: bool, at: usize, out: &mut impl FnMut(u8, bool)) {
         if key > 127 {
