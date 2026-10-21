@@ -29,7 +29,8 @@ transcription. Recheck an existing transcription and identify its provenance.
 Use `ca72_analyze` with named `regions`: separate notes/chords, attacks, holds and releases,
 with `id`, clip-relative `start`, `seconds`, optional `fundamentals_hz` and `modulation_hz`.
 Each window needs at least 1024 samples; supplied fundamentals need enough cycles and FFT
-resolution. Region fundamentals are locally refined within ±4% independently for each file.
+resolution and a credible local peak; weak leakage from an out-of-range tone is refused.
+Region fundamentals are locally refined within ±4% independently for each file.
 Chord normalization is shared across fundamentals; overlapping bands describe aggregate
 energy, not separated voices. A frequency estimate is not proof of a transcription.
 Reserve representative notes or passages for later validation when the reference permits.

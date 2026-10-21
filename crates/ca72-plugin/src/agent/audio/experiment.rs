@@ -72,7 +72,7 @@ fn limits(args: &Value) -> Result<Limits, ApiError> {
 }
 
 pub fn measurement_summary(m: &[Measurement]) -> Value {
-    json!(m.iter().map(|m|json!({"id":m.id,"start":m.start,"seconds":m.seconds,"fundamentals_hz":m.fundamental_estimates_hz,"fft_bin_hz":m.fft_bin_hz,"physical_resolution_hz":m.physical_resolution_hz,"normalization":m.normalization,"harmonic_levels_db":m.harmonics.iter().map(|h|h.relative_db).collect::<Vec<_>>(),"upper_band_db":m.upper_band_db,"modulation":m.modulation,"warnings":m.warnings})).collect::<Vec<_>>())
+    json!(m.iter().map(|m|json!({"id":m.id,"start":m.start,"seconds":m.seconds,"fundamentals_hz":m.fundamental_estimates_hz,"fundamental_peak_support_db":m.fundamental_peak_support_db,"fft_bin_hz":m.fft_bin_hz,"physical_resolution_hz":m.physical_resolution_hz,"normalization":m.normalization,"harmonic_levels_db":m.harmonics.iter().map(|h|h.relative_db).collect::<Vec<_>>(),"upper_band_db":m.upper_band_db,"modulation":m.modulation,"warnings":m.warnings})).collect::<Vec<_>>())
 }
 
 fn difference_summary(d: &[regions::Difference]) -> Value {

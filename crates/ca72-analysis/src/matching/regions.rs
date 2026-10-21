@@ -116,14 +116,22 @@ fn band(bins: &[f64], bin: f64, lo: f64, hi: f64) -> f64 {
         .sum()
 }
 
-fn near(bins: &[f64], bin: f64, expected: f64) -> Result<f64, String> {
+fn near(bins: &[f64], bin: f64, expected: f64) -> Result<(f64, f64), String> {
     let lo = ((expected * 0.96 / bin).ceil() as usize).max(1);
     let hi = ((expected * 1.04 / bin).floor() as usize).min(bins.len() - 2);
-    let Some(k) = (lo..=hi).max_by(|a, b| bins[*a].total_cmp(&bins[*b])) else {
+    let Some(k) = (lo..=hi)
+        .filter(|i| bins[*i] >= bins[*i - 1] && bins[*i] > bins[*i + 1])
+        .max_by(|a, b| bins[*a].total_cmp(&bins[*b]))
+    else {
         return Err(
             "no FFT bins resolve the supplied fundamental search range; use a longer region".into(),
         );
     };
+    let maximum = bins.iter().copied().fold(0.0, f64::max);
+    let support = 10.0 * (bins[k].max(1e-30) / maximum.max(1e-30)).log10();
+    if support < -40.0 {
+        return Err("fundamental unresolved: the local peak is below−40dB of the strongest peak; recheck pitch hint or choose a clearer/longer region".into());
+    }
     let a = bins[k - 1].max(1e-30).ln();
     let b = bins[k].max(1e-30).ln();
     let c = bins[k + 1].max(1e-30).ln();
@@ -133,7 +141,10 @@ fn near(bins: &[f64], bin: f64, expected: f64) -> Result<f64, String> {
     } else {
         0.0
     };
-    Ok(((k as f64 + delta) * bin).clamp(expected * 0.96, expected * 1.04))
+    Ok((
+        ((k as f64 + delta) * bin).clamp(expected * 0.96, expected * 1.04),
+        support,
+    ))
 }
 
 fn ac_strongest(ch: &[Vec<f32>]) -> Vec<f64> {
@@ -179,6 +190,7 @@ pub struct Measurement {
     pub start: f64,
     pub seconds: f64,
     pub fundamental_estimates_hz: Vec<f64>,
+    pub fundamental_peak_support_db: Vec<f64>,
     pub fft_bin_hz: f64,
     pub physical_resolution_hz: f64,
     pub normalization: &'static str,
@@ -322,11 +334,13 @@ fn measure(ch: &[Vec<f32>], rate: u32, r: &Region) -> Result<Measurement, String
             r.id
         ));
     }
-    let f0s: Vec<_> = r
+    let refined: Vec<_> = r
         .fundamentals_hz
         .iter()
         .map(|f| near(&p, bin, *f))
         .collect::<Result<_, _>>()?;
+    let f0s: Vec<_> = refined.iter().map(|(f, _)| *f).collect();
+    let support: Vec<_> = refined.iter().map(|(_, s)| *s).collect();
     let width = |f: f64| 7.0f64.max(f * 0.015).max(2.0 * resolution);
     let norm = if f0s.is_empty() {
         band(&p, bin, 50.0, 1000.0)
@@ -430,6 +444,7 @@ fn measure(ch: &[Vec<f32>], rate: u32, r: &Region) -> Result<Measurement, String
             "sum of supplied fundamental bands; chord overlap retained"
         },
         fundamental_estimates_hz: f0s,
+        fundamental_peak_support_db: support,
         harmonics,
         spectral_band_centres_hz: centres,
         spectral_bands_db: bands,
@@ -782,6 +797,12 @@ mod tests {
         r.fundamentals_hz = vec![20.0];
         assert!(analyze(&[vec![0.1; 1024]], 192000, &[r]).is_err());
         assert!(analyze(&[vec![0.0; 48000]], RATE, &[region(1.0)]).is_err());
+        for actual in [465.0, 475.0, 880.0] {
+            assert!(
+                analyze(&tone(1.0, actual, 0.0, 0.0, 4.2), RATE, &[region(1.0)]).is_err(),
+                "out-of-search tone {actual} must not become a confident pitch from leakage"
+            );
+        }
     }
     #[test]
     fn refines_pitch_separately_and_preserves_stereo_chord_balance() {
