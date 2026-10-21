@@ -72,7 +72,7 @@ fn limits(args: &Value) -> Result<Limits, ApiError> {
 }
 
 pub fn measurement_summary(m: &[Measurement]) -> Value {
-    json!(m.iter().map(|m|json!({"id":m.id,"start":m.start,"seconds":m.seconds,"fundamentals_hz":m.fundamental_estimates_hz,"fundamental_peak_support_db":m.fundamental_peak_support_db,"fft_bin_hz":m.fft_bin_hz,"physical_resolution_hz":m.physical_resolution_hz,"normalization":m.normalization,"harmonic_levels_db":m.harmonics.iter().map(|h|h.relative_db).collect::<Vec<_>>(),"upper_band_db":m.upper_band_db,"modulation":m.modulation,"warnings":m.warnings})).collect::<Vec<_>>())
+    json!(m.iter().map(|m|json!({"id":m.id,"start":m.start,"seconds":m.seconds,"fundamentals_hz":m.fundamental_estimates_hz,"harmonic_anchors_hz":m.harmonic_anchors_hz,"fundamental_peak_support_db":m.fundamental_peak_support_db,"fft_bin_hz":m.fft_bin_hz,"physical_resolution_hz":m.physical_resolution_hz,"normalization":m.normalization,"harmonic_levels_db":m.harmonics.iter().map(|h|h.relative_db).collect::<Vec<_>>(),"upper_band_db":m.upper_band_db,"modulation":m.modulation,"warnings":m.warnings})).collect::<Vec<_>>())
 }
 
 fn difference_summary(d: &[regions::Difference]) -> Value {
@@ -353,16 +353,22 @@ pub fn run(args: &Value, snapshot: Snapshot, source: Option<Value>) -> Reply {
             };
             page.push_str(&format!("<caption>{}</caption>", verdict));
         }
-        page.push_str("<tr><th>Region</th><th>Harmonic RMS dB</th><th>Spectrum RMS dB</th><th>Peak flags</th></tr>");
+        page.push_str("<tr><th>Region</th><th>Harmonic RMS dB</th><th>Spectrum RMS dB</th><th>Upper band Δ dB</th><th>Peak flags</th><th>Strongest flag Hz</th></tr>");
         for d in row["regions"].as_array().expect("region rows") {
             page.push_str(&format!(
-                "<tr><td>{}</td><td>{}</td><td>{:.3}</td><td>{}</td></tr>",
+                "<tr><td>{}</td><td>{}</td><td>{:.3}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
                 html(d["id"].as_str().unwrap_or("")),
                 d["harmonic_rmse_db"]
                     .as_f64()
                     .map_or("unresolved".into(), |v| format!("{v:.3}")),
                 d["spectrum_rmse_db"].as_f64().unwrap_or(0.0),
-                d["unexplained_peak_count"]
+                d["upper_band_difference_db"]
+                    .as_f64()
+                    .map_or("unresolved".into(), |v| format!("{v:+.3}")),
+                d["unexplained_peak_count"],
+                d["strongest_unexplained_peaks"][0]["hz"]
+                    .as_f64()
+                    .map_or("—".into(), |v| format!("{v:.1}"))
             ));
         }
         page.push_str("</table></div></article>");

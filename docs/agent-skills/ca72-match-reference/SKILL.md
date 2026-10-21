@@ -31,6 +31,8 @@ with `id`, clip-relative `start`, `seconds`, optional `fundamentals_hz` and `mod
 Each window needs at least 1024 samples; supplied fundamentals need enough cycles and FFT
 resolution and a credible local peak; weak leakage from an out-of-range tone is refused.
 Region fundamentals are locally refined within ±4% independently for each file.
+Comparable competing peaks can make a carrier ambiguous: pitch/AM/FM stay null while
+harmonic bands retain explicitly labelled spectral anchors. Do not treat null as a match.
 Chord normalization is shared across fundamentals; overlapping bands describe aggregate
 energy, not separated voices. A frequency estimate is not proof of a transcription.
 Reserve representative notes or passages for later validation when the reference permits.

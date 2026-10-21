@@ -116,7 +116,13 @@ fn band(bins: &[f64], bin: f64, lo: f64, hi: f64) -> f64 {
         .sum()
 }
 
-fn near(bins: &[f64], bin: f64, expected: f64) -> Result<(f64, f64), String> {
+fn near(
+    bins: &[f64],
+    bin: f64,
+    expected: f64,
+    resolution: f64,
+    modulation_hz: Option<f64>,
+) -> Result<(f64, f64, bool), String> {
     let lo = ((expected * 0.96 / bin).ceil() as usize).max(1);
     let hi = ((expected * 1.04 / bin).floor() as usize).min(bins.len() - 2);
     let Some(k) = (lo..=hi)
@@ -141,9 +147,26 @@ fn near(bins: &[f64], bin: f64, expected: f64) -> Result<(f64, f64), String> {
     } else {
         0.0
     };
+    // Comparable separated peaks can be FM sidebands or multiple detuned voices. A
+    // strongest spectral peak is still useful as a harmonic-band anchor, but must not
+    // masquerade as a resolved carrier for pitch budgets or complex demodulation.
+    let a = ((expected * 0.92 / bin).ceil() as usize).max(1);
+    let b = ((expected * 1.08 / bin).floor() as usize).min(bins.len() - 2);
+    let separation = (2.0 * resolution).max(modulation_hz.unwrap_or(0.0) * 1.5);
+    let power = |i: usize| {
+        let hz = i as f64 * bin;
+        band(bins, bin, hz - resolution, hz + resolution)
+    };
+    let resolved = !(a..=b).any(|i| {
+        (i.abs_diff(k) as f64 * bin) > separation
+            && bins[i] >= bins[i - 1]
+            && bins[i] > bins[i + 1]
+            && power(i) >= power(k) * 10.0f64.powf(-6.0 / 10.0)
+    });
     Ok((
         ((k as f64 + delta) * bin).clamp(expected * 0.96, expected * 1.04),
         support,
+        resolved,
     ))
 }
 
@@ -189,7 +212,8 @@ pub struct Measurement {
     pub id: String,
     pub start: f64,
     pub seconds: f64,
-    pub fundamental_estimates_hz: Vec<f64>,
+    pub fundamental_estimates_hz: Vec<Option<f64>>,
+    pub harmonic_anchors_hz: Vec<f64>,
     pub fundamental_peak_support_db: Vec<f64>,
     pub fft_bin_hz: f64,
     pub physical_resolution_hz: f64,
@@ -337,10 +361,14 @@ fn measure(ch: &[Vec<f32>], rate: u32, r: &Region) -> Result<Measurement, String
     let refined: Vec<_> = r
         .fundamentals_hz
         .iter()
-        .map(|f| near(&p, bin, *f))
+        .map(|f| near(&p, bin, *f, resolution, r.modulation_hz))
         .collect::<Result<_, _>>()?;
-    let f0s: Vec<_> = refined.iter().map(|(f, _)| *f).collect();
-    let support: Vec<_> = refined.iter().map(|(_, s)| *s).collect();
+    let f0s: Vec<_> = refined.iter().map(|(f, _, _)| *f).collect();
+    let support: Vec<_> = refined.iter().map(|(_, s, _)| *s).collect();
+    let estimates: Vec<_> = refined
+        .iter()
+        .map(|(f, _, valid)| valid.then_some(*f))
+        .collect();
     let width = |f: f64| 7.0f64.max(f * 0.015).max(2.0 * resolution);
     let norm = if f0s.is_empty() {
         band(&p, bin, 50.0, 1000.0)
@@ -416,13 +444,16 @@ fn measure(ch: &[Vec<f32>], rate: u32, r: &Region) -> Result<Measurement, String
             break;
         }
     }
-    let motion = if f0s.len() == 1 {
+    let motion = if f0s.len() == 1 && estimates[0].is_some() {
         r.modulation_hz
             .and_then(|hz| modulation(&clip, rate, f0s[0], hz))
     } else {
         None
     };
     let mut warnings = Vec::new();
+    if estimates.iter().any(Option::is_none) {
+        warnings.push("Carrier unresolved: comparable peaks within ±8% of a supplied fundamental (integrated power within 6 dB, separated by more than max(two physical-resolution bins, 1.5 times the supplied modulation rate)). Harmonic anchors remain spectral peaks; pitch and AM/FM checks are unresolved, not passed. Use a clearer region for carrier measurements.".into());
+    }
     if f0s.len() > 1 {
         warnings.push("Chord harmonic bands may overlap: energies are aggregate, not separated voices; normalization is shared across all fundamentals.".into());
     }
@@ -443,7 +474,8 @@ fn measure(ch: &[Vec<f32>], rate: u32, r: &Region) -> Result<Measurement, String
         } else {
             "sum of supplied fundamental bands; chord overlap retained"
         },
-        fundamental_estimates_hz: f0s,
+        fundamental_estimates_hz: estimates,
+        harmonic_anchors_hz: f0s,
         fundamental_peak_support_db: support,
         harmonics,
         spectral_band_centres_hz: centres,
@@ -462,7 +494,7 @@ pub struct Difference {
     pub harmonic_rmse_db: Option<f64>,
     pub spectrum_rmse_db: f64,
     pub upper_band_difference_db: Option<f64>,
-    pub fundamental_differences_cents: Vec<f64>,
+    pub fundamental_differences_cents: Vec<Option<f64>>,
     pub am_depth_difference_db: Option<f64>,
     pub fm_depth_difference_cents: Option<f64>,
     pub unexplained_peaks: Vec<Peak>,
@@ -517,7 +549,7 @@ pub fn differences(a: &[Measurement], b: &[Measurement]) -> Result<Vec<Differenc
                     .fundamental_estimates_hz
                     .iter()
                     .zip(&b.fundamental_estimates_hz)
-                    .map(|(a, b)| 1200.0 * (b / a).log2())
+                    .map(|(a, b)| a.zip(*b).map(|(a, b)| 1200.0 * (b / a).log2()))
                     .collect(),
                 am_depth_difference_db: motion.map(|(a, b)| b.am_depth_db - a.am_depth_db),
                 fm_depth_difference_cents: motion.map(|(a, b)| b.fm_depth_cents - a.fm_depth_cents),
@@ -604,7 +636,7 @@ pub struct PreservationRegion {
     pub envelope_p95_db: Option<f64>,
     pub am_depth_change_db: Option<f64>,
     pub fm_depth_change_cents: Option<f64>,
-    pub fundamental_shifts_cents: Vec<f64>,
+    pub fundamental_shifts_cents: Vec<Option<f64>>,
     /// Null when no limits were requested or a requested measurement is unresolved.
     pub within_limits: Option<bool>,
 }
@@ -680,7 +712,11 @@ pub fn preservation(
             .and_then(|d| d.fm_depth_difference_cents)
             .map(f64::abs);
         let shifts = motion.map_or_else(Vec::new, |d| d.fundamental_differences_cents.clone());
-        let pitch_change = shifts.iter().map(|v| v.abs()).reduce(f64::max);
+        let pitch_change = if shifts.iter().any(Option::is_none) {
+            None
+        } else {
+            shifts.iter().flatten().map(|v| v.abs()).reduce(f64::max)
+        };
         let checks = [
             (
                 if index == 0 || r.fundamentals_hz.is_empty() {
@@ -818,7 +854,9 @@ mod tests {
         let b = analyze(&stereo, RATE, &[r]).expect("b");
         let d = differences(&a, &b).expect("d");
         assert!(
-            (d[0].fundamental_differences_cents[0] - 1200.0 * (444.0f64 / 440.0).log2()).abs()
+            (d[0].fundamental_differences_cents[0].expect("resolved")
+                - 1200.0 * (444.0f64 / 440.0).log2())
+            .abs()
                 < 0.1
         );
         assert!(d[0].harmonic_rmse_db.expect("harmonics") < 0.1);
@@ -910,6 +948,30 @@ mod tests {
                 analyze(&x, RATE, &[r]).expect("unresolved")[0]
                     .modulation
                     .is_none()
+            );
+        }
+    }
+    #[test]
+    fn sideband_dominated_carriers_cannot_pass_pitch_or_modulation_checks() {
+        for (depth, am) in [(50.0, 0.0), (100.0, 0.0), (50.0, 3.0), (100.0, 3.0)] {
+            let x = tone(2.0, 440.0, am, depth, 4.2);
+            let mut r = region(2.0);
+            r.modulation_hz = Some(4.2);
+            let specs = [r];
+            let a = analyze(&x, RATE, &specs).expect("spectral measurements still useful");
+            assert!(a[0].fundamental_estimates_hz[0].is_none(), "{depth}: {a:?}");
+            assert!(a[0].modulation.is_none());
+            assert!(!a[0].harmonics.is_empty());
+            let limits = Limits {
+                pitch_cents: Some(1.0),
+                fm_depth_cents: Some(1.0),
+                ..Limits::default()
+            };
+            assert_eq!(
+                preservation(&x, &x, RATE, &specs, &a, &a, &limits)
+                    .expect("uncertain even for identical clips")
+                    .within_limits,
+                None
             );
         }
     }

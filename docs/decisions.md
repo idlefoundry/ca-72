@@ -14550,3 +14550,55 @@ unchanged. No Rust, circuit model or installed library changes. See the detailed
 the controls. Check each short note and audible attack/release with a common gain, and
 measure AM/FM as well as slow amplitude. Reject a locally better sustained-note timbre
 when it makes the rest of the phrase worse.
+
+## R-MCP-EXPERIMENTS. Reusable regional evidence and bounded offline batches
+
+**Owner direction, 2026-10-21:** implement the general lessons from the reference-matching
+studies, improve the skill, exercise the tools on the same examples and merge when ready.
+The target is a repeatable recording-to-preset workflow across sound sources, not recipes
+for a particular acoustic instrument.
+
+`ca72_experiment` renders up to eight independent candidates from one captured base with
+named note/chord/attack/release windows. Original/approved region measurements are cached
+once per batch; all candidates preflight before output creation. Its compact MCP summaries,
+exact snapshot files, per-candidate evidence and common-level HTML audition replace custom
+render/analysis/report loops. Batch work is bounded to 120 rendered seconds and 12 million
+frames. `init:true` works without an app or library; snapshot-file continuation/export avoids
+copying large state through agent context. The normal preset serializer/replay remains the
+final delivery gate.
+
+Region-aware analyze/compare and explicit preservation budgets keep harmonic balance,
+full-spectrum bands, excess peaks, pitch and actual approved expression separate. DC-safe
+common-gain envelopes include added tails and isolated short notes. Approximate known-rate
+AM/FM requires a resolved monophonic carrier, sufficient cycles and a reliable window
+response; weak leakage is refused and ambiguous competing peaks yield nullable carrier
+measurements. These are disclosed engineering diagnostics, not a universal perceptual
+score or automatic candidate acceptance.
+
+The rewritten matching skill establishes the original recording and sound setting, separates
+performance from patch/effects, chooses purposeful experiments, preserves approved rendered
+behavior, checks other notes/phrasing/seeds and exports/replays the exact deliverable.
+No analogue DSP changes are made to improve a recording match. See
+[mcp-experiments.md](mcp-experiments.md) for the API, methods and acceptance matrix, and
+[mcp-acoustic-validation.md](mcp-acoustic-validation.md) for the actual recordings exercise.
+
+## R-HOST-STACK-ENGINE. Keep the engine out of wrapper construction copies
+
+2026-10-21: PR #135's Windows CI exposed a regression in the existing 256 KB CLAP host-thread
+lifecycle test after the expanded 0.3 parameter/control state. A separate source build on
+Windows 11, MSVC 1.97.1, reproduces `STATUS_STACK_OVERFLOW` (0xc00000fd). Instrumenting only
+that disposable checkout locates the deepest failure while reading computer settings during
+parameter construction; wrapper/default construction keeps repeated inline engine copies
+on the caller stack at the same time.
+
+`Ca72` now holds `Box<Engine>`, allocated once at construction. The engine, its processing,
+parameter defaults, state serialization and thread lifecycle are otherwise unchanged. The
+same source build passes the unchanged 256 KB test with this change alone, then all 13 CLAP
+host tests with `standalone-production` (one existing manual stress test ignored). The Linux
+build passes the same suite and all 572 plug-in library tests (28 existing ignored).
+Native reference-experiment controls are checked against the previous exact WAV hashes.
+No larger stack allowance, ignored guard, installed plug-in or open audio device is used.
+
+The Linux CI installer-identity fixture also needed the newly required `ca72-mcp` binary in
+its synthetic payload. Supplying both executable fixtures restores all three checks; the
+installer's required-payload check remains intact.

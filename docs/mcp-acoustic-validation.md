@@ -293,3 +293,72 @@ accordion sections/files, all 42 local links and identical served copies. All 13
 browser audio players load with expected durations and no errors. Matching-skill validation
 and whitespace checks pass. This settings/artifact/guidance follow-up does not change the
 previously tested Rust implementation.
+
+## Native experiment workflow, 2026-10-21
+
+The new `ca72_experiment` tool repeats the actual-recording exercise without a custom FFT,
+metric or report loop. One production MCP call evaluates six flute candidates across seven
+regions in about 11 seconds; another evaluates four second-register accordion candidates
+across three regions in about eight seconds on the Linux development machine. Each batch
+decodes/analyzes its reference once. These are descriptive timings, not a controlled speedup
+comparison with the earlier search. The candidates are known variations of previous fits,
+not fresh blind fits or a new validation corpus.
+
+The original flute recording, approved revision-4 expression replay, performance, seed,
+quality and dry conditions are unchanged. The batch includes a control, static waveform,
+fixed filter, accepted balanced refit, lower resonance and stronger phrase shape movement.
+Native uniform-weight H1–H8 RMS diagnostics illustrate the tradeoff:
+
+| Region | Approved control | Accepted balanced refit | Stronger shape movement |
+|---|---|---|---|
+| E4 | 4.973 dB | 4.356 dB | 3.025 dB |
+| G#4 | 8.747 dB | 7.146 dB | 8.552 dB |
+| G4 | 9.446 dB | 10.137 dB | 11.842 dB |
+| A4 | 4.362 dB | 2.147 dB | 1.879 dB |
+| F4 | 4.484 dB | 3.899 dB | 5.434 dB |
+
+The stronger held-note result worsens G4/F4. All three pass the explicit expression budgets;
+that does not make their tone equally acceptable. The balanced refit's worst regional
+envelope RMS change is 0.247 dB, approximate maximum AM/FM changes 0.006 dB/0.003 cents
+under this method. Native diagnostics use uniform harmonic weights and their own documented
+windows/normalization; their absolute values must not be compared with the earlier bespoke
+weighted diagnostic as if its definition were unchanged.
+
+The control and balanced refit reproduce the previous actual preset-replay WAV hashes
+exactly, including after the boxed-engine host-stack fix. Exporting the batch snapshot by
+`snapshot_file`, rendering its normal returned preset file and comparing with the batch WAV
+has zero measured spectral error at 512/2048/8192 samples and zero envelope/pitch difference.
+This continuation begins from already serialized settings; it does not establish that normal
+preset quantization is universally lossless.
+
+The accordion batch keeps the corrected second register and its C4/E4/G4 performance as the
+baseline. Changing only EMPHASIS to 9 recreates the previously rejected extra high tones.
+Its harmonic RMS looks slightly better (6.243 versus 6.283 dB); full-spectrum RMS also looks
+better (14.132 versus 16.579 dB). Yet normalized upper-band difference from the actual
+recording jumps from −3.518 to +35.448 dB, with 15 unexplained peak flags including roughly
+6.0, 7.5 and 8.9 kHz. Its envelope changes by up to 6.080 dB regional RMS and 13.949 dB p95,
+failing preservation. The control reproduces the corrected preset replay hash exactly.
+The tool displays separate upper-band/peak evidence and preservation verdicts, and chooses
+no automatic winner. Both accepted accordion presets and the accepted flute remain intact.
+
+Durable local evidence is under `acoustic-matches/native-experiments-v3`: production
+requests/results, complete experiment manifests, exact snapshots, region metrics, common-level
+HTML auditions and the flute's export/reload check. All candidate auditions share the batch's
+recorded listening gain/headroom cap after level matching; measurement normalization is
+separate. No hidden EQ, alignment, denoising or effects are applied.
+
+Checks for the implementation: 21 analysis tests, 572 plug-in library tests (28 existing
+ignored), six production stdio audio tests, 13 CLAP host tests (one existing manual stress
+test ignored), default/all-feature workspace/all-target Clippy with warnings denied,
+formatting, skill validation and all three Linux installer-identity checks pass locally.
+Synthetic checks include calibrated shallow AM/FM, strong-FM ambiguity, unsupported pitch
+hints, DC-heavy channel selection, short-note regressions, added tails and unresolved budgets.
+An independent critic rechecked the confidence fixes and native API paths. The 6 dB competing-
+peak check is a conservative heuristic, not a universal carrier estimator; stronger AM can
+hide a sideband. Requested unresolved measurements cannot pass.
+
+Windows MSVC 1.97.1 reproduces the original 256 KB CLAP lifecycle stack overflow and passes
+the unchanged guard with only `Ca72.engine` moved to a box. All 13 CLAP host tests also pass
+with `standalone-production`. This is a source-built test host without a GUI/audio device;
+it is not a claim of installed-DAW qualification. The normal three-OS PR checks remain the
+merge gate. No tag/release, personal-library installation or video upload is part of this work.

@@ -1,8 +1,8 @@
 # Local reference-fitting experiments
 
 `ca72_experiment` makes a bounded, inspectable experiment from an actual local recording.
-It combines offline rendering with reusable named-region measurements and optional
-preservation of approved expression. It does not transcribe a recording, separate sources,
+It combines offline rendering with reusable named-region measurements and optional checks of
+approved-expression preservation. It does not transcribe a recording, separate sources,
 choose a winner or change the live instrument. The analogue DSP is unchanged.
 
 ## Inputs
@@ -18,9 +18,9 @@ Additional arguments:
 - `reference`, optional `reference_start`: original local WAV and crop start.
 - `approved`, optional `approved_start`: approved expression baseline, cropped independently.
 - `regions`: 1–32 unique named `{id,start,seconds,fundamentals_hz?,modulation_hz?}` windows,
-  relative to each selected clip. Total region duration including overlaps is at most120s.
-- `candidates`: 1–8 `{id,values?,modulations?}` variations. IDs use1–40ASCIIletters/digits,
-  underscores or hyphens. The common request is bounded to120renderedseconds/12millionframes.
+  relative to each selected clip. Total region duration including overlaps is at most 120 s.
+- `candidates`: 1–8 `{id,values?,modulations?}` variations. IDs use 1–40 ASCII letters/digits,
+  underscores or hyphens. The common request is bounded to 120 rendered seconds / 12 million frames.
 - `preservation_limits`: optional nonnegative `envelope_rmse_db`, `envelope_p95_db`,
   `am_depth_db`, `fm_depth_cents` and `pitch_cents`. These are explicit engineering budgets.
 
@@ -36,29 +36,34 @@ accepts approved audio and the same preservation limits. The legacy whole-clip o
 remain available. Full region evidence is saved in `metrics.json`; compact summaries are
 returned through MCP.
 
-Each region measures integrated H1–H8 bands, one-twelfth-octave bands from20Hz to the lower
-of20kHz/Nyquist, upper6–20kHz power when available, and spectral peaks. Supplied fundamentals
-are refined separately in each file within±4%. Regions need at least1024samples, four
+Each region measures integrated H1–H8 bands, one-twelfth-octave bands from 20 Hz to the lower
+of 20 kHz/Nyquist, upper 6–20 kHz power when available, and spectral peaks. Supplied fundamentals
+are refined separately in each file within ±4%. Regions need at least 1024 samples, four
 periods of each supplied fundamental and bins within its search range. Physical resolution
 and zero-padding bin spacing are reported separately. Insufficient resolution is refused.
+A supplied fundamental must have a local spectral peak at least −40 dB relative to the
+strongest peak. Comparable separated peaks within ±8% (integrated power within 6 dB, separated by more than the
+larger of two physical-resolution bins and 1.5 times the supplied modulation rate) make the carrier ambiguous: its estimate and pitch differences are
+null and AM/FM is unresolved. Harmonic bands retain explicitly reported spectral anchors.
+This is a conservative confidence check for detuning/strong FM, not general pitch tracking.
 
-Harmonic RMS error has uniform weights and a−60dB floor. Spectral RMS error has a−80dB floor.
-Both use total fundamental-band power for normalization, or50–1000Hz when no fundamentals
+Harmonic RMS error has uniform weights and a −60 dB floor. Spectral RMS error has a −80 dB floor.
+Both use total fundamental-band power for normalization, or 50–1000 Hz when no fundamentals
 are supplied. Chord bands can overlap and describe combined energy; this is not voice
 separation. Strong candidate peaks without a similarly strong nearby reference peak are
 flagged. Peak flags are diagnostics: a tuning change or intended harmonic change can also
 produce one. There is no universal or perceptual similarity score.
 
 For a single supplied fundamental and known `modulation_hz`, approximate AM/FM depths use
-a50msHann complex demodulator, DC removal, AC-based channel selection and a complete
+a 50 ms Hann complex demodulator, DC removal, AC-based channel selection and a complete
 sinusoidal least-squares fit including constant/linear trend. Window and finite-difference
-responses are compensated. At least three cycles must resolve; window response below0.8
-is unresolved (roughly rates above11Hz). This avoids reporting attenuated high-rate motion
+responses are compensated. At least three cycles must resolve; window response below 0.8
+is unresolved (roughly rates above 11 Hz). This avoids reporting attenuated high-rate motion
 as a smaller real depth. Null is not absent movement. Use the existing sideband analysis
 for faster modulation; its own resolution limits still apply.
 
-Preservation uses50msAC-RMS frames with10ms hops and one common gain fitted to approved
-frames audible above−45dB of peak AC power. The union of audible approved/candidate frames
+Preservation uses 50 ms AC-RMS frames with 10 ms hops and one common gain fitted to approved
+frames audible above −45 dB of peak AC power. The union of audible approved/candidate frames
 includes added tails. Whole-clip and each named region are checked separately, along with
 AM/FM-depth differences and supplied-fundamental pitch shifts where requested. AM/FM
 limits without any modulation region, or pitch limits without fundamentals, are rejected.
@@ -76,7 +81,7 @@ A runtime failure can leave partial candidate artifacts without this marker.
 
 Continue a candidate by passing its returned `snapshot_path` as `snapshot_file` to another
 render or experiment. `ca72_preset_export` also accepts that file, avoiding large state
-copies through the agent context. Snapshot files are bounded to1MiB and require the same
+copies through the agent context. Snapshot files are bounded to 1 MiB and require the same
 engine fingerprint; ordinary preset files retain normal serialization and portability.
 Export and reload the actual preset before presenting final listening evidence. The batch
 report itself demonstrates candidates before serialization, not final preset delivery.
@@ -85,7 +90,7 @@ report itself demonstrates candidates before serialization, not final preset del
 
 Synthetic analysis tests exercise malformed/duplicate/out-of-range regions, silence,
 unresolved low fundamentals, independent pitch refinement, stereo phase cancellation,
-chord balance, added tones outsideH1–H8, calibrated AM/FM, DC-heavy channel selection,
+chord balance, added tones outside H1–H8, calibrated AM/FM, DC-heavy channel selection,
 common-gain invariance, isolated short-note regressions, candidate-only tails and unresolved
 requested budgets. Production stdio tests exercise all-candidate preflight, batch bounds,
 cache counts, exact single-render equivalence, snapshot-file continuation/export and
