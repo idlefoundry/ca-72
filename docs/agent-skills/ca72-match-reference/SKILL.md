@@ -100,6 +100,16 @@ Fit the audible structure, using a small number of changes each iteration:
   from the source, and required a lower-resonance preset despite worse harmonic-band error.
 - Filter and loudness contours from attacks, held levels and releases. Include candidate-only
   tails. Preserve the musical timing while fitting the envelope.
+- When the user approves expression and asks for a tone refit, retain the approved gates,
+  pitch, contours and expression routes. Also compare the actual rendered AC-RMS envelope
+  and early/late AM/FM depth with that approved replay after one common gain: unchanged
+  knobs do not guarantee unchanged expression. Include each short note, onset and audible
+  release separately; a whole-phrase percentile can omit an entire ornament. Waveform/filter
+  movement may need a small mixer-level compensation. Treat preservation limits as declared
+  engineering budgets, never a perceptual quality score. Prefer a balanced improvement across
+  the phrase to a larger held-note gain which worsens the other notes; disclose every note's
+  result. Once inspected during selection, those notes are acceptance data, not untouched
+  validation. The flute harmonic refit exposed these tradeoffs.
 - Modulation from sideband spacing and level: supply `modulation_hz` and a long enough held
   note to resolve it. Compare sidebands around several harmonics. Unresolved sidebands are
   null, not proof of absent modulation. Test whether detuned oscillators explain beating

@@ -14519,3 +14519,34 @@ archived; the corrected sound awaits listening judgement. [Evidence](mcp-acousti
 **Shared skill lesson:** a harmonic-only objective can reward a resonant patch which adds
 an unrelated high tone. Check candidate-only peaks across the full measured spectrum,
 including attacks/releases/new notes, before accepting its local harmonic score.
+
+## R-REFERENCE-PRESERVE-EXPRESSION. Flute harmonics without losing the approved articulation
+
+**Owner feedback, 2026-10-21:** the flute's envelopes and other expression are good; improve
+its harmonic match to the original acoustic recording.
+
+The refit retains the approved notes, pitch, contours, individual LFO 1 RETRIG/1.2 s RISE
+and existing modulation. A small continuous waveform blend, fixed filter and gentle phrase
+ENV-to-waveform route with mixer compensation improve the E4/A4 harmonic diagnostic from
+3.919 to 3.212 dB. Other-note results remain close to the approved tone; the all-note
+gate-duration-weighted diagnostic improves from 4.775 to 4.458 dB. Larger held-note gains
+were rejected when they worsened the short ornaments/F4 or approved expression. The G4
+ornament remains a poor absolute match, and the interharmonic-air diagnostic is slightly
+worse. Inspected acceptance notes are not presented as untouched validation.
+
+Unchanged expression knobs are insufficient evidence: tone controls can change the actual
+envelope and beating. Relative to the approved replay after one common gain, actual audible
+AC-RMS frames differ by 0.112 dB RMS, including separate onset, each short note and release;
+the worst interval RMS difference is 0.247 dB. Approximate maximum AM/FM-depth changes are
+0.012 dB/0.025 cents. Two alternate seeds retain the improvement. Saved-file replay, full
+spectra/peak checks and the same overlapping-note performance supply the final evidence.
+
+`Flute Harmonic Study` replaces the current flute download; the previous study and RISE
+alternative remain archived. Both accordion presets, audio and report sections are
+unchanged. No Rust, circuit model or installed library changes. See the detailed
+[validation record](mcp-acoustic-validation.md).
+
+**Shared skill lesson:** preserve approved expression in the rendered result, not merely
+the controls. Check each short note and audible attack/release with a common gain, and
+measure AM/FM as well as slow amplitude. Reject a locally better sustained-note timbre
+when it makes the rest of the phrase worse.

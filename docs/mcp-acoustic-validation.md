@@ -221,3 +221,75 @@ original/corrected pair uses MCP LUFS matching followed by one common gain, and 
 chord sequence is normalized separately. The rejected version remains archived rather than
 appearing as the current preset. First-register and flute preset/audio files and report
 sections are preserved. The engine fingerprint remains the one recorded above.
+
+## Flute harmonic refit with the approved expression retained
+
+The owner approved the flute's envelopes and asked for a closer harmonic match. The same
+original 7.7-second recording, E4–G#4–G4–A4–F4 gates, pitch, main contours, LFO 1's 4.2 Hz
+triangle/1.2 s RISE/individual RETRIG, all existing volume/tune routes, phrase ENV settings
+and noise input are retained. No Rust or analogue DSP is changed.
+
+The selected `Flute Harmonic Study` uses a continuous oscillator shape of 0.37, CUTOFF +1,
+EMPHASIS 3, keyboard tracking off and oscillator mixer level 9.6. Two additional routes
+from the existing phrase LFO 3 move WAVEFORM by -3% and its mixer level by +4%. The gentle
+shape movement toward 0.34 follows the phrase; mixer compensation limits the accompanying
+change in loudness. No additional oscillator is used. Stronger co-pitched layers and larger
+waveform movements were rejected for expression or other-note regressions.
+
+The local search contains 199 rendered candidates. E4/A4 were the fitting windows. Other
+notes were inspected during acceptance and must not be called untouched validation. The
+final compromise improves both held notes while keeping the other errors close to the
+approved replay. Measurements below use the actual exported-file replay:
+
+| Harmonic-band RMS error | Approved tone | Harmonic refit |
+|---|---|---|
+| E4 | 4.848 dB | 4.064 dB |
+| G#4 ornament | 7.328 dB | 7.284 dB |
+| G4 ornament | 10.870 dB | 10.926 dB |
+| A4 | 2.687 dB | 2.030 dB |
+| F4 | 3.501 dB | 3.594 dB |
+| E4/A4 fitting windows | 3.919 dB | 3.212 dB |
+| All five, gate-duration weighted | 4.775 dB | 4.458 dB |
+| E4/A4 full-spectrum band RMS error | 9.120 dB | 7.818 dB |
+
+These are engineering diagnostics, not perceptual similarity percentages. G4 remains a
+substantial mismatch. Interharmonic-energy RMS error is slightly worse, 0.929 to 1.833 dB;
+individual intonation, breath detail and the room still differ. A larger held-note gain
+(about 2.04 dB aggregate error) was rejected because ornaments/F4 worsened by about 2 dB.
+
+Preservation is checked against the approved rendered waveform, rather than inferred from
+the unchanged envelope knobs. After one common gain, 50 ms AC-RMS frames at 10 ms hops
+differ by 0.112 dB RMS, 0.218 dB at the absolute-error 95th percentile. The mask is set by
+the approved signal down to -45 dB of its peak AC RMS, including audible onset and release.
+Separate note/onset/release intervals prevent a short ornament from disappearing within a
+phrase-wide percentile. The worst interval RMS difference is 0.247 dB. Maximum approximate
+early/late periodic AM/FM-depth changes are 0.012 dB and 0.025 cents. Declared conservative
+preservation budgets were 0.5 dB RMS/1 dB p95 per interval and whole phrase, 0.2 dB AM and
+0.75 cents FM; passing those budgets is not a listening approval.
+
+All five steady windows, first attack, final release and a separate overlapping-note
+performance receive 150 Hz–20 kHz peak/upper-band checks. No strong added nonharmonic tone
+is identified; both fitting windows' 6–20 kHz energy is below the source. Alternate seeds
+71 and 73 retain the held-note improvement (about 3.933 to 3.224/3.236 dB), with envelope
+differences of 0.111/0.106 dB RMS from their respective approved-tone controls.
+
+The short/long-note demonstration retains the previous A4/G4/F4/E4 performance and 10 ms
+key overlaps. Its actual old/new envelope difference is 0.147 dB RMS. It checks performance
+beyond the fitting sequence; no second acoustic reference is claimed. Original/previous/new
+audition files use MCP LUFS matching followed by one common boost/headroom cap; the probe
+pair uses its own common gain. No EQ, denoising, separation or reverb is applied.
+
+Normal preset export/reload spectral MAE is 0.152/0.110/0.080 dB (512/2048/8192) and envelope
+MAE 0.0054 dB. Source fingerprint remains
+`c182626605628a35e3c8d3844961d92b2d42c0be1bfaf960dcb22f5483913365`.
+The current report preserves both accordion sections byte-for-byte and provides the real
+source, approved flute replay, new replay, new-phrase pair, per-note harmonic plots and
+saved preset. The prior report and its 0.9-second RISE alternative are archived. No library
+installation, merge, release or video upload is performed.
+
+An independent read-only audit verified source/preset/replay hashes, declared listening gains
+to 32-bit rounding, correct WAV formats/durations, preservation claims, both unchanged
+accordion sections/files, all 42 local links and identical served copies. All 13 current
+browser audio players load with expected durations and no errors. Matching-skill validation
+and whitespace checks pass. This settings/artifact/guidance follow-up does not change the
+previously tested Rust implementation.
