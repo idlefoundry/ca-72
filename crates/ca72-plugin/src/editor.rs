@@ -15086,6 +15086,102 @@ mod tests {
         assert_eq!(light(&e.browser.bar), 0);
     }
 
+    /// The stereo and output knobs take LFOs and macros (the owner, 2026-10-20: "make sure the
+    /// stereo controls can be controlled by macros and lfos", "and entropy, drive, and
+    /// output"): with the strip's page showing and the macros in, a macro's cord lands on WIDTH,
+    /// INNER, DETUNE, ENTROPY, DRIVE and LEVEL, and on the panel's MAIN OUTPUT VOLUME and
+    /// FEEDBACK; from the LFO page (over the strip) an LFO's cord lands on VOLUME and FEEDBACK;
+    /// each strip knob's menu offers every LFO and every macro, and one chosen is assigned. Their
+    /// rings take the knob's own sweep. Neither an assignment to DRIVE nor a macro on it turned
+    /// here asks for AUTO GAIN's curve (R-AUTO-GAIN-DRIVE: only DRIVE itself changed here does).
+    #[test]
+    fn the_stereo_and_output_knobs_take_lfos_and_macros() {
+        use crate::learning::{ModItem, Row};
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _host, params) = editing();
+        e.playing.visible = false;
+        macro_key(&mut e);
+        let drag = |e: &mut Editing, from: (f64, f64), to: &str| {
+            let p = at(e, from);
+            go(e, p);
+            e.mouse(MouseEvent::ButtonPressed {
+                button: MouseButton::Left,
+                modifiers: Modifiers::empty(),
+            });
+            let q = at(e, centre(to));
+            go(e, q);
+            e.draw();
+            release(e);
+            e.draw();
+        };
+        let knobs = [
+            ("spread", T::Spread),
+            ("inner", T::Inner),
+            ("double", T::Double),
+            ("entropy", T::Entropy),
+            ("drive", T::Drive),
+            ("level", T::Level),
+            ("volume", T::Volume),
+            ("feedback", T::Feedback),
+        ];
+        for (n, (id, t)) in knobs.iter().enumerate() {
+            let m = n % crate::lfo::MACROS;
+            drag(&mut e, ca72_panel::strip::macros::jack_at(m), id);
+            assert_eq!(
+                params.lfo_patch.depth(Source::Macro(m), *t),
+                Some(0.25),
+                "a macro's cord on {id}"
+            );
+        }
+        assert!(!e.watched.take_moved(), "nothing for AUTO GAIN to measure");
+        // Their rings: a quarter of the knob's own 300 degrees.
+        let width = at(&e, centre("spread"));
+        go(&mut e, width);
+        e.draw();
+        let k = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| CONTROLS[k.control].param == "spread")
+            .expect("WIDTH's rings")
+            .clone();
+        assert_eq!(k.sweep, art::KNOB_SWEEP);
+        let (_, _, end) = ca72_panel::modulation::swing(&k, &k.rings[0]);
+        assert!((end - k.angle(k.travel) - 75.0).abs() < 1e-9);
+        // Each strip knob's menu: every LFO and every macro.
+        for (id, t) in &knobs[..6] {
+            let i = ca72_panel::controls::index(id).expect(id);
+            let rows = e.knob_rows(i);
+            for s in Source::all() {
+                assert!(
+                    rows.iter().any(
+                        |r| matches!(r, Row::Item(ModItem::Assign(x, y), ..) if *x == s && y == t)
+                    ),
+                    "{id}'s menu offers {s:?}"
+                );
+            }
+        }
+        e.mod_item(ModItem::Assign(Source::Lfo(2), T::Level));
+        assert_eq!(params.lfo_patch.depth(Source::Lfo(2), T::Level), Some(0.25));
+        e.mod_item(ModItem::Assign(Source::Lfo(1), T::Drive));
+        assert_eq!(params.lfo_patch.depth(Source::Lfo(1), T::Drive), Some(0.25));
+        // A macro on DRIVE turned here: not DRIVE changed, nothing asked.
+        e.set_once(ca72_panel::controls::MACRO_FIRST + 4, 0.8);
+        assert!(!e.watched.take_moved(), "a macro on DRIVE turned");
+        // From the LFO page, over the strip: VOLUME and FEEDBACK on the panel by cord.
+        lfo_open(&mut e);
+        for id in ["volume", "feedback"] {
+            drag(&mut e, ca72_panel::strip::lfo::places(3).jack, id);
+            let t = crate::lfo::Target::of_id(id).expect(id);
+            assert_eq!(
+                params.lfo_patch.depth(Source::Lfo(3), t),
+                Some(0.25),
+                "LFO 4 on {id}"
+            );
+        }
+        assert!(!e.watched.take_moved());
+    }
+
     /// An assignment dragged from a macro's jack lands on a knob at +25 %, as an LFO's; while
     /// the macros show, every macro's rings show on the panel's knobs, one way from the knob's
     /// setting, an LFO's only on the knob under the pointer; a macro's knob takes none.

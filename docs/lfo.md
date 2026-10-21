@@ -95,11 +95,12 @@ them; choosing a preset loads its own (none where it names none); a MIDI pad's p
 
 ## Targets: which controls can take an LFO
 
-`lfo::Target` (29), the same for every source (the macros' knobs, and the LFOs' own, are not
-targets): the panel's continuous knobs and the strip's (26), and each oscillator's
+`lfo::Target` (30), the same for every source (the macros' knobs, and the LFOs' own, are not
+targets): the panel's continuous knobs and the strip's (27, the strip's LEVEL last: R-LFO's
+corrections), and each oscillator's
 CONTINUOUS shape. `Target::id()` is the parameter's ID, `Target::of_id`, `Target::short()` a
 name for MODULATES' ten-character screen, `Target::per_voice()` (false for VOLUME and the
-strip's ENTROPY, WIDTH, INNER, DETUNE and DRIVE: those always take the shared copy, option C,
+strip's ENTROPY, WIDTH, INNER, DETUNE, DRIVE and LEVEL: those always take the shared copy, option C,
 which the hover pop-up marks "shared").
 
 - `lfo::target_of(params, control_param_id) -> Option<Target>` and `lfo::is_lfo_target`: by

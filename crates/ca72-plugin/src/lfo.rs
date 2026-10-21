@@ -68,7 +68,7 @@ pub const VOICES: usize = POLY_VOICES.2;
 
 // ---- What an LFO can modulate.
 
-/// A knob an LFO can modulate: the panel's continuous knobs and the strip's (26), and each
+/// A knob an LFO can modulate: the panel's continuous knobs and the strip's (27), and each
 /// oscillator's WAVEFORM while it is CONTINUOUS (its shape's travel). Its parameter's ID
 /// ([`Target::id`]) is what presets and sessions save.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -102,10 +102,13 @@ pub enum Target {
     Osc1Shape,
     Osc2Shape,
     Osc3Shape,
+    /// The strip's OUTPUT LEVEL (R-LFO's corrections: the owner, 2026-10-20, "and entropy,
+    /// drive, and output"), last, so that no target's index moves.
+    Level,
 }
 
 /// How many targets there are.
-pub const TARGETS: usize = 29;
+pub const TARGETS: usize = 30;
 
 impl Target {
     pub const ALL: [Target; TARGETS] = [
@@ -138,6 +141,7 @@ impl Target {
         Target::Osc1Shape,
         Target::Osc2Shape,
         Target::Osc3Shape,
+        Target::Level,
     ];
 
     /// Its place in [`Target::ALL`].
@@ -178,6 +182,7 @@ impl Target {
             Target::Osc1Shape => "osc1_shape",
             Target::Osc2Shape => "osc2_shape",
             Target::Osc3Shape => "osc3_shape",
+            Target::Level => "level",
         }
     }
 
@@ -218,17 +223,19 @@ impl Target {
             Target::Osc1Shape => "OSC 1 WAVE",
             Target::Osc2Shape => "OSC 2 WAVE",
             Target::Osc3Shape => "OSC 3 WAVE",
+            Target::Level => "LEVEL",
         }
     }
 
     /// Whether each voice has its own (it is on the voice's panel, or FEEDBACK, each voice's
     /// own loop): an LFO with MONO off moves it a voice at a time. The others the voices share
-    /// (MAIN OUTPUT's VOLUME, the strip's ENTROPY, WIDTH, INNER, DETUNE and DRIVE), which take
-    /// the LFO's shared copy whatever MONO is (option C).
+    /// (MAIN OUTPUT's VOLUME, the strip's ENTROPY, WIDTH, INNER, DETUNE, DRIVE and LEVEL), which
+    /// take the LFO's shared copy whatever MONO is (option C).
     pub fn per_voice(self) -> bool {
         !matches!(
             self,
             Target::Volume
+                | Target::Level
                 | Target::Entropy
                 | Target::Spread
                 | Target::Double
@@ -269,6 +276,7 @@ impl Target {
             Target::Osc1Shape => &p.osc1_shape,
             Target::Osc2Shape => &p.osc2_shape,
             Target::Osc3Shape => &p.osc3_shape,
+            Target::Level => &p.level,
         }
     }
 
@@ -319,6 +327,11 @@ impl Target {
                 }
             }
             Target::Drive => c.drive = t * DRIVE_TOP,
+            // (Its dB straight along its travel, as its parameter's range is.)
+            Target::Level => {
+                c.level = crate::engine::LEVEL_RANGE.0
+                    + t * (crate::engine::LEVEL_RANGE.1 - crate::engine::LEVEL_RANGE.0);
+            }
             Target::Feedback => c.feedback = ca72::voice::feedback_law(t),
             _ => self.write_panel(&mut c.panel, t, law),
         }
@@ -351,6 +364,7 @@ impl Target {
             Target::Osc2Shape => p.shape[1].at = shape_snapped(t * SHAPE_PLACES),
             Target::Osc3Shape => p.shape[2].at = shape_snapped(t * SHAPE_PLACES),
             Target::Volume
+            | Target::Level
             | Target::Feedback
             | Target::Entropy
             | Target::Spread
@@ -2399,6 +2413,7 @@ mod tests {
             Target::Osc1Shape => p.shape[0].at,
             Target::Osc2Shape => p.shape[1].at,
             Target::Osc3Shape => p.shape[2].at,
+            Target::Level => c.level,
         }
     }
 

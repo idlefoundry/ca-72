@@ -207,6 +207,150 @@ fn a_depth_is_so_much_of_the_knobs_travel_each_way() {
     }
 }
 
+/// The stereo and output knobs (the owner, 2026-10-20: "make sure the stereo controls can be
+/// controlled by macros and lfos", "and entropy, drive, and output"): WIDTH, INNER and DETUNE
+/// (DOUBLE on), ENTROPY, DRIVE, LEVEL, MAIN OUTPUT VOLUME and FEEDBACK each moved by an LFO at
+/// +25 % exactly as their law takes setting + 0.25 × its output every step, and by a macro at
+/// 100 % and +25 % to setting + 0.25; the shared ones take the LFO's shared copy.
+#[test]
+fn the_stereo_and_output_knobs_take_an_lfo_and_a_macro() {
+    type Of = fn(&Controls) -> f64;
+    let knobs: [(Target, Of); 8] = [
+        (Target::Spread, |c| c.spread),
+        (Target::Inner, |c| c.inner),
+        (Target::Double, |c| c.double),
+        (Target::Entropy, |c| c.entropy),
+        (Target::Drive, |c| c.drive),
+        (Target::Level, |c| c.level),
+        (Target::Volume, |c| c.volume),
+        (Target::Feedback, |c| c.feedback),
+    ];
+    let base = Controls {
+        double: 0.5,
+        ..controls()
+    };
+    let law = base.lfo.law.into();
+    let want = |t: Target, travel: f64, of: Of| {
+        let mut c = base;
+        t.write(&mut c, travel, law);
+        of(&c)
+    };
+    for (t, of) in knobs {
+        assert_eq!(t.per_voice(), t == Target::Feedback, "{t:?}");
+        let c = with(base, 0, sharp(Mode::Free, 0.0, 5.0), t, 0.25, 0.5);
+        let mut e = engine(&c);
+        key(&mut e, 60, true);
+        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+        for _ in 0..(secs(0.25) / lfo::STEP) {
+            run(&mut e, lfo::STEP);
+            let v = e.bank.shared_values[0];
+            let got = of(&e.controls);
+            let w = want(t, 0.5 + 0.25 * v, of);
+            assert!(
+                (got - w).abs() < 1e-9 * w.abs().max(1.0),
+                "{t:?}: {got} {w}"
+            );
+            (lo, hi) = (lo.min(got), hi.max(got));
+        }
+        let (a, b) = (want(t, 0.25, of), want(t, 0.75, of));
+        let span = (b - a).abs();
+        assert!(
+            (lo - a.min(b)).abs() < 0.01 * span && (hi - a.max(b)).abs() < 0.01 * span,
+            "{t:?}: {lo}..{hi}, not {a}..{b}"
+        );
+        let mut c = base;
+        c.lfo.to[lfo::Source::Macro(2).index()][0] = Some(Assignment {
+            target: t,
+            depth: 0.25,
+        });
+        c.lfo.base[t.index()] = 0.5;
+        c.lfo.macros[2] = 1.0;
+        let mut e = engine(&c);
+        key(&mut e, 60, true);
+        run(&mut e, lfo::STEP * 4);
+        let got = of(&e.controls);
+        assert!(
+            (got - b).abs() < 1e-9 * b.abs().max(1.0),
+            "{t:?}: a macro: {got} {b}"
+        );
+    }
+}
+
+/// DRIVE moved by an LFO under AUTO GAIN (R-AUTO-GAIN-DRIVE; agreed with the owner,
+/// 2026-10-20): the correction is the curve in force read at the modulated DRIVE every step, so
+/// the level stays as steady as the curve keeps it at DRIVE's settings, and the curve is not
+/// changed (nothing measures it: only the editor's own DRIVE asks, `editor.rs`). The sound's
+/// curve measured as the plug-in measures it; a held note's level at DRIVE 0 to 24 dB in 3 dB
+/// steps with AUTO GAIN on sets what the curve keeps; an LFO sweeping DRIVE over 0 to 24 dB
+/// keeps every 50 ms within that and half a decibel (the correction's 10 ms glide behind a
+/// moving DRIVE); without AUTO GAIN the same sweep moves the level by several decibels.
+#[test]
+fn an_lfo_sweeping_drive_keeps_auto_gains_level() {
+    let mut sound = controls();
+    sound.lock = true;
+    sound.panel.osc[1].on = false;
+    sound.panel.osc[2].on = false;
+    sound.panel.loudness_contour.sustain = 1.0;
+    let cal = crate::drive::Calibration::default();
+    cal.set_rate(RATE);
+    cal.ask(&Controls {
+        drive: 12.0,
+        ..sound
+    });
+    cal.measure_now();
+    let curve = crate::drive::Curve(cal.saved().db);
+    assert_ne!(curve.0, crate::drive::AVERAGE.0, "its own curve");
+    let db = |y: &[f32]| {
+        let e = y.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / y.len() as f64;
+        10.0 * e.log10()
+    };
+    let held = |c: &Controls| {
+        let mut e = engine(c);
+        e.set_curve(curve);
+        key(&mut e, 45, true);
+        run(&mut e, secs(0.3));
+        e
+    };
+    let at = |drive: f64| {
+        let mut e = held(&Controls { drive, ..sound });
+        db(&run(&mut e, secs(0.4)))
+    };
+    let off = at(0.0);
+    let kept = (1..=8)
+        .map(|k| (at(3.0 * f64::from(k)) - off).abs())
+        .fold(0.0f64, f64::max);
+    let sweep = |auto_gain: bool| {
+        let c = Controls {
+            drive: 12.0,
+            auto_gain,
+            ..sound
+        };
+        // (A triangle from DRIVE 0 to 24 dB and back each 2 s.)
+        let c = with(c, 0, sharp(Mode::Free, 0.0, 0.5), Target::Drive, 0.5, 0.5);
+        let mut e = held(&c);
+        let windows: Vec<f64> = (0..40).map(|_| db(&run(&mut e, secs(0.05)))).collect();
+        assert_eq!(e.curve().0, curve.0, "the curve in force, unchanged");
+        windows
+    };
+    let swept = sweep(true);
+    let worst = swept.iter().map(|w| (w - off).abs()).fold(0.0f64, f64::max);
+    assert!(
+        worst <= kept + 0.5,
+        "swept {worst:.2} dB from DRIVE off, the curve keeps {kept:.2} dB"
+    );
+    let plain = sweep(false);
+    let moved = plain.iter().fold(f64::MIN, |m, w| m.max(*w))
+        - plain.iter().fold(f64::MAX, |m, w| m.min(*w));
+    assert!(
+        moved > 3.0 && moved > 2.0 * worst,
+        "without AUTO GAIN: {moved:.2} dB"
+    );
+    eprintln!(
+        "DRIVE swept 0..24 dB: within {worst:.2} dB of DRIVE off (the curve keeps {kept:.2} dB \
+         at its settings); without AUTO GAIN {moved:.2} dB"
+    );
+}
+
 /// POLARITY UNI (R-LFO's corrections; the owner, 2026-10-20: "yes, bipolar is exactly the right
 /// idea here ... probably a switch would be sufficient"): the LFO runs 0..1, so at +25 % its knob
 /// moves from its setting up to 0.25 above it, at −25 % down to 0.25 below, never the other way;

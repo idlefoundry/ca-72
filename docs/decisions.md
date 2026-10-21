@@ -13176,6 +13176,44 @@ parameters in the table); MIDI Learn's counts; `tests/realtime.rs`'
 `the_lfos_neither_allocate_nor_free` with POLARITY, REVERSE and ON automated too (release: no
 allocation, no free).
 
+**The stereo and output knobs, by LFOs and macros.** The owner: "make sure the stereo controls
+can be controlled by macros and lfos", then "and entropy, drive, and output". Checked, and one
+gap closed:
+- **Reached:** the strip's WIDTH, INNER and DETUNE (its STEREO section), ENTROPY (VOICES) and
+  DRIVE (OUTPUT) were targets, shared ones (option C). With the strip's page showing and the
+  macros in the left area beside it, a macro's cord lands on each; the LFO page lies over the
+  strip, so an LFO reaches them from their right-click menu, which offers every LFO and every
+  macro (a head each). MAIN OUTPUT VOLUME and FEEDBACK are on the panel, so both a macro's cord
+  and an LFO's (from its page) land on them. Their rings are on the knob's own 300 degrees
+  (items 2 and 7 hold for them as for every knob); DETUNE moves the sound only while DOUBLE is
+  on (with SCATTER it does nothing, R45), but takes an assignment either way.
+- **LEVEL was not a target** (an agent's reading: "output" is the strip's OUTPUT section, whose
+  continuous knobs are DRIVE and LEVEL; round 2's list of 26 had left LEVEL out without a
+  reason). It now is: `Target::Level`, last so that no target's index moves, a shared target as
+  VOLUME is, its dB straight along its travel as its parameter's range (−30 to +12 dB). Every
+  target's law test takes it.
+- **Not targets, and why:** VOICES (stepped); the switches (MONO, POLY, UNISON; SCATTER,
+  DOUBLE; EVEN, CENTER; AUTO GAIN's ON; MAIN OUTPUT's ON and A-440); WHERE THE VOICES SOUND and
+  AUTO GAIN's readout (displays); PHONES (a jack). No other continuous control is in the
+  strip's STEREO or OUTPUT sections or the panel's OUTPUT.
+- **DRIVE and AUTO GAIN** (agreed with the owner: never a measurement from modulation, the
+  correction the curve in force at the modulated DRIVE): so already. A measurement is asked
+  only when DRIVE or AUTO GAIN is changed by the editor's own controls (R-AUTO-GAIN-DRIVE); an
+  LFO or a macro never sets DRIVE's parameter, and a macro's knob turned is not DRIVE. The
+  engine works the correction out where it takes its controls (`take`, `auto_trim`), and while
+  anything is assigned those are the modulated ones, each 32-sample step, gliding in 10 ms, so
+  the curve is read at DRIVE where the LFO or macro has it, across its whole range.
+- **Evidence:** the engine's `the_stereo_and_output_knobs_take_an_lfo_and_a_macro` (WIDTH,
+  INNER, DETUNE with DOUBLE on, ENTROPY, DRIVE, LEVEL, VOLUME, FEEDBACK: an LFO at +25 % every
+  step their law at setting + 0.25 × its output, a macro at 100 % at setting + 0.25) and
+  `an_lfo_sweeping_drive_keeps_auto_gains_level` (the sound's curve measured as the plug-in
+  measures it; a held note at DRIVE 0 to 24 dB in 3 dB steps within 0.55 dB of DRIVE off; an
+  LFO sweeping DRIVE over 0 to 24 dB, every 50 ms within 0.83 dB of it, the curve in force
+  unchanged; the same sweep without AUTO GAIN moves 10.4 dB); the editor's
+  `the_stereo_and_output_knobs_take_lfos_and_macros` (the cords and menus above, WIDTH's ring a
+  quarter of 300 degrees at +25 %, and no measurement asked by any of it, nor by a macro on DRIVE
+  turned there).
+
 ## R-LFO-PAGE. The LFO page and drag-to-knob modulation: the panel and the editor
 
 The page, the rings and the drag of R-LFO (whose record has the owner's decisions of 2026-10-20,
@@ -13567,3 +13605,11 @@ source), so colour is never the only cue. Round 2's purple and pink stay in the 
 - **Not tried:** the live editor by hand on any system (no clicks in a real window), real hosts,
   Windows, hearing a macro move a knob, a skin pack's face under the area (only the base looks
   were drawn), the LARGE lettering's dials in the area.
+
+**The V0.3 test build's corrections (2026-10-20; R-LFO's, which see).** A macro's depth is a
+share of its knob's travel as an LFO's is: at +25 % and 100 % it moves its knob up exactly 0.25,
+its one-way ring a quarter of the knob's own sweep (300 degrees on a knob, 199.3 on a CONTINUOUS
+WAVEFORM), the pop-up's dial as far. A macro's cord lands on the strip's WIDTH, INNER, DETUNE,
+ENTROPY, DRIVE and (now a target) LEVEL while the strip's page shows, and the strip knobs' menus
+offer every macro; a macro moving DRIVE is corrected by AUTO GAIN's curve at the DRIVE it gives
+and never asks for a measurement.

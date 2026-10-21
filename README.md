@@ -383,7 +383,7 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   a knob takes several LFOs. The panel's continuous knobs can be modulated, and an oscillator's
   WAVEFORM while CONTINUOUS (not switches, stepped selectors, VOICES, the timed dials, the
   wheels, the drawers' or the LFOs' own knobs). The strip's knobs (ENTROPY, WIDTH, INNER, DETUNE,
-  DRIVE) are under the LFO page, so they take an LFO from their right-click menu instead. A
+  DRIVE, LEVEL) are under the LFO page, so they take an LFO from their right-click menu instead. A
   modulated knob carries a thin ring for each LFO in its colour (the first LFO outermost)
   showing how far it swings either way, its positive end ticked, and while the LFO page shows a
   point where the LFO has it now; the rings show only while the LFO page is open, while you
