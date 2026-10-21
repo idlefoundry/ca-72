@@ -117,6 +117,17 @@ latency when bypassed, as in most hosts. A plug-in that changes its latency whil
 is not followed (DAW-v3's D19 limitation): the new latency applies when it is next loaded
 (a sample-rate change, the next session).
 
+## Tempo
+
+Each block gives the effects the standalone's tempo as the block began, its place in quarter
+notes and the sample rate (`Runner::set_timing`, the helper's slot's `Timing`; DAW-v3's change 5),
+as a host's stopped transport in 4/4: CLAP's `clap_event_transport` (`HAS_TEMPO`,
+`HAS_BEATS_TIMELINE`, `HAS_TIME_SIGNATURE`) and VST3's `ProcessContext` (`kTempoValid`,
+`kProjectTimeMusicValid`, `kBarPositionValid`, `kTimeSigValid`). It is TEMPO, or the tempo an LFO
+or a macro moves it to (decisions.md R-LFO); a pipelined chunk's place is reckoned from its first
+frame. Before, effects had no transport at all. No third-party effect that reads the tempo has
+been tried with it.
+
 ## Sample rate and block size
 
 Effects are loaded at a provisional 48 kHz before an audio device plays (so that a chain

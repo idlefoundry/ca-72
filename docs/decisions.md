@@ -13290,7 +13290,8 @@ the shortest cycle it shapes (20 ms); it is about the audio's own step (32 sampl
   generators are (that tick their settings as set); the last taken away, they run on from where
   the ticks left them.
 - **The scope** draws the waveform as its knobs are set; its orb rides the LFO's output as it
-  is, moved (agent's choice: a moving trace would redraw the screen every frame).
+  is, moved (agent's choice: a moving trace would redraw the screen every frame). Superseded by
+  the owner: "Scope traces as the engine plays them" below.
 
 **Agents:** `ca72_modulation_set`, `_remove` and `ca72_modulations` take the new targets by ID
 or label ("LFO 1 RATE", `lfo2_level`, an LFO's WAVEFORM while CONTINUOUS), list them with their
@@ -13330,6 +13331,131 @@ its own RATE +60 %, RETRIGGER on). Levelled by the strip's LEVEL to about −21 
   voice, against the same with each also on its own RATE and the next one's RATE, PHASE and
   LEVEL; omarchy at load 4 to 8): LO 211.8 against 213.8 ms a second of audio (+1.0 %), HI 901.0
   against 880.6 (within the noise).
+
+### The standalone's TEMPO a target (the owner, 2026-10-20)
+
+**Asked.** The owner: "in standalone mode, lfo or macro should also be able to control the BPM,
+I think." The plug-ins follow their host's tempo: there it is no target.
+
+**The target.** `Target::Tempo` (ID `tempo`, "TEMPO"), last of the targets so that no index
+moves (51 in all); one the voices share (each LFO's shared copy moves it, option C). Its travel is
+TEMPO's own range, 30 to 300 BPM straight along it; a depth is a share of that travel (+25 % moves
+it 67.5 BPM each way), added to TEMPO as set and clamped to the range. Not a host parameter:
+TEMPO is this computer's setting (R-ARP), and its law is an unregistered `FloatParam`
+(`Ca72Params::tempo_knob`) that is never read for its value. Saved with the patch and the
+session as every assignment (`lfo1_to_tempo = 25`).
+
+**On the LFOs' ticks.** TEMPO is moved on the 0.5 ms ticks of R-LFO's addendum, as an LFO's own
+knobs are: each tick's tempo comes from the sources' shared values at the tick before (option B).
+So a timed LFO on TEMPO, whose clock is that tempo's beats, is a loop through its own cycle,
+allowed, bounded (the tempo clamped, the LFO within −1..1) and deterministic. The tempo is in
+force from the first sample at or after its tick's time. The first tick after a source is given
+reads the LFO before its first tick (its start), as an LFO's knobs do.
+
+**Everything the tempo times follows the beats it adds up.** The plug-in's `process` begins each
+block at the tempo of the latest tick; while a source moves TEMPO a run ends at each tick, where
+the arpeggiator (`Arp::retime`), oscillators 2's and 3's clock and the timed LFOs' (`timed::Clock::retime`,
+`Engine::retime`) go on from the beat they had come to, at the new tempo: the arpeggiator's
+place, the block's start re-reckoned so that a sample's beat is still the start's plus its offset.
+Nothing jumps; each sample's beats are the tempo in force over it. A note sounding is held its
+SHORTEST (20 ms) at a tempo raised under it (beats at a faster tempo are fewer seconds; R-ARP's
+floor). REARM's gap before the next note is not kept against a tempo raised within it (it would
+take a tempo doubling within 13 ms).
+
+**The effects.** The standalone's hosted effects had no tempo at all (CLAP's `transport` and
+VST3's `processContext` were null). Now each block gives them the tempo as the block began, its
+place in quarter notes and the rate, as a stopped transport in 4/4 (DAW-v3's change 5: the
+helper's slot carries a `Timing` in what was padding). With a source on TEMPO that is the moving
+tempo, a block's start's. Not tried with a third-party effect that reads the tempo.
+
+**The screen.** The TEMPO screen reads **the moving tempo** (whole beats a minute), the set one
+while it is dragged or typed into (an agent's choice between the two the brief offered, and the
+owner's rule for every screen, next). Its "ring": a screen has no round travel, so its rings are
+**rails** under it in the wood, along its width (30 BPM at its left end, 300 at its right),
+nested downwards (the first source nearest the screen), drawn as a ring is: the swing faint, the
+half its positive peak reaches bright, its end ticked, the point where the source has it now; a
+macro's one way. While a cord is dragged the screen has a dashed box round it, a bright one under
+the plug; dropped, the default 25 %. Hovered, the pop-up stands under the rails, its dials on a
+knob's 300 degrees, and the tip beside the screen ("TEMPO: 120 BPM · LFO 1 +25 %"; above it the
+window has no room); Alt/Option-drag on it edits the last-touched source's depth, a rail's end
+dragged likewise, and its right click is a menu of what moves it (DEPTH…, REMOVE) and the sources
+that can (LFO and MACRO heads, as a strip knob's). In the editor it is a control past the panel's
+(`lfo_page::TEMPO_CONTROL`), so that the cord, rails, pop-up, menus and a typed depth take it as
+they take a knob.
+
+**In a plug-in** (the instance says which it is: `Ca72Params::standalone`, from its host's API
+at initialisation and every block): `lfo::controls` leaves a TEMPO assignment out, so nothing
+runs (the same to the bit as without it), but the patch keeps it, so a standalone's preset brings
+it back where it can play. An LFO whose one assignment is TEMPO reads TEMPO, dim, on MODULATES;
+its tip and the menus add "(STANDALONE ONLY)". MCP: TEMPO is among the targets in the standalone
+alone; in a plug-in `ca72_modulation_set` refuses it ("standalone only") and `ca72_modulations`
+marks one there `inert`.
+
+**Evidence:** `tempo_tests.rs` through `process`: a triangle at 0.5 Hz on TEMPO (52.5 to
+187.5 BPM), a sample a block: every sample's beats the tempo in force, the timed LFO's phase the
+beat's fraction at every sample (within 2e-5), each arpeggiator step on its sixteenth and as
+long as the tempos over it, oscillator 3 timed resetting on the quarters; the same steps in
+blocks of 256 and the same beats at the end within 1e-6; a timed LFO on its own TEMPO for ten
+minutes, the tempo always within 30..300 and still moving, the beats rising, every value finite;
+a plug-in the same to the bit with one as without; a macro's share, clamped at 300. The
+target's IDs, laws, saving and eligibility (`lfo.rs`), presets (`presets.rs`), the agents', the
+editor's (`the_tempo_screen_takes_a_source_and_reads_the_moving_tempo`), and
+`a_moving_tempo_neither_allocates_nor_frees` (release). `preset_render`, 19 presets, 2 s, HI, LO
+and ULTRA against 393588a: every preset the same to the bit.
+
+### Screens reading the modulated value (the owner, 2026-10-20)
+
+**Asked.** The owner, with a picture of DRIVE with an LFO's ring and its dB screen beside it: "if
+we attach a modulator to a parameter with a screen, that screen should represent where the
+modulator currently is based on modulation position. Not the position of the static knob." In the
+picture the screen was dark at DRIVE 0 while the LFO moved DRIVE.
+
+**Which screens.** Every screen whose control is a target: the strip's ENTROPY, WIDTH, DETUNE,
+DRIVE, LEVEL and INNER, AUTO GAIN's (read at DRIVE as it plays, as the engine reads its curve),
+and the standalone's TEMPO screen. (VOICES is no target; the drawers' screens and the LFO page's
+MODULATES read no target's value.)
+
+**What they read.** The value the engine plays by, after glide, modulation and clamping, in the
+screen's own units (the audio thread publishes the controls with the sources' shared moves after
+each block while an editor is open, `Engine::controls_now`, the sleeping instrument's too, R68);
+lit as that value is, so DRIVE's screen lights while an LFO lifts it off 0 (it was lit by the
+knob's value). With nothing on the control, the knob's value as before. While the control is
+turned, scrolled or typed into, its own value, so that the player sees what is set; then the
+moving one again.
+
+**How often.** At most 30 times a second, as the orbs, and only while a source moves one of them;
+a screen is drawn again only when its text or light changes.
+
+**Evidence:** `a_modulated_screen_reads_where_its_source_has_the_control` (DRIVE at 0 dark, then
+lit and following an LFO, read again only after a thirtieth, its own while turned, as set once
+the LFO is taken off; WIDTH, which nothing moves, as set) and the TEMPO screen's test above.
+
+### Scope traces as the engine plays them (the owner, 2026-10-20)
+
+**Asked.** The owner, with a picture of an LFO whose CONTINUOUS WAVEFORM another LFO moved: "same
+sort of thing here. the oscilloscope wave isn't changing to match the actual pattern that's
+happening at the moment. The floating orb however is following the correct path." This
+supersedes the addendum's agent choice that the scope draw the waveform as its knobs are set.
+
+**What is drawn.** While a source moves an LFO's PHASE, its CONTINUOUS shape or its LEVEL, its
+trace is one cycle from PHASE of the waveform as the engine has them in force (its reading
+carries them: `lfo::Reading`'s `shape`, `offset`, `level`, `moved`), at its LEVEL, with its
+POLARITY, REVERSE and ON as set; so the orb, at the LFO's output, rides on the drawn line. An LFO
+whose knobs nothing moves keeps its cached still trace exactly as before (its LEVEL not drawn:
+an LFO with LEVEL set under 100 % and nothing moving it still has its orb under its trace, as
+before).
+
+**Cost.** A moved trace is drawn again whenever what it is drawn from moves, at the orbs' 30
+frames a second at most: kept to 1/256 of its height so that a change under half a pixel draws
+nothing, and drawn by a cheaper glow (`draw_trace_live`: its halo and bloom a few wide strokes
+of falling light, no blurs; its core as the still one's), the bezel and graticule cached as
+before. `examples/frames`, release, omarchy: all four scopes' traces moved every frame, median
+2.4 ms at 0.44 and 5.5 ms at 0.87 (the still glow 2.9 and 9.0 ms); one, 1.0 and 2.8 ms; the
+orbs alone 0.7 and 2.2 ms.
+
+**Evidence:** `a_moved_trace_passes_through_its_orb` (LFO 1 CONTINUOUS, its shape moved by LFO 2
+and its PHASE and LEVEL by LFO 3, SHARP: at every reading the drawn trace at the orb's place
+within a pixel at 0.87 of the orb; the trace as set more than ten pixels off).
 
 ## R-LFO-PAGE. The LFO page and drag-to-knob modulation: the panel and the editor
 

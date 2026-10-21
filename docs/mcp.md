@@ -335,6 +335,12 @@ the strip's LEVEL is `level`), by `ca72_modulation_set {source, target, depth}` 
 Loops are allowed: each LFO reads the others' values from the latest of its ticks, every 0.5 ms
 of audio time.
 
+In the standalone the TEMPO screen is a target as well (`tempo`, "TEMPO"; decisions.md R-LFO): a
+depth a share of TEMPO's 30 to 300 BPM, the arpeggiator, the timed oscillators and LFOs and the
+effects following the moving tempo. A plug-in follows its host's tempo: there `tempo` is not
+among `ca72_modulations`' targets, `ca72_modulation_set` refuses it ("standalone only"), and one
+a standalone's patch brought is kept, listed `inert`.
+
 ### The macros (decisions.md R-MACROS)
 
 The six macros' knobs are parameters; their names and what they move are the patch's, set with

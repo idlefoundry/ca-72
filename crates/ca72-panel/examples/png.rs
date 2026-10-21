@@ -1014,6 +1014,62 @@ fn lfo_overlay(all: &mut ca72_panel::Pixmap, r: &Renderer, scale: f64, values: &
             size: r.text_size(),
         });
     }
+    // (`CA72_TEMPO_RAILS=1`: the standalone's TEMPO screen moved by LFO 1 and a macro, its
+    // rails and pop-up under it: decisions.md R-LFO.)
+    if var("CA72_TEMPO_RAILS").as_deref() == Some("1") {
+        let (x, y, w, h) = ca72_panel::art::tempo_window(r.arrangement().plate_at());
+        let foot = (x + w / 2.0, y + h + ca72_panel::art::TEMPO_SURROUND);
+        let travel = (120.0 - 30.0) / 270.0;
+        let macro_colour = [0xe8, 0x6a, 0x9a];
+        scene.knobs.push(KnobRings {
+            bar: Some(w / 2.0),
+            control: usize::MAX,
+            at: foot,
+            skirt: 0.0,
+            sweep: (-150.0, 150.0),
+            travel,
+            rings: vec![
+                Ring {
+                    colour: colour(0),
+                    depth: 0.25,
+                    point: Some(travel + 0.25 * 0.6),
+                    one_way: false,
+                    dim: false,
+                },
+                Ring {
+                    colour: macro_colour,
+                    depth: -0.2,
+                    point: Some(travel - 0.2 * 0.5),
+                    one_way: true,
+                    dim: false,
+                },
+            ],
+        });
+        scene.popup = Some(Popup {
+            knob: (foot, ca72_panel::modulation::rails_depth(2)),
+            span: 300.0,
+            dials: vec![
+                PopDial {
+                    colour: colour(0),
+                    label: "LFO 1".into(),
+                    depth: 0.25,
+                    shared: false,
+                    uni: false,
+                    muted: false,
+                },
+                PopDial {
+                    colour: macro_colour,
+                    label: "MACRO 1".into(),
+                    depth: -0.2,
+                    shared: false,
+                    uni: true,
+                    muted: false,
+                },
+            ],
+            hover: None,
+            size: r.text_size(),
+        });
+    }
     if scene == ModScene::default() {
         return;
     }
