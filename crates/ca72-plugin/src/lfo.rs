@@ -2966,7 +2966,15 @@ impl LfoParams {
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|t| crate::params::shape_text(0, f64::from(t)))),
+            .with_value_to_string(Arc::new(|t| crate::params::shape_text(0, f64::from(t))))
+            .with_string_to_value(Arc::new(|s| {
+                // Retain the LFO's existing bare numeric travel (0..1); named waveform
+                // displays and explicitly suffixed duties use the shared inverse.
+                match s.trim().parse::<f32>() {
+                    Ok(v) => (v.is_finite() && (0.0..=1.0).contains(&v)).then_some(v),
+                    Err(_) => crate::params::parse_shape_text(0, s),
+                }
+            })),
             // (Its travel nearly logarithmic: about 1.6 Hz at its middle.)
             rate: FloatParam::new(name("Rate"), DEFAULT_RATE, RATE_RANGE)
                 .with_unit(" Hz")
@@ -3082,14 +3090,16 @@ pub fn sound_params(p: &Ca72Params, n: usize) -> [&dyn crate::presets::SoundPara
     ]
 }
 
-/// RATE as the host shows it: Hz to two figures under 1 Hz, else to a tenth or whole.
+/// RATE before the host appends its Hz unit: two figures under 1 Hz, else a tenth or whole.
 pub fn rate_text(hz: f32) -> String {
-    if hz < 1.0 {
-        format!("{hz:.2} Hz")
-    } else if hz < 10.0 {
-        format!("{hz:.1} Hz")
+    // Choose precision after rounding across a tier boundary. Otherwise a displayed
+    // "10" can parse as 9.999999 after host normalization and redisplay as "10.0".
+    if hz < 0.995 {
+        format!("{hz:.2}")
+    } else if hz < 9.95 {
+        format!("{hz:.1}")
     } else {
-        format!("{hz:.0} Hz")
+        format!("{hz:.0}")
     }
 }
 

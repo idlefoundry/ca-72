@@ -14602,3 +14602,22 @@ No larger stack allowance, ignored guard, installed plug-in or open audio device
 The Linux CI installer-identity fixture also needed the newly required `ca72-mcp` binary in
 its synthetic payload. Supplying both executable fixtures restores all three checks; the
 installer's required-payload check remains intact.
+
+
+## R-HOST-PARAM-TEXT. Round-trip waveform labels and LFO rate displays
+
+2026-10-21: the completed macOS CI run for PR #135 failed CLAP `param-conversions` on the
+expanded 0.3 parameter set. Oscillator continuous shapes lacked blend/rectangle-label
+parsing, LFO shapes lacked any display inverse, and LFO RATE appended Hz twice. Near rate
+formatting boundaries, normal host float conversion could also turn displayed "10" into
+"10.0" after parsing.
+
+Use a shared waveform display inverse with finite percent bounds and oscillator-specific
+names. Preserve oscillator numeric duty units and LFO bare numeric 0..1 travel. Rounded
+blend endpoints/rectangle aliases choose a representative within the shown precision so
+the original label remains stable. LFO rate precision accounts for rounding across tiers;
+the parameter appends its Hz unit once. No defaults, stored values or audio paths change.
+A real-CLAP regression fails on the prior implementation, then checks all host parameters
+and 10,001 values per shape; the official script-pinned conversion validator passes locally.
+An independent dense shape sweep also passes. This fixes host-typed controls as well as the
+validation gate; no validator is disabled or weakened.

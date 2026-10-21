@@ -341,14 +341,14 @@ failing preservation. The control reproduces the corrected preset replay hash ex
 The tool displays separate upper-band/peak evidence and preservation verdicts, and chooses
 no automatic winner. Both accepted accordion presets and the accepted flute remain intact.
 
-Durable local evidence is under `acoustic-matches/native-experiments-v3`: production
+Durable local evidence is under `acoustic-matches/native-experiments-v4`: production
 requests/results, complete experiment manifests, exact snapshots, region metrics, common-level
 HTML auditions and the flute's export/reload check. All candidate auditions share the batch's
 recorded listening gain/headroom cap after level matching; measurement normalization is
 separate. No hidden EQ, alignment, denoising or effects are applied.
 
 Checks for the implementation: 21 analysis tests, 572 plug-in library tests (28 existing
-ignored), six production stdio audio tests, 13 CLAP host tests (one existing manual stress
+ignored), six production stdio audio tests, 14 CLAP host tests (one existing manual stress
 test ignored), default/all-feature workspace/all-target Clippy with warnings denied,
 formatting, skill validation and all three Linux installer-identity checks pass locally.
 Synthetic checks include calibrated shallow AM/FM, strong-FM ambiguity, unsupported pitch
@@ -358,7 +358,21 @@ peak check is a conservative heuristic, not a universal carrier estimator; stron
 hide a sideband. Requested unresolved measurements cannot pass.
 
 Windows MSVC 1.97.1 reproduces the original 256 KB CLAP lifecycle stack overflow and passes
-the unchanged guard with only `Ca72.engine` moved to a box. All 13 CLAP host tests also pass
+the unchanged guard with only `Ca72.engine` moved to a box. All 14 CLAP host tests and all six production MCP audio tests pass
 with `standalone-production`. This is a source-built test host without a GUI/audio device;
 it is not a claim of installed-DAW qualification. The normal three-OS PR checks remain the
 merge gate. No tag/release, personal-library installation or video upload is part of this work.
+
+
+The previous CI run's macOS CLAP validator also exposed incomplete 0.3 parameter-text
+conversion: continuous waveform blends/named rectangle duties could not be typed back,
+LFO RATE printed its Hz unit twice, and rate precision changed after parsing near 1/10 Hz.
+The oscillator/LFO text inverse now accepts its displayed labels while retaining oscillator
+numeric duty-percent and LFO bare numeric travel units. Rounded labels select a representative
+within their display precision. Rate units are appended once and precision is stable across
+rounded tier boundaries. No parameter defaults, values, formatter waveform labels or audio
+processing change. The new real-CLAP regression checks every parameter's display roundtrip,
+with 10,001 samples per shape parameter, plus numeric LFO compatibility/nonfinite refusal.
+The script-pinned official CLAP validator's `param-conversions` check passes against a fresh
+source-built debug library; full platform validators remain in CI. An independent 100,001-
+sample sweep per shape parameter covered all 352 canonical labels with stable roundtrips.

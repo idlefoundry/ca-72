@@ -271,6 +271,62 @@ pub fn travel_at_duty(d: f64) -> f64 {
     0.5 * (lo + hi) / SHAPE_PLACES
 }
 
+/// Inverse of the waveform's displayed names, blends and rectangle duties. Shared by
+/// oscillator and LFO host parameters; numeric input retains its existing duty-percent units.
+pub(crate) fn parse_shape_text(n: usize, text: &str) -> Option<f32> {
+    let s = text.trim().to_ascii_lowercase();
+    let names = shape_names(n).map(str::to_ascii_lowercase);
+    let places = ca72::voice::SHAPE_PLACES;
+    // Rounded blend endpoints and rectangle duties may coincide with a named place.
+    // Pick a representative inside that display bin so text -> value -> text is stable.
+    let displayed = |guess: f64| {
+        [0.0, 0.002, -0.002, 0.004, -0.004]
+            .into_iter()
+            .map(|offset| (guess + offset / places).clamp(0.0, 1.0) as f32)
+            .find(|v| shape_text(n, f64::from(*v)).eq_ignore_ascii_case(&s))
+            .unwrap_or(guess as f32)
+    };
+    let percent = |text: &str| {
+        text.trim_end_matches('%')
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && (0.0..=100.0).contains(v))
+    };
+    if let Some(k) = names.iter().position(|name| *name == s) {
+        return Some((k as f64 / places) as f32);
+    }
+    for k in 0..3 {
+        let prefix = format!("{} to {} ", names[k], names[k + 1]);
+        if let Some(share) = s.strip_prefix(&prefix) {
+            return percent(share).map(|v| displayed((k as f64 + v / 100.0) / places));
+        }
+    }
+    for (name, at) in [("wide rectangle", 4.0), ("narrow rectangle", 5.0)] {
+        if s == name {
+            return Some((at / places) as f32);
+        }
+    }
+    for (name, at) in [
+        ("square ", 3.0),
+        ("wide rectangle ", 4.0),
+        ("narrow rectangle ", 5.0),
+        ("rectangle ", 3.0),
+    ] {
+        if let Some(duty) = s.strip_prefix(name) {
+            return percent(duty).map(|v| {
+                let named = (at / places) as f32;
+                if shape_text(n, f64::from(named)).eq_ignore_ascii_case(&s) {
+                    named
+                } else {
+                    displayed(travel_at_duty(v / 100.0))
+                }
+            });
+        }
+    }
+    percent(&s).map(|v| travel_at_duty(v / 100.0) as f32)
+}
+
 /// Oscillator `n`'s CONTINUOUS shape: its travel, 0 (TRIANGLE) to 1 (the narrowest pulse), at
 /// SAWTOOTH to begin with, as WAVEFORM is; shown by [`shape_text`]; a place's name, or a duty
 /// cycle ("30 %"), typed.
@@ -282,17 +338,7 @@ fn shape_param(name: &str, n: usize) -> FloatParam {
         FloatRange::Linear { min: 0.0, max: 1.0 },
     )
     .with_value_to_string(std::sync::Arc::new(move |t| shape_text(n, f64::from(t))))
-    .with_string_to_value(std::sync::Arc::new(move |s| {
-        let s = s.trim();
-        if let Some(k) = shape_names(n)
-            .iter()
-            .position(|name| name.eq_ignore_ascii_case(s))
-        {
-            return Some((k as f64 / places) as f32);
-        }
-        let pct: f64 = s.trim_end_matches('%').trim().parse().ok()?;
-        Some(travel_at_duty(pct / 100.0) as f32)
-    }))
+    .with_string_to_value(std::sync::Arc::new(move |s| parse_shape_text(n, s)))
 }
 
 /// FILTER MODE, which the original does not have (decisions.md R46): LO, the filter as

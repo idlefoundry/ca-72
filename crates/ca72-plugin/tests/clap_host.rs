@@ -27,8 +27,8 @@ use clap_sys::events::{
     clap_input_events, clap_output_events,
 };
 use clap_sys::ext::params::{
-    CLAP_EXT_PARAMS, clap_host_params, clap_param_clear_flags, clap_param_rescan_flags,
-    clap_plugin_params,
+    CLAP_EXT_PARAMS, clap_host_params, clap_param_clear_flags, clap_param_info,
+    clap_param_rescan_flags, clap_plugin_params,
 };
 use clap_sys::ext::render::{CLAP_EXT_RENDER, CLAP_RENDER_OFFLINE, clap_plugin_render};
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_plugin_state};
@@ -1204,6 +1204,88 @@ fn clap_brightness_rests_where_the_computers_setting_says() {
             "{word}:\n{told}\n{}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+}
+
+/// Host display text must remain stable after typing it back, including waveform blends,
+/// rectangle duties and LFO rate units. Rounded displays need not preserve the original value.
+#[test]
+fn every_parameter_display_roundtrips_through_the_host_api() {
+    let p = Instance::with_rate_block(RATE, BLOCK);
+    let params: &clap_plugin_params = p.extension(CLAP_EXT_PARAMS);
+    // SAFETY: the instance and CLAP output buffers live through every call; zero is valid
+    // initial storage for clap_param_info's scalar fields, pointers and character arrays.
+    unsafe {
+        for index in 0..(params.count.unwrap())(p.plugin) {
+            let mut info: clap_param_info = std::mem::zeroed();
+            assert!((params.get_info.unwrap())(p.plugin, index, &mut info));
+            let name = CStr::from_ptr(info.name.as_ptr());
+            // Dense sampling includes rounded 0%/100% blends and rectangle aliases.
+            let steps = if name.to_bytes().ends_with(b" Shape") {
+                10_000
+            } else {
+                100
+            };
+            if name.to_bytes().starts_with(b"LFO ") && name.to_bytes().ends_with(b" Shape") {
+                let mut travel = f64::NAN;
+                assert!((params.text_to_value.unwrap())(
+                    p.plugin,
+                    info.id,
+                    c"0.25".as_ptr(),
+                    &mut travel
+                ));
+                assert_eq!(travel, 0.25, "bare LFO shape numbers retain travel units");
+                assert!(!(params.text_to_value.unwrap())(
+                    p.plugin,
+                    info.id,
+                    c"NaN".as_ptr(),
+                    &mut travel
+                ));
+            }
+            for step in 0..=steps {
+                let value = info.min_value
+                    + (info.max_value - info.min_value) * f64::from(step) / f64::from(steps);
+                let mut text = [0 as c_char; 256];
+                let mut again = [0 as c_char; 256];
+                let mut back = f64::NAN;
+                let mut last = f64::NAN;
+                assert!((params.value_to_text.unwrap())(
+                    p.plugin,
+                    info.id,
+                    value,
+                    text.as_mut_ptr(),
+                    text.len() as u32
+                ));
+                let shown = CStr::from_ptr(text.as_ptr());
+                assert!(
+                    (params.text_to_value.unwrap())(p.plugin, info.id, text.as_ptr(), &mut back),
+                    "{name:?} {value}: {shown:?}"
+                );
+                assert!(
+                    back.is_finite() && (info.min_value..=info.max_value).contains(&back),
+                    "{name:?} {shown:?} -> {back}"
+                );
+                assert!((params.value_to_text.unwrap())(
+                    p.plugin,
+                    info.id,
+                    back,
+                    again.as_mut_ptr(),
+                    again.len() as u32
+                ));
+                assert_eq!(
+                    shown,
+                    CStr::from_ptr(again.as_ptr()),
+                    "{name:?} {value} -> {back}"
+                );
+                assert!((params.text_to_value.unwrap())(
+                    p.plugin,
+                    info.id,
+                    again.as_ptr(),
+                    &mut last
+                ));
+                assert_eq!(back, last, "{name:?} {shown:?}");
+            }
+        }
     }
 }
 
