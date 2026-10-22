@@ -102,6 +102,29 @@ fn the_voice_does_not_allocate_while_it_plays() {
             timed: [None; 3],
         });
     }
+    // First-use fixed selector and continuously modulated pulse widths use only
+    // constructor-prepared reductions in all circuit quality paths.
+    for q in [
+        Quality::NoCompromises,
+        Quality::HighFidelity,
+        Quality::Potato,
+    ] {
+        v.panel.quality = q;
+        for i in 0..4800 {
+            for n in 0..3 {
+                v.panel.osc[n].waveform = match (i / 400 + n) % 3 {
+                    0 => ca72::voice::Waveform::Square,
+                    1 => ca72::voice::Waveform::WideRectangle,
+                    _ => ca72::voice::Waveform::NarrowRectangle,
+                };
+                v.panel.shape[n].continuous = i % 1200 >= 600;
+                v.panel.shape[n].at = 3.0 + 2.4 * (0.5 + 0.5 * (i as f64 * 0.001 + n as f64).sin());
+                v.panel.shape[n].modulated = i % 2 == 0;
+            }
+            v.panel.mod_wheel = 0.8;
+            v.tick();
+        }
+    }
     // HI's filter stays oversampled as EMPHASIS crosses the regeneration region.
     v.panel.quality = Quality::Potato;
     for i in 0..4800 {
