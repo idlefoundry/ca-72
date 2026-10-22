@@ -12,7 +12,7 @@ pub enum PulseProfile {
     Factory,
     ReferenceStandard,
 }
-pub const ACTIVE_PROFILE: PulseProfile = PulseProfile::Factory;
+pub const ACTIVE_PROFILE: PulseProfile = PulseProfile::ReferenceStandard;
 pub const ACTIVE_PROFILE_ID: &str = match ACTIVE_PROFILE {
     PulseProfile::Factory => "factory-drawn-pulse",
     PulseProfile::ReferenceStandard => "provisional-modeld-standard-pulse-374k-41k2",
