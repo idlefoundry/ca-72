@@ -1060,7 +1060,8 @@ pub(crate) fn key_light(bar: &BarScene, t: BarTarget) -> KeyLight {
     let lit = |on: bool| if on { KeyLight::Lit } else { KeyLight::Off };
     let affecting = match t {
         BarTarget::Panel => return lit(bar.panel),
-        BarTarget::Keyboard => return lit(bar.keyboard),
+        BarTarget::Global => return lit(bar.panel && !bar.keyboard && !bar.lfo_page),
+        BarTarget::Keyboard => return lit(bar.panel && bar.keyboard),
         BarTarget::Arp => bar.arp,
         BarTarget::Fx => bar.fx,
         BarTarget::Mpe => bar.mpe,
@@ -1090,8 +1091,11 @@ pub(super) fn svg_over(options: &usvg::Options<'_>, frame: &mut Pixmap, scale: f
     }
 }
 
-/// The keys' marks: the previous and next arrows, SAVE, the settings' gear (the star is drawn
-/// as the preset is).
+/// The largest whole-unit size giving GLOBAL at least PANEL's former side clearance at 20
+/// units (R-GLOBAL-KEY); shared by every worded key.
+const KEY_TEXT: f64 = 15.0;
+
+/// The keys' marks (the star is drawn as the preset is).
 fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
     let y = super::RAIL_Y - PANEL_H;
     for &(x, _, t) in rail.keys() {
@@ -1111,17 +1115,19 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
             }
             BarTarget::Save
             | BarTarget::Panel
+            | BarTarget::Global
             | BarTarget::Arp
             | BarTarget::Fx
             | BarTarget::Mpe
             | BarTarget::Lfo
             | BarTarget::Macro => put!(
                 o,
-                "<text x='{}' y='{}' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{print}'>{}</text>",
+                "<text x='{}' y='{}' font-size='{KEY_TEXT}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{print}'>{}</text>",
                 N(x),
                 N(y),
                 match t {
                     BarTarget::Panel => "PANEL",
+                    BarTarget::Global => "GLOBAL",
                     BarTarget::Arp => "ARP",
                     BarTarget::Fx => "FX",
                     BarTarget::Mpe => "MPE",
@@ -1963,6 +1969,25 @@ mod tests {
     use resvg::tiny_skia::{Color, Paint, Rect};
 
     use super::*;
+
+    #[test]
+    fn global_fits_with_the_panels_former_side_clearance() {
+        use crate::fonts::Weight;
+        let fonts = Fonts::new();
+        let width = |word, size| fonts.advance(word, size, Weight::Bold, 0.0);
+        let available = width("PANEL", 20.0);
+        assert!(width("GLOBAL", KEY_TEXT) <= available);
+        assert!(width("GLOBAL", KEY_TEXT + 1.0) > available);
+        for word in [
+            "SAVE", "PANEL", "GLOBAL", "ARP", "FX", "MPE", "LFO", "MACRO",
+        ] {
+            assert!(width(word, KEY_TEXT) <= available, "{word}");
+        }
+        println!(
+            "PANEL at 20: {available}; GLOBAL at {KEY_TEXT}: {}",
+            width("GLOBAL", KEY_TEXT)
+        );
+    }
 
     /// The drops move on each time the caller's clock does, 30 ms apart as well as 45 (the
     /// editor's ticks on baseview's 15 ms frames: at a thirtieth of a second at the least they

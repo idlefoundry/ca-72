@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use ca72_panel::controls::{Place as ControlPlace, lfo_index};
 use ca72_panel::modulation::{self as mods, Cord, KnobRings, ModScene, PopDial, Popup, Ring};
+use ca72_panel::presets::BarTarget;
 use ca72_panel::strip::lfo::{self as lfo_ui, Column, LfoScene, LfoTarget, TRACE_POINTS};
 use ca72_panel::{CONTROLS, Target, art, interact};
 use keyboard_types::Modifiers;
@@ -397,28 +398,49 @@ impl Editing {
         self.playing.visible && !self.modulating.open
     }
 
-    /// The rail's LFO key: the page shown, or (lit) put away for the page under it; the lower
-    /// part shown first if it is not, the presets' drawer put away for it.
-    pub(super) fn toggle_lfo_page(&mut self) {
+    /// The remembered lower page, also while PANEL hides it (R-GLOBAL-KEY).
+    pub(super) fn lower_page(&self) -> BarTarget {
+        if self.modulating.open {
+            BarTarget::Lfo
+        } else if self.playing.visible {
+            BarTarget::Keyboard
+        } else {
+            BarTarget::Global
+        }
+    }
+
+    /// The three lower page keys select one page; the lit key leaves it alone. PANEL off:
+    /// show the lower part first. Keep the keyboard's saved preference and the LFO page's
+    /// editor-local memory, the pointer's release and the drawers over the page as before.
+    pub(super) fn show_lower_page(&mut self, page: BarTarget) {
+        if self.expanded() && self.lower_page() == page {
+            return;
+        }
+        if page == BarTarget::Lfo && self.browser.open {
+            self.browser.show(false, &self.params);
+            self.follow_drawer();
+        }
+        // Closing presets can put away a temporarily revealed lower panel too.
         if !self.expanded() {
             self.toggle_panel();
             if !self.expanded() {
                 return;
             }
+        }
+        if page == BarTarget::Lfo {
             self.modulating.open = true;
-        } else if self.browser.open {
-            self.browser.show(false, &self.params);
-            self.follow_drawer();
-            self.modulating.open = true;
+            self.typing = None;
+            self.modulating.hover = None;
+            self.modulating.popup = None;
         } else {
-            self.modulating.open = !self.modulating.open;
+            self.playing.visible = page == BarTarget::Keyboard;
+            self.modulating.open = false;
+            self.keep_settings(Change::Keyboard(self.playing.visible));
         }
         self.playing.release_pointer();
-        self.typing = None;
+        self.playing.wants_keys = self.playing.holds_keys();
         self.hover = None;
         self.strip_scene.hover = None;
-        self.modulating.hover = None;
-        self.modulating.popup = None;
         self.composed = None;
     }
 

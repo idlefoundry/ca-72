@@ -123,8 +123,11 @@ reopens the current release's highlights.
 
 ## Playing it
 
-The keyboard button beside SAVE and settings switches the lower panel between
-VOICES/STEREO/OUTPUT and a playable 44-key keyboard. The wheels, GLIDE and DECAY
+The rail's **GLOBAL**, **keyboard** (piano icon) and **LFO** keys select the three
+lower pages. GLOBAL holds VOICES, STEREO and OUTPUT; keyboard shows a playable
+44-key piano. The selected key is lit; pressing it again leaves the page showing.
+Any of the three shows the lower panel if hidden; **PANEL** shows or hides the
+whole lower area and restores its selected page. The wheels, GLIDE and DECAY
 remain visible. Click a key or drag between keys to play; the octave buttons move
 the visible range. In standalone, TYPING enables a piano layout on your computer keyboard: `A S D F G`
 play `C D E F G`, with `W E T Y U` on the black notes. The full chromatic order is
@@ -365,7 +368,8 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   never sends timbre is always at rest.
 - **LFOs** (from 0.3.0; none assigned in any preset or project saved before it, which sound as
   they did): the rail's **LFO** key, right after the keyboard's, shows the LFO page in the
-  keyboard's place (the wheels stay at its left); pressed again, it puts it away. Four LFOs
+  keyboard's place (the wheels stay at its left). Choose **GLOBAL** or the keyboard's key
+  to leave it; pressing the lit **LFO** key leaves it showing. Four LFOs
   side by side, each with:
   - its **scope**, in its own phosphor colour (LFO 1 amber, LFO 2 green, LFO 3 blue, LFO 4 red
     at first): one cycle of its waveform from PHASE, and an orb where the LFO is in it now, at its

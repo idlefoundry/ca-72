@@ -821,6 +821,7 @@ impl Browser {
             // (The editor's: its menu.)
             BarTarget::Settings
             | BarTarget::Panel
+            | BarTarget::Global
             | BarTarget::Keyboard
             | BarTarget::Arp
             | BarTarget::Fx
