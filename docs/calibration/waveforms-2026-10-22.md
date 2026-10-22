@@ -105,3 +105,62 @@ the NAS checkpoint without mismatches. The installed app and capture application
 unchanged. Hardware source validation currently covers OSC1; other physical oscillators,
 additional levels and notes remain outside this calibration's demonstrated coverage.
 No listening or blind equivalence has been accepted.
+
+## Final isolated candidate: 9135818
+
+The corrected candidate is source commit `9135818943026c9028e92a2466c85ffa81fe3742`,
+engine source fingerprint `353eacb47379e7d5561fd16e9f45b2b02f01e32eb9719997c3d3f35eedd42f72`.
+Its independent read-only executables, source archive and manifest are under the session's
+`calibration-waveforms/combined-builds/9135818/`, with a verified NAS copy. The original
+prepared build and running apps remain unchanged. The first combined candidate and its
+local pages remain archived under their original identity.
+
+The LO shape reference now derives both extrema from the finite-knee source polynomial at
+compile time. The original greater-than-0.97 travel gate passes without relaxation. The
+hybrid harmonic and waveform-text fixtures follow the calibrated circuit, retaining their
+original tolerances. All factory DRIVE Auto Gain curves were regenerated with the existing
+measurement harness: 15 HI and 10 LO arrays change, while every preset control, level and
+other field remains byte-identical after removing those curve lines. Largest curve changes
+are Feedback Funk at DRIVE 18 dB: HI -0.384 dB and LO +0.216 dB. The fallback `drive::AVERAGE`
+remains unchanged under R55/R63; saved user curves and presets are not rewritten.
+
+All six fixed-waveform raw renders remain byte-identical to the first combined candidate.
+Each final snapshot was also exported through MCP to a new normal preset file and reloaded:
+all six complete snapshots match with zero excluded fields, and each full 30-second WAV is
+byte-identical. The 18 levelled/cropped PCM24 auditions independently reconstruct exactly.
+
+The final factory audit retains two distinct methods. The repository's four-second,
+ten-voice control-patch harness uses the fallback gain curve and overrides polyphony,
+voice count and DOUBLE; it does not load each preset's saved curve. Its 57 final renders
+are byte-identical to the first candidate's. A separate native MCP audit loads all 19 named
+factory presets in each quality, including the correct saved curve and each preset's own
+polyphony/voice/DOUBLE settings. All 114 before/after one-second A3 renders pass source and
+curve checks; snapshot differences are limited to engine identity and the verified curve.
+The same 600 ms gate, 48 kHz, seed 72 and tempo are used before and after. This short probe
+does not establish full-tail or musical acceptance.
+
+The loaded-preset probe's maximum whole-clip level change is +0.243 dB (Tenor Pluck LO).
+Its largest supported band change is Smoke Flute LO near 794 Hz: -10.09 dB, from about
+32.20 to 42.32 dB below each render's strongest band. Those results must not be substituted
+for the different four-second chord protocol. Both reports and their limits are linked on
+the local page. No preset was re-levelled.
+
+Final validation at the exact candidate commit: formatting and Clippy with and without all
+features pass; macOS plug-in library tests pass 581/0 with 26 existing manual ignores.
+The complete three-crate Linux DEBUG batch passes 833/0 with 87 existing manual ignores:
+core 110, lab 56 and plug-in 667. Three macOS-only empty Linux harnesses are N/A and are not
+counted as passes. ngspice 47 checks run fail-closed under the shared resource guards.
+Independent review rechecked source integration, both fixture changes, the LO normalizer,
+regenerated data, snapshots, audio reconstruction and preset audit calculations. The original
+hybrid harmonic, shape-travel and alias budgets are retained. The source-dependent pulse-floor
+expectation follows the corrected physical divider rather than the old ideal-source estimate.
+Ignored timing/performance and real-device checks
+are not implied by these software results.
+
+The candidate is ready for identified listening review at
+`http://127.0.0.1:53383/waveforms/combined-candidate/`. Remaining harmonic differences,
+the small hybrid regression, Square H27 excess and excluded Wide duty residual stay
+explicit. Background-noise parity is still required before a blind test. More same-rig
+simultaneous MIX/MAIN measurements would help distinguish source and downstream causes
+before introducing further component changes. No additional hardware recording is made
+without the owner's cue. This stage performs no installation, public deployment or merge.
