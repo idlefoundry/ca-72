@@ -14621,3 +14621,14 @@ A real-CLAP regression fails on the prior implementation, then checks all host p
 and 10,001 values per shape; the official script-pinned conversion validator passes locally.
 An independent dense shape sweep also passes. This fixes host-typed controls as well as the
 validation gate; no validator is disabled or weakened.
+
+## R-FACTORY-CATEGORY — Study the bundled presets on their own
+
+The preset list offers ALL, FACTORY, MINE and FAVORITES, in that order. FACTORY
+selects entries whose existing provenance is Factory; saved replacements (Edited)
+and user presets stay in MINE. Retagging or favoriting a factory entry does not
+change its provenance. Reverting a replacement restores its factory membership.
+Search and tag filters continue to apply in every category; FAVORITES continues
+to include starred presets of every origin. Category changes reset scrolling and
+keep the current sound, search and tags. The existing skin-controlled tab drawing
+and hit testing also draw and select the new category.

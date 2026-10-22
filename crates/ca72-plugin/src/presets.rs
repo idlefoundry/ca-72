@@ -493,6 +493,9 @@ impl Browser {
             self.drawer.favourites,
             self.drawer.mine,
         );
+        if self.drawer.factory {
+            self.list.retain(|e| e.origin == Origin::Factory);
+        }
         if let Ok(mut names) = p.midi_map.preset_list.lock() {
             *names = Some(self.list.iter().map(|e| e.sound.name.clone()).collect());
         }
@@ -1094,8 +1097,9 @@ impl Browser {
                 self.wants_keys = true;
             }
             DrawerTarget::Tab(t) => {
+                self.drawer.factory = t == Tab::Factory;
                 (self.drawer.favourites, self.drawer.mine) = match t {
-                    Tab::All => (false, false),
+                    Tab::All | Tab::Factory => (false, false),
                     Tab::Favourites => (true, false),
                     Tab::Mine => (false, true),
                 };
@@ -1759,6 +1763,74 @@ mod tests {
 
     fn rows(b: &Browser) -> Vec<&str> {
         b.drawer.rows.iter().map(|r| r.name.as_str()).collect()
+    }
+
+    #[test]
+    fn factory_category_uses_provenance_and_preserves_filters_and_navigation() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        lib.save("My Bass", vec![], None).unwrap();
+        lib.save("Singing Drift", vec![], None).unwrap();
+        lib.favorite("My Bass", true).unwrap();
+        lib.favorite("Singing Drift", true).unwrap();
+        lib.favorite("Felt Bass", true).unwrap();
+        lib.tag("Felt Bass", vec!["study".into()]).unwrap();
+        let p = Ca72Params::default();
+        let setter = ParamSetter::new(&Host);
+        let mut b = Browser::new(lib);
+        b.show(true, &p);
+        let all = b.list.clone();
+        let select = |b: &mut Browser, tab| {
+            b.drawer.first = 100;
+            b.drawer_press(DrawerTarget::Tab(tab), 0.0, &p, &setter);
+            assert_eq!(b.drawer.first, 0);
+            assert_eq!(ca72_panel::presets::tab_of(&b.drawer), tab);
+            let names: Vec<_> = b.list.iter().map(|e| e.sound.name.clone()).collect();
+            assert_eq!(*p.midi_map.preset_list.lock().unwrap(), Some(names));
+        };
+        select(&mut b, Tab::Factory);
+        assert!(!b.list.is_empty());
+        assert!(b.list.iter().all(|e| e.origin == Origin::Factory));
+        assert_eq!(b.list.len(), all.len() - 2);
+        assert!(!rows(&b).contains(&"Singing Drift"));
+        assert!(rows(&b).contains(&"Felt Bass"));
+        Browser::set_current(&p, "My Bass");
+        for _ in 0..=b.list.len() {
+            b.step(1, &p, &setter);
+            assert!(b.list.iter().any(|e| e.sound.name == Browser::current(&p)));
+        }
+        b.step(-1, &p, &setter);
+        assert_eq!(Browser::current(&p), b.list.last().unwrap().sound.name);
+        b.drawer.search = Field::new("felt");
+        b.refilter(&p);
+        assert_eq!(rows(&b), ["Felt Bass"]);
+        b.drawer.chips = vec![("study".into(), true)];
+        select(&mut b, Tab::Mine);
+        assert!(b.list.is_empty());
+        select(&mut b, Tab::Factory);
+        assert_eq!(rows(&b), ["Felt Bass"]);
+        b.drawer.search = Field::new("no such preset xyz");
+        b.refilter(&p);
+        assert!(b.list.is_empty() && b.drawer.rows.is_empty());
+        assert_eq!(*p.midi_map.preset_list.lock().unwrap(), Some(vec![]));
+        let current = Browser::current(&p);
+        b.step(1, &p, &setter);
+        assert_eq!(Browser::current(&p), current);
+        b.drawer.search = Field::default();
+        b.drawer.chips.clear();
+        select(&mut b, Tab::Mine);
+        assert_eq!(rows(&b), ["My Bass", "Singing Drift"]);
+        select(&mut b, Tab::Favourites);
+        assert_eq!(rows(&b), ["Felt Bass", "My Bass", "Singing Drift"]);
+        b.drawer_press(DrawerTarget::Star(0), 0.0, &p, &setter);
+        assert_eq!(rows(&b), ["My Bass", "Singing Drift"]);
+        select(&mut b, Tab::Factory);
+        assert!(rows(&b).contains(&"Felt Bass"));
+        b.library.revert("Singing Drift").unwrap();
+        b.reread(&p);
+        assert!(rows(&b).contains(&"Singing Drift"));
+        select(&mut b, Tab::All);
+        assert_eq!(b.list.len(), all.len());
     }
 
     /// MIDI BEND RANGE is the player's: no factory preset names it, a preset saved does not,
