@@ -84,3 +84,20 @@ pass merely for matching level, pitch, knob marks or one harmonic statistic.
 The captured reference is oscillator1; oscillators2/3, other source levels and more notes
 need further physical validation. Current graphs and listening candidates remain reviewable
 experiments, with listening, weak-partial and upper-band differences retained.
+
+## Whole-voice hybrid regression fixture
+
+The original LO fifth-harmonic unit test retained −27.6dBc from the circuit model measured
+in commit434dbb29, before this reference calibration. At its unchanged panel (MIDI33,
+oscillator1 hybrid volume2, open filter, no contour/tracking, loudness sustain maximum),
+48kHz with0.5s settling and1s Hann measurement, the old circuit at POTATO gives−27.564dBc;
+the calibrated circuit gives−27.103dBc. LO changes from−27.707 to−26.455dBc. Its current
+0.648dB error remains within the original1dB budget, though larger than before. The test
+now measures the current circuit voice at that same quality and compares directly, keeping
+the original1dB tolerance. This test adjustment changes no runtime model or coefficients.
+
+An independent55Hz full-board ngspice check with the calibrated physical R030/R031 network,
+volume2's actual pot law and25K/33K channel load gives source H5−27.321dBc; the real-time
+circuit source gives−27.352dBc (H2–24 RMS0.066dB, H1 level error0.014dB). This confirms the
+circuit reference behind the updated fixture. LO's finite-knee source remains approximate;
+its H5 is−26.661dBc. No artificial triangle phase lead is restored to meet the old fixture.
