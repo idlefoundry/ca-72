@@ -780,11 +780,17 @@ fn outputs_of(w: Waveform, n: usize) -> [bool; 3] {
     }
 }
 
-/// An oscillator's selected output as a Thevenin source (board 1's output dividers:
+/// Front-panel R030 on drawing1448, retained at its drawn47K value.
+pub const SHARK_SAW_OHMS: f64 = 47e3;
+/// Reference-equivalent R031; the drawing/BOM is10K±5% (Table7-2).
+/// 9.53K is an inferred E96 equivalent, not a measured installed component.
+pub const SHARK_TRIANGLE_OHMS: f64 = 9.53e3;
+
+/// An oscillator's selected output as a Thevenin source (board1's output dividers:
 /// sawtooth R34/R33, triangle R28/R23 behind Q1, rectangle R22 against R13 as Q12
-/// switches), the shark tooth through R030 and R031. For oscillator 3, `rev` is its reverse
-/// sawtooth stage's (the second position, and the sawtooth as R171 loads it).
-fn waveform_source(w: Waveform, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f64) {
+/// switches), the hybrid through front-panel R030/R031. For oscillator3, `rev` is its
+/// reverse-sawtooth stage. Public so the circuit lab can check the actual source model.
+pub fn waveform_source(w: Waveform, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f64) {
     let r_saw = 4300.0 * 4700.0 / 9000.0;
     let saw = match rev {
         Some(r) => (r.saw, r_saw * 33e3 / (r_saw + 33e3)),
@@ -799,7 +805,10 @@ fn waveform_source(w: Waveform, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f6
         (Waveform::Sawtooth, _) => saw,
         (Waveform::SharkTooth | Waveform::ReverseSawtooth, Some(r)) => (r.rev, r.r_rev),
         (Waveform::SharkTooth | Waveform::ReverseSawtooth, None) => {
-            let (ga, gb) = (1.0 / (saw.1 + 47e3), 1.0 / (tri.1 + 10e3));
+            let (ga, gb) = (
+                1.0 / (saw.1 + SHARK_SAW_OHMS),
+                1.0 / (tri.1 + SHARK_TRIANGLE_OHMS),
+            );
             ((saw.0 * ga + tri.0 * gb) / (ga + gb), 1.0 / (ga + gb))
         }
         _ => rect,

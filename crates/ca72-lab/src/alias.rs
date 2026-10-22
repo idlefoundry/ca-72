@@ -210,18 +210,10 @@ fn light_naive(p: f64, wave: Waveform) -> f64 {
     let fall = 1.0 - 2.0 * p;
     let rect = |d: f64| (if p < d { 1.0 } else { -1.0 }) - (2.0 * d - 1.0);
     match wave {
-        Waveform::Triangle => {
-            let b = f64::from(laws::TRIANGLE_BOTTOM);
-            let t = if p < b {
-                1.0 - p * (2.0 / b)
-            } else {
-                (p - b) * (2.0 / (1.0 - b)) - 1.0
-            };
-            f64::from(laws::TRIANGLE) * t
-        }
+        Waveform::Triangle => f64::from(ca72::light::triangle_naive(p as f32)),
         Waveform::SharkTooth => {
-            let q = (p + f64::from(laws::SHARK_AHEAD)).fract();
-            f64::from(laws::SHARK_TRIANGLE) * (4.0 * (q - 0.5).abs() - 1.0)
+            f64::from(laws::SHARK_TRIANGLE_WEIGHT)
+                * f64::from(ca72::light::triangle_naive(p as f32))
                 + f64::from(laws::SHARK_SAWTOOTH) * fall
         }
         Waveform::Sawtooth => f64::from(laws::SAWTOOTH) * fall,
