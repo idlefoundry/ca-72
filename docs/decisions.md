@@ -14874,8 +14874,8 @@ existing drawer and window.
 
 GLOBAL's legends and units, and every drawer's printed legends, units, small print and tab
 words use `art::text` with `Style::Legend`, at their previous sizes. The tabs keep their darker
-ink; the FX status print keeps its spacing and opacity. PRESSURE, TIMBRE, ARP and DIRECTION use 52-unit
-`Style::Title`; LFO 1 to 4 keep 52 and use that style too. The drawn and worn skins share the
+ink; the FX status print keeps its spacing and opacity. PRESSURE, TIMBRE, ARP and DIRECTION
+use 52-unit `Style::Title`; LFO 1 to 4 keep 52 and use that style too. The drawn and worn skins share the
 path, in STANDARD and LARGE. Dot screens and the rail are outside this change. No parameter
 ID, sound, saved setting or preset format changes.
 
@@ -14904,3 +14904,13 @@ machine's wall-clock variation, are in `timings.md` beside the frames.
 the rightwards window growth, the rule and title placements, and bringing GLOBAL's legacy
 print through the same path. The owner still has the pictures to review. No Mac build,
 Windows host run, installed plug-in or real audio device is used for this job.
+
+**Final checks:** the production-feature package suite passes: 836 tests, 80 intentionally
+ignored, including the two existing approved panel image checks. Workspace/all-target/
+all-feature Clippy, touched-panel default-feature Clippy, formatting and notices pass. The
+full default-feature workspace test run also passes: 1169 tests, 97 intentionally ignored,
+with its log beside the frames. No golden image is changed or re-approved. All 24
+before/after full-window pairs are pixel-identical above the drawers, including the rail.
+Independent read-only source and image review finds no material issue. GLOBAL's existing
+tab-cap words retain their separate print path; the GLOBAL extension here covers its legends,
+units and section titles. These checks and review are not the owner's visual approval.
