@@ -14425,3 +14425,16 @@ ENV saw for its bellows attack; flute LFO trials did not improve the overall sel
 Source permissions, methods, measurements, quantized reload differences and remaining
 acoustic limitations: [acoustic validation](mcp-acoustic-validation.md). These are working
 studies for the owner's listening review, not a release or an exact-reproduction claim.
+
+## R-LO-SHAPE-REFERENCE. Shape MOD follows the calibrated triangle's extrema
+
+The calibrated finite-knee triangle is asymmetric about its period mean. CONTINUOUS MOD's
+existing whole-travel convention remains: oscillator3's triangle with the wheel fully
+forward reaches both ends. LO derives this reference's midpoint and half-swing from its
+current source polynomial at compile time, as the circuit voice measures its current
+triangle table. The source samples and the physical pitch/filter modulation laws are not
+adjusted for this correction. See [the source calibration](calibration/waveform-fold-reference.md).
+
+The original greater-than0.97 travel assertion is unchanged. A regression links the
+normalizer to independently sampled source extrema; the eight continuous-waveform and two
+core allocation tests pass. These are functional checks, not hardware or listening acceptance.
