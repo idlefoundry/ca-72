@@ -151,7 +151,7 @@ pub const LEARNABLE: [Learnable; 166] = [
     switch("decay_on", "DECAY (switch)"),
     stepped("note_priority", "NOTE PRIORITY"),
     switch("retrigger", "RETRIGGER"),
-    // The strip, and LOCK.
+    // The GLOBAL page (VOICES, STEREO and OUTPUT), and LOCK.
     switch("poly", "POLY"),
     switch("unison", "UNISON"),
     stepped("voices", "VOICES"),

@@ -152,7 +152,9 @@ pub enum BarTarget {
     Save,
     /// The settings' key, at the rail's right end (the strip's rail; the drawn bar has none).
     Settings,
-    /// Swap the extension controls and the piano.
+    /// The GLOBAL page: VOICES, STEREO and OUTPUT (decisions.md R-GLOBAL-KEY).
+    Global,
+    /// The piano, one of the three lower pages.
     Keyboard,
     /// The arpeggiator's drawer, dropped down over the lower panel or put away (decisions.md
     /// R-ARP); lit while the arpeggiator is on.
@@ -587,6 +589,7 @@ pub fn bar_centre(t: BarTarget) -> (f64, f64) {
         BarTarget::Save
         | BarTarget::Settings
         | BarTarget::Panel
+        | BarTarget::Global
         | BarTarget::Keyboard
         | BarTarget::Arp
         | BarTarget::Fx

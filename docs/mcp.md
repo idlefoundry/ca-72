@@ -121,7 +121,7 @@ controls use:
 | Saved, renamed | `Browser::save_sound` and `Browser::rename_preset`, which SAVE AS and RENAME now share with the agent. |
 | Tagged, starred, deleted, reverted, restored | The drawer's `Library` calls, followed by `Browser::reread`. The drawer's hint line says what was done, as it does for the player. |
 | A setting | `set_look`, `set_lettering`, `set_frequency_dials`, `keep_settings`, and the SIZE menu's `gripped` width, which the host is asked for at the next frame. |
-| The view | The rail's PANEL and KEYBOARD keys (`toggle_panel`, `strip_press`), the drawer's `Browser::show`, the keyboard's octave keys, and the drawer's MIDI list. |
+| The view | The rail's PANEL and GLOBAL / keyboard / LFO keys (`toggle_panel`, `strip_press`), the drawer's `Browser::show`, the keyboard's octave keys, and the drawer's MIDI list. |
 | A note | `Playing::agent`: owned like the pointer's and the typed keys', through `LocalNotes`, the lock-free queue the on-screen keyboard already uses. The audio thread takes them at its next block. |
 | PANIC | The keyboard's PANIC (`Editing::panic`): `AppHandle::panic_tagged` in the standalone. |
 | MIDI Learn | `Learning::learn`, `cancel` and `remove`; `MidiMap::assign` for an assignment given outright. |
@@ -201,7 +201,7 @@ agent to use the bridge that came with that instance.
 | `ca72_presets_restore` | RESTORE | none |
 | `ca72_settings` | Reads the settings and window sizes | none |
 | `ca72_settings_set` | Changes settings as the SETTINGS menu does | `look? lettering? frequency_dials? quality_indicator? tempo? mod_wheel_source? mpe_input? timbre_rest? size? agents?` (`agents` only false) |
-| `ca72_view` | Changes the view as the rail and keyboard keys do | `presets? panel? keyboard? keyboard_octave? midi_list?` |
+| `ca72_view` | Changes the view as the rail and keyboard keys do | `presets? panel? lower_page? keyboard? keyboard_octave? midi_list?` |
 | `ca72_note_on` / `ca72_note_off` | Presses or lets go of keys (no velocity: the instrument has none); `note_off` with no notes lets go of all the agent's | `notes` (numbers 0 to 127, or names, C4 = 60) |
 | `ca72_play` | Plays notes for a while, then lets go | `notes, seconds` (0.01 to 30) |
 | `ca72_panic` | PANIC | none |
@@ -369,7 +369,7 @@ area shows, the wheels or the macros, is the computer's (the rail's MACRO key), 
 | The name: opens or shuts the drawer | `ca72_view {presets}` |
 | SAVE key, SAVE AS | `ca72_preset_save` |
 | PANEL key | `ca72_view {panel}` |
-| KEYBOARD key | `ca72_view {keyboard}` |
+| GLOBAL / keyboard / LFO keys | `ca72_view {lower_page: "global" / "keyboard" / "lfo"}` selects and shows the page; a selected key does nothing. `keyboard: true / false` remains readable as keyboard / global. The returned `lower_page` names the selected page even with PANEL off. |
 | SETTINGS key: see Settings | |
 | FIND: SEARCH, tag chips | `ca72_presets {search, tags}` |
 | ALL / FAVORITES / MINE tabs | `ca72_presets {favorites, mine}` |

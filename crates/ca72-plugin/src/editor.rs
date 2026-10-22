@@ -3253,20 +3253,11 @@ impl Editing {
                 let on = !self.params.auto_gain.value();
                 self.set_switch(&self.params.auto_gain, on);
             }
-            // The settings' key: its menu, dropping down from under it to its left.
-            StripTarget::Bar(BarTarget::Lfo) => self.toggle_lfo_page(),
-            StripTarget::Bar(BarTarget::Macro) => self.toggle_macros(),
-            StripTarget::Bar(BarTarget::Keyboard) => {
-                self.playing.release_pointer();
-                // (From the LFO page: the keyboard in its place, shown.)
-                self.playing.visible = !self.keyboard_shown();
-                self.modulating.open = false;
-                self.keep_settings(Change::Keyboard(self.playing.visible));
-                self.playing.wants_keys = self.playing.holds_keys();
-                self.hover = None;
-                self.strip_scene.hover = None;
-                self.composed = None;
+            StripTarget::Bar(t @ (BarTarget::Global | BarTarget::Keyboard | BarTarget::Lfo)) => {
+                self.show_lower_page(t);
             }
+            StripTarget::Bar(BarTarget::Macro) => self.toggle_macros(),
+            // The settings' key: its menu, dropping down from under it to its left.
             StripTarget::Bar(BarTarget::Settings) => {
                 self.playing.release();
                 let size = self.renderer.text_size() * MENU_TEXT;
@@ -3329,6 +3320,17 @@ impl Editing {
             return;
         }
         if !self.expanded() && y >= DRAWER_TOP {
+            return;
+        }
+        // A lit page key is inert before the usual press cancels typing or ends a gesture.
+        // Modal notes and menus still own their presses.
+        if self.expanded()
+            && !self.ultra_note
+            && !self.learning.menu_open()
+            && let Some(key @ (BarTarget::Global | BarTarget::Keyboard | BarTarget::Lfo)) =
+                self.on_rail((x, y))
+            && key == self.lower_page()
+        {
             return;
         }
         // The field keeps a press inside it. Elsewhere cancels it, consuming that press.
@@ -4624,6 +4626,20 @@ impl Editing {
                 nx + nw - 95.0,
                 ny - 12.0,
             ));
+        }
+        if self.drag.is_none()
+            && let Some(key) = self.on_rail((px, py))
+        {
+            let text = match key {
+                BarTarget::Global => Some("GLOBAL: VOICES, STEREO AND OUTPUT"),
+                BarTarget::Keyboard => Some("KEYBOARD: PLAYABLE PIANO"),
+                BarTarget::Lfo => Some("LFO: MODULATION SOURCES"),
+                _ => None,
+            };
+            if let Some(text) = text {
+                let (x, y) = strip::centre(self.rail, StripTarget::Bar(key));
+                return Some((text.into(), x, y - strip::KEY_H / 2.0 - 12.0));
+            }
         }
         let operated = self
             .drag
@@ -7289,7 +7305,7 @@ mod tests {
     }
 
     #[test]
-    fn panel_hide_and_view_swap_preserve_type_notes_and_the_current_height() {
+    fn panel_hide_and_page_selection_preserve_type_notes() {
         let (mut e, _, _) = editing_standalone();
         e.playing.visible = true;
         e.playing.typing = true;
@@ -7311,15 +7327,13 @@ mod tests {
             "held key does not retrigger"
         );
         let compact_height = e.window_height();
-        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        e.strip_press(StripTarget::Bar(BarTarget::Global));
         assert!(!e.playing.visible);
-        assert!(e.note_typing_allowed(), "extra controls preserve TYPE");
+        assert!(e.note_typing_allowed(), "GLOBAL preserves TYPE");
         assert_eq!(e.playing.notes.generation(), generation);
-        assert_eq!(e.window_height(), compact_height);
+        assert!(e.window_height() > compact_height);
         e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
         assert!(e.playing.visible);
-        assert_eq!(e.window_height(), compact_height);
-        e.toggle_panel();
         assert!(e.expanded());
         assert!(e.note_typing_allowed());
         let mut up = key.clone();
@@ -7376,7 +7390,7 @@ mod tests {
         e.strip_press(StripTarget::Bar(BarTarget::Settings));
         assert!(!e.note_typing_allowed());
         e.learning.close_menu();
-        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        e.strip_press(StripTarget::Bar(BarTarget::Global));
         assert!(!e.playing.visible);
         assert_eq!((e.width, e.window_height()), (width, height));
     }
@@ -14648,7 +14662,7 @@ mod tests {
         right_click(&mut e, scope);
         save(&mut e, "lfo-menu.png");
         e.learning.close_menu();
-        let l = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Lfo)));
+        let l = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Global)));
         click(&mut e, l);
         let cutoff = at(&e, centre("cutoff"));
         go(&mut e, cutoff);
@@ -14970,7 +14984,7 @@ mod tests {
 
     /// The rail's LFO key (the owner, 2026-10-20: "the LFO rail key after the keyboard key")
     /// shows the page in the keyboard's place, its key lit, the strip's own parts not drawn under
-    /// it; pressed lit, it puts it away. The keyboard's key shows the keyboard in its place; the
+    /// it; pressed lit, it stays. The keyboard's key shows the keyboard in its place; the
     /// page's controls answer only while it shows.
     #[test]
     fn the_lfo_key_shows_its_page_in_the_keyboards_place() {
@@ -14996,12 +15010,215 @@ mod tests {
         assert!(e.strip_scene.keyboard.is_none() && !e.browser.bar.keyboard);
         let l = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Lfo)));
         click(&mut e, l);
-        assert!(!e.page_shows());
+        assert!(e.page_shows(), "the lit key leaves its page showing");
+        let g = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Global)));
+        click(&mut e, g);
         e.draw();
+        assert!(!e.page_shows() && e.strip_scene.extension());
+    }
+
+    /// Every route through the three keys, PANEL off included, selects one page. The lit
+    /// key is inert, and PANEL restores the selected page without changing its preference.
+    #[test]
+    fn the_three_lower_page_keys_select_and_remember_one_page() {
+        let pages = [BarTarget::Global, BarTarget::Keyboard, BarTarget::Lfo];
+        for standalone in [false, true] {
+            let (mut e, host, _) = if standalone {
+                editing_standalone()
+            } else {
+                editing()
+            };
+            if standalone {
+                e.use_effects(crate::fx_view::FxView::new(Some(
+                    crate::fx_view::fake::Fake::with(&[], &[]),
+                )));
+            }
+            assert_eq!(
+                e.rail,
+                if standalone {
+                    Rail::Effects
+                } else {
+                    Rail::Plugin
+                }
+            );
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("settings.toml");
+            std::fs::write(&path, "keyboard_view = \"controls\"\nunknown = 42\n").unwrap();
+            e.settings.keyboard = Some(false);
+            e.playing.visible = false;
+            e.settings_file = Some(path.clone());
+            for from in pages {
+                for hidden in [false, true] {
+                    for to in pages {
+                        e.show_lower_page(from);
+                        let saved = e.settings.keyboard;
+                        if hidden {
+                            e.toggle_panel();
+                        }
+                        let p = on_strip(&e, strip::centre(e.rail, StripTarget::Bar(to)));
+                        click(&mut e, p);
+                        e.update_scene();
+                        assert!(e.expanded(), "{from:?} -> {to:?}, hidden {hidden}");
+                        assert_eq!(e.lower_page(), to);
+                        let lights = pages.map(|t| strip::key_light_of(&e.browser.bar, t));
+                        assert_eq!(lights.iter().filter(|&&n| n == 2).count(), 1);
+                        assert_eq!(strip::key_light_of(&e.browser.bar, to), 2);
+                        assert_eq!(
+                            e.settings.keyboard,
+                            match to {
+                                BarTarget::Global => Some(false),
+                                BarTarget::Keyboard => Some(true),
+                                _ => saved,
+                            }
+                        );
+                        let remembered = e.settings.keyboard;
+                        let file = std::fs::read_to_string(&path).unwrap();
+                        e.typing = Some((Typed::Strip(Readout::Level), "0".into()));
+                        click(&mut e, p);
+                        assert!(e.typing.is_some(), "lit key changes nothing");
+                        assert_eq!(std::fs::read_to_string(&path).unwrap(), file);
+                        e.typing = None;
+                        e.toggle_panel();
+                        e.update_scene();
+                        assert!(
+                            pages
+                                .iter()
+                                .all(|&t| strip::key_light_of(&e.browser.bar, t) < 2)
+                        );
+                        e.toggle_panel();
+                        assert_eq!(e.lower_page(), to);
+                        assert_eq!(e.settings.keyboard, remembered);
+                    }
+                }
+            }
+            assert!(
+                host.take().is_empty(),
+                "view keys never automate sound parameters"
+            );
+            let file = std::fs::read_to_string(&path).unwrap();
+            assert!(file.contains("unknown = 42"));
+            assert_eq!(Settings::read(&path).keyboard, e.settings.keyboard);
+        }
+    }
+
+    #[test]
+    fn page_keys_release_the_pointer_keep_drawers_and_leave_lit_keys_alone() {
+        let (mut e, _, _) = editing_standalone();
+        e.show_lower_page(BarTarget::Keyboard);
+        e.playing.press(60);
+        assert!(e.playing.dragging());
+        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        assert!(e.playing.dragging(), "lit key keeps a pointer note");
+        e.show_lower_page(BarTarget::Global);
+        assert!(!e.playing.dragging());
+        assert!(e.playing.notes.pop().unwrap().on);
+        assert!(!e.playing.notes.pop().unwrap().on);
+        e.show_lower_page(BarTarget::Keyboard);
+        e.playing.press(62);
+        e.show_lower_page(BarTarget::Lfo);
+        assert!(!e.playing.dragging());
+        e.toggle_lower(Lower::Arp);
+        for page in [BarTarget::Global, BarTarget::Keyboard, BarTarget::Lfo] {
+            e.show_lower_page(page);
+            assert!(e.lower.is_open(Lower::Arp));
+        }
+        e.lower.shut();
+        e.show_lower_page(BarTarget::Global);
+        e.browser.show(true, &e.params);
+        e.follow_drawer();
+        e.show_lower_page(BarTarget::Keyboard);
         assert!(
-            e.strip_scene.keyboard.is_some(),
-            "the keyboard back, as it was"
+            e.browser.open,
+            "keyboard keeps the presets over it as before"
         );
+        e.show_lower_page(BarTarget::Lfo);
+        assert!(!e.browser.open, "LFO puts the presets away as before");
+    }
+
+    #[test]
+    fn page_keys_leave_the_page_alone_when_the_host_refuses_to_show_panel() {
+        let (mut e, host, _) = editing();
+        e.show_lower_page(BarTarget::Keyboard);
+        e.toggle_panel();
+        host.fixed.store(true, Ordering::Relaxed);
+        let saved = e.settings.keyboard;
+        for page in [BarTarget::Global, BarTarget::Keyboard, BarTarget::Lfo] {
+            e.strip_press(StripTarget::Bar(page));
+            assert!(!e.expanded());
+            assert_eq!(e.lower_page(), BarTarget::Keyboard);
+            assert_eq!(e.settings.keyboard, saved);
+        }
+    }
+
+    #[test]
+    fn selecting_lfo_keeps_panel_shown_after_presets_temporarily_revealed_it() {
+        let (mut e, _, _) = editing();
+        e.show_lower_page(BarTarget::Global);
+        e.toggle_panel();
+        e.strip_press(StripTarget::Bar(BarTarget::Name));
+        assert!(e.expanded() && e.browser.open);
+        assert!(!e.params.editor_panel.load(Ordering::Relaxed));
+        let p = on_strip(&e, strip::centre(e.rail, StripTarget::Bar(BarTarget::Lfo)));
+        click(&mut e, p);
+        assert!(e.expanded() && !e.browser.open);
+        assert!(e.params.editor_panel.load(Ordering::Relaxed));
+        assert_eq!(e.lower_page(), BarTarget::Lfo);
+    }
+
+    /// The real editor's full frames and rail crops, in LARGE in each look, rail and scale.
+    #[cfg(feature = "standalone-production")]
+    #[test]
+    #[ignore = "writes the GLOBAL key review pictures"]
+    fn the_global_key_pngs() {
+        let out = std::path::PathBuf::from(
+            std::env::var_os("CA72_GLOBAL_KEY_PNG").expect("an output folder"),
+        );
+        std::fs::create_dir_all(&out).unwrap();
+        for standalone in [false, true] {
+            let (mut e, _, _) = if standalone {
+                editing_standalone()
+            } else {
+                editing()
+            };
+            if standalone {
+                e.use_effects(crate::fx_view::FxView::new(Some(
+                    crate::fx_view::fake::Fake::with(&[], &[]),
+                )));
+            }
+            let rail = if standalone { "standalone" } else { "plugin" };
+            for (look, skin) in [("worn", Skin::Worn), ("drawn", Skin::Drawn)] {
+                e.set_look(skin);
+                e.set_lettering(Lettering::Large);
+                for scale in [0.44, 1.0] {
+                    let width = (art::W * scale).round() as u32;
+                    e.fit(1.0, width, width);
+                    for (page, key) in [
+                        ("global", BarTarget::Global),
+                        ("keyboard", BarTarget::Keyboard),
+                        ("lfo", BarTarget::Lfo),
+                    ] {
+                        e.strip_press(StripTarget::Bar(key));
+                        go(&mut e, Point { x: 0.0, y: 0.0 });
+                        let name = format!("{rail}-{look}-large-{scale}-{page}");
+                        let top = e.renderer.strip_row();
+                        let height = (strip::RAIL * e.renderer.scale()).round() as u32;
+                        let frame = window_frame(&mut e).clone();
+                        frame.save_png(out.join(format!("{name}.png"))).unwrap();
+                        frame
+                            .clone_rect(
+                                resvg::tiny_skia::IntRect::from_xywh(0, top, width, height)
+                                    .unwrap(),
+                            )
+                            .unwrap()
+                            .save_png(out.join(format!("{name}-rail.png")))
+                            .unwrap();
+                        // Selecting pages must also clear the former light in a partial redraw.
+                        e.composed = None;
+                        assert_eq!(frame.data(), window_frame(&mut e).data());
+                    }
+                }
+            }
+        }
     }
 
     /// Each LFO's POLARITY, REVERSE and ON (R-LFO's corrections): UNI's key and ON's key (and
@@ -16297,10 +16514,8 @@ mod tests {
         save(&mut e, "keyboard.png");
         lfo_open(&mut e);
         save(&mut e, "lfo.png");
-        let l = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Lfo)));
-        click(&mut e, l);
-        let k = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Keyboard)));
-        click(&mut e, k);
+        let g = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Global)));
+        click(&mut e, g);
         e.draw();
         let jack = at(&e, ca72_panel::strip::macros::jack_at(1));
         go(&mut e, jack);

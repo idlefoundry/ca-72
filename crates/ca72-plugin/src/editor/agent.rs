@@ -248,7 +248,12 @@ impl Editing {
         json!({
             "presets": self.browser.open,
             "panel": self.expanded(),
-            "keyboard": self.playing.visible,
+            "keyboard": self.lower_page() == BarTarget::Keyboard,
+            "lower_page": match self.lower_page() {
+                BarTarget::Global => "global",
+                BarTarget::Keyboard => "keyboard",
+                _ => "lfo",
+            },
             "keyboard_range": [keyboard::label(root), keyboard::label(root.saturating_add(keyboard::KEYS as u8 - 1))],
             "midi_list": self.browser.open && self.learning.list,
             "typing": self.playing.typing,
@@ -899,6 +904,28 @@ impl Editing {
             flag("keyboard")?,
             flag("midi_list")?,
         );
+        let page = match arg(args, "lower_page") {
+            None => None,
+            Some(Value::String(s)) => Some(match s.as_str() {
+                "global" => BarTarget::Global,
+                "keyboard" => BarTarget::Keyboard,
+                "lfo" => BarTarget::Lfo,
+                _ => return Err(ApiError::params("`lower_page` is global, keyboard or lfo")),
+            }),
+            Some(_) => return Err(ApiError::params("`lower_page` is global, keyboard or lfo")),
+        };
+        if let (Some(page), Some(kb)) = (page, kb)
+            && page
+                != if kb {
+                    BarTarget::Keyboard
+                } else {
+                    BarTarget::Global
+                }
+        {
+            return Err(ApiError::params(
+                "`keyboard` and `lower_page` select different pages",
+            ));
+        }
         let octave = match arg(args, "keyboard_octave") {
             None => None,
             Some(Value::String(s)) if s == "up" => Some(true),
@@ -910,10 +937,14 @@ impl Editing {
         {
             self.toggle_panel();
         }
-        if let Some(on) = kb
-            && on != self.playing.visible
-        {
-            self.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        if let Some(page) = page.or(kb.map(|on| {
+            if on {
+                BarTarget::Keyboard
+            } else {
+                BarTarget::Global
+            }
+        })) {
+            self.strip_press(StripTarget::Bar(page));
         }
         if let Some(up) = octave {
             self.playing.shift(up);
@@ -1309,6 +1340,40 @@ mod tests {
     use crate::editor::Meters;
     use crate::library::Library;
     use crate::params::Ca72Params;
+
+    #[test]
+    fn view_selects_all_three_pages_and_keeps_the_old_keyboard_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut e, _) = editing(Library::at(dir.path()));
+        for from in ["global", "keyboard", "lfo"] {
+            for to in ["global", "keyboard", "lfo"] {
+                e.set_view(&json!({"lower_page": from})).unwrap();
+                e.set_view(&json!({"panel": false})).unwrap();
+                let view = e.set_view(&json!({"lower_page": to})).unwrap();
+                assert_eq!(view["lower_page"], json!(to));
+                assert_eq!(view["panel"], json!(true));
+                assert_eq!(view["keyboard"], json!(to == "keyboard"));
+                assert_eq!(e.set_view(&json!({"lower_page": to})).unwrap(), view);
+            }
+        }
+        assert_eq!(
+            e.set_view(&json!({"keyboard": false})).unwrap()["lower_page"],
+            json!("global")
+        );
+        assert_eq!(
+            e.set_view(&json!({"keyboard": true})).unwrap()["lower_page"],
+            json!("keyboard")
+        );
+        let before = e.view_state();
+        for bad in [
+            json!({"lower_page": "voices", "panel": false}),
+            json!({"lower_page": 1}),
+            json!({"lower_page": "lfo", "keyboard": true}),
+        ] {
+            assert!(e.set_view(&bad).is_err());
+            assert_eq!(e.view_state(), before, "invalid input changes nothing");
+        }
+    }
 
     /// A host that applies the editor's changes, as the standalone's does (the value set at
     /// once), through nih-plug's context for tests.

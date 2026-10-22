@@ -27,7 +27,7 @@ const NOTICE: Duration = Duration::from_secs(4);
 pub const KEYS_TEXT: &str = "UP, DOWN: CHOOSE · ENTER: LEARN · DELETE: REMOVE · ESC: CANCEL";
 
 /// Where a learnable parameter's control is: the panel's (its index in [`CONTROLS`]: the
-/// strip's knobs and the left hand's are the panel's controls too), the strip's tabs, or none
+/// GLOBAL page's knobs and the left hand's are the panel's controls too), the strip's tabs, or none
 /// (LOCK: the drawer's list alone learns it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {

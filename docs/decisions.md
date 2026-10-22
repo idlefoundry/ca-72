@@ -14775,3 +14775,52 @@ Search and tag filters continue to apply in every category; FAVORITES continues
 to include starred presets of every origin. Category changes reset scrolling and
 keep the current sound, search and tags. The existing skin-controlled tab drawing
 and hit testing also draw and select the new category.
+
+
+## R-GLOBAL-KEY. Name the VOICES, STEREO and OUTPUT page and give it a rail key
+
+**The owner, 2026-10-22**, of the lower page with VOICES, STEREO and OUTPUT:
+"We don't call this panel anything currently. But it needs a name and a button on the
+preview bar." The preview bar is the rail. "The problem with naming it voices is it's
+not really voices. It's stereo settings, voices, and output." Offered EXPANDER, ENGINE,
+GLOBAL or EXTRAS: "GLOBAL is the best thing so far. Let's run with it."
+
+**Built:** GLOBAL directly before the keyboard's icon, followed by LFO, in the plug-ins'
+and standalone's rails, in both looks and with LARGE lettering. The preset name's window
+is 100 units shorter (1700 in the plug-ins, 1600 in the standalone); the keys' gaps stay as
+they were. The three keys select their pages: exactly one lit while the lower panel shows,
+pressing it again does nothing. With PANEL off, any page key first shows the lower panel.
+PANEL still hides and restores the selected page. LFO keeps its faint glow while an LFO
+affects the sound, including with PANEL off. Drawers still sit over the selected page.
+
+GLOBAL's six letters need more room than PANEL's five. Every worded rail key uses 15 units,
+the largest whole-unit size at which GLOBAL fits within PANEL's former 13.63-unit side
+clearance at 20 (PANEL 58.74 units wide, GLOBAL 57.54 at 15; 61.376 at 16). The keyboard keeps
+its icon. This is shared by both looks and lettering settings. No approved picture is
+replaced: `approved.png` and `approved-large.png` compare only above `PANEL_H`, where
+no pixels change. Review frames show the changed rail separately.
+
+GLOBAL and keyboard keep `Change::Keyboard(false/true)`, with the existing saved
+`keyboard_view = "controls" / "keyboard"` IDs. No new setting: LFO retains its editor-local
+page memory, and the next editor opens the saved GLOBAL/keyboard choice as before.
+Pointer notes release on page changes; TYPING and physical MIDI keep playing as before.
+The lit key releases nothing. LFO still closes the presets' drawer when selected; the
+other page keys keep it over them. The MIDI learning list still names the sound controls,
+with no new learnable view action or saved control ID. The page keys' tips name the pages;
+`ca72_view` adds `lower_page: "global" / "keyboard" / "lfo"`, keeps the legacy `keyboard`
+argument and reports the remembered page even while PANEL hides it.
+
+**Evidence (Linux):** the production-feature plug-in/panel suite passes (590 plug-in
+library tests, 110 panel library tests and their integration suites; manual/picture tests
+remain ignored by default). Both approved panel image checks pass. The page matrix covers
+both rails, including every transition with PANEL on and off, real clicks on lit keys,
+saved settings, pointer notes, TYPING, drawer overlays and refused host resizes. MCP tests
+cover the three pages and legacy arguments. Independent review and recheck cover the
+mouse path and temporary preset expansion. `target/global-key-frames/README.md` indexes
+the 0.44/1.0, worn/drawn, LARGE, plug-in/standalone matrix: 24 windows and 24 rail crops,
+with partial/full composition compared. No Mac build, installed plug-in or real audio
+device is used. The job summary records the final check commands and results.
+
+The production-feature package tests, workspace/all-target/all-feature Clippy, touched-crate
+default-feature Clippy, formatting and notices checks pass. Full workspace tests and native
+Mac/Windows UI runs are not part of this job. The owner still has the rail pictures to review.
