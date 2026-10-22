@@ -605,25 +605,99 @@ mod triangle_source {
         (0.34542942, 0.13680515, 0.6440923),
         (0.48223457, 0.020794975, 13.92329),
     ];
+
+    const _: () = {
+        assert!(CURVATURE >= 0.0);
+        let mut i = 0;
+        while i < KNEES.len() {
+            let (_, width, gain) = KNEES[i];
+            assert!(width > 0.0 && gain > 0.0);
+            i += 1;
+        }
+    };
+
+    pub const fn value(p: f32) -> f32 {
+        let mut v = V0 + SLOPE * p + CURVATURE * p * p;
+        let mut i = 0;
+        while i < KNEES.len() {
+            let (at, width, gain) = KNEES[i];
+            let x = p - at;
+            let hinge = if x <= 0.0 {
+                0.0
+            } else if x < width {
+                x * x / (2.0 * width)
+            } else {
+                x - 0.5 * width
+            };
+            v += gain * hinge;
+            i += 1;
+        }
+        (v - MEAN) / SCALE
+    }
+
+    const fn slope(p: f32) -> f32 {
+        let mut v = SLOPE + 2.0 * CURVATURE * p;
+        let mut i = 0;
+        while i < KNEES.len() {
+            let (at, width, gain) = KNEES[i];
+            let x = p - at;
+            v += gain
+                * if x <= 0.0 {
+                    0.0
+                } else if x < width {
+                    x / width
+                } else {
+                    1.0
+                };
+            i += 1;
+        }
+        v
+    }
+
+    /// This convex source transfer's minimum is its zero slope, and its maximum an
+    /// endpoint. Evaluate at compile time: no first-use source scan on the audio thread.
+    const fn extrema() -> (f32, f32) {
+        let (mut lo, mut hi) = (0.0, 1.0);
+        let mut i = 0;
+        while i < 32 {
+            let p = 0.5 * (lo + hi);
+            if slope(p) < 0.0 {
+                lo = p;
+            } else {
+                hi = p;
+            }
+            i += 1;
+        }
+        let a = value(0.0);
+        let b = value(1.0);
+        (value(0.5 * (lo + hi)), if a > b { a } else { b })
+    }
+
+    pub const EXTREMA: (f32, f32) = extrema();
 }
 
 /// The light model's triangle source before band-limiting, for the circuit lab.
 #[doc(hidden)]
 pub fn triangle_naive(p: f32) -> f32 {
-    use triangle_source::*;
-    let mut v = V0 + SLOPE * p + CURVATURE * p * p;
-    for (at, width, gain) in KNEES {
-        let x = p - at;
-        let hinge = if x <= 0.0 {
-            0.0
-        } else if x < width {
-            x * x / (2.0 * width)
-        } else {
-            x - 0.5 * width
-        };
-        v += gain * hinge;
-    }
-    (v - MEAN) / SCALE
+    triangle_source::value(p)
+}
+
+/// CONTINUOUS MOD's reference is the current triangle's midpoint and half-swing, as in
+/// the circuit voice's `mod_reference`. The calibrated fold is not symmetric about its
+/// period mean. Keep the physical pitch/filter modulation laws separate from this share
+/// of the plug-in's shape travel.
+const SHAPE_MOD_REFERENCE: (f32, f32) = {
+    let (lo, hi) = triangle_source::EXTREMA;
+    let gain = laws::MOD_SWING[0] as f32 / laws::TRIANGLE;
+    (
+        0.5 * (lo + hi) * gain + laws::MOD_CENTRE[0] as f32,
+        -0.5 * (hi - lo) * gain,
+    )
+};
+
+#[inline(always)]
+fn shape_mod_swing(swing: f32) -> f64 {
+    f64::from((swing - SHAPE_MOD_REFERENCE.0) / SHAPE_MOD_REFERENCE.1)
 }
 
 /// A finite knee's periodic BLAMP correction, using the circuit voice's same kernel.
@@ -2000,7 +2074,7 @@ impl Light {
                     (1.0 - mix_k) * o + mix_k * n * (laws::NOISE_SEMITONES_RMS / rms) as f32;
                 let m = crate::voice::ModSwing {
                     depth: f64::from(depth / self.set.depth_full),
-                    swing: f64::from(swing / -(laws::MOD_SWING[0] as f32)),
+                    swing: shape_mod_swing(swing),
                 };
                 self.mod_u = m.share(crate::voice::ModDirection::Onward) as f32;
                 let p = &self.panel;
@@ -2671,6 +2745,28 @@ mod tests {
         run(&mut l, 240_000);
         let held = l.contours().1;
         assert!((held - 1.675).abs() < 0.01, "SUSTAIN 5 at {held} V");
+    }
+
+    /// Shape MOD uses both source extrema, rather than assuming that the peak about
+    /// the period mean is also its negative trough. This is source voltage, not an
+    /// adjustment fitted to the shape-travel test or the hardware recording.
+    #[test]
+    fn shape_mod_uses_the_current_triangles_midpoint_and_half_swing() {
+        let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+        for i in 0..=65_536 {
+            let v = triangle_naive(i as f32 / 65_536.0);
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+        assert!((lo - triangle_source::EXTREMA.0).abs() < 2e-6);
+        assert!((hi - triangle_source::EXTREMA.1).abs() < 2e-6);
+        // The normalization must retain this asymmetry; its midpoint is not its mean.
+        assert!((lo + hi).abs() > 0.05);
+        let line =
+            |v: f32| v / laws::TRIANGLE * laws::MOD_SWING[0] as f32 + laws::MOD_CENTRE[0] as f32;
+        assert!((shape_mod_swing(line(lo)) - 1.0).abs() < 5e-6);
+        assert!((shape_mod_swing(line(hi)) + 1.0).abs() < 5e-6);
+        assert!(shape_mod_swing(line(0.5 * (lo + hi))).abs() < 5e-6);
     }
 
     /// The hybrid's fifth harmonic follows the current circuit reference at the original

@@ -73,6 +73,16 @@ The existing oscillator aliasing budgets and fixed-knot CONTINUOUS identity chec
 LO retains its existing linear phase and omitted frequency-dependent core/reset details;
 its approximation is not a second exact circuit solver. CPU changes are measured separately.
 
+CONTINUOUS shape MOD measures its travel against the current triangle's extrema, as the
+circuit voice does. The calibrated LO source's period mean is not its extrema midpoint:
+its normalized source spans approximately−0.833804 to+0.895355, midpoint+0.030775 and
+half-swing0.864580. The previous symmetric-peak normalization stopped onward travel at
+0.965655 with the wheel forward. LO now derives the midpoint and half-swing from the
+finite-knee source polynomial at compile time; no measured-audio multiplier, first-use
+DC solve or allocation is introduced. The original greater-than0.97 travel gate is retained.
+This corrects the plug-in's shape travel only; source audio and the physical oscillator and
+filter modulation laws are unchanged.
+
 ## Validation limits
 
 Noise-qualified comparisons use the current gate-open round023 plus each take's local idle
