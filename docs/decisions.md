@@ -14824,3 +14824,83 @@ device is used. The job summary records the final check commands and results.
 The production-feature package tests, workspace/all-target/all-feature Clippy, touched-crate
 default-feature Clippy, formatting and notices checks pass. Full workspace tests and native
 Mac/Windows UI runs are not part of this job. The owner still has the rail pictures to review.
+
+## R-DRAWER-LETTERING. The drawers' print and digits are drawn as the panel's
+
+**Owner direction, 2026-10-22:**
+
+> "why does MP use a different font for their numbers than every other number on the plugin?"
+
+> "it's very obviously different. Look at the difference between the 6 in 16 and the 0 in
+> 0.0. The 0 is very much narrower."
+
+The second comparison was GLOBAL's DRIVE against MPE's CUTOFF.
+
+> "I swear all of the fonts that you use on the MPE screen look different. From the rest of the
+> fonts in the app ... I'm speaking here of the numbers and the big larger fonts like where it
+> says pressure and timbre."
+
+The owner was right about each visible difference, and was first told otherwise. Sharing the
+printed labels' typeface did not give them the same proportions or weight; the readouts are
+seven-segment geometry.
+
+**The three causes at `e9545a1`:**
+
+- Seven-segment digits took their pitch from the window: `((w - 22) / cells).min(44)`.
+  GLOBAL and ARP had three cells in 156 units, pitch 44; MPE had four in the same window,
+  pitch 33.5. MPE's digits and strokes were about 24 % narrower at the same height.
+- The panel's `art::text`, `Style::Legend`, stretches the print 9 % and strokes it at 0.7.
+  The drawers' separate plain bold text did neither. Inspection also found GLOBAL's legacy
+  `strip::print` used plain text, so GLOBAL's legends join the same shared path in this fix.
+  The dial numbers already used the panel's print.
+- PRESSURE and TIMBRE were 44 units, against GLOBAL's section titles at 52. GLOBAL's titles
+  have no added letter spacing or forced printed width; some of the upper panel's titles
+  do, through `Layout`. The drawers follow GLOBAL's unspaced section titles.
+
+**Built:** `seven` uses a constant 44-unit pitch and 53.76-unit digit height, including the
+same stroke thickness, for all readouts. Existing three-cell windows remain 156 by 84;
+MPE keeps four cells in windows 198 by 84 (`4 × 44 + 22`). Its extra cell grows rightwards,
+keeping the window's left edge clear of its own dial numbers. Centring the wider window on
+the old readout centre hid MODULATION's 50; that placement was rejected after rendering.
+
+MPE's unit centres are 1165, 1615, 2325 and 2775; its middle rule moves to 1920. Each pair's
+450-unit pitch clears both its own dial and the next one's numbers, with room for % and OCT
+in LARGE. The title's right edge is 220 units before its first unit's centre. A test measures
+the actual SVG ink, including the dials, unit lettering, bezels, title and rules in both
+lettering sizes. A 425-unit trial leaves only about 2.35 units between neighbouring print in
+STANDARD and fails the six-unit clearance gate; the centred-window trial fails its own
+dial's clearance gate. INPUT remains before the first rule, and all parts stay inside the
+existing drawer and window.
+
+GLOBAL's legends and units, and every drawer's printed legends, units, small print and tab
+words use `art::text` with `Style::Legend`, at their previous sizes. The tabs keep their darker
+ink; the FX status print keeps its spacing and opacity. PRESSURE, TIMBRE, ARP and DIRECTION use 52-unit
+`Style::Title`; LFO 1 to 4 keep 52 and use that style too. The drawn and worn skins share the
+path, in STANDARD and LARGE. Dot screens and the rail are outside this change. No parameter
+ID, sound, saved setting or preset format changes.
+
+**Evidence (Linux, Rust 1.97.1, 2026-10-22):** the digit regression compares the actual pixels
+of two adjacent digits in all eight GLOBAL, four ARP and four MPE windows. The layout test
+rejects both the 425-unit and centred-window trials, and passes the final layout. MPE's
+partial-versus-whole test also covers LARGE at 0.44 and 1.0 in both skins.
+
+`target/drawer-lettering-frames/README.md` indexes the baseline and changed MPE, ARP, LFO,
+FX and GLOBAL windows and matching crops, worn and drawn, LARGE, at 0.44 and 1.0, plus FX
+safety states and same-scale DRIVE/CUTOFF digit and legend comparisons. The baseline binaries
+were built before any renderer edit; `scripts/drawer-lettering-frames.py` reproduces the
+matrix. No approved panel picture is replaced merely to accept these drawer changes.
+
+`cargo run --release -p ca72-panel --example frames -- 0.44 1.0` is measured before and after,
+twice each, with the saved baseline binary between the changed runs under the timing lock.
+The existing harness uses worn STANDARD lettering. At 0.44, MPE's changed CUTOFF median
+goes from 1.0 to 1.2 ms; at 1.0 from 2.0–2.1 to 2.5 ms, reflecting the larger readout.
+Ready first-open is 4.7–5.0 to 5.7–7.1 ms at 0.44, 9.4–10.6 to 11.1–11.2 ms at 1.0.
+ARP's knob frame remains 1.1 / 2.3 ms at the two scales; LFO's PHASE frame remains about
+1.2 / 5.2 ms. The plates still warm on their own threads and unchanged MPE frames remain
+0.0 ms at the harness's precision. Full cold/ready/change results, including the shared
+machine's wall-clock variation, are in `timings.md` beside the frames.
+
+**Agent decisions** (not separately approved): 450 rather than the estimated 425-unit spacing,
+the rightwards window growth, the rule and title placements, and bringing GLOBAL's legacy
+print through the same path. The owner still has the pictures to review. No Mac build,
+Windows host run, installed plug-in or real audio device is used for this job.

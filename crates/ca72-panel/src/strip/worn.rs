@@ -1379,8 +1379,8 @@ fn seven(
         shown.insert(0, (' ', false));
     }
     let shown = &shown[shown.len() - cells..];
-    let pitch = ((w - 22.0) / cells as f64).min(44.0);
-    let (cw, ch, t) = (pitch * 0.68, h * 0.64, pitch * 0.19);
+    let pitch = super::DIGIT_PITCH;
+    let (cw, ch, t) = (pitch * 0.68, super::DIGIT_HEIGHT, pitch * 0.19);
     let x0 = x + w - 12.0 - pitch * cells as f64 + (pitch - cw) / 2.0;
     let y0 = y + (h - ch) / 2.0;
     let hx = t / 2.0 + 1.3;
@@ -1969,6 +1969,39 @@ mod tests {
     use resvg::tiny_skia::{Color, Paint, Rect};
 
     use super::*;
+
+    /// Every seven-segment readout, including four-cell MPE, prints two adjacent digits at
+    /// the same pitch and height. Compare their actual pixels at the window's right edge so
+    /// that a future window-derived pitch, height or stroke width fails this check.
+    #[test]
+    fn every_readout_has_the_same_digit_pitch_and_height() {
+        let options = super::super::lower::lettered();
+        let mut reference = None;
+        let windows = Readout::ALL
+            .into_iter()
+            .map(|r| (r.window(), 3))
+            .chain((0..4).map(|i| (super::super::arp::readout(i), 3)))
+            .chain((0..4).map(|i| (super::super::mpe::readout(i), super::super::mpe::CELLS)));
+        for ((_, _, w, h), cells) in windows {
+            assert!(w >= super::super::readout_width(cells));
+            assert_eq!(h, super::super::READOUT.1);
+            let mut svg = Svg::default();
+            seven(&mut svg, (0.0, 0.0, w, h), cells, "88", true, "#ffb020");
+            let mut pixels = Pixmap::new(w as u32, h as u32).expect("the window");
+            svg_over(&options, &mut pixels, 1.0, &svg.0);
+            let digits = pixels
+                .clone_rect(
+                    resvg::tiny_skia::IntRect::from_xywh(w as i32 - 100, 0, 100, h as u32)
+                        .expect("two digits"),
+                )
+                .expect("inside the window");
+            if let Some(expected) = &reference {
+                assert_eq!(&digits, expected, "{cells} cells in a {w} by {h} window");
+            } else {
+                reference = Some(digits);
+            }
+        }
+    }
 
     #[test]
     fn global_fits_with_the_panels_former_side_clearance() {

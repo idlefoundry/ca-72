@@ -23,7 +23,6 @@ use super::worn::{
 };
 use super::{READOUT, UNIT_READOUT};
 use crate::art::{self, Lettering};
-use crate::fonts::FAMILY;
 use crate::render::Renderer;
 use crate::skin::Skin;
 use crate::svg::{N, Svg, colour, put};
@@ -38,10 +37,13 @@ const LEGEND_UP: f64 = 109.0;
 pub const INPUT: (f64, f64, f64, f64) = (INPUT_X - 120.0, ROW - 25.0, 240.0, 50.0);
 const INPUT_X: f64 = 536.0;
 /// The rules: after INPUT, and between PRESSURE's units and TIMBRE's.
-const RULES: [f64; 2] = [700.0, 1890.0];
-/// The units' middles: PRESSURE's MODULATION and CUTOFF, TIMBRE's MODULATION and CUTOFF (each a
-/// knob `UNIT_KNOB` left of it and its readout `UNIT_READOUT` right of it, as the strip's).
-pub const UNITS: [f64; 4] = [1219.0, 1602.0, 2389.0, 2772.0];
+const RULES: [f64; 2] = [700.0, 1920.0];
+// The four-cell window, its % print and the next dial's outer numbers need 450 units
+// between middles in LARGE (the measured ink extents are checked below).
+const UNIT_PITCH: f64 = 450.0;
+/// The units' middles: PRESSURE's MODULATION and CUTOFF, TIMBRE's MODULATION and CUTOFF. Each
+/// knob is `UNIT_KNOB` left of it; its readout grows rightwards from the strip's window.
+pub const UNITS: [f64; 4] = [1165.0, 1165.0 + UNIT_PITCH, 2325.0, 2325.0 + UNIT_PITCH];
 /// The knobs' parameters, in the units' order.
 pub const KNOB_PARAMS: [&str; 4] = [
     "pressure_mod",
@@ -51,13 +53,12 @@ pub const KNOB_PARAMS: [&str; 4] = [
 ];
 const LEGENDS: [&str; 4] = ["MODULATION", "CUTOFF", "MODULATION", "CUTOFF"];
 /// Each readout's cells: four, for MODULATION's "-100" (CUTOFF's "-2.5" needs three), the same
-/// in all four so that their digits are one size.
+/// in all four. Their windows grow to keep the strip's digit pitch and height.
 pub const CELLS: usize = 4;
 /// The groups' titles, each before its first unit (right-aligned this far left of its middle),
-/// and their size.
+/// at the strip's section title size.
 const GROUPS: [(usize, &str); 2] = [(0, "PRESSURE"), (2, "TIMBRE")];
-const TITLE_LEFT: f64 = 234.0;
-const TITLE: f64 = 44.0;
+const TITLE_LEFT: f64 = 220.0;
 
 /// What INPUT reads (the editor's, from what the audio thread heard lately).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -85,9 +86,11 @@ impl Input {
 pub fn readout(i: usize) -> (f64, f64, f64, f64) {
     let x = UNITS[i.min(3)] + UNIT_READOUT;
     (
+        // Keep the strip's clearance from the knob's outer numbers; the extra cell grows
+        // rightwards. Centring the wider window on `x` would cover MODULATION's 50.
         x - READOUT.0 / 2.0,
         ROW - READOUT.1 / 2.0,
-        READOUT.0,
+        super::readout_width(CELLS),
         READOUT.1,
     )
 }
@@ -498,16 +501,8 @@ fn surfaces(oy: f64, skin: Skin) -> String {
 fn print_svg(oy: f64, lettering: Lettering) -> String {
     let mut s = Svg(String::new(), lettering);
     let (legend, small) = (lettering.strip_legend(), lettering.strip_small());
-    let text = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64, anchor: &str| {
-        put!(
-            s,
-            "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='{anchor}' dominant-baseline='central' fill='{}'>{}</text>",
-            N(x),
-            N(y - oy),
-            N(size),
-            colour::LEGEND,
-            t
-        );
+    let text = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64| {
+        art::text(s, x, y - oy, t, size, art::Style::Legend, false, "");
     };
     for x in RULES {
         put!(
@@ -520,32 +515,42 @@ fn print_svg(oy: f64, lettering: Lettering) -> String {
             colour::LEGEND
         );
     }
-    text(&mut s, INPUT_X, ROW - LEGEND_UP, "INPUT", legend, "middle");
+    text(&mut s, INPUT_X, ROW - LEGEND_UP, "INPUT", legend);
+    let fonts = crate::fonts::Fonts::new();
     for (u, t) in GROUPS {
-        text(&mut s, UNITS[u] - TITLE_LEFT, ROW, t, TITLE, "end");
+        let width = fonts.advance(t, super::TITLE, crate::fonts::Weight::Bold, 0.0);
+        put!(s, "<g id='mpe-title-{u}'>");
+        art::text(
+            &mut s,
+            UNITS[u] - TITLE_LEFT - width / 2.0,
+            ROW - oy,
+            t,
+            super::TITLE,
+            art::Style::Title,
+            false,
+            "",
+        );
+        s.0.push_str("</g>");
     }
     for (k, (u, t)) in UNITS.iter().zip(LEGENDS).enumerate() {
+        put!(s, "<g id='mpe-unit-{k}'>");
         let x = u + super::UNIT_KNOB;
-        text(&mut s, x, ROW - LEGEND_UP, t, legend, "middle");
+        text(&mut s, x, ROW - LEGEND_UP, t, legend);
         let dial = if k % 2 == 0 {
             crate::controls::Dial::Reach
         } else {
             crate::controls::Dial::Cutoff
         };
+        put!(s, "<g id='mpe-dial-{k}'>");
         art::draw_dial(&mut s, x, ROW - oy, dial);
+        s.0.push_str("</g>");
         let (rx, ry, rw, rh) = readout(k);
         if k % 2 == 0 {
-            text(&mut s, rx + rw + 18.0, ry + rh / 2.0, "%", small, "middle");
+            text(&mut s, rx + rw + 18.0, ry + rh / 2.0, "%", small);
         } else {
-            text(
-                &mut s,
-                rx + rw + 36.0,
-                ry + rh / 2.0,
-                "OCT",
-                small,
-                "middle",
-            );
+            text(&mut s, rx + rw + 36.0, ry + rh / 2.0, "OCT", small);
         }
+        s.0.push_str("</g>");
     }
     s.0
 }
@@ -564,24 +569,63 @@ mod tests {
             assert!(inside(at.0, at.1));
         }
         assert_eq!(hit(INPUT.0 + 10.0, ROW), None);
-        let half = super::super::UNIT_HALF;
-        for w in UNITS.windows(2) {
-            assert!(w[1] - w[0] >= 2.0 * half);
-        }
         const {
             assert!(INPUT.0 > LEFT && INPUT.0 + INPUT.2 < RULES[0]);
-            // Each group between its rules, its title (some 230 units) before its first knob's
-            // dial.
-            assert!(UNITS[0] - TITLE_LEFT - 230.0 > RULES[0]);
-            assert!(UNITS[2] - TITLE_LEFT - 230.0 > RULES[1]);
         }
-        assert!(UNITS[1] + half < RULES[1] && UNITS[3] + half < RIGHT);
-        // CUTOFF's OCT (some 50 units wide) inside the trim.
-        let (rx, _, rw, _) = readout(3);
-        assert!(rx + rw + 36.0 + 30.0 < RIGHT);
         assert!(!inside(LEFT - 1.0, ROW) && !inside(RIGHT + 1.0, ROW));
         assert!(!inside(1000.0, TOP + DEPTH + 1.0) && !inside(1000.0, TOP - 1.0));
         assert!(ROW - LEGEND_UP > TOP + 14.0 && ROW + READOUT.1 / 2.0 < TOP + DEPTH - 9.0);
+    }
+
+    /// Use the actual printed extents, including LARGE's outer dial numbers and units, rather
+    /// than the strip's old three-cell unit width. The titles and INPUT have their own space.
+    #[test]
+    fn the_wider_readouts_and_titles_clear_the_print() {
+        for lettering in [Lettering::Standard, Lettering::Large] {
+            let doc = art::document(
+                [0.0, 0.0, art::W, art::H],
+                3108,
+                1775,
+                &print_svg(0.0, lettering),
+            );
+            let tree = usvg::Tree::from_str(&doc, &lower::lettered()).expect("the print parses");
+            let bounds = |id: &str| {
+                tree.node_by_id(id)
+                    .expect("the printed part")
+                    .abs_stroke_bounding_box()
+            };
+            for (group, _) in GROUPS {
+                let (left, right) = if group == 0 {
+                    (RULES[0], RULES[1])
+                } else {
+                    (RULES[1], RIGHT)
+                };
+                let title = bounds(&format!("mpe-title-{group}"));
+                assert!(
+                    f64::from(title.left()) > left + 8.0,
+                    "{lettering:?}: {title:?}"
+                );
+                let mut end = f64::from(title.right());
+                for i in group..group + 2 {
+                    let ink = bounds(&format!("mpe-unit-{i}"));
+                    let (x, _, w, _) = readout(i);
+                    let dial = bounds(&format!("mpe-dial-{i}"));
+                    assert!(
+                        x - 6.0 > f64::from(dial.right()) + 6.0,
+                        "{lettering:?} unit {i}: window {x} after dial {dial:?}"
+                    );
+                    let start = f64::from(ink.left()).min(x - 6.0);
+                    assert!(
+                        start > end + 6.0,
+                        "{lettering:?} unit {i}: {start} after {end}"
+                    );
+                    end = f64::from(ink.right()).max(x + w + 6.0);
+                    assert!(f64::from(ink.top()) > TOP + 14.0);
+                    assert!(f64::from(ink.bottom()) < TOP + DEPTH - 9.0);
+                }
+                assert!(end < right - 8.0, "{lettering:?}: {end} before {right}");
+            }
+        }
     }
 
     /// The drawer drawn in parts is the drawer drawn whole: INPUT's screen lit and dark, a
@@ -589,9 +633,16 @@ mod tests {
     /// both skins.
     #[test]
     fn drawn_in_parts_it_is_drawn_whole() {
-        for (scale, skin) in [(0.44, Skin::Worn), (0.87, Skin::Drawn)] {
-            let mut panel = Renderer::with_skin(skin, scale, 1.0);
-            let mut r = MpeRenderer::new(scale, skin, Lettering::Standard);
+        for (scale, skin, lettering) in [
+            (0.44, Skin::Worn, Lettering::Standard),
+            (0.87, Skin::Drawn, Lettering::Standard),
+            (0.44, Skin::Worn, Lettering::Large),
+            (1.0, Skin::Worn, Lettering::Large),
+            (0.44, Skin::Drawn, Lettering::Large),
+            (1.0, Skin::Drawn, Lettering::Large),
+        ] {
+            let mut panel = Renderer::with_look(skin, lettering, scale, 1.0);
+            let mut r = MpeRenderer::new(scale, skin, lettering);
             let mut scene = MpeScene {
                 readouts: [
                     ("0".into(), true),
@@ -616,11 +667,11 @@ mod tests {
                 step(&mut scene);
                 assert!(r.render(&scene, &mut panel));
                 assert!(r.damage().is_some());
-                let mut whole = MpeRenderer::new(scale, skin, Lettering::Standard);
+                let mut whole = MpeRenderer::new(scale, skin, lettering);
                 whole.render(&scene, &mut panel);
                 assert!(
                     r.frame() == whole.frame(),
-                    "{scale} {skin:?}: {scene:?} drawn in parts"
+                    "{scale} {skin:?} {lettering:?}: {scene:?} drawn in parts"
                 );
             }
             assert!(!r.render(&scene, &mut panel), "nothing changed");

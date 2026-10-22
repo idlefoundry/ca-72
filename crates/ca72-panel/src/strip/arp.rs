@@ -22,7 +22,6 @@ pub use super::lower::{LEFT, RIGHT, SHADOW, TOP, top_px};
 use super::worn::{Lamp, Reading, copy, meets, readout_patch, svg_over, union, within};
 use super::{READOUT, RECESS_PAD, UNIT_READOUT};
 use crate::art::{self, Lettering};
-use crate::fonts::FAMILY;
 use crate::render::Renderer;
 use crate::skin::Skin;
 use crate::svg::{N, Svg, colour, put};
@@ -637,15 +636,7 @@ fn print_svg(oy: f64, lettering: Lettering) -> String {
     let mut s = Svg(String::new(), lettering);
     let (legend, small) = (lettering.strip_legend(), lettering.strip_small());
     let text = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64| {
-        put!(
-            s,
-            "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}'>{}</text>",
-            N(x),
-            N(y - oy),
-            N(size),
-            colour::LEGEND,
-            t
-        );
+        art::text(s, x, y - oy, t, size, art::Style::Legend, false, "");
     };
     put!(
         s,
@@ -657,7 +648,16 @@ fn print_svg(oy: f64, lettering: Lettering) -> String {
         colour::LEGEND
     );
     for b in ArpBank::ALL {
-        text(&mut s, b.x(), ROW - LEGEND_UP, b.title(), legend);
+        art::text(
+            &mut s,
+            b.x(),
+            TOP + 38.0 - oy,
+            b.title(),
+            super::TITLE,
+            art::Style::Title,
+            false,
+            "",
+        );
     }
     for (k, (u, t)) in UNITS.iter().zip(LEGENDS).enumerate() {
         let x = u + super::UNIT_KNOB;

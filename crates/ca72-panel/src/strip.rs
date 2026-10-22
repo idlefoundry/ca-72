@@ -54,6 +54,14 @@ pub const TAB_PITCH: f64 = TAB.0 + 6.0;
 pub const RECESS_PAD: f64 = 18.0;
 /// A readout's size.
 pub const READOUT: (f64, f64) = (156.0, 84.0);
+/// The seven-segment cells' pitch and visible height, shared by every readout (R-DRAWER-LETTERING).
+pub const DIGIT_PITCH: f64 = 44.0;
+pub const DIGIT_HEIGHT: f64 = READOUT.1 * 0.64;
+
+/// More cells make a wider window, never narrower digits.
+pub const fn readout_width(cells: usize) -> f64 {
+    cells as f64 * DIGIT_PITCH + 22.0
+}
 /// The grid (the mock-up's A5 and A6): every amount a unit of its knob and its readout, the
 /// knob this far left of the unit's middle, the readout this far right, the unit this wide.
 pub const UNIT_KNOB: f64 = -84.0;
@@ -167,7 +175,7 @@ pub const DISPLAY: (f64, f64, f64, f64) = (
 );
 /// The section titles' size (the legends' and the small print's are the lettering's:
 /// `art::Lettering`).
-const TITLE: f64 = 52.0;
+pub(super) const TITLE: f64 = crate::arrangement::TITLE_SIZE;
 
 /// The banks of tabs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -624,20 +632,12 @@ pub(crate) fn screen_bezel(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64)) {
 /// The strip's print: the sections' rules and titles, the banks' titles, the knobs' legends,
 /// the readouts' units, the display's title and its ends. (The knobs' dials are drawn with the
 /// panel's: `art`.)
-pub(crate) fn print(s: &mut Svg, fonts_family: &str) {
+pub(crate) fn print(s: &mut Svg) {
     let top = PANEL_H + RAIL;
     let foot = art::H;
     let (legend, small) = (s.1.strip_legend(), s.1.strip_small());
     let text = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64| {
-        put!(
-            s,
-            "<text x='{}' y='{}' font-family='{fonts_family}' font-size='{}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}'>{}</text>",
-            N(x),
-            N(y),
-            N(size),
-            colour::LEGEND,
-            t
-        );
+        art::text(s, x, y, t, size, art::Style::Legend, false, "");
     };
     for (x0, _, _) in &SECTIONS[1..] {
         put!(
@@ -652,7 +652,16 @@ pub(crate) fn print(s: &mut Svg, fonts_family: &str) {
     }
     for (x0, x1, t) in SECTIONS {
         if !t.is_empty() {
-            text(s, (x0 + x1) / 2.0, foot - 50.0, t, TITLE);
+            art::text(
+                s,
+                (x0 + x1) / 2.0,
+                foot - 50.0,
+                t,
+                TITLE,
+                art::Style::Title,
+                false,
+                "",
+            );
         }
     }
     for b in Bank::ALL {

@@ -269,7 +269,7 @@ pub fn polar(r: f64, deg: f64) -> (f64, f64) {
 
 /// The lettering's kinds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Style {
+pub(crate) enum Style {
     Legend,
     Title,
     Plate,
@@ -277,7 +277,16 @@ enum Style {
 
 /// Text centred on (x, y) (`y` the middle of its capitals); `start`: begun at `x`.
 #[allow(clippy::too_many_arguments)]
-fn text(s: &mut Svg, x: f64, y: f64, t: &str, size: f64, style: Style, start: bool, extra: &str) {
+pub(crate) fn text(
+    s: &mut Svg,
+    x: f64,
+    y: f64,
+    t: &str,
+    size: f64,
+    style: Style,
+    start: bool,
+    extra: &str,
+) {
     let k = if style == Style::Legend { STRETCH } else { 1.0 };
     let look = match style {
         Style::Legend => format!(
@@ -1097,7 +1106,7 @@ pub(crate) fn strip_trims(s: &mut Svg) {
 
 /// The strip's print (`strip::print`) and its knobs' dials.
 fn strip_print(s: &mut Svg, arrangement: &Arrangement) {
-    crate::strip::print(s, FAMILY);
+    crate::strip::print(s);
     for c in arrangement
         .controls
         .iter()

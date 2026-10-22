@@ -28,8 +28,7 @@ use super::TAB;
 use super::lower::{self, LitTabs, Look};
 pub use super::lower::{LEFT, RIGHT, SHADOW, TOP, top_px};
 use super::worn::{CAP_LIFT, DOT, ORANGE, ORANGE_GLOW, copy, meets, svg_over, union, within};
-use crate::art::Lettering;
-use crate::fonts::FAMILY;
+use crate::art::{self, Lettering};
 use crate::skin::Skin;
 use crate::svg::{N, Svg, colour, put};
 
@@ -1535,23 +1534,26 @@ fn make_still((scale, skin, lettering): Look) -> Still {
     // The legends, over each slot's screen and tab.
     let mut print = Svg(String::new(), lettering);
     for i in 0..SLOTS {
-        put!(
-            print,
-            "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}'>SLOT {}</text>",
-            N(middle(i)),
-            N(LEGEND_Y - oy),
-            N(lettering.strip_legend()),
-            colour::LEGEND,
-            i + 1
+        art::text(
+            &mut print,
+            middle(i),
+            LEGEND_Y - oy,
+            &format!("SLOT {}", i + 1),
+            lettering.strip_legend(),
+            art::Style::Legend,
+            false,
+            "",
         );
     }
-    put!(
-        print,
-        "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}'>CHAIN</text>",
-        N(lock_tab().0),
-        N(LEGEND_Y - oy),
-        N(lettering.strip_legend()),
-        colour::LEGEND
+    art::text(
+        &mut print,
+        lock_tab().0,
+        LEGEND_Y - oy,
+        "CHAIN",
+        lettering.strip_legend(),
+        art::Style::Legend,
+        false,
+        "",
     );
     // The short plate is also the deep plate's header: no rounded rule end at their join.
     for k in 1..SLOTS {
@@ -1628,14 +1630,15 @@ fn make_still((scale, skin, lettering): Look) -> Still {
                     let (left, ptop) = ((x * s).floor(), ((WORD_Y - 14.0 - oy) * s).floor());
                     let mut p = Pixmap::new(pw.max(1), ph)?;
                     let mut o = Svg::default();
-                    put!(
-                        o,
-                        "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' letter-spacing='1.5' text-anchor='middle' dominant-baseline='central' fill='{}' fill-opacity='0.72'>{}</text>",
-                        N(x + w / 2.0 - left / s),
-                        N(WORD_Y - oy - ptop / s),
-                        N(lettering.strip_small()),
-                        colour::LEGEND,
-                        word.text()
+                    art::text(
+                        &mut o,
+                        x + w / 2.0 - left / s,
+                        WORD_Y - oy - ptop / s,
+                        word.text(),
+                        lettering.strip_small(),
+                        art::Style::Legend,
+                        false,
+                        "letter-spacing='1.5' opacity='0.72'",
                     );
                     svg_over(&options, &mut p, s, &o.0);
                     Some((left as i32, ptop as i32, p))
@@ -1783,9 +1786,18 @@ fn make_still((scale, skin, lettering): Look) -> Still {
         ((lx - 100.0) * s).floor(),
         ((WORD_Y - 14.0 - oy) * s).floor(),
     );
-    let unlock = Pixmap::new((200.0*s).ceil() as u32, (28.0*s).ceil() as u32).map(|mut p| {
+    let unlock = Pixmap::new((200.0 * s).ceil() as u32, (28.0 * s).ceil() as u32).map(|mut p| {
         let mut o = Svg::default();
-        put!(o, "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}' fill-opacity='0.72'>UNLOCK TO HEAR</text>", N(lx-left/s), N(WORD_Y-oy-top/s), N(lettering.strip_small()), colour::LEGEND);
+        art::text(
+            &mut o,
+            lx - left / s,
+            WORD_Y - oy - top / s,
+            "UNLOCK TO HEAR",
+            lettering.strip_small(),
+            art::Style::Legend,
+            false,
+            "opacity='0.72'",
+        );
         svg_over(&options, &mut p, s, &o.0);
         (left as i32, top as i32, p)
     });

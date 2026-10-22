@@ -30,7 +30,7 @@ use super::worn::{Lamp, screen_still, screen_text, svg_over};
 use crate::arrangement::Arrangement;
 use crate::art::{self, H, Keyed, Layout, Lettering, ModWay, W};
 use crate::controls::{CONTROLS, Dial, Kind, lfo_index};
-use crate::fonts::{FAMILY, Fonts};
+use crate::fonts::Fonts;
 use crate::glow::{self, Coverage, Phosphor, crop, hex, lay};
 use crate::render::Renderer;
 use crate::skin::Skin;
@@ -45,7 +45,7 @@ pub const DEPTH: f64 = H - 6.0 - TOP;
 pub const X0: f64 = 370.0;
 pub const X1: f64 = W - 28.0;
 pub const COL_W: f64 = (X1 - X0) / 4.0;
-const TITLE: f64 = 52.0;
+const TITLE: f64 = super::TITLE;
 const TITLE_Y: f64 = H - 50.0;
 const LEGEND_UP: f64 = 109.0;
 const PITCH: f64 = 212.0;
@@ -1513,17 +1513,9 @@ fn bezel(s: &mut Svg, n: usize, (x, y, w, h): (f64, f64, f64, f64)) {
     }
 }
 
-/// Text at (`x`, `y`), centred, the panel's legends' colour.
+/// Text at (`x`, `y`), centred, the panel's legends' print.
 fn text(t: &mut Svg, x: f64, y: f64, w: &str, size: f64) {
-    put!(
-        t,
-        "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}'>{}</text>",
-        N(x),
-        N(y),
-        N(size),
-        colour::LEGEND,
-        w
-    );
+    art::text(t, x, y, w, size, art::Style::Legend, false, "");
 }
 
 /// The page's print (the frame's units): the rules between the columns, each column's title and
@@ -1547,7 +1539,16 @@ fn print_svg(oy: f64, lettering: Lettering, layout: &Layout, times: &str) -> Str
     }
     for n in 0..4 {
         let p = places(n);
-        text(&mut t, centre(n), TITLE_Y, &format!("LFO {}", n + 1), TITLE);
+        art::text(
+            &mut t,
+            centre(n),
+            TITLE_Y,
+            &format!("LFO {}", n + 1),
+            TITLE,
+            art::Style::Title,
+            false,
+            "",
+        );
         for ((x, y), w) in [
             (p.wave, "WAVEFORM"),
             (p.rate, "RATE"),
