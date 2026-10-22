@@ -2668,31 +2668,49 @@ mod tests {
         assert!((held - 1.675).abs() < 0.01, "SUSTAIN 5 at {held} V");
     }
 
-    /// The shark tooth's odd harmonics as the circuit's: the fifth 27.6 dB under the
-    /// fundamental (its triangle ahead of the sawtooth's reset; in step, 24.7).
+    /// The hybrid's fifth harmonic follows the current circuit reference at the original
+    /// measurement panel, within the same 1 dB budget. Measure it here rather than retaining
+    /// the old -27.6 dBc fixture: the Q2 fold and R031 reference calibration changed the
+    /// physical source (docs/calibration/waveform-fold-reference.md).
     #[test]
     fn the_shark_tooth_as_the_circuits() {
-        let mut l = Light::new(48_000.0);
         let mut p = measuring();
         p.osc[0].waveform = Waveform::SharkTooth;
         p.osc[0].volume = 0.2;
+        let mut l = Light::new(48_000.0);
         l.set_panel(&p);
         l.note(33, true);
         run(&mut l, 24_000);
-        let x = run(&mut l, 48_000);
-        let f0 = hz(&x);
-        let amp = |h: f64| {
-            let w = std::f64::consts::TAU * h * f0 / 48_000.0;
-            let (mut re, mut im) = (0.0, 0.0);
-            for (i, y) in x.iter().enumerate() {
-                let window = 0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / x.len() as f64).cos();
-                re += window * y * (w * i as f64).cos();
-                im += window * y * (w * i as f64).sin();
-            }
-            re.hypot(im)
+        let light = run(&mut l, 48_000);
+        // The original potato_reference.rs harness measures Voice at this quality too.
+        p.quality = crate::voice::Quality::Potato;
+        let mut reference = crate::voice::Voice::new(48_000.0, p);
+        reference.note(33, true);
+        for _ in 0..24_000 {
+            reference.tick();
+        }
+        let circuit: Vec<f64> = (0..48_000).map(|_| reference.tick()).collect();
+        let fifth = |x: &[f64]| {
+            let f0 = hz(x);
+            let amp = |h: f64| {
+                let w = std::f64::consts::TAU * h * f0 / 48_000.0;
+                let (mut re, mut im) = (0.0, 0.0);
+                for (i, y) in x.iter().enumerate() {
+                    let window =
+                        0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / x.len() as f64).cos();
+                    re += window * y * (w * i as f64).cos();
+                    im += window * y * (w * i as f64).sin();
+                }
+                re.hypot(im)
+            };
+            20.0 * (amp(5.0) / amp(1.0)).log10()
         };
-        let h5 = 20.0 * (amp(5.0) / amp(1.0)).log10();
-        assert!((h5 + 27.6).abs() < 1.0, "the fifth harmonic at {h5:.1} dB");
+        let light_h5 = fifth(&light);
+        let circuit_h5 = fifth(&circuit);
+        assert!(
+            (light_h5 - circuit_h5).abs() < 1.0,
+            "the fifth harmonic: light {light_h5:.3}, circuit {circuit_h5:.3} dBc"
+        );
     }
 
     /// The passband falls as the circuit's at the lowest cutoffs: a sawtooth at 55 Hz
