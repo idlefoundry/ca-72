@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render R-DRAWER-LETTERING's LARGE review frames with the panel's PNG example.
+"""Render R-DRAWER-LETTERING's STANDARD and LARGE review frames with the panel's PNG example.
 
 Run once with the saved baseline binary, then with the changed one. ImageMagick crops
 both at the same drawing coordinates; no image is resized for the comparison.
@@ -19,13 +19,15 @@ def crop(source, dest, box, scale):
     )
 
 
-def comparisons(output, skin, scale, baseline):
-    prefix = f"{skin}-large-{scale}"
+def comparisons(output, skin, lettering, scale, baseline):
+    prefix = f"{skin}-{lettering}-{scale}"
     full = output / "full"
     cutoff = 1602 if baseline else 1615
     rows = []
     font = Path(__file__).resolve().parents[1] / "third_party/urw-gothic/URWGothic-Demi.otf"
     for kind, boxes in (
+        ("bank", (("global", "GLOBAL: MODE", (413, 1023, 933, 1203)),
+                  ("arp", "ARP: ARP", (385, 1053, 725, 1233)))),
         ("readout", (("global", "GLOBAL: DRIVE", (2738, 1311, 3038, 1439)),
                      ("mpe", "MPE: CUTOFF", (cutoff + 13, 1117, cutoff + 313, 1245)))),
         ("legend", (("global", "GLOBAL: DRIVE", (2541, 1248, 2741, 1288)),
@@ -58,23 +60,37 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     full = args.output / "full"
     full.mkdir(exist_ok=True)
+    font = Path(__file__).resolve().parents[1] / "third_party/urw-gothic/URWGothic-Demi.otf"
+    pages = (("global", None), ("mpe", "CA72_MPE"), ("arp", "CA72_ARP"),
+             ("lfo", "CA72_LFO"), ("fx", "CA72_FX"), ("fx-safety", "CA72_FX"))
     for skin in ("worn", "drawn"):
         for scale in (0.44, 1.0):
-            for page, flag in (("global", None), ("mpe", "CA72_MPE"),
-                               ("arp", "CA72_ARP"), ("lfo", "CA72_LFO"),
-                               ("fx", "CA72_FX"), ("fx-safety", "CA72_FX")):
-                if args.comparisons_only:
-                    continue
-                name = f"{skin}-large-{scale}-{page}.png"
-                env = {k: v for k, v in os.environ.items() if not k.startswith("CA72_")}
-                env.update(CA72_SKIN=skin, CA72_LETTERING="large", CA72_MPE_P="-100")
-                if flag:
-                    env[flag] = "safety" if page == "fx-safety" else "1"
-                subprocess.run([str(args.binary.resolve()), str(full / name), str(scale)],
-                               env=env, check=True)
-                box = (360, 1033, 3090, 1775 if page in ("global", "lfo") else 1330)
-                crop(full / name, args.output / name, box, scale)
-            comparisons(args.output, skin, scale, args.baseline)
+            for lettering in ("standard", "large"):
+                for page, flag in pages:
+                    if args.comparisons_only:
+                        continue
+                    name = f"{skin}-{lettering}-{scale}-{page}.png"
+                    env = {k: v for k, v in os.environ.items() if not k.startswith("CA72_")}
+                    env.update(CA72_SKIN=skin, CA72_LETTERING=lettering, CA72_MPE_P="-100")
+                    if flag:
+                        env[flag] = "safety" if page == "fx-safety" else "1"
+                    subprocess.run([str(args.binary.resolve()), str(full / name), str(scale)],
+                                   env=env, check=True)
+                    box = (360, 1033, 3090, 1775 if page in ("global", "lfo") else 1330)
+                    crop(full / name, args.output / name, box, scale)
+                comparisons(args.output, skin, lettering, scale, args.baseline)
+            # STANDARD beside LARGE, with captions outside the unscaled samples.
+            for page in (*[p for p, _ in pages], "bank-comparison"):
+                tiles = []
+                for lettering in ("standard", "large"):
+                    source = args.output / f"{skin}-{lettering}-{scale}-{page}.png"
+                    tiles.extend(["(", str(source), "-background", "#1d1b1a",
+                                  "-gravity", "north", "-splice", "0x24", "-font", str(font),
+                                  "-pointsize", "14", "-fill", "#ebe6d8", "-annotate",
+                                  "+0+3", lettering.upper(), ")"])
+                subprocess.run(["magick", *tiles, "+append",
+                                str(args.output / f"{skin}-{scale}-{page}-lettering.png")],
+                               check=True)
 
 
 if __name__ == "__main__":

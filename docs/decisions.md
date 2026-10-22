@@ -14914,3 +14914,58 @@ before/after full-window pairs are pixel-identical above the drawers, including 
 Independent read-only source and image review finds no material issue. GLOBAL's existing
 tab-cap words retain their separate print path; the GLOBAL extension here covers its legends,
 units and section titles. These checks and review are not the owner's visual approval.
+
+**Review corrections, 2026-10-22 (the owner's second brief):** the first review matrix omitted
+STANDARD, the default. In that setting PRESSURE and TIMBRE appeared against the rules. The
+eight-unit gate was too small: their actual ink-to-rule-edge gaps were 13.32 and 12.08 units.
+The owner asked to keep both at 52 in `Style::Title`, with "at least the clearance the GLOBAL
+page's section titles have from its rules", and to keep the drawer's depth and the existing
+clearances. The owner also clarified: "ARP and DIRECTION are group legends, not section titles."
+
+**Built:** GLOBAL's smallest measured ink-to-rule-edge clearance is 207.582 drawing units
+(VOICES's left gap; the four-unit rule's half-width is included). MPE now centres PRESSURE
+and TIMBRE beneath their sections, with the same 52-unit title print. Both titles' nearest rule
+gaps exceed 490 units. The capitals' centre is 44 units above the foot, leaving 10.62 units
+below the first readout's bezel and over 24 units above the foot. The drawer remains 265 units
+deep; INPUT, all four units, their windows and the rules keep their positions.
+
+**Agent decision** (not separately approved): use the sections' lower space for their titles,
+as GLOBAL does. The preferred inline adjustments cannot supply GLOBAL's measured gap: even
+with no INPUT padding, the 240-unit screen, two titles, two 207.58-unit rule gaps and the two
+knob/readout pairs need about 2875 units across, against 2708 available. That lower bound
+already tightens each pair to the six-unit printed clearance and each title-to-knob gap to
+six units. Narrowing INPUT's column, tightening the title gap and moving units cannot retain
+all those clearances with inline headings. The owner should confirm the lower title placement
+from the pictures.
+
+ARP and DIRECTION now pass through `strip::bank_legend`, shared with GLOBAL's MODE, VOICES
+PLAYED AS, PLACEMENT and AUTO GAIN: `Style::Legend`, 21 units in STANDARD or 23 in LARGE,
+26 units above the recess's top (67 above the tabs' middle). The LFO and FX audit found no
+other group label promoted to a title: MODE and FX's SLOT/CHAIN labels already use the legend
+style; LFO 1 to 4 name whole sections and retain the 52-unit title style.
+
+The layout regression measures GLOBAL's real title ink, compares both sides of both MPE
+titles against that minimum, and retains the neighbour, own-dial, bezel, rule and drawer-edge
+gaps. With titles now below the row, the six-unit title-to-print clearance is checked against
+each printed part's extents in both axes. Restoring the previous inline placement fails the
+new GLOBAL clearance gate in STANDARD. A second regression checks both ARP banks against the
+shared GLOBAL legend's dimensions and recess offset in STANDARD and LARGE. The MPE
+partial-versus-whole matrix now also includes STANDARD in both skins at 0.44 and 1.0.
+
+`scripts/drawer-lettering-frames.py` now renders STANDARD beside LARGE for every page and
+skin at both scales: 48 full windows before (`e9545a1`) and 48 after, including FX safety
+states. Each has an unscaled page crop; the same-scale MODE/ARP comparisons align the tabs'
+middles, making both letter size and height above the tabs visible. The README under
+`target/drawer-lettering-frames/` indexes the complete matrix. The earlier LARGE-only evidence
+and its review did not establish the default setting's visual quality.
+
+**Checks after the corrections (Linux, 2026-10-22):** the requested production-feature package
+suite passes, 837 tests with 80 intentionally ignored. The full default-feature workspace
+suite passes, 1170 tests with 97 intentionally ignored. Workspace/all-target/all-feature
+Clippy, default-feature panel Clippy, formatting and notices pass. The approved panel images
+remain unchanged. All 48 before/after full-window pairs are pixel-identical above the drawer
+top, including the entire rail. Independent read-only source/image review finds no defect and
+confirms the optimistic inline width calculation. Logs, hashes and the updated image index
+are under `target/drawer-lettering-frames/`; the new logs have a `-2` suffix. No new timing
+claim, Mac build, Windows run, installed plug-in or manual host test is made. The lower title
+placement is still for the owner's visual confirmation.

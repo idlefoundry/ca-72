@@ -3,7 +3,7 @@
 //! whichever lower page shows, as the arpeggiator's is (`arp`, `lower`). Left to right: INPUT, a
 //! pixel screen of the rail's kind reading what expression comes in; a rule; PRESSURE's
 //! MODULATION and CUTOFF; a rule; TIMBRE's MODULATION and CUTOFF, each a knob and its readout,
-//! the strip's own parts. The two groups are each centred on their own half.
+//! the strip's own parts. The two groups' titles are centred below them, as GLOBAL's are.
 //!
 //! The drawer is a plate of its own, as the arpeggiator's is. What does not change is drawn once
 //! a scale on a thread of its own, begun as the editor opens; then only what changed.
@@ -55,10 +55,8 @@ const LEGENDS: [&str; 4] = ["MODULATION", "CUTOFF", "MODULATION", "CUTOFF"];
 /// Each readout's cells: four, for MODULATION's "-100" (CUTOFF's "-2.5" needs three), the same
 /// in all four. Their windows grow to keep the strip's digit pitch and height.
 pub const CELLS: usize = 4;
-/// The groups' titles, each before its first unit (right-aligned this far left of its middle),
-/// at the strip's section title size.
+/// The groups' section titles, centred below the units as GLOBAL's are.
 const GROUPS: [(usize, &str); 2] = [(0, "PRESSURE"), (2, "TIMBRE")];
-const TITLE_LEFT: f64 = 220.0;
 
 /// What INPUT reads (the editor's, from what the audio thread heard lately).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -516,14 +514,13 @@ fn print_svg(oy: f64, lettering: Lettering) -> String {
         );
     }
     text(&mut s, INPUT_X, ROW - LEGEND_UP, "INPUT", legend);
-    let fonts = crate::fonts::Fonts::new();
-    for (u, t) in GROUPS {
-        let width = fonts.advance(t, super::TITLE, crate::fonts::Weight::Bold, 0.0);
+    for (g, (u, t)) in GROUPS.into_iter().enumerate() {
+        let right = RULES.get(g + 1).copied().unwrap_or(RIGHT);
         put!(s, "<g id='mpe-title-{u}'>");
         art::text(
             &mut s,
-            UNITS[u] - TITLE_LEFT - width / 2.0,
-            ROW - oy,
+            (RULES[g] + right) / 2.0,
+            TOP + DEPTH - 44.0 - oy,
             t,
             super::TITLE,
             art::Style::Title,
@@ -578,9 +575,25 @@ mod tests {
     }
 
     /// Use the actual printed extents, including LARGE's outer dial numbers and units, rather
-    /// than the strip's old three-cell unit width. The titles and INPUT have their own space.
+    /// than the strip's old three-cell unit width. The titles clear their rules by at least
+    /// GLOBAL's smallest section-title gap, and every printed part and bezel by six units.
     #[test]
     fn the_wider_readouts_and_titles_clear_the_print() {
+        fn parts(node: &usvg::Node, boxes: &mut Vec<usvg::Rect>) {
+            if let usvg::Node::Group(g) = node {
+                for child in g.children() {
+                    parts(child, boxes);
+                }
+            } else {
+                boxes.push(node.abs_stroke_bounding_box());
+            }
+        }
+        let clears = |a: usvg::Rect, b: usvg::Rect| {
+            a.right() + 6.0 < b.left()
+                || b.right() + 6.0 < a.left()
+                || a.bottom() + 6.0 < b.top()
+                || b.bottom() + 6.0 < a.top()
+        };
         for lettering in [Lettering::Standard, Lettering::Large] {
             let doc = art::document(
                 [0.0, 0.0, art::W, art::H],
@@ -594,6 +607,25 @@ mod tests {
                     .expect("the printed part")
                     .abs_stroke_bounding_box()
             };
+            let mut global = Svg(String::new(), lettering);
+            super::super::print(&mut global);
+            let global = usvg::Tree::from_str(
+                &art::document([0.0, 0.0, art::W, art::H], 3108, 1775, &global.0),
+                &lower::lettered(),
+            )
+            .expect("GLOBAL's print parses");
+            let global_gap = super::super::SECTIONS
+                .into_iter()
+                .skip(1)
+                .map(|(left, right, title)| {
+                    let ink = global
+                        .node_by_id(&format!("strip-title-{title}"))
+                        .expect("GLOBAL's section title")
+                        .abs_stroke_bounding_box();
+                    (f64::from(ink.left()) - left - 2.0).min(right - 2.0 - f64::from(ink.right()))
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(global_gap > 200.0, "GLOBAL's measured gap: {global_gap}");
             for (group, _) in GROUPS {
                 let (left, right) = if group == 0 {
                     (RULES[0], RULES[1])
@@ -602,10 +634,13 @@ mod tests {
                 };
                 let title = bounds(&format!("mpe-title-{group}"));
                 assert!(
-                    f64::from(title.left()) > left + 8.0,
-                    "{lettering:?}: {title:?}"
+                    f64::from(title.left()) - left - 2.0 >= global_gap
+                        && right - 2.0 - f64::from(title.right()) >= global_gap,
+                    "{lettering:?}: {title:?}, GLOBAL's gap {global_gap}"
                 );
-                let mut end = f64::from(title.right());
+                assert!(f64::from(title.top()) > TOP + 14.0);
+                assert!(f64::from(title.bottom()) < TOP + DEPTH - 9.0);
+                let mut end = left + 2.0;
                 for i in group..group + 2 {
                     let ink = bounds(&format!("mpe-unit-{i}"));
                     let (x, _, w, _) = readout(i);
@@ -622,6 +657,29 @@ mod tests {
                     end = f64::from(ink.right()).max(x + w + 6.0);
                     assert!(f64::from(ink.top()) > TOP + 14.0);
                     assert!(f64::from(ink.bottom()) < TOP + DEPTH - 9.0);
+                    let mut print = Vec::new();
+                    parts(
+                        tree.node_by_id(&format!("mpe-unit-{i}")).expect("a unit"),
+                        &mut print,
+                    );
+                    for part in print {
+                        assert!(
+                            clears(title, part),
+                            "{lettering:?}: title {title:?}, print {part:?}"
+                        );
+                    }
+                    let (_, y, _, h) = readout(i);
+                    let bezel = usvg::Rect::from_xywh(
+                        (x - 6.0) as f32,
+                        (y - 6.0) as f32,
+                        (w + 12.0) as f32,
+                        (h + 12.0) as f32,
+                    )
+                    .expect("a bezel");
+                    assert!(
+                        clears(title, bezel),
+                        "{lettering:?}: title {title:?}, bezel {bezel:?}"
+                    );
                 }
                 assert!(end < right - 8.0, "{lettering:?}: {end} before {right}");
             }
@@ -635,6 +693,9 @@ mod tests {
     fn drawn_in_parts_it_is_drawn_whole() {
         for (scale, skin, lettering) in [
             (0.44, Skin::Worn, Lettering::Standard),
+            (1.0, Skin::Worn, Lettering::Standard),
+            (0.44, Skin::Drawn, Lettering::Standard),
+            (1.0, Skin::Drawn, Lettering::Standard),
             (0.87, Skin::Drawn, Lettering::Standard),
             (0.44, Skin::Worn, Lettering::Large),
             (1.0, Skin::Worn, Lettering::Large),
