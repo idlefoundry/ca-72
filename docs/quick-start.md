@@ -24,9 +24,10 @@ Read the panel from left to right: **1 CONTROLLERS** sets tuning, glide and modu
 **2 OSCILLATOR BANK** makes the waves; **3 MIXER** chooses and balances the sources;
 **4 MODIFIERS** shapes their tone and loudness; **5 OUTPUT** controls the main output.
 
-The wooden rail holds presets, **SAVE**, **PANEL**, the keyboard icon, **ARP**, and settings;
-standalone adds **FX**. PANEL shows or hides the lower area; the keyboard icon swaps keys
-and extra controls. Drag knobs vertically or scroll them; Shift-drag makes fine changes.
+The wooden rail holds presets, **SAVE**, **PANEL**, **GLOBAL**, **KEYS**, **LFO**, **ARP**,
+and settings; standalone adds **FX**. PANEL shows or hides the lower area. GLOBAL, KEYS
+and LFO select its extra controls, playable keyboard and modulation pages. Drag knobs
+vertically or scroll them; Shift-drag makes fine changes.
 Hover for values, or choose **LETTERING › LARGE** in settings for larger print.
 
 ## 3. Make your first sound

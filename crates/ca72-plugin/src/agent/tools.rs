@@ -301,7 +301,7 @@ pub fn tools() -> Vec<Tool> {
         t(
             "ca72_view",
             "view.set",
-            "What the window shows, as the rail's keys and the keyboard's buttons change it: `presets` (the presets' drawer open), `panel` (the lower panel shown), `lower_page` (select `global` for VOICES/STEREO/OUTPUT, `keyboard` or `lfo`, showing PANEL if hidden; pressing the selected key does nothing), `keyboard` (legacy: true selects keyboard, false selects global), `keyboard_octave` (move its range an octave `up` or `down`), `midi_list` (the drawer's MIDI Learn list in place of the presets).",
+            "What the window shows, as the rail's keys and the keyboard's buttons change it: `presets` (the presets' drawer open), `panel` (the lower panel shown), `lower_page` (select `global` for VOICES/STEREO/OUTPUT, `keyboard` for KEYS or `lfo`, showing PANEL if hidden; pressing the selected key does nothing), `keyboard` (legacy: true selects keyboard, false selects global), `keyboard_octave` (move its range an octave `up` or `down`), `midi_list` (the drawer's MIDI Learn list in place of the presets).",
             |_| {
                 obj(
                     json!({

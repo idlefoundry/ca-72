@@ -77,16 +77,17 @@ pub const CO: f64 = (SECTIONS[3].0 + SECTIONS[3].1) / 2.0;
 /// 2026-10-20; R-MPE); and LFO directly after the keyboard's, the name a key shorter again (the
 /// owner, 2026-10-20; R-LFO); and MACRO at the far left, over the left area it flips, the star and
 /// the previous key a key right, the name a key shorter again (the owner, 2026-10-20: "in the
-/// same bar as the presets ... the far left edge"; R-MACROS); and GLOBAL before the keyboard's,
-/// the name a key shorter again, the gaps unchanged (the owner, 2026-10-22; R-GLOBAL-KEY).
+/// same bar as the presets ... the far left edge"; R-MACROS); and GLOBAL before KEYS,
+/// the name a key shorter again (the owner, 2026-10-22; R-GLOBAL-KEY). GLOBAL is 104 units
+/// wide for its lettering at 20, taking 18 more from the name; the gaps stay unchanged.
 const KEYS: [(f64, f64, BarTarget); 12] = [
     (92.0, 86.0, BarTarget::Macro),
     (192.0, 86.0, BarTarget::Star),
     (292.0, 86.0, BarTarget::Prev),
-    (2126.0, 86.0, BarTarget::Next),
-    (2270.0, 170.0, BarTarget::Save),
-    (2412.0, 86.0, BarTarget::Panel),
-    (2512.0, 86.0, BarTarget::Global),
+    (2108.0, 86.0, BarTarget::Next),
+    (2252.0, 170.0, BarTarget::Save),
+    (2394.0, 86.0, BarTarget::Panel),
+    (2503.0, 104.0, BarTarget::Global),
     (2612.0, 86.0, BarTarget::Keyboard),
     (2712.0, 86.0, BarTarget::Lfo),
     (2812.0, 86.0, BarTarget::Arp),
@@ -96,15 +97,16 @@ const KEYS: [(f64, f64, BarTarget); 12] = [
 /// The standalone application's (the owner's FX-A, 2026-10-18; decisions.md R-FX-DRAWER): FX
 /// after ARP, the name a key shorter again for it, the gaps between the keys as they were; MPE
 /// after FX, in the plug-ins' place beside the settings' key (R-MPE); LFO after the keyboard's
-/// (R-LFO); MACRO at the far left (R-MACROS); GLOBAL before the keyboard's (R-GLOBAL-KEY).
+/// (R-LFO); MACRO at the far left (R-MACROS); GLOBAL before KEYS, widened to 104 units
+/// from the name's display as above, with the same gaps (R-GLOBAL-KEY).
 const KEYS_FX: [(f64, f64, BarTarget); 13] = [
     (92.0, 86.0, BarTarget::Macro),
     (192.0, 86.0, BarTarget::Star),
     (292.0, 86.0, BarTarget::Prev),
-    (2026.0, 86.0, BarTarget::Next),
-    (2170.0, 170.0, BarTarget::Save),
-    (2312.0, 86.0, BarTarget::Panel),
-    (2412.0, 86.0, BarTarget::Global),
+    (2008.0, 86.0, BarTarget::Next),
+    (2152.0, 170.0, BarTarget::Save),
+    (2294.0, 86.0, BarTarget::Panel),
+    (2403.0, 104.0, BarTarget::Global),
     (2512.0, 86.0, BarTarget::Keyboard),
     (2612.0, 86.0, BarTarget::Lfo),
     (2712.0, 86.0, BarTarget::Arp),
@@ -118,8 +120,8 @@ pub const KEY_W: f64 = 86.0;
 /// The name's display: its window (left, top, width, height), as tall with its surround as
 /// the keys beside it (the owner, 2026-10-09: "Needs to be the same height as the buttons
 /// flanking it").
-pub const NAME: (f64, f64, f64, f64) = (362.0, RAIL_Y - 25.0, 1700.0, 50.0);
-const NAME_FX: (f64, f64, f64, f64) = (362.0, RAIL_Y - 25.0, 1600.0, 50.0);
+pub const NAME: (f64, f64, f64, f64) = (362.0, RAIL_Y - 25.0, 1682.0, 50.0);
+const NAME_FX: (f64, f64, f64, f64) = (362.0, RAIL_Y - 25.0, 1582.0, 50.0);
 
 /// Key `t`'s light on the rail (decisions.md R-LFO-PAGE's rule): 0 unlit, 1 a faint glow (its
 /// page or drawer closed but affecting the sound), 2 lit.

@@ -123,8 +123,8 @@ reopens the current release's highlights.
 
 ## Playing it
 
-The rail's **GLOBAL**, **keyboard** (piano icon) and **LFO** keys select the three
-lower pages. GLOBAL holds VOICES, STEREO and OUTPUT; keyboard shows a playable
+The rail's **GLOBAL**, **KEYS** and **LFO** keys select the three
+lower pages. GLOBAL holds VOICES, STEREO and OUTPUT; KEYS shows a playable
 44-key piano. The selected key is lit; pressing it again leaves the page showing.
 Any of the three shows the lower panel if hidden; **PANEL** shows or hides the
 whole lower area and restores its selected page. The wheels, GLIDE and DECAY
@@ -367,8 +367,8 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   was when you began playing, the first key pressed with none held). A note or channel that
   never sends timbre is always at rest.
 - **LFOs** (from 0.3.0; none assigned in any preset or project saved before it, which sound as
-  they did): the rail's **LFO** key, right after the keyboard's, shows the LFO page in the
-  keyboard's place (the wheels stay at its left). Choose **GLOBAL** or the keyboard's key
+  they did): the rail's **LFO** key, right after **KEYS**, shows the LFO page in the
+  keyboard's place (the wheels stay at its left). Choose **GLOBAL** or **KEYS**
   to leave it; pressing the lit **LFO** key leaves it showing. Four LFOs
   side by side, each with:
   - its **scope**, in its own phosphor colour (LFO 1 amber, LFO 2 green, LFO 3 blue, LFO 4 red

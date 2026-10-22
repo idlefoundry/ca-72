@@ -28,7 +28,8 @@ pub const KEYS_TEXT: &str = "UP, DOWN: CHOOSE · ENTER: LEARN · DELETE: REMOVE 
 
 /// Where a learnable parameter's control is: the panel's (its index in [`CONTROLS`]: the
 /// GLOBAL page's knobs and the left hand's are the panel's controls too), the strip's tabs, or none
-/// (LOCK: the drawer's list alone learns it).
+/// (LOCK: the drawer's list alone learns it). GLOBAL, KEYS and LFO select views and do not
+/// appear in the learning list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {
     Panel(usize),

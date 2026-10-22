@@ -6,21 +6,30 @@ use ca72_panel::strip::{self, Rail, StripTarget};
 #[test]
 fn global_precedes_the_keyboard_on_both_rails_without_closing_the_gaps() {
     for (rail, width, global) in [
-        (Rail::Plugin, 1700.0, 2512.0),
-        (Rail::Effects, 1600.0, 2412.0),
+        (Rail::Plugin, 1682.0, 2503.0),
+        (Rail::Effects, 1582.0, 2403.0),
     ] {
         let keys = rail.keys();
         let i = keys.iter().position(|k| k.2 == BarTarget::Global).unwrap();
         assert_eq!(
             &keys[i - 1..i + 3],
             &[
-                (global - 100.0, 86.0, BarTarget::Panel),
-                (global, 86.0, BarTarget::Global),
-                (global + 100.0, 86.0, BarTarget::Keyboard),
-                (global + 200.0, 86.0, BarTarget::Lfo),
+                (global - 109.0, 86.0, BarTarget::Panel),
+                (global, 104.0, BarTarget::Global),
+                (global + 109.0, 86.0, BarTarget::Keyboard),
+                (global + 209.0, 86.0, BarTarget::Lfo),
             ]
         );
         assert_eq!(rail.name(), (362.0, strip::RAIL_Y - 25.0, width, 50.0));
+        for pair in keys[5..].windows(2) {
+            assert_eq!(
+                pair[1].0 - pair[1].1 / 2.0 - (pair[0].0 + pair[0].1 / 2.0),
+                14.0,
+                "{rail:?}: {:?} to {:?}",
+                pair[0].2,
+                pair[1].2
+            );
+        }
         // Name to NEXT, NEXT to SAVE and SAVE to PANEL keep their former clearances too.
         assert_eq!(keys[3].0 - keys[3].1 / 2.0 - (362.0 + width), 21.0);
         assert_eq!(

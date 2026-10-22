@@ -866,7 +866,7 @@ impl StripRenderer {
                 sprite(&mut still, &self.lighting.unlit, s, at(b.tab(i)), TAB);
             }
         }
-        // The keys: the charcoal cap, drawn out wider for SAVE.
+        // The keys: the charcoal cap, drawn out wider for SAVE and GLOBAL.
         for (x, w, _) in self.keys() {
             let cap = widened(&self.button, w / KEY_HEIGHT);
             sprite(&mut still, &cap, s, at((x, super::RAIL_Y)), (w, KEY_HEIGHT));
@@ -1091,9 +1091,8 @@ pub(super) fn svg_over(options: &usvg::Options<'_>, frame: &mut Pixmap, scale: f
     }
 }
 
-/// The largest whole-unit size giving GLOBAL at least PANEL's former side clearance at 20
-/// units (R-GLOBAL-KEY); shared by every worded key.
-const KEY_TEXT: f64 = 15.0;
+/// Every worded rail key keeps its original size in both lettering modes (R-GLOBAL-KEY).
+const KEY_TEXT: f64 = 20.0;
 
 /// The keys' marks (the star is drawn as the preset is).
 fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
@@ -1116,6 +1115,7 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
             BarTarget::Save
             | BarTarget::Panel
             | BarTarget::Global
+            | BarTarget::Keyboard
             | BarTarget::Arp
             | BarTarget::Fx
             | BarTarget::Mpe
@@ -1128,6 +1128,7 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
                 match t {
                     BarTarget::Panel => "PANEL",
                     BarTarget::Global => "GLOBAL",
+                    BarTarget::Keyboard => "KEYS",
                     BarTarget::Arp => "ARP",
                     BarTarget::Fx => "FX",
                     BarTarget::Mpe => "MPE",
@@ -1135,25 +1136,6 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
                     BarTarget::Macro => "MACRO",
                     _ => "SAVE",
                 }
-            ),
-            BarTarget::Keyboard => put!(
-                o,
-                "<path d='M {} {} H {} V {} H {} Z M {} {} V {} M {} {} V {}' fill='none' stroke='{print}' stroke-width='2'/><path d='M {} {} h 5 v 14 h -5 Z M {} {} h 5 v 14 h -5 Z' fill='{print}'/>",
-                N(x - 15.0),
-                N(y - 13.0),
-                N(x + 15.0),
-                N(y + 13.0),
-                N(x - 15.0),
-                N(x - 5.0),
-                N(y - 13.0),
-                N(y + 13.0),
-                N(x + 5.0),
-                N(y - 13.0),
-                N(y + 13.0),
-                N(x - 8.0),
-                N(y - 13.0),
-                N(x + 2.0),
-                N(y - 13.0)
             ),
             BarTarget::Settings => put!(
                 o,
@@ -1971,22 +1953,79 @@ mod tests {
     use super::*;
 
     #[test]
-    fn global_fits_with_the_panels_former_side_clearance() {
+    fn global_has_the_panels_side_clearance_at_twenty() {
         use crate::fonts::Weight;
         let fonts = Fonts::new();
-        let width = |word, size| fonts.advance(word, size, Weight::Bold, 0.0);
-        let available = width("PANEL", 20.0);
-        assert!(width("GLOBAL", KEY_TEXT) <= available);
-        assert!(width("GLOBAL", KEY_TEXT + 1.0) > available);
-        for word in [
-            "SAVE", "PANEL", "GLOBAL", "ARP", "FX", "MPE", "LFO", "MACRO",
-        ] {
-            assert!(width(word, KEY_TEXT) <= available, "{word}");
+        let width = |word| fonts.advance(word, 20.0, Weight::Bold, 0.0);
+        for rail in [Rail::Plugin, Rail::Effects] {
+            let cap = |t| rail.keys().iter().find(|k| k.2 == t).unwrap().1;
+            let panel = (cap(BarTarget::Panel) - width("PANEL")) / 2.0;
+            let global = (cap(BarTarget::Global) - width("GLOBAL")) / 2.0;
+            println!(
+                "{rail:?}: PANEL at 20: {}, clearance {panel}; GLOBAL at 20: {}, clearance {global}",
+                width("PANEL"),
+                width("GLOBAL")
+            );
+            assert!((global - panel).abs() < 1.0, "{rail:?}: {panel}, {global}");
         }
-        println!(
-            "PANEL at 20: {available}; GLOBAL at {KEY_TEXT}: {}",
-            width("GLOBAL", KEY_TEXT)
-        );
+    }
+
+    #[test]
+    fn every_worded_rail_key_is_twenty_and_keys_has_no_icon() {
+        fn texts<'a>(group: &'a usvg::Group, out: &mut Vec<&'a usvg::Text>) {
+            for node in group.children() {
+                match node {
+                    usvg::Node::Text(text) => out.push(text),
+                    usvg::Node::Group(group) => texts(group, out),
+                    _ => {}
+                }
+            }
+        }
+        let fonts = Fonts::new();
+        let options = usvg::Options {
+            fontdb: fonts.database(),
+            ..Default::default()
+        };
+        for rail in [Rail::Plugin, Rail::Effects] {
+            for lettering in [art::Lettering::Standard, art::Lettering::Large] {
+                let mut marks = Svg(String::new(), lettering);
+                // Both skins share these marks over their caps.
+                key_marks(&mut marks, rail, KEY_PRINT);
+                let doc =
+                    art::document([0.0, 0.0, art::W, super::super::RAIL], 3108, 116, &marks.0);
+                let tree = usvg::Tree::from_str(&doc, &options).unwrap();
+                let mut words = Vec::new();
+                texts(tree.root(), &mut words);
+                let mut expected = vec![
+                    (BarTarget::Macro, "MACRO"),
+                    (BarTarget::Save, "SAVE"),
+                    (BarTarget::Panel, "PANEL"),
+                    (BarTarget::Global, "GLOBAL"),
+                    (BarTarget::Keyboard, "KEYS"),
+                    (BarTarget::Lfo, "LFO"),
+                    (BarTarget::Arp, "ARP"),
+                    (BarTarget::Mpe, "MPE"),
+                ];
+                if rail == Rail::Effects {
+                    expected.push((BarTarget::Fx, "FX"));
+                }
+                assert_eq!(words.len(), expected.len());
+                for (target, word) in expected {
+                    let x = rail.keys().iter().find(|k| k.2 == target).unwrap().0 as f32;
+                    let text = words.iter().find(|t| t.chunks()[0].x() == Some(x)).unwrap();
+                    assert_eq!(text.chunks().len(), 1);
+                    let chunk = &text.chunks()[0];
+                    assert_eq!(chunk.text(), word);
+                    assert!(!chunk.spans().is_empty());
+                    for span in chunk.spans() {
+                        assert_eq!(span.font_size().get(), 20.0, "{rail:?}: {word}");
+                        assert_eq!(span.font().weight(), 700, "{rail:?}: {word}");
+                    }
+                }
+                // Only the previous/next arrows and settings gear remain as paths.
+                assert_eq!(marks.0.matches("<path ").count(), 3);
+            }
+        }
     }
 
     /// The drops move on each time the caller's clock does, 30 ms apart as well as 45 (the

@@ -4632,7 +4632,7 @@ impl Editing {
         {
             let text = match key {
                 BarTarget::Global => Some("GLOBAL: VOICES, STEREO AND OUTPUT"),
-                BarTarget::Keyboard => Some("KEYBOARD: PLAYABLE PIANO"),
+                BarTarget::Keyboard => Some("KEYS: PLAYABLE PIANO"),
                 BarTarget::Lfo => Some("LFO: MODULATION SOURCES"),
                 _ => None,
             };
@@ -15102,6 +15102,46 @@ mod tests {
     }
 
     #[test]
+    fn page_keys_tips_name_their_print_and_the_learning_list_keeps_sound_controls() {
+        for standalone in [false, true] {
+            let (mut e, _, _) = if standalone {
+                editing_standalone()
+            } else {
+                editing()
+            };
+            if standalone {
+                e.use_effects(crate::fx_view::FxView::new(Some(
+                    crate::fx_view::fake::Fake::with(&[], &[]),
+                )));
+            }
+            assert_eq!(
+                e.rail,
+                if standalone {
+                    Rail::Effects
+                } else {
+                    Rail::Plugin
+                }
+            );
+            for (key, tip) in [
+                (BarTarget::Global, "GLOBAL: VOICES, STEREO AND OUTPUT"),
+                (BarTarget::Keyboard, "KEYS: PLAYABLE PIANO"),
+                (BarTarget::Lfo, "LFO: MODULATION SOURCES"),
+            ] {
+                let point = on_strip(&e, strip::centre(e.rail, StripTarget::Bar(key)));
+                go(&mut e, point);
+                assert_eq!(e.tip().map(|t| t.0), Some(tip.into()));
+            }
+            let list = e.learning.list_scene(&e.params.midi_map);
+            for name in ["KEYBOARD CONTROL 1", "KEYBOARD CONTROL 2"] {
+                assert!(list.rows.iter().any(|row| row.name == name));
+            }
+            for name in ["GLOBAL", "KEYS", "LFO"] {
+                assert!(!list.rows.iter().any(|row| row.name == name));
+            }
+        }
+    }
+
+    #[test]
     fn page_keys_release_the_pointer_keep_drawers_and_leave_lit_keys_alone() {
         let (mut e, _, _) = editing_standalone();
         e.show_lower_page(BarTarget::Keyboard);
@@ -15165,13 +15205,13 @@ mod tests {
         assert_eq!(e.lower_page(), BarTarget::Lfo);
     }
 
-    /// The real editor's full frames and rail crops, in LARGE in each look, rail and scale.
+    /// The real editor's full frames and rail crops, in each lettering, look, rail and scale.
     #[cfg(feature = "standalone-production")]
     #[test]
-    #[ignore = "writes the GLOBAL key review pictures"]
-    fn the_global_key_pngs() {
+    #[ignore = "writes the rail keys' review pictures"]
+    fn the_rail_keys_pngs() {
         let out = std::path::PathBuf::from(
-            std::env::var_os("CA72_GLOBAL_KEY_PNG").expect("an output folder"),
+            std::env::var_os("CA72_RAIL_KEYS_PNG").expect("an output folder"),
         );
         std::fs::create_dir_all(&out).unwrap();
         for standalone in [false, true] {
@@ -15188,33 +15228,51 @@ mod tests {
             let rail = if standalone { "standalone" } else { "plugin" };
             for (look, skin) in [("worn", Skin::Worn), ("drawn", Skin::Drawn)] {
                 e.set_look(skin);
-                e.set_lettering(Lettering::Large);
-                for scale in [0.44, 1.0] {
-                    let width = (art::W * scale).round() as u32;
-                    e.fit(1.0, width, width);
-                    for (page, key) in [
-                        ("global", BarTarget::Global),
-                        ("keyboard", BarTarget::Keyboard),
-                        ("lfo", BarTarget::Lfo),
-                    ] {
-                        e.strip_press(StripTarget::Bar(key));
-                        go(&mut e, Point { x: 0.0, y: 0.0 });
-                        let name = format!("{rail}-{look}-large-{scale}-{page}");
-                        let top = e.renderer.strip_row();
-                        let height = (strip::RAIL * e.renderer.scale()).round() as u32;
-                        let frame = window_frame(&mut e).clone();
-                        frame.save_png(out.join(format!("{name}.png"))).unwrap();
-                        frame
-                            .clone_rect(
-                                resvg::tiny_skia::IntRect::from_xywh(0, top, width, height)
+                for (print, lettering) in
+                    [("normal", Lettering::Standard), ("large", Lettering::Large)]
+                {
+                    e.set_lettering(lettering);
+                    for scale in [0.44, 1.0] {
+                        let width = (art::W * scale).round() as u32;
+                        e.fit(1.0, width, width);
+                        for (page, key) in [
+                            ("global", BarTarget::Global),
+                            ("keyboard", BarTarget::Keyboard),
+                            ("lfo", BarTarget::Lfo),
+                        ] {
+                            e.strip_press(StripTarget::Bar(key));
+                            go(&mut e, Point { x: 0.0, y: 0.0 });
+                            let name = format!("{rail}-{look}-{print}-{scale}-{page}");
+                            let top = e.renderer.strip_row();
+                            let height = (strip::RAIL * e.renderer.scale()).round() as u32;
+                            let frame = window_frame(&mut e).clone();
+                            frame.save_png(out.join(format!("{name}.png"))).unwrap();
+                            frame
+                                .clone_rect(
+                                    resvg::tiny_skia::IntRect::from_xywh(0, top, width, height)
+                                        .unwrap(),
+                                )
+                                .unwrap()
+                                .save_png(out.join(format!("{name}-rail.png")))
+                                .unwrap();
+                            let left = (1900.0 * e.renderer.scale()).round() as u32;
+                            frame
+                                .clone_rect(
+                                    resvg::tiny_skia::IntRect::from_xywh(
+                                        left as i32,
+                                        top,
+                                        width - left,
+                                        height,
+                                    )
                                     .unwrap(),
-                            )
-                            .unwrap()
-                            .save_png(out.join(format!("{name}-rail.png")))
-                            .unwrap();
-                        // Selecting pages must also clear the former light in a partial redraw.
-                        e.composed = None;
-                        assert_eq!(frame.data(), window_frame(&mut e).data());
+                                )
+                                .unwrap()
+                                .save_png(out.join(format!("{name}-right.png")))
+                                .unwrap();
+                            // Selecting pages must also clear the former light in a partial redraw.
+                            e.composed = None;
+                            assert_eq!(frame.data(), window_frame(&mut e).data());
+                        }
                     }
                 }
             }

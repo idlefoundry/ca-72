@@ -154,7 +154,7 @@ pub enum BarTarget {
     Settings,
     /// The GLOBAL page: VOICES, STEREO and OUTPUT (decisions.md R-GLOBAL-KEY).
     Global,
-    /// The piano, one of the three lower pages.
+    /// The piano, selected by KEYS, one of the three lower pages.
     Keyboard,
     /// The arpeggiator's drawer, dropped down over the lower panel or put away (decisions.md
     /// R-ARP); lit while the arpeggiator is on.

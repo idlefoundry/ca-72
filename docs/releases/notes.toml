@@ -87,7 +87,7 @@ bug_fixes = [
 [[release]]
 version = "0.3.0"
 features = [
-  "GLOBAL, the keyboard icon and LFO select the three lower pages; any page key shows PANEL if hidden.",
+  "GLOBAL, KEYS and LFO select the three lower pages; any page key shows PANEL if hidden.",
   "An arpeggiator: press ARP on the rail for ON, HOLD, DIRECTION, RATE, OCTAVES, GATE and SWING, in time with your host.",
   "HOLD with the arpeggiator off keeps your notes sounding as a drone until you play a new chord.",
   "MPE: each note's pressure, timbre and bend move its own voice; press MPE on the rail to set how far.",

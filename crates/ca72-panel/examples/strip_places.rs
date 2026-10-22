@@ -16,7 +16,7 @@ fn main() {
     }
     println!("rows: {:?}", strip::ROWS.map(y));
     // The rail's keys: the plug-ins' (ARP last but the settings), and the standalone's with FX
-    // after ARP and the name a key shorter; both with GLOBAL before the keyboard's
+    // after ARP and the name a key shorter; both with the wider GLOBAL before KEYS
     // (decisions.md R-ARP, R-FX-DRAWER, R-GLOBAL-KEY).
     for rail in [strip::Rail::Plugin, strip::Rail::Effects] {
         let (x, yy, w, h) = rail.name();

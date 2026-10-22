@@ -1,5 +1,9 @@
 # Standalone feature integration
 
+Since 2026-10-22, the rail uses the word **KEYS** in place of the piano icon
+([R-GLOBAL-KEY](decisions.md#r-global-key-name-the-voices-stereo-and-output-page-and-give-it-a-rail-key)).
+The earlier pictures and icon descriptions below record the original implementation.
+
 Owner-authorized integration, 2026-10-14. Start from current main
 `db681b8ccbfbaaa928d71e82aba641681fff7921`, the corrected plug-in-only 0.2.2.
 Integrate the standalone preview as a new feature PR to main. Preserve the released

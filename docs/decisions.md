@@ -14824,3 +14824,51 @@ device is used. The job summary records the final check commands and results.
 The production-feature package tests, workspace/all-target/all-feature Clippy, touched-crate
 default-feature Clippy, formatting and notices checks pass. Full workspace tests and native
 Mac/Windows UI runs are not part of this job. The owner still has the rail pictures to review.
+
+
+**Addendum, 2026-10-22: restore the rail's lettering and name KEYS.** On shrinking every
+worded key from 20 to 15 to fit GLOBAL, the owner said: "why did you shrink the fonts for
+the buttons? Looks way worse. I'm talking about the buttons on the center bar." On the
+keyboard's mark: "The keyboard is the only thing aside from settings that has an icon
+instead of a word. So let's just call it keys."
+
+Every worded rail key returns to 20 units, in both looks and both lettering settings.
+KEYS replaces the piano icon on the keyboard page's key; its old drawing is removed from
+the rail and is not placed elsewhere. The placement of that icon and TYPING remains with
+the owner. The existing GLOBAL · KEYS · LFO page selection, lights, tips and saved
+`keyboard` IDs keep their behaviour; the tip now names KEYS. The MIDI learning list still
+contains the sound controls, including KEYBOARD CONTROL 1 and 2, without learnable page keys.
+
+Measured with the built-in URW Gothic Demi, PANEL at 20 advances 58.74 units and GLOBAL
+76.72. PANEL's 86-unit cap leaves 13.63 a side; a 104-unit GLOBAL leaves 13.64. GLOBAL's
+centre moves left 9 units, PANEL/SAVE/NEXT left 18, and the preset name's window loses
+18: 1682 units in plug-ins, 1582 in standalone. KEYS and the keys to its right stay in
+place, as do every gap and the 62-unit key height. This supersedes the 15-unit lettering
+and piano mark described above. No approved panel picture is replaced.
+
+
+**Evidence (Linux):** the production-feature plug-in/panel package run passes: 595 plug-in
+and 112 panel library tests, plus every enabled integration test. Existing ignored tests
+stay ignored. The rail's tests parse every label's text, 20-unit size and bold weight in
+both lettering modes and rails; only the previous/next arrows and settings remain as
+icon paths. A temporary return to 15 fails the size assertion. GLOBAL's measured clearance
+fails with the former 86-unit cap and passes with 104; both rails' name widths, cap edges,
+gaps and hit areas pass. The KEYS tip and unchanged MIDI learning list are checked on
+both actual rails. The existing page/lighting, saved-setting, pointer/TYPING, drawer and
+refused-resize tests pass. Both approved panel image checks pass without changing either
+approved picture.
+
+`target/rail-keys-frames/README.md` indexes the 0.44/1.0, worn/drawn, normal/LARGE,
+plug-in/standalone matrix with all three page keys selected, before (`e9545a1`) and after:
+48 full windows and 96 crops a version, plus 16 labelled before/after right ends. Every
+partial composition equals the whole; all 48 before/after pairs are pixel-identical above
+`PANEL_H`, and all 24 normal/LARGE rail pairs have identical pixels. The 304 PNGs have a
+checked SHA-256 manifest. Both scales, skins and rails receive visual inspection and a
+read-only source review; its test-coverage correction is rechecked. No native host, Mac
+build, installed plug-in or real audio device is used. Full workspace tests are not run.
+
+
+Workspace/all-target Clippy passes with and without all features, with warnings denied;
+formatting and notices checks pass. The required package run totals 833 passed and 80
+existing ignored. The job summary records commands, logs, the commit and the untested
+native/full-workspace checks. The owner has the new rail pictures to review.
