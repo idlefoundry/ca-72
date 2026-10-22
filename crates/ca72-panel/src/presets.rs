@@ -272,6 +272,7 @@ pub struct DrawerScene {
     /// The list's tab: FAVORITES, MINE (neither: ALL).
     pub favourites: bool,
     pub mine: bool,
+    pub factory: bool,
     /// The tags in use, each picked as a filter or not, and the first line of them shown.
     pub chips: Vec<(String, bool)>,
     pub tags_first: usize,

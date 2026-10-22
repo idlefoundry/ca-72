@@ -569,8 +569,9 @@ the name and a drawer drops down over the strip, in three sections:
 
 - **FIND**: type to search names, descriptions and tags; click a tag to filter by it (the
   wheel scrolls the tags).
-- **PRESETS**: ALL, FAVORITES and MINE over the list. Click a preset, or use the arrow keys,
-  to choose it; double-click it to choose it and close the drawer; click its star to make it a
+- **PRESETS**: ALL, FACTORY, MINE and FAVORITES over the list. FACTORY shows only bundled
+  presets; edited factory replacements and your saved presets are in MINE. Click a preset,
+  or use the arrow keys, to choose it; double-click it to choose it and close the drawer; click its star to make it a
   favourite. The mouse wheel or a trackpad scrolls the list.
 - **PRESET**: its keys act on the preset you have chosen: RENAME, TAGS, DELETE (asked first:
   DELETE again or Enter deletes it) and, for a factory preset you edited, REVERT. SAVE AS

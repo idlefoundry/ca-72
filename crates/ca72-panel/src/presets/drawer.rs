@@ -1,8 +1,8 @@
 //! The drawer as the mock-up has it (A6: decisions.md R44; the owner, 2026-10-10: "we didn't
 //! update the preset search page to the new one that you had sketched out"): on the strip's
 //! face under the rail, three sections in the panel's print, their displays dots behind glass
-//! as the rail's name is: FIND, the search and the tags in use; PRESETS, ALL, FAVORITES and MINE
-//! over the list; PRESET, its keys (RENAME, TAGS, DELETE and REVERT, each for the preset the
+//! as the rail's name is: FIND, the search and the tags in use; PRESETS, ALL, FACTORY, MINE
+//! and FAVORITES over the list; PRESET, its keys (RENAME, TAGS, DELETE and REVERT, each for the preset the
 //! plug-in is set to; SAVE AS, RESTORE, MIDI LEARN and CLOSE) over a display of that preset, of
 //! what a key is doing (a name or tags typed, a question asked) and of the update check. MIDI
 //! Learn's list shows in the list's place, its keys and the controllers it will not learn in
@@ -243,14 +243,16 @@ impl PresetKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     All,
-    Favourites,
+    Factory,
     Mine,
+    Favourites,
 }
 
-const TABS: [(Tab, &str); 3] = [
+const TABS: [(Tab, &str); 4] = [
     (Tab::All, "ALL"),
-    (Tab::Favourites, "FAVORITES"),
+    (Tab::Factory, "FACTORY"),
     (Tab::Mine, "MINE"),
+    (Tab::Favourites, "FAVORITES"),
 ];
 
 /// A tab's characters, from the list's first: each three apart.
@@ -267,7 +269,9 @@ fn tab_span(t: Tab) -> (usize, usize) {
 
 /// The tab the list shows.
 pub fn tab_of(s: &DrawerScene) -> Tab {
-    if s.mine {
+    if s.factory {
+        Tab::Factory
+    } else if s.mine {
         Tab::Mine
     } else if s.favourites {
         Tab::Favourites
@@ -2651,6 +2655,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn four_categories_fit_in_order_and_factory_has_an_empty_state() {
+        assert_eq!(
+            TABS.map(|(_, label)| label),
+            ["ALL", "FACTORY", "MINE", "FAVORITES"]
+        );
+        let s = DrawerScene {
+            factory: true,
+            ..DrawerScene::default()
+        };
+        let items = list_items(&s);
+        assert_eq!(tab_of(&s), Tab::Factory);
+        assert!(items.iter().any(|i| i.text == "NO PRESET MATCHES"));
+        for (tab, label) in TABS {
+            let item = items.iter().find(|i| i.text == label).unwrap();
+            assert!(item.col + 6 * label.len() <= LIST.cols());
+            assert_eq!(
+                drawer_hit(&s, tab_centre(tab).0, tab_centre(tab).1),
+                Some(DrawerTarget::Tab(tab))
+            );
+        }
+    }
+
     /// Each control is found where it is drawn: the search, the tabs, the tags, a row and its
     /// star, each key, the update check's button when it has one; scrolled, the rows shown; a
     /// field only while what it is for goes on.
@@ -2662,7 +2689,7 @@ mod tests {
             at(&s, search_centre()),
             Some(DrawerTarget::Field(FieldId::Search))
         );
-        for t in [Tab::All, Tab::Favourites, Tab::Mine] {
+        for (t, _) in TABS {
             assert_eq!(at(&s, tab_centre(t)), Some(DrawerTarget::Tab(t)));
         }
         for i in 0..5 {
@@ -2814,6 +2841,14 @@ mod tests {
             let base = scene();
             let states = [
                 base.clone(),
+                DrawerScene {
+                    factory: true,
+                    ..base.clone()
+                },
+                DrawerScene {
+                    mine: true,
+                    ..base.clone()
+                },
                 DrawerScene {
                     focus: Some(FieldId::Search),
                     search: Field::new("bass"),
