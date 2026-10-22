@@ -14148,7 +14148,58 @@ loaded (recommended in the supplied choice list, not separately objected to); th
 renderer width and 370-unit depth derived above; the replacement list stays open after a
 selection, showing its new pin and any refusal. No choice blocks this implementation.
 
-**Evidence (Linux, 2026-10-22):** recorded after the final checks below.
+**Evidence (Linux, Rust 1.97.1, 2026-10-22):**
+
+- The requested `cargo test -p ca72-plugin -p ca72-panel -p ca72-fx -p ca72-fx-helper
+  --features ca72-plugin/standalone-production`: **857 passed, 0 failed, 80 ignored**.
+  After the review's two cache corrections, the frozen branch's single full run,
+  `CA72_REQUIRE_NGSPICE=1 cargo test --workspace --features
+  ca72-plugin/standalone-production --no-fail-fast`: **1,182 passed, 0 failed, 97 ignored**.
+  This includes all four touched crates, the real helper's eleven parameter tests and its
+  no-allocation test (now swapping a modulated target during its watched run).
+- Focused FX checks after those corrections: **23 passed, 0 failed, 3 image/manual tests
+  ignored**. Tests cover discoverable + PIN at loaded/no-pin depth, no-effect depth, offers,
+  pinned/unpinnable touches, newest touch replacing an offer, name versus arrow clicks,
+  the last free field, JUST TOUCHED order and filtering, inert heads and Page Up at the first
+  head, replacement, Escape, retained source assignments and MIDI Learn, own value text,
+  unavailable/MISSING controls, equal local IDs in moved effects, stale replies and retry
+  after a failed catalogue request. The independent read-only critic re-checked both fixes
+  and reported no remaining findings.
+- The FX renderer's parts/whole matrix covers **32 combinations**: 0.37, 0.44, 0.6 and 1.0
+  at both 1× and 2× backing, worn/drawn and standard/LARGE. It includes all sixteen pins,
+  a single turn, missing/dimmed, moving/removing, offers and hover arrows, value text,
+  lists, no pins, and both depths. A single turn damages only its field. The two approved
+  panel images pass; **no golden image was re-approved**.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`, default-feature
+  clippy for all four touched crates with `--all-targets -- -D warnings`,
+  `cargo fmt --all -- --check`, `python3 scripts/notices.py --check` and `git diff --check`:
+  clean. Own target, four build jobs/test threads, isolated shared settings under this
+  worktree and TMPDIR under `/var/tmp`, outside /tmp and every Git tree. The final workspace
+  run and checks used nice 19 / idle I/O priority; no native audio device was opened.
+- Two consecutive `cargo run --release -p ca72-panel --example frames -- 0.44 1.0` runs,
+  under the exclusive timing lock, wall time on the shared Linux machine: all sixteen
+  fields and knobs changed, medians **1.3 / 5.2–5.3 ms**, slowest **3.2 / 9.2–9.4**,
+  versus B1's recorded **1.5 / 6.4** medians. One field turned with its value text changed:
+  **0.1–0.2 / 0.6 ms**; an offer changed **0.1 / 0.4**; unchanged **0.0**. A cord over
+  sixteen **3.0–3.1 / 10.9–11.5**. The first loaded/no-pin drop, now at full depth, after
+  preparation **2.0–2.1 / 6.6–7.1**; clicked before its thread finishes **271.7–273.7 /
+  482.4–489.3 ms**, including preparation. These compare with the recorded B1 figures,
+  not an interleaved rebuild of B1. Logs: `target/fx-strip-times-{1,2}.log` and
+  `target/fx-strip-timing-load.log`.
+- **Pictures:** `target/fx-strip-frames/README.md` indexes **90 real editor frames and two
+  lossless close-ups**: both skins, 0.44 and 1.0, plus the approximate Mac-size 2× viewport.
+  New chain, offer and arrow, three pins and a last-field offer, value while turning,
+  replacement hover/list, JUST TOUCHED, FIND, cord, rings/pop-up, menu, MIDI Learn, dimmed,
+  MISSING and LARGE. Generated on the final implementation by `CA72_FX_PIN_PNG=<folder>
+  cargo test -p ca72-plugin --lib --features standalone-production the_fx_pin_pngs --
+  --ignored --nocapture`: **1 passed**. Close-ups were inspected at drawing size; no glass
+  stretch bands or seams. The browser tool blocked the local HTML URL, so the supplied
+  preview images and HTML measurements were read directly.
+
+**Not tried:** a native host/editor by hand, an actual third-party effect window (including
+ValhallaRoom), hardware MIDI, macOS or Windows, listening or factory-preset render benchmarks.
+The real helper tests use the existing CLAP/VST3 test effects; pictures use the fake chain
+through the real editor. No Mac build, installation, PR, merge or owner settings change.
 
 ## R-FX-SEARCH. FIND in the standalone’s effects’ chooser, with grouping and six recent choices
 
