@@ -2133,7 +2133,7 @@ impl Engine {
             // (A step of the output's gain made a ramp across the step's samples: EDGES SOFT's
             // 2 ms slew on VOLUME is then smooth, not a few clicks; SHARP's alone stay steps,
             // R-LFO-STRESS.)
-            if self.gain != was && n > 1 && !sharp {
+            if self.gain != was && n > 1 && !sharp && modulation_gain_ramps() {
                 (self.gain_now, self.gain_left) = (was, n);
                 self.gain_ramp = (self.gain - was) / n as f64;
             } else {
@@ -3367,6 +3367,7 @@ static MODULATION_STEP: std::sync::atomic::AtomicUsize = std::sync::atomic::Atom
 #[cfg(feature = "lfo-lab")]
 fn modulation_step(fast: bool) -> usize {
     match MODULATION_STEP.load(std::sync::atomic::Ordering::Relaxed) {
+        0 if MODULATION_LEGACY.load(std::sync::atomic::Ordering::Relaxed) => crate::lfo::STEP,
         0 if fast => crate::lfo::FAST_STEP,
         0 => crate::lfo::STEP,
         n => n,
@@ -3379,6 +3380,30 @@ fn modulation_step(fast: bool) -> usize {
 #[cfg(feature = "lfo-lab")]
 pub fn set_modulation_step_for_measurement(samples: usize) {
     MODULATION_STEP.store(samples, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The behaviour before R-LFO-STRESS: 32-sample steps and no output-gain ramp. An explicit
+/// step still wins, so that the per-sample reference is the same on either side.
+#[cfg(feature = "lfo-lab")]
+static MODULATION_LEGACY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Measure the behaviour at 1374b0f, before both LFO fixes. Process-wide, for serial
+/// measurements only; absent from a plug-in build.
+#[cfg(feature = "lfo-lab")]
+pub fn set_modulation_legacy_for_measurement(legacy: bool) {
+    MODULATION_LEGACY.store(legacy, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[inline(always)]
+fn modulation_gain_ramps() -> bool {
+    #[cfg(feature = "lfo-lab")]
+    {
+        !MODULATION_LEGACY.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    #[cfg(not(feature = "lfo-lab"))]
+    {
+        true
+    }
 }
 
 /// Today's count, the least the process's budget holds (decisions.md R11, R39, R-THREADS):

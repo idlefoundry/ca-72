@@ -6,7 +6,7 @@
 //! 256-frame blocks at 48 kHz, each preset's MIDI phrase, the transport playing.
 //!
 //! - `zipper`: each preset rendered as built (the LFOs moving their knobs every `lfo::STEP`
-//!   samples, 32) and as a reference with the LFOs every sample
+//!   samples, 32 or 8) and as a reference with the LFOs every sample
 //!   (`engine::set_modulation_step_for_measurement`, the feature `lfo-lab`), twice: as set, and
 //!   with each LFO's PHASE moved back by the 15.5 samples a 32-sample step holds its value late
 //!   on average (aligned). A render that moves a pitch drifts from the reference in phase (the
@@ -30,7 +30,10 @@
 //!
 //!   `CA72_LFO_OUT=<dir>` writes each render and its reference as WAVs there, at one gain a
 //!   preset (the louder's peak at -14 dBFS), and `metrics-<label>.csv`. `CA72_LFO_STEP` renders
-//!   at another step instead of the built one (for measuring the choice).
+//!   at another step instead of the built one (for measuring the choice). `CA72_LFO_LEGACY=1`
+//!   measures before both fixes (32-sample steps, no output-gain ramp). With
+//!   `CA72_LFO_COMPARE=1`, the WAV gain also includes the other version's peak, giving all
+//!   three versions the same gain when run once with LEGACY and once without it.
 //! - `cost`: each preset's controls in the engine on one thread, no workers, 4 s of its
 //!   phrase, best of three, against the same with nothing assigned (and at `CA72_LFO_STEP`).
 //! - `paced`: the heaviest preset in real time, 256-frame blocks with the plug-in's deadline and
@@ -43,6 +46,7 @@
 //! (the presets' numbers, `03,15`), `CA72_LFO_PRESETS` (another folder of presets),
 //! `CA72_LFO_LABEL` (a word in the WAVs' names, `built`).
 
+#![cfg(feature = "lfo-lab")]
 #![allow(unsafe_code, clippy::unwrap_used)]
 
 mod common;
@@ -648,6 +652,9 @@ fn step_of(s: &Sound, q: &str, tried: usize) -> usize {
     if tried != 0 {
         return tried;
     }
+    if env("CA72_LFO_LEGACY", 0) != 0 {
+        return STEP;
+    }
     let fast = s.values.iter().any(|(k, v)| {
         *v != 0.0
             && k.starts_with("lfo")
@@ -665,6 +672,8 @@ fn step_of(s: &Sound, q: &str, tried: usize) -> usize {
 #[test]
 #[ignore = "a measurement, run by hand (--features lfo-lab)"]
 fn zipper() {
+    let legacy = env("CA72_LFO_LEGACY", 0) != 0;
+    ca72_plugin::engine::set_modulation_legacy_for_measurement(legacy);
     let out = std::env::var_os("CA72_LFO_OUT").map(PathBuf::from);
     let label = std::env::var("CA72_LFO_LABEL").unwrap_or_else(|_| "built".into());
     if let Some(d) = &out {
@@ -706,7 +715,16 @@ fn zipper() {
                 mono(&set_moved),
                 mono(&aligned),
             );
-            let loudest = peak(&built).max(peak(&set)).max(1e-12);
+            let other_peak = if out.is_some() && env("CA72_LFO_COMPARE", 0) != 0 {
+                assert_eq!(tried, 0, "COMPARE requires the built or legacy step");
+                ca72_plugin::engine::set_modulation_legacy_for_measurement(!legacy);
+                let other = render(n, &s, &q, 0, BLOCK);
+                ca72_plugin::engine::set_modulation_legacy_for_measurement(legacy);
+                peak(&other)
+            } else {
+                0.0
+            };
+            let loudest = peak(&built).max(peak(&set)).max(other_peak).max(1e-12);
             let gain = 10f64.powf(PEAK_DBFS / 20.0) / loudest;
             // (1) The high band's pulse at 1.5 kHz against the reference's (aligned), and the
             // same for the reference as set (the figure's own floor).
@@ -865,6 +883,7 @@ fn play(c: &Controls, n: u32, seconds: f64, workers: usize, paced: bool) -> (f64
 #[test]
 #[ignore = "a measurement, run by hand (--features lfo-lab)"]
 fn cost() {
+    ca72_plugin::engine::set_modulation_legacy_for_measurement(env("CA72_LFO_LEGACY", 0) != 0);
     for q in qualities() {
         for (n, s) in presets() {
             if tempo(&s) != 120.0 {
@@ -908,10 +927,13 @@ fn cost() {
 #[test]
 #[ignore = "a measurement, run by hand (--features lfo-lab)"]
 fn paced() {
+    ca72_plugin::engine::set_modulation_legacy_for_measurement(env("CA72_LFO_LEGACY", 0) != 0);
     let workers: usize = env("CA72_WORKERS", AUTO);
     if workers != AUTO {
         ca72_plugin::engine::set_budget_for_measurement(workers);
     }
+    // (At another step if `CA72_LFO_STEP` asks: 32, the step before R-LFO-STRESS's change.)
+    ca72_plugin::engine::set_modulation_step_for_measurement(env("CA72_LFO_STEP", 0));
     let (n, s) = presets()
         .into_iter()
         .find(|(n, _)| *n == 15)
@@ -938,6 +960,7 @@ fn paced() {
 #[test]
 #[ignore = "a measurement, run by hand (--features lfo-lab)"]
 fn layouts() {
+    ca72_plugin::engine::set_modulation_legacy_for_measurement(env("CA72_LFO_LEGACY", 0) != 0);
     for q in qualities() {
         for (n, s) in presets() {
             let mut none = s.clone();
