@@ -107,7 +107,7 @@ r34   buf saw 4.3k                  ; R34 4300
 r33   saw 0 4.7k                    ; R33 4700
 
 * --- triangle: Q2 folds the sawtooth, Q1 buffers it --------------------------------------
-q2    tric buf e2t Q2N3392          ; Q2 2N3392
+q2    tric buf e2t Q2N3392_TRI_REFERENCE          ; Q2 2N3392
 r3    vp tric 10.7k                 ; R3 10.7K 1%
 r29   e2t vn 10k                    ; R29 10K 1%
 r14   tric vn 150k                  ; R14 150K

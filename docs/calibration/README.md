@@ -703,3 +703,10 @@ CA72_ONLY=<preset> CA72_PHRASE=<phrase.json> CA72_LEVELS_OUT=<dir> cargo test --
 # the render's fourth and sixth channels are the loudness and filter contours.
 python scripts/calibration/analyze.py <take.json> [--render <render.wav>]
 ```
+
+## Waveform source calibration candidate
+
+The triangle fold and hybrid switch network have a separate, provenance-preserving
+investigation: [waveform-fold-reference.md](waveform-fold-reference.md). It distinguishes the
+original drawing/model assumptions from inferred Q2 and R031 equivalents, keeps the
+rejected BR-only hybrid regression, and documents the circuit, LO and noise-qualified checks.

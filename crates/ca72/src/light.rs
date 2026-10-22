@@ -61,24 +61,29 @@ pub mod laws {
     /// Each waveform's level against the sawtooth's (the bus's unit: a sawtooth at VOLUME 10
     /// is 1 at its peak), its channel's source resistance (ohm, for the pot's loading) and the
     /// rectangles' duty cycles.
-    pub const TRIANGLE: f32 = 0.857;
+    pub const TRIANGLE: f32 = 0.89530206;
     pub const SAWTOOTH: f32 = 1.0;
     pub const REVERSE_SAWTOOTH: f32 = 1.0;
     pub const SQUARE: f32 = 1.032;
     pub const WIDE: f32 = 1.046;
     pub const NARROW: f32 = 1.059;
     pub const DUTY: [f32; 3] = [0.484, 0.30, 0.179];
-    /// The triangle's lowest point, as a share of its period from its top (the sawtooth's
-    /// reset): a little before half way, as the circuit's, whose even harmonics stand 37 dB
-    /// (the second), 43 and 46 dB under its fundamental.
-    pub const TRIANGLE_BOTTOM: f32 = 0.4915;
-    /// The shark tooth: the triangle inverted (its peak at the sawtooth's reset, and this
-    /// share of a period ahead of it) and the falling sawtooth, as R030 and R031 mix them (its
-    /// odd harmonics so within 0.5 dB of the circuit's to the ninth).
-    pub const SHARK_TRIANGLE: f32 = 0.704;
-    pub const SHARK_SAWTOOTH: f32 = 0.189;
-    pub const SHARK_AHEAD: f32 = 0.0175;
-    pub const SOURCE_OHMS: [f64; 4] = [687.0, 2246.0, 3500.0, 8790.0];
+    /// Source mixing uses the same physical R030/R031 network as the circuit voice.
+    pub const SHARK_TRIANGLE: f32 = TRIANGLE * SHARK_TRIANGLE_WEIGHT;
+    pub const SHARK_SAWTOOTH: f32 = (1.0 - SHARK_TRIANGLE_WEIGHT) * SAWTOOTH;
+    pub const SHARK_TRIANGLE_WEIGHT: f32 = ((4300.0 * 4700.0 / 9000.0
+        + crate::voice::SHARK_SAW_OHMS)
+        / (4300.0 * 4700.0 / 9000.0
+            + crate::voice::SHARK_SAW_OHMS
+            + 750.0 * 8200.0 / 8950.0
+            + crate::voice::SHARK_TRIANGLE_OHMS)) as f32;
+    pub const SOURCE_OHMS: [f64; 4] = [
+        687.0,
+        2246.0,
+        3500.0,
+        1.0 / (1.0 / (4300.0 * 4700.0 / 9000.0 + crate::voice::SHARK_SAW_OHMS)
+            + 1.0 / (750.0 * 8200.0 / 8950.0 + crate::voice::SHARK_TRIANGLE_OHMS)),
+    ];
     /// Oscillator 3's channel against the others' (its sawtooth through the reverse
     /// sawtooth's stage).
     pub const OSC3_LEVEL: f32 = 0.914;
@@ -579,6 +584,77 @@ impl Held {
     }
 }
 
+/// LO's triangle source transfer, approximated from the ngspice-derived DC table.
+/// Two finite knees and the broad transistor curvature replace the ideal triangle.
+/// Coefficients are fitted to source voltage, never recorded audio or spectral targets.
+/// `docs/calibration/waveform-fold-reference.md` records the source and approximation.
+mod triangle_source {
+    pub const V0: f32 = 1.5566981;
+    pub const SLOPE: f32 = -7.3142695;
+    pub const CURVATURE: f32 = 0.020533603;
+    pub const MEAN: f32 = -0.19010404;
+    pub const SCALE: f32 = 2.116305;
+    pub const RESET_STEP: f32 = -0.14804143;
+    pub const RESET_SLOPE: f32 = -14.60845;
+    pub const KNEES: [(f32, f32, f32); 2] = [
+        (0.34542942, 0.13680515, 0.6440923),
+        (0.48223457, 0.020794975, 13.92329),
+    ];
+}
+
+/// The light model's triangle source before band-limiting, for the circuit lab.
+#[doc(hidden)]
+pub fn triangle_naive(p: f32) -> f32 {
+    use triangle_source::*;
+    let mut v = V0 + SLOPE * p + CURVATURE * p * p;
+    for (at, width, gain) in KNEES {
+        let x = p - at;
+        let hinge = if x <= 0.0 {
+            0.0
+        } else if x < width {
+            x * x / (2.0 * width)
+        } else {
+            x - 0.5 * width
+        };
+        v += gain * hinge;
+    }
+    (v - MEAN) / SCALE
+}
+
+/// A finite knee's periodic BLAMP correction, using the circuit voice's same kernel.
+#[inline(always)]
+fn around_fillet(t: &BlepTables, p: f32, at: f32, inv: f32, width: f32) -> f32 {
+    let w = width * inv;
+    if f64::from(w) > crate::resample::MAX_FILLET {
+        return 0.0;
+    }
+    let reach = crate::resample::BLEP_DELAY as f32;
+    let mut q = p - at;
+    if q < 0.0 {
+        q += 1.0;
+    }
+    let mut sum = 0.0;
+    let mut k = 0.0;
+    loop {
+        let x = (q + k) * inv;
+        if x >= reach + w {
+            break;
+        }
+        sum += t.fillet(f64::from(x), f64::from(w)) as f32;
+        k += 1.0;
+    }
+    let mut k = -1.0;
+    loop {
+        let x = (q + k) * inv;
+        if x <= -reach {
+            break;
+        }
+        sum += t.fillet(f64::from(x), f64::from(w)) as f32;
+        k -= 1.0;
+    }
+    sum
+}
+
 /// An oscillator: its phase (0..1) and waveform.
 #[derive(Debug, Clone, Copy)]
 struct Osc {
@@ -621,27 +697,18 @@ impl Osc {
             // (Centred: the rectangle's mean taken out, as the coupling does.)
             naive + 2.0 * (step(0.0) - step(d)) - (2.0 * d - 1.0)
         };
-        // (The triangle at its top as the sawtooth resets, as the circuit's is.)
+        // The Q2/Q1 source curve, its finite fold knees and its physical reset step.
         let triangle = || {
-            const B: f32 = laws::TRIANGLE_BOTTOM;
-            let t = if p < B {
-                1.0 - p * (2.0 / B)
-            } else {
-                (p - B) * (2.0 / (1.0 - B)) - 1.0
-            };
-            // Its corners: at the top as the sawtooth resets, at the bottom at B.
-            let g = 2.0 / B + 2.0 / (1.0 - B);
-            laws::TRIANGLE * (t + corner(0.0, -g) + corner(B, g))
+            use triangle_source::*;
+            let mut v = triangle_naive(p)
+                + RESET_STEP / SCALE * step(0.0)
+                + RESET_SLOPE / SCALE * corner(0.0, 1.0);
+            for (at, width, gain) in KNEES {
+                v += gain / SCALE * dt * around_fillet(t, p, at, inv, width);
+            }
+            v
         };
-        // The shark tooth's triangle: its corners, its bottom at q = 1/2, its top at q = 0.
-        let shark_triangle = || {
-            let q = p + laws::SHARK_AHEAD;
-            let q = if q >= 1.0 { q - 1.0 } else { q };
-            4.0 * (q - 0.5).abs() - 1.0
-                + corner(0.5 - laws::SHARK_AHEAD, 8.0)
-                + corner(1.0 - laws::SHARK_AHEAD, -8.0)
-        };
-        let shark = || laws::SHARK_TRIANGLE * shark_triangle() + laws::SHARK_SAWTOOTH * fall();
+        let shark = || laws::SHARK_TRIANGLE_WEIGHT * triangle() + laws::SHARK_SAWTOOTH * fall();
         let sawtooth = || laws::SAWTOOTH * fall();
         let reverse = || -laws::REVERSE_SAWTOOTH * fall();
         let rectangle = || self.level * rect(self.duty);
@@ -663,7 +730,7 @@ impl Osc {
             (0, _) => triangle(),
             (1, false) => shark(),
             (1, true) => {
-                laws::SHARK_TRIANGLE * shark_triangle()
+                laws::SHARK_TRIANGLE_WEIGHT * triangle()
                     + laws::SHARK_SAWTOOTH * (laws::REVERSE_SAWTOOTH / laws::SAWTOOTH) * -fall()
             }
             (2, false) => sawtooth(),

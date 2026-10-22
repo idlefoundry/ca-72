@@ -147,7 +147,7 @@ impl Default for ShaperParams {
             rect_rise_delay: 2.74e-6,
             rect_fall_delay: 3.75e-6,
             rect_fall_overdrive: 4.94e-3,
-            tri_glitch: -3.8e-7,
+            tri_glitch: -4.02e-7,
             buf_lag: -4.8e-7,
         }
     }
