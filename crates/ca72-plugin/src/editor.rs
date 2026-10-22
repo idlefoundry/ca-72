@@ -9733,6 +9733,11 @@ mod tests {
         let size = (e.width, e.window_height());
         mpe_open(&mut e);
         assert_eq!((e.width, e.window_height()), size);
+        assert_eq!(Lower::Mpe.depth(), mpe_ui::DEPTH);
+        assert_eq!(e.lower_depth(), mpe_ui::DEPTH);
+        assert_eq!(lower_of(&e).expect("MPE's frame").depth, mpe_ui::DEPTH);
+        assert!(e.in_mpe((2000.0, mpe_ui::TOP + arp_ui::DEPTH + 20.0)));
+        assert!(!e.in_lower((2000.0, mpe_ui::TOP + mpe_ui::DEPTH + 1.0)));
         let mut whole = None;
         compose(
             &mut whole,
@@ -9755,7 +9760,7 @@ mod tests {
         let s = e.renderer.scale();
         let (x, y) = (
             (2000.0 * s) as usize,
-            ((mpe_ui::TOP + 200.0) * s).round() as usize,
+            ((mpe_ui::TOP + mpe_ui::DEPTH - 20.0) * s).round() as usize,
         );
         let row = mpe_ui::top_px(s) as usize;
         let px = |p: &ca72_panel::Pixmap, x: usize, y: usize| {

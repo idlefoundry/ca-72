@@ -14969,3 +14969,53 @@ confirms the optimistic inline width calculation. Logs, hashes and the updated i
 are under `target/drawer-lettering-frames/`; the new logs have a `-2` suffix. No new timing
 claim, Mac build, Windows run, installed plug-in or manual host test is made. The lower title
 placement is still for the owner's visual confirmation.
+
+**Review corrections, 2026-10-22 (the owner's third brief):** the second pass's ARP and
+DIRECTION bank legends stay. Moving PRESSURE and TIMBRE to the foot was "the right idea",
+but at 265 units deep the drawer left the titles "cramped" beside the dials' numbers. The
+owner asked for "Room at the foot as on the GLOBAL page", an independent MPE depth, and each
+section's units centred between its rules or edge, keeping INPUT and the four 198-unit
+readouts, the pairs' internal spacing and every existing clearance test.
+
+**Built:** MPE is 340 units deep; ARP remains 265. The title centres are 50 units above the
+foot, as GLOBAL's are, and the rules run down the deeper plate. The four unit centres are
+1040, 1490, 2230 and 2680. The pairs keep their 450-unit pitch. Their complete printed
+extents, including dial numbers, readouts, % and OCT, are centred within half a drawing unit
+between the rules at 700/1920 or the rule at 1920 and the edge at 3080, in STANDARD and LARGE.
+INPUT's column, the controls' row, title size and section centres stay as in the second pass.
+
+**Measured:** GLOBAL's control-to-title ink gaps are 21.069 / 35.616 / 18.945 units for
+VOICES / STEREO / OUTPUT in STANDARD, and 20.040 / 35.616 / 17.633 in LARGE. The control
+extent includes the dials' stroked print and the readouts' and voices' display's bezels.
+GLOBAL's title-to-foot ink gap is 30.604 units. The new gate uses the largest reference gap
+above the titles, 35.616, for both MPE sections. MPE leaves at least 39.225 above and 30.604
+below. It also retains the previous GLOBAL-derived horizontal title clearance and all
+six-unit print/bezel clearances, and checks the rules' full depth and the pairs' centring.
+A 335-unit trial fails LARGE's new upper gap (34.225); the old 265-unit depth and the old
+unit positions also fail the layout test.
+
+The editor's `Lower::depth`, `lower_frame`, sliding and hit bounds already use `mpe::DEPTH`.
+The editor regression now checks the independent depth, hits in the added band and frame
+composition near its new foot; existing knob and typed-readout tests follow the new places.
+The partial/full renderer matrix checks that the deeper frame and its shadow fit inside the
+unchanged window in both skins and lettering sizes at 0.44 and 1.0, plus the existing 0.87
+case. The drawing's depth bound keeps the drawer inside at every scale.
+
+`target/drawer-lettering-frames/README.md` now indexes the MPE-only before (`e9545a1`) and
+after matrix: STANDARD/LARGE, worn/drawn, 0.44/1.0, matching complete windows, and GLOBAL's
+lower half above MPE at 1.0 STANDARD in each skin. All eight full-window pairs are identical
+above the drawer, including the rail; all crops match their full windows exactly. Earlier
+other-drawer pictures are retained as historical evidence. No approved image is changed.
+
+**Agent decisions** (not separately approved): use the largest of GLOBAL's three upper gaps,
+round the necessary depth up to 340, and centre the complete printed pair rather than just
+the nominal unit centres. The owner still has the pictures to review. No Mac build, Windows
+host run, installed plug-in, real audio device or new performance benchmark is used.
+
+**Third-pass checks (Linux, Rust 1.97.1):** the required production-feature package suite passes:
+837 tests, 80 intentionally ignored. Workspace/all-target/all-feature Clippy, touched-panel
+and plug-in default-feature Clippy, formatting and notices pass. The measured layout gate
+rejects each negative trial by a failing assertion, then passes the final layout.
+The final default-feature workspace run also passes: 1170 tests, 97 intentionally
+ignored, with four test threads on the shared Linux machine. Logs have a `-3` suffix beside
+the frames. These checks and pictures are evidence for review, not the owner's visual approval.

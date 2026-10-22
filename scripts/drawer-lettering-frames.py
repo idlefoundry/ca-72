@@ -22,7 +22,7 @@ def crop(source, dest, box, scale):
 def comparisons(output, skin, lettering, scale, baseline):
     prefix = f"{skin}-{lettering}-{scale}"
     full = output / "full"
-    cutoff = 1602 if baseline else 1615
+    cutoff = 1602 if baseline else 1490
     rows = []
     font = Path(__file__).resolve().parents[1] / "third_party/urw-gothic/URWGothic-Demi.otf"
     for kind, boxes in (
@@ -56,6 +56,8 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--baseline", action="store_true", help="the e9545a1 MPE positions")
     parser.add_argument("--comparisons-only", action="store_true")
+    parser.add_argument("--mpe-only", action="store_true",
+                        help="third-pass MPE matrix and GLOBAL foot-spacing comparison")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     full = args.output / "full"
@@ -63,6 +65,8 @@ def main():
     font = Path(__file__).resolve().parents[1] / "third_party/urw-gothic/URWGothic-Demi.otf"
     pages = (("global", None), ("mpe", "CA72_MPE"), ("arp", "CA72_ARP"),
              ("lfo", "CA72_LFO"), ("fx", "CA72_FX"), ("fx-safety", "CA72_FX"))
+    if args.mpe_only:
+        pages = (("mpe", "CA72_MPE"),)
     for skin in ("worn", "drawn"):
         for scale in (0.44, 1.0):
             for lettering in ("standard", "large"):
@@ -76,11 +80,34 @@ def main():
                         env[flag] = "safety" if page == "fx-safety" else "1"
                     subprocess.run([str(args.binary.resolve()), str(full / name), str(scale)],
                                    env=env, check=True)
-                    box = (360, 1033, 3090, 1775 if page in ("global", "lfo") else 1330)
+                    foot = 1775 if page in ("global", "lfo") else 1330
+                    if args.mpe_only or page == "mpe":
+                        foot = 1405  # Both revisions in the deeper drawer's frame, shadow included.
+                    box = (360, 1033, 3090, foot)
                     crop(full / name, args.output / name, box, scale)
-                comparisons(args.output, skin, lettering, scale, args.baseline)
+                if args.mpe_only:
+                    if scale == 1.0 and lettering == "standard":
+                        source = full / f"{skin}-{lettering}-{scale}-global.png"
+                        if not args.comparisons_only:
+                            env = {k: v for k, v in os.environ.items()
+                                   if not k.startswith("CA72_")}
+                            env.update(CA72_SKIN=skin, CA72_LETTERING=lettering)
+                            subprocess.run([str(args.binary.resolve()), str(source), str(scale)],
+                                           env=env, check=True)
+                        lower = args.output / f"{skin}-standard-1.0-global-lower.png"
+                        crop(source, lower, (360, 1408, 3090, 1775), scale)
+                        drawer = args.output / f"{skin}-{lettering}-{scale}-mpe.png"
+                        subprocess.run(["magick", str(lower), str(drawer),
+                                        "-background", "#1d1b1a", "-gravity", "center", "-append",
+                                        str(args.output / f"{skin}-standard-1.0-global-mpe-foot.png")],
+                                       check=True)
+                else:
+                    comparisons(args.output, skin, lettering, scale, args.baseline)
             # STANDARD beside LARGE, with captions outside the unscaled samples.
-            for page in (*[p for p, _ in pages], "bank-comparison"):
+            comparison_pages = [p for p, _ in pages]
+            if not args.mpe_only:
+                comparison_pages.append("bank-comparison")
+            for page in comparison_pages:
                 tiles = []
                 for lettering in ("standard", "large"):
                     source = args.output / f"{skin}-{lettering}-{scale}-{page}.png"

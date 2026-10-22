@@ -29,8 +29,9 @@ use crate::svg::{N, Svg, colour, put};
 
 // ---- The layout (the drawing's units, the drawer open; the mock-up's).
 
-/// How deep it is, and its row's middle: the arpeggiator's.
-pub const DEPTH: f64 = super::arp::DEPTH;
+/// Room below the controls for GLOBAL's title gaps (R-DRAWER-LETTERING).
+pub const DEPTH: f64 = 340.0;
+/// The controls keep the arpeggiator's row.
 pub const ROW: f64 = super::arp::ROW;
 const LEGEND_UP: f64 = 109.0;
 /// INPUT's screen: left, top, width, height.
@@ -41,9 +42,14 @@ const RULES: [f64; 2] = [700.0, 1920.0];
 // The four-cell window, its % print and the next dial's outer numbers need 450 units
 // between middles in LARGE (the measured ink extents are checked below).
 const UNIT_PITCH: f64 = 450.0;
+// Each pair's full printed extent, including OCT, is centred 270 units after its first
+// middle in both lettering sizes (within half a unit; checked below).
+const PAIR_CENTRE: f64 = 270.0;
+const PRESSURE: f64 = (RULES[0] + RULES[1]) / 2.0 - PAIR_CENTRE;
+const TIMBRE: f64 = (RULES[1] + RIGHT) / 2.0 - PAIR_CENTRE;
 /// The units' middles: PRESSURE's MODULATION and CUTOFF, TIMBRE's MODULATION and CUTOFF. Each
 /// knob is `UNIT_KNOB` left of it; its readout grows rightwards from the strip's window.
-pub const UNITS: [f64; 4] = [1165.0, 1165.0 + UNIT_PITCH, 2325.0, 2325.0 + UNIT_PITCH];
+pub const UNITS: [f64; 4] = [PRESSURE, PRESSURE + UNIT_PITCH, TIMBRE, TIMBRE + UNIT_PITCH];
 /// The knobs' parameters, in the units' order.
 pub const KNOB_PARAMS: [&str; 4] = [
     "pressure_mod",
@@ -520,7 +526,7 @@ fn print_svg(oy: f64, lettering: Lettering) -> String {
         art::text(
             &mut s,
             (RULES[g] + right) / 2.0,
-            TOP + DEPTH - 44.0 - oy,
+            TOP + DEPTH - 50.0 - oy,
             t,
             super::TITLE,
             art::Style::Title,
@@ -568,7 +574,9 @@ mod tests {
         assert_eq!(hit(INPUT.0 + 10.0, ROW), None);
         const {
             assert!(INPUT.0 > LEFT && INPUT.0 + INPUT.2 < RULES[0]);
+            assert!(TOP + DEPTH + SHADOW < art::H);
         }
+        assert!(inside(1000.0, TOP + DEPTH - 1.0));
         assert!(!inside(LEFT - 1.0, ROW) && !inside(RIGHT + 1.0, ROW));
         assert!(!inside(1000.0, TOP + DEPTH + 1.0) && !inside(1000.0, TOP - 1.0));
         assert!(ROW - LEGEND_UP > TOP + 14.0 && ROW + READOUT.1 / 2.0 < TOP + DEPTH - 9.0);
@@ -577,6 +585,8 @@ mod tests {
     /// Use the actual printed extents, including LARGE's outer dial numbers and units, rather
     /// than the strip's old three-cell unit width. The titles clear their rules by at least
     /// GLOBAL's smallest section-title gap, and every printed part and bezel by six units.
+    /// Both vertical gaps match at least GLOBAL's largest, measured to control ink and bezels;
+    /// each pair's full printed extent is centred between its section's rules or edge.
     #[test]
     fn the_wider_readouts_and_titles_clear_the_print() {
         fn parts(node: &usvg::Node, boxes: &mut Vec<usvg::Rect>) {
@@ -602,6 +612,17 @@ mod tests {
                 &print_svg(0.0, lettering),
             );
             let tree = usvg::Tree::from_str(&doc, &lower::lettered()).expect("the print parses");
+            for rule in RULES {
+                let ink = tree
+                    .root()
+                    .children()
+                    .iter()
+                    .map(usvg::Node::abs_stroke_bounding_box)
+                    .find(|r| (f64::from(r.left()) - rule + 2.0).abs() < 0.01)
+                    .expect("a section rule");
+                assert!((f64::from(ink.top()) - TOP - 14.0).abs() < 0.01);
+                assert!((f64::from(ink.bottom()) - TOP - DEPTH + 12.0).abs() < 0.01);
+            }
             let bounds = |id: &str| {
                 tree.node_by_id(id)
                     .expect("the printed part")
@@ -614,6 +635,51 @@ mod tests {
                 &lower::lettered(),
             )
             .expect("GLOBAL's print parses");
+            let mut controls = Svg(String::new(), lettering);
+            for c in crate::controls::CONTROLS
+                .iter()
+                .filter(|c| c.place == crate::controls::Place::Strip)
+            {
+                if let crate::controls::Kind::Knob { dial, .. } = c.kind {
+                    art::draw_dial(&mut controls, c.x, c.y, dial);
+                }
+            }
+            let controls = usvg::Tree::from_str(
+                &art::document([0.0, 0.0, art::W, art::H], 3108, 1775, &controls.0),
+                &lower::lettered(),
+            )
+            .expect("GLOBAL's controls parse");
+            let mut ink = Vec::new();
+            for child in controls.root().children() {
+                parts(child, &mut ink);
+            }
+            let (mut global_above, mut global_foot) = (0.0_f64, 0.0_f64);
+            for (left, right, title) in super::super::SECTIONS.into_iter().skip(1) {
+                let title_ink = global
+                    .node_by_id(&format!("strip-title-{title}"))
+                    .expect("a title")
+                    .abs_stroke_bounding_box();
+                let mut bottom = ink
+                    .iter()
+                    .filter(|r| f64::from(r.left()) >= left && f64::from(r.right()) <= right)
+                    .map(|r| f64::from(r.bottom()))
+                    .fold(0.0, f64::max);
+                for r in super::super::Readout::ALL {
+                    let (x, y, w, h) = r.window();
+                    if x >= left && x + w <= right {
+                        bottom = bottom.max(y + h + 6.0);
+                    }
+                }
+                let (x, y, w, h) = super::super::DISPLAY;
+                if x >= left && x + w <= right {
+                    bottom = bottom.max(y + h + 6.0);
+                }
+                let above = f64::from(title_ink.top()) - bottom;
+                let foot = art::H - f64::from(title_ink.bottom());
+                global_above = global_above.max(above);
+                global_foot = global_foot.max(foot);
+                eprintln!("{lettering:?} GLOBAL {title}: above {above}, foot {foot}");
+            }
             let global_gap = super::super::SECTIONS
                 .into_iter()
                 .skip(1)
@@ -626,6 +692,7 @@ mod tests {
                 })
                 .fold(f64::INFINITY, f64::min);
             assert!(global_gap > 200.0, "GLOBAL's measured gap: {global_gap}");
+            assert!(global_above > 30.0 && global_foot > 30.0);
             for (group, _) in GROUPS {
                 let (left, right) = if group == 0 {
                     (RULES[0], RULES[1])
@@ -641,6 +708,8 @@ mod tests {
                 assert!(f64::from(title.top()) > TOP + 14.0);
                 assert!(f64::from(title.bottom()) < TOP + DEPTH - 9.0);
                 let mut end = left + 2.0;
+                let mut first = f64::INFINITY;
+                let mut bottom = 0.0_f64;
                 for i in group..group + 2 {
                     let ink = bounds(&format!("mpe-unit-{i}"));
                     let (x, _, w, _) = readout(i);
@@ -649,7 +718,9 @@ mod tests {
                         x - 6.0 > f64::from(dial.right()) + 6.0,
                         "{lettering:?} unit {i}: window {x} after dial {dial:?}"
                     );
+                    assert_eq!(w, 198.0);
                     let start = f64::from(ink.left()).min(x - 6.0);
+                    first = first.min(start);
                     assert!(
                         start > end + 6.0,
                         "{lettering:?} unit {i}: {start} after {end}"
@@ -669,6 +740,7 @@ mod tests {
                         );
                     }
                     let (_, y, _, h) = readout(i);
+                    bottom = bottom.max(f64::from(ink.bottom())).max(y + h + 6.0);
                     let bezel = usvg::Rect::from_xywh(
                         (x - 6.0) as f32,
                         (y - 6.0) as f32,
@@ -682,6 +754,23 @@ mod tests {
                     );
                 }
                 assert!(end < right - 8.0, "{lettering:?}: {end} before {right}");
+                assert!(
+                    ((first + end - left - right) / 2.0).abs() < 0.5,
+                    "{lettering:?}: pair {first}..{end} centred between {left}..{right}"
+                );
+                let above = f64::from(title.top()) - bottom;
+                let foot = TOP + DEPTH - f64::from(title.bottom());
+                assert!(
+                    above >= global_above,
+                    "{lettering:?}: title gap {above}, GLOBAL {global_above}"
+                );
+                assert!(
+                    foot >= global_foot,
+                    "{lettering:?}: foot gap {foot}, GLOBAL {global_foot}"
+                );
+                eprintln!(
+                    "{lettering:?} MPE group {group}: above {above}, foot {foot}, pair {first}..{end}"
+                );
             }
         }
     }
@@ -714,6 +803,13 @@ mod tests {
                 ..MpeScene::default()
             };
             assert!(r.render(&scene, &mut panel));
+            assert_eq!(r.frame().height(), (DEPTH * scale).ceil() as u32);
+            assert!(
+                top_px(scale)
+                    + r.frame().height() as i32
+                    + (r.shadow().expect("the drawer's shadow").height() as i32)
+                    < (art::H * scale).round() as i32
+            );
             let steps: [&dyn Fn(&mut MpeScene); 5] = [
                 &|s| s.input = Input::Mpe,
                 &|s| s.readouts[0] = ("-100".into(), true),
