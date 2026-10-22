@@ -14425,3 +14425,25 @@ ENV saw for its bellows attack; flute LFO trials did not improve the overall sel
 Source permissions, methods, measurements, quantized reload differences and remaining
 acoustic limitations: [acoustic validation](mcp-acoustic-validation.md). These are working
 studies for the owner's listening review, not a release or an exact-reproduction claim.
+
+## R-WAVEFORM-CALIBRATION. Preserve the comparison build and calibrate fixed sources
+
+**The owner, 2026-10-22.** After the knob-only comparison, preserve the current build and
+focus on matching the waveforms while following the project's circuit-calibration rules.
+This authorizes a separate source-model experiment; it does not replace the prepared app
+or accept a blind match.
+
+The prepared `d9d1204` executables and exact source are independently preserved on the Mac
+and NAS. Original captures, presets, snapshots, earlier fits and blind assignments remain
+associated with that build. Work proceeds in an isolated branch with independent review.
+
+Calibration follows physical source mechanisms through ngspice, the circuit voice and LO.
+Fixed waveform positions remain fixed. No output EQ, added filtering, empirical harmonic
+correction or phase/seed fitting is used. Identified local auditions may use documented
+constant gains and timing alignment. Noise parity and listening acceptance remain separate
+requirements before any final blind trial. Equivalent component inferences are not claims
+about the installed reference parts.
+
+Selection, primary component evidence, original versus candidate renders, preset effects
+and unresolved differences are recorded in [the waveform stage](calibration/waveforms-2026-10-22.md).
+No release, installation, public deployment or merge is performed by this stage.
