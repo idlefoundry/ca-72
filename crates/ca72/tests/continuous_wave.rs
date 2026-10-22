@@ -370,40 +370,49 @@ fn the_pulse_still_comes_at_the_floor_across_the_keyboard() {
 
 #[test]
 fn a_width_that_moves_past_the_ramp_switches_the_comparator_at_once() {
-    let rate = 96_000.0;
     let hz = 100.0;
     let core = CoreParams::default();
     let i0 = (core.c1 + core.c_par) * (core.v_top0 - core.v_threshold) * hz;
-    for moves in [true, false] {
-        let mut v = Vco::new(rate, 8);
-        v.set_width_moves(moves);
-        // Square for a few cycles, then just after a reset plus 30 % of a cycle (high: the
-        // square falls about half way), narrow (it falls at about 18 %: already passed).
-        let mut resets = v.last_reset().1;
-        let mut since = None;
-        let mut low_after = None;
-        for i in 0..(rate * 0.2) as usize {
-            let (_, r) = v.last_reset();
-            if r != resets {
-                resets = r;
-                if r == 10 {
-                    since = Some(i);
+    for physical_width_source in [false, true] {
+        for rate in [44_100.0, 48_000.0, 96_000.0] {
+            for oversample in [1, 4, 8] {
+                for moves in [true, false] {
+                    let mut v = Vco::new(rate, oversample);
+                    v.use_width_network(physical_width_source);
+                    v.set_width_moves(moves);
+                    // Square for a few cycles, then just after a reset plus 30 % of a cycle (high: the
+                    // square falls about half way), narrow (it falls at about 18 %: already passed).
+                    let mut resets = v.last_reset().1;
+                    let mut since = None;
+                    let mut low_after = None;
+                    for i in 0..(rate * 0.2) as usize {
+                        let (_, r) = v.last_reset();
+                        if r != resets {
+                            resets = r;
+                            if r == 10 {
+                                since = Some(i);
+                            }
+                        }
+                        let narrow = since.is_some_and(|s| i >= s + (0.3 * rate / hz) as usize);
+                        let out = v.tick_current(i0, i0 * 1e-3, if narrow { -2.5 } else { 0.0 });
+                        if narrow && low_after.is_none() && out.rect < -2.15 {
+                            low_after = Some(i - since.unwrap() - (0.3 * rate / hz) as usize);
+                        }
+                    }
+                    // (Less the outputs' delay through band-limiting and decimation.)
+                    let after = (low_after.expect("it falls at last") as f64 - v.latency()) / rate;
+                    eprintln!(
+                        "physical source {physical_width_source}, rate {rate}, os{oversample}, moves {moves}: falls {:.3} ms after",
+                        after * 1e3
+                    );
+                    if moves {
+                        assert!(after < 1e-4, "following, it fell {after} s after");
+                    } else {
+                        // (The instrument's switch never moves mid-cycle: the next cycle's threshold.)
+                        assert!(after > 0.7 / hz, "not following, it fell {after} s after");
+                    }
                 }
             }
-            let narrow = since.is_some_and(|s| i >= s + (0.3 * rate / hz) as usize);
-            let out = v.tick_current(i0, i0 * 1e-3, if narrow { -2.5 } else { 0.0 });
-            if narrow && low_after.is_none() && out.rect < -2.15 {
-                low_after = Some(i - since.unwrap() - (0.3 * rate / hz) as usize);
-            }
-        }
-        // (Less the outputs' delay through band-limiting and decimation.)
-        let after = (low_after.expect("it falls at last") as f64 - v.latency()) / rate;
-        eprintln!("width moves {moves}: falls {:.1} ms after", after * 1e3);
-        if moves {
-            assert!(after < 1e-4, "following, it fell {after} s after");
-        } else {
-            // (The instrument's switch never moves mid-cycle: the next cycle's threshold.)
-            assert!(after > 0.7 / hz, "not following, it fell {after} s after");
         }
     }
 }

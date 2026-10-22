@@ -139,7 +139,8 @@ pub fn against(m: &Measure, reference: &[f64]) -> (f64, f64) {
 }
 
 /// Oscillator 1 of the circuit's model on 2' (key 4 is A-440), tuned the 1973 way at
-/// `rate`; its sawtooth, triangle and rectangle for a width bias (V) over `n` samples after
+/// `rate`, using the production physical width-source network; its sawtooth, triangle
+/// and rectangle for a width bias (V) over `n` samples after
 /// a quarter of a second, and its frequency from its resets.
 pub fn circuit(
     rate: f64,
@@ -148,7 +149,31 @@ pub fn circuit(
     width: f64,
     n: usize,
 ) -> ([Vec<f64>; 3], f64) {
+    circuit_with_source(rate, oversample, key, width, n, true)
+}
+
+/// Explicit legacy ideal-voltage shaper bench. Production uses [`circuit`], including
+/// the active component set and the prepared physical width-source network.
+pub fn circuit_ideal(
+    rate: f64,
+    oversample: usize,
+    key: f64,
+    width: f64,
+    n: usize,
+) -> ([Vec<f64>; 3], f64) {
+    circuit_with_source(rate, oversample, key, width, n, false)
+}
+
+fn circuit_with_source(
+    rate: f64,
+    oversample: usize,
+    key: f64,
+    width: f64,
+    n: usize,
+    physical_width_source: bool,
+) -> ([Vec<f64>; 3], f64) {
     let mut v = ca72::vco::Vco::new(rate, oversample);
+    v.use_width_network(physical_width_source);
     let t = tuned(rate);
     v.expo.r11 = t.r11;
     v.expo.a8 = t.a8;
