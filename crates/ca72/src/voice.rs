@@ -1557,6 +1557,16 @@ impl Voice {
         self.keys.gate
     }
 
+    /// Prepare a comparator component set during lab/setup, never on the audio thread.
+    pub fn prepare_pulse(
+        &mut self,
+        circuit: crate::pulse::PulseCircuit,
+    ) -> Result<(), crate::mna::NoConvergence> {
+        for v in &mut self.audio.front.vcos {
+            v.prepare_pulse(circuit)?;
+        }
+        Ok(())
+    }
     /// The last sample's keyboard voltage, V, the mixer bus's Norton current, A, and the
     /// filter's output, V.
     pub fn probe(&self) -> (f64, f64, f64) {
@@ -2404,6 +2414,7 @@ impl FrontPart {
                 Some(at) => shape_outputs(n, at, shape.modulated),
             });
             self.vcos[n].set_width_moves(shape.continuous);
+            self.vcos[n].use_width_network(true);
             let width = at.map_or(op.waveform.width(), shape_bias);
             let o = match j.timed[n] {
                 // An oscillator timed at LO (the plug-in's: decisions.md R-OSC-TIMED): its

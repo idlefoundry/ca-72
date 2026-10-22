@@ -64,10 +64,15 @@ pub mod laws {
     pub const TRIANGLE: f32 = 0.857;
     pub const SAWTOOTH: f32 = 1.0;
     pub const REVERSE_SAWTOOTH: f32 = 1.0;
-    pub const SQUARE: f32 = 1.032;
-    pub const WIDE: f32 = 1.046;
-    pub const NARROW: f32 = 1.059;
-    pub const DUTY: [f32; 3] = [0.484, 0.30, 0.179];
+    // Reduced from the full voice MIX at220Hz, VOLUME8, with the same physical
+    // comparator component set. Frequency-dependent pulse-edge residuals remain (LO).
+    pub const SQUARE: f32 = 1.056762;
+    pub const WIDE: f32 = 1.056852;
+    pub const NARROW: f32 = 1.056932;
+    pub const DUTY: [f32; 3] = match crate::pulse::ACTIVE_PROFILE {
+        crate::pulse::PulseProfile::Factory => [0.48447033, 0.30409349, 0.18917401],
+        crate::pulse::PulseProfile::ReferenceStandard => [0.48181775, 0.29378574, 0.17421979],
+    };
     /// The triangle's lowest point, as a share of its period from its top (the sawtooth's
     /// reset): a little before half way, as the circuit's, whose even harmonics stand 37 dB
     /// (the second), 43 and 46 dB under its fundamental.

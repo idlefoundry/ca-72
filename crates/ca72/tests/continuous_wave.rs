@@ -85,13 +85,13 @@ fn the_travel_gives_the_switchs_widths_exactly() {
         assert_eq!(shape_at(continuous(back, false), Default::default()), k);
     }
     // The duty falls along the rectangle's stretch: the square's about half, the floor's about
-    // a sixteenth.
+    // five to nine percent after retaining the physical width-divider load.
     let d: Vec<f64> = (0..=20)
         .map(|k| rect_duty(shape_bias(3.0 + f64::from(k) / 20.0 * (SHAPE_PLACES - 3.0))))
         .collect();
     assert!(d.windows(2).all(|w| w[1] < w[0]), "{d:?}");
     assert!(
-        (d[0] - 0.484).abs() < 1e-6 && d[20] > 0.05 && d[20] < 0.08,
+        d[0] > 0.47 && d[0] < 0.49 && d[20] > 0.05 && d[20] < 0.095,
         "{d:?}"
     );
 }
@@ -324,6 +324,7 @@ fn both_voices_move_the_shape_the_same_way() {
 fn vco_duty(hz: f64, bias: f64, cycles: f64) -> (f64, f64) {
     let rate = 96_000.0;
     let mut v = Vco::new(rate, 8);
+    v.use_width_network(true);
     let core = CoreParams::default();
     // A timing current for `hz`: the capacitor through the ramp's travel each period.
     let i0 = (core.c1 + core.c_par) * (core.v_top0 - core.v_threshold) * hz;
@@ -403,6 +404,31 @@ fn a_width_that_moves_past_the_ramp_switches_the_comparator_at_once() {
         } else {
             // (The instrument's switch never moves mid-cycle: the next cycle's threshold.)
             assert!(after > 0.7 / hz, "not following, it fell {after} s after");
+        }
+    }
+}
+
+#[test]
+fn pulse_knots_are_continuous_just_outside_the_rounding_deadband() {
+    for q in [
+        Quality::NoCompromises,
+        Quality::HighFidelity,
+        Quality::Potato,
+    ] {
+        for (at, w) in [
+            (3.0, Waveform::Square),
+            (4.0, Waveform::WideRectangle),
+            (5.0, Waveform::NarrowRectangle),
+        ] {
+            let reference = full(panel(q, 0, w, Shape::STEPPED), 0.12);
+            for off in [-0.00101, 0.00101] {
+                let moved = full(panel(q, 0, w, continuous(at + off, false)), 0.12);
+                let delta: Vec<_> = reference.iter().zip(&moved).map(|(a, b)| a - b).collect();
+                assert!(
+                    rms(&delta) / rms(&reference) < 0.025,
+                    "{q:?} knot{at} offset{off} produced a finite jump"
+                );
+            }
         }
     }
 }
