@@ -68,6 +68,8 @@ impl Health {
 /// An effect in the chain, as the drawer shows it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SlotInfo {
+    /// The effect's stable identity; parameter IDs alone are local to a plug-in.
+    pub instance: u64,
     pub name: String,
     pub vendor: String,
     pub format: String,
@@ -329,7 +331,7 @@ enum Job {
     Pin(usize, u32),
     Unpin(usize),
     Repin(usize, u32),
-    Recent(usize, Vec<u32>),
+    Recent(usize, u64),
     Texts(Vec<PinInfo>),
     Order(FxOrder),
 }
@@ -344,7 +346,7 @@ struct Pending {
     parameters: Option<ParameterReply>,
     pin_error: Option<String>,
     pin_texts: Vec<(PinInfo, String)>,
-    recent: Vec<(usize, Vec<u32>, Vec<ParamRow>)>,
+    recent: Vec<parameters::RecentReply>,
 }
 
 /// How long an effect that would not load is said so on its slot.
@@ -398,6 +400,8 @@ pub struct FxView {
     request: u64,
     touched: [Vec<u32>; SLOTS],
     recent: [Vec<ParamRow>; SLOTS],
+    recent_request: [u64; SLOTS],
+    recent_retry: [Option<Instant>; SLOTS],
 }
 
 impl std::fmt::Debug for FxView {
@@ -458,6 +462,8 @@ impl FxView {
             request: 0,
             touched: Default::default(),
             recent: Default::default(),
+            recent_request: Default::default(),
+            recent_retry: Default::default(),
         }
     }
 
@@ -481,6 +487,16 @@ impl FxView {
         self.polled = Some(now);
         if let Some(slots) = e.slots() {
             self.seen = done;
+            for slot in 0..SLOTS {
+                if self.slots.get(slot).map(|s| (s.instance, s.health))
+                    != slots.get(slot).map(|s| (s.instance, s.health))
+                {
+                    self.touched[slot].clear();
+                    self.recent[slot].clear();
+                    self.recent_request[slot] += 1;
+                    self.recent_retry[slot] = None;
+                }
+            }
             self.slots = slots;
         }
         if let Some(a) = e.active() {
@@ -493,7 +509,7 @@ impl FxView {
                 self.refilter();
             }
         }
-        self.poll_parameters();
+        self.poll_parameters(now);
     }
 
     /// Whether any effect plays: the FX key lit.
@@ -1133,9 +1149,9 @@ fn run(effects: &dyn Effects, pending: &Mutex<Pending>, job: Job) {
             lock(pending).pin_texts = texts;
             Ok(())
         }
-        Job::Recent(slot, ids) => {
-            let rows = effects.params(*slot).unwrap_or_default();
-            lock(pending).recent.push((*slot, ids.clone(), rows));
+        Job::Recent(slot, request) => {
+            let rows = effects.params(*slot);
+            lock(pending).recent.push((*slot, *request, rows));
             Ok(())
         }
         Job::Repin(target, id) => effects.repin(*target, *id),
@@ -1207,6 +1223,8 @@ pub(crate) mod fake {
         pub touched: Mutex<std::collections::BTreeMap<usize, Vec<u32>>>,
         pub pins_busy: std::sync::atomic::AtomicBool,
         pub param_reads: std::sync::atomic::AtomicUsize,
+        pub params_fail: std::sync::atomic::AtomicBool,
+        pub next_instance: std::sync::atomic::AtomicU64,
         pub preferences: Mutex<Preferences>,
         pub preset: Mutex<PresetStatus>,
         pub preset_raw: Mutex<Option<String>>,
@@ -1216,7 +1234,8 @@ pub(crate) mod fake {
 
     impl Fake {
         pub fn with(names: &[&str], found: &[&str]) -> Arc<Fake> {
-            let info = |n: &&str| SlotInfo {
+            let info = |(i, n): (usize, &&str)| SlotInfo {
+                instance: i as u64 + 1,
                 name: (*n).into(),
                 vendor: "Maker".into(),
                 format: "clap".into(),
@@ -1224,7 +1243,8 @@ pub(crate) mod fake {
                 ..SlotInfo::default()
             };
             Arc::new(Fake {
-                slots: Mutex::new(names.iter().map(info).collect()),
+                slots: Mutex::new(names.iter().enumerate().map(info).collect()),
+                next_instance: std::sync::atomic::AtomicU64::new(names.len() as u64 + 1),
                 found: found
                     .iter()
                     .map(|n| Listing {
@@ -1276,6 +1296,9 @@ pub(crate) mod fake {
         fn params(&self, slot: usize) -> Result<Vec<ParamRow>, String> {
             self.param_reads
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if self.params_fail.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err("the catalogue is not available".into());
+            }
             let mut rows = lock(&self.parameter_rows)
                 .get(&slot)
                 .cloned()
@@ -1451,6 +1474,9 @@ pub(crate) mod fake {
             lock(&self.preferences).chosen(l.key.clone());
             self.note(format!("add {}", l.name));
             lock(&self.slots).push(SlotInfo {
+                instance: self
+                    .next_instance
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 name: l.name.clone(),
                 vendor: l.vendor.clone(),
                 format: l.format.clone(),
@@ -1462,7 +1488,11 @@ pub(crate) mod fake {
             let l = self.found.get(effect).ok_or("no such effect")?;
             lock(&self.preferences).chosen(l.key.clone());
             self.note(format!("replace {slot} {}", l.name));
-            lock(&self.slots)[slot].name = l.name.clone();
+            let mut slots = lock(&self.slots);
+            slots[slot].name.clone_from(&l.name);
+            slots[slot].instance = self
+                .next_instance
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Ok(())
         }
         fn remove(&self, slot: usize) -> Result<(), String> {
@@ -1475,17 +1505,31 @@ pub(crate) mod fake {
             let mut s = lock(&self.slots);
             let e = s.remove(from);
             s.insert(to, e);
-            for pin in lock(&self.pins).iter_mut() {
-                pin.slot = if pin.slot == from {
+            drop(s);
+            let moved = |slot| {
+                if slot == from {
                     to
-                } else if from < to && pin.slot > from && pin.slot <= to {
-                    pin.slot - 1
-                } else if to < from && pin.slot >= to && pin.slot < from {
-                    pin.slot + 1
+                } else if from < to && slot > from && slot <= to {
+                    slot - 1
+                } else if to < from && slot >= to && slot < from {
+                    slot + 1
                 } else {
-                    pin.slot
-                };
+                    slot
+                }
+            };
+            for pin in lock(&self.pins).iter_mut() {
+                pin.slot = moved(pin.slot);
             }
+            let mut params = lock(&self.parameter_rows);
+            *params = std::mem::take(&mut *params)
+                .into_iter()
+                .map(|(slot, rows)| (moved(slot), rows))
+                .collect();
+            let mut touched = lock(&self.touched);
+            *touched = std::mem::take(&mut *touched)
+                .into_iter()
+                .map(|(slot, ids)| (moved(slot), ids))
+                .collect();
             Ok(())
         }
         fn set_bypass(&self, slot: usize, on: bool) -> Result<(), String> {

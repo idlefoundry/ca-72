@@ -24,6 +24,8 @@ pub(super) struct Parameters {
     pub note: Option<String>,
 }
 
+pub(super) type RecentReply = (usize, u64, Result<Vec<ParamRow>, String>);
+
 pub(super) type ParameterReply = (usize, u64, Result<Vec<(ParamRow, String)>, String>);
 
 impl Parameters {
@@ -105,18 +107,21 @@ impl FxView {
         self.pin_texts.get(&target).map_or("…", String::as_str)
     }
 
-    pub(super) fn poll_parameters(&mut self) {
+    pub(super) fn poll_parameters(&mut self, now: Instant) {
         let Some(e) = self.effects.clone() else {
             return;
         };
         for slot in 0..SLOTS {
             if let Some(ids) = e.touched(slot)
-                && ids != self.touched[slot]
+                && (ids != self.touched[slot]
+                    || self.recent_retry[slot].is_some_and(|at| now >= at))
             {
-                self.touched[slot] = ids.clone();
+                self.touched[slot] = ids;
                 self.recent[slot].clear();
-                if !ids.is_empty() {
-                    self.submit(Job::Recent(slot, ids));
+                self.recent_request[slot] += 1;
+                self.recent_retry[slot] = None;
+                if !self.touched[slot].is_empty() {
+                    self.submit(Job::Recent(slot, self.recent_request[slot]));
                 }
             }
         }
@@ -139,9 +144,12 @@ impl FxView {
             self.pins = pins;
         }
         let mut p = lock(&self.pending);
-        for (slot, ids, rows) in p.recent.drain(..) {
-            if self.touched[slot] == ids {
-                self.recent[slot] = rows;
+        for (slot, request, rows) in p.recent.drain(..) {
+            if self.recent_request[slot] == request {
+                match rows {
+                    Ok(rows) => self.recent[slot] = rows,
+                    Err(_) => self.recent_retry[slot] = Some(now + Duration::from_secs(1)),
+                }
             }
         }
         if let Some((slot, request, reply)) = p.parameters.take()
@@ -748,5 +756,66 @@ mod tests {
         fake.pins.lock().unwrap().clear();
         settle(&mut v, |v| v.scene().occupied == 0);
         assert_eq!(v.scene().depth(), fx_ui::DEPTH);
+    }
+    #[test]
+    fn offers_follow_effect_identity_even_when_their_local_ids_match() {
+        let fake = Fake::with(&["Chorus", "Room"], &[]);
+        fake.parameters(0, &["Mix", "Rate"]);
+        fake.parameters(1, &["Mix", "Decay"]);
+        for row in fake.parameter_rows.lock().unwrap().get_mut(&1).unwrap() {
+            row.id -= 100;
+        }
+        fake.touched
+            .lock()
+            .unwrap()
+            .extend([(0, vec![1]), (1, vec![1])]);
+        let mut v = FxView::new(Some(fake.clone()));
+        settle(&mut v, |v| v.offer(0).is_some() && v.offer(1).is_some());
+        assert_eq!(v.scene().offers[0].as_deref(), Some("+ RATE"));
+        assert_eq!(v.scene().offers[1].as_deref(), Some("+ DECAY"));
+        let stale = v.recent_request[0];
+        let old_rows = v.recent[0].clone();
+        fake.move_to(0, 1).unwrap();
+        v.polled = None;
+        v.poll(Instant::now());
+        assert_ne!(v.recent_request[0], stale);
+        lock(&v.pending).recent.push((0, stale, Ok(old_rows)));
+        v.polled = None;
+        v.poll(Instant::now());
+        assert!(
+            v.offer(0).is_none_or(|r| r.name == "Decay"),
+            "a stale reply cannot show the previous effect's offer"
+        );
+        settle(&mut v, |v| {
+            v.offer(0).is_some_and(|r| r.name == "Decay")
+                && v.offer(1).is_some_and(|r| r.name == "Rate")
+        });
+        assert_eq!(v.scene().offers[0].as_deref(), Some("+ DECAY"));
+        let (x, y) = fx_ui::centre(FxTarget::Field(0, 0));
+        v.press(x, y);
+        settle(&mut v, |v| !v.pins.is_empty());
+        assert_eq!((v.pins[0].slot, v.pins[0].name.as_str()), (0, "Decay"));
+    }
+
+    #[test]
+    fn a_failed_recent_catalogue_is_retried_with_the_same_touch() {
+        let fake = Fake::with(&["Chorus"], &[]);
+        fake.parameters(0, &["Mix", "Rate"]);
+        fake.touched.lock().unwrap().insert(0, vec![1]);
+        fake.params_fail.store(true, Ordering::Relaxed);
+        let mut v = FxView::new(Some(fake.clone()));
+        settle(&mut v, |v| v.recent_retry[0].is_some());
+        assert!(v.offer(0).is_none());
+        let reads = fake.param_reads.load(Ordering::Relaxed);
+        fake.params_fail.store(false, Ordering::Relaxed);
+        v.polled = None;
+        v.poll(Instant::now());
+        assert_eq!(
+            fake.param_reads.load(Ordering::Relaxed),
+            reads,
+            "a failure cannot spin requests"
+        );
+        settle(&mut v, |v| v.offer(0).is_some_and(|r| r.name == "Rate"));
+        assert_eq!(v.scene().offers[0].as_deref(), Some("+ RATE"));
     }
 }

@@ -268,6 +268,8 @@ pub enum Health {
 /// One slot of the chain, for a view of it.
 #[derive(Debug, Clone)]
 pub struct SlotStatus {
+    /// Stable within this chain, including when the effect moves to another place.
+    pub id: u64,
     pub name: String,
     pub vendor: String,
     pub format: String,
@@ -993,6 +995,7 @@ impl Chain {
                     Phase::Ready => {}
                 }
                 SlotStatus {
+                    id: s.id,
                     name: s.saved.name.clone(),
                     vendor: s.saved.vendor.clone(),
                     format: s.saved.format.clone(),

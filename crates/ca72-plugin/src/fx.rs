@@ -215,6 +215,7 @@ impl crate::fx_view::Effects for Host {
                 .map(|s| {
                     let why = s.disabled.as_ref().map(|d| d.why.as_str());
                     SlotInfo {
+                        instance: s.id,
                         health: match s.health {
                             ca72_fx::Health::Running => Health::Running,
                             ca72_fx::Health::Loading => Health::Loading,

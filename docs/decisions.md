@@ -14123,6 +14123,11 @@ saved. The helper receiver and sandbox keep repeated values in latest-edit order
 first-insertion order, using the existing `param_edits` protocol. `Effects::touched` is a
 nonblocking poll (`None` keeps the previous hints). A changed touch asks for pinnable names
 on the drawer's worker. Catalogue and value-text requests never run in the drawing path.
+The slot status gives the view the chain's stable effect identity: local parameter IDs can
+match across different effects. Moving, replacing or recovering an effect invalidates its
+cached catalogue and request generation; stale replies are ignored. A failed recent catalogue
+request is retried after one second rather than being treated as an empty success. These two
+cache corrections came from the independent read-only review and have regression tests.
 
 `Chain::repin(target, id)` replaces the saved parameter in place, taking the new parameter's
 current base, retaining the target and source assignments. It verifies the slot's identity
