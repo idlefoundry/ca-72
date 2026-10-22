@@ -2197,6 +2197,27 @@ pub fn oscillator_alone(rate: f64, hz: f64, wave: Waveform, n: usize) -> Vec<f32
 mod tests {
     use super::*;
 
+    #[test]
+    fn reverse_hybrid_keeps_the_same_calibrated_network_in_lo() {
+        for dt in [0.003_f32, 0.071_f32] {
+            let mut tri = Osc::new(Waveform::Triangle);
+            let mut saw = Osc::new(Waveform::Sawtooth);
+            let mut hybrid = Osc::new(Waveform::Triangle);
+            hybrid.third = true;
+            hybrid.shape = Some(1.0);
+            for _ in 0..4096 {
+                let triangle = f64::from(tri.tick(dt, 1.0 / dt));
+                let reverse = -f64::from(saw.tick(dt, 1.0 / dt))
+                    * f64::from(laws::REVERSE_SAWTOOTH / laws::SAWTOOTH);
+                let mix = f64::from(hybrid.tick(dt, 1.0 / dt));
+                let current = (triangle - mix)
+                    / (750.0 * 8200.0 / 8950.0 + crate::voice::SHARK_TRIANGLE_OHMS)
+                    + (reverse - mix) / (4300.0 * 4700.0 / 9000.0 + crate::voice::SHARK_SAW_OHMS);
+                assert!(current.abs() < 1e-10, "LO reverse mix KCL {current}");
+            }
+        }
+    }
+
     /// The fast functions follow the true ones closely enough for the model.
     #[test]
     fn the_fast_functions_follow() {
