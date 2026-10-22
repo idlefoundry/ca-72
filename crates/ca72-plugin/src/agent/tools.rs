@@ -429,6 +429,23 @@ pub fn tools() -> Vec<Tool> {
             Instance,
         ),
         t(
+            "ca72_effect_repin",
+            "effects.repin",
+            "Replace a pin's parameter, keeping its target, modulation assignments and MIDI Learn. Its base is the new parameter's current value. Saved with the effects' chain.",
+            |_| {
+                obj(
+                    json!({
+                        "target": {"type": "string", "description": "fx1 to fx16."},
+                        "parameter": {"type": ["integer", "string"], "description": "Its ID or name in the same effect."},
+                    }),
+                    &["target", "parameter"],
+                )
+            },
+            false,
+            false,
+            Instance,
+        ),
+        t(
             "ca72_effect_unpin",
             "effects.unpin",
             "Unpin an effect's parameter by its pin's `target` (`fx1` to `fx16`): what modulated it is let go of, and the parameter stays at its value.",

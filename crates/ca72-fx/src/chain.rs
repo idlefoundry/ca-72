@@ -408,6 +408,7 @@ struct Slot {
     try_failed: Option<Instant>,
     /// Its parameters as it last listed them (none until it is loaded here).
     params: Vec<protocol::ParamInfo>,
+    touched: Vec<u32>,
 }
 
 /// Which slot and parameter a pin target is.
@@ -695,6 +696,7 @@ impl Chain {
             id,
             saved,
             params: listed.unwrap_or_else(|| inst.info.params.clone()),
+            touched: Vec::new(),
             inst: Some(inst),
             bypass,
             error: None,
@@ -1081,6 +1083,76 @@ impl Chain {
         inst.param_text(values)
     }
 
+    /// The last four parameters turned in this effect's window, newest first. A repeated
+    /// touch moves to the front; these are session hints, never part of a saved chain.
+    pub fn touched(&self, at: usize) -> Vec<u32> {
+        lock(&self.shared.core)
+            .slots
+            .get(at)
+            .map(|s| s.touched.clone())
+            .unwrap_or_default()
+    }
+
+    /// As [`Self::touched`], without waiting for a busy chain (the drawer's poll).
+    pub fn try_touched(&self, at: usize) -> Option<Vec<u32>> {
+        try_lock(&self.shared.core).map(|core| {
+            core.slots
+                .get(at)
+                .map(|s| s.touched.clone())
+                .unwrap_or_default()
+        })
+    }
+
+    /// Replaces a pin's parameter, keeping its target and assignments. The new base is the
+    /// plug-in's current value. Only the control side allocates; the audio thread receives
+    /// the same fixed-size pin message as it does for a turn.
+    pub fn repin(&self, target: usize, id: u32) -> Result<(), String> {
+        let (slot_id, old, inst) = {
+            let core = lock(&self.shared.core);
+            let (at, pin) = core.pin(target).ok_or("nothing is pinned there")?;
+            (
+                core.slots[at].id,
+                pin.id,
+                core.slots[at]
+                    .inst
+                    .clone()
+                    .ok_or("the effect is not loaded")?,
+            )
+        };
+        if old == id {
+            return Ok(());
+        }
+        let listed = inst.list_params()?;
+        let info = listed
+            .iter()
+            .find(|p| p.id == id && pinnable(p))
+            .cloned()
+            .ok_or("the effect has no such parameter a player may pin")?;
+        let shared = &self.shared;
+        let mut core = lock(&shared.core);
+        let (at, pin) = core.pin(target).ok_or("nothing is pinned there")?;
+        if core.slots[at].id != slot_id || pin.id != old {
+            return Err("the pin changed meanwhile".into());
+        }
+        if core.slots[at].saved.pins.iter().any(|p| p.id == id) {
+            return Err("that parameter is pinned already".into());
+        }
+        core.slots[at].params = listed;
+        let (_, pin) = core.pin_mut(target).expect("the checked pin");
+        pin.id = id;
+        pin.name.clone_from(&info.name);
+        pin.base = info.value;
+        core.pins[target] = Some(PinRef { slot: slot_id, id });
+        if let (Some(inst), Some(v)) = (&core.slots[at].inst, info.value) {
+            inst.record_value(id, v);
+        }
+        shared.learnt[target].store(u64::MAX, Ordering::Release);
+        shared.send_pin(&core, target);
+        shared.pins_rev.fetch_add(1, Ordering::AcqRel);
+        shared.save_in(&core);
+        Ok(())
+    }
+
     /// Pins parameter `id` of the effect at `at` (R-FX-PARAMS): its target (0 to
     /// [`MAX_PINS`] less 1), on which the synth's sources can move it. Its base is its value
     /// now. One the effect does not list as a player's ([`pinnable`]), one pinned already, a
@@ -1381,6 +1453,7 @@ impl Chain {
                     phase,
                     try_failed: None,
                     params: Vec::new(),
+                    touched: Vec::new(),
                 });
             }
             drop(q);
@@ -1653,6 +1726,11 @@ impl Shared {
                 }
                 let slot = core.slots[at].id;
                 for (id, v) in inst.take_edits() {
+                    let touched = &mut core.slots[at].touched;
+                    touched.retain(|p| *p != id);
+                    touched.insert(0, id);
+                    touched.truncate(4);
+                    inst.record_value(id, v);
                     let Some(t) = core.target_of(slot, id) else {
                         continue;
                     };
@@ -2213,6 +2291,25 @@ impl Runner {
                 }
                 Msg::Pin { target, pin } => {
                     if let Some(p) = self.pins.get_mut(target) {
+                        if (p.stage, p.param) != (pin.stage, pin.param) {
+                            // A swap or unpin releases the old parameter at its base before
+                            // the target starts moving the new one. All storage is bounded.
+                            if self.moved & (1 << target) != 0
+                                && let Some(node) = self
+                                    .stages
+                                    .iter_mut()
+                                    .find(|s| s.id == p.stage)
+                                    .and_then(|s| s.node.as_mut())
+                            {
+                                let (kind, value) = match p.how {
+                                    How::Value => (EV_PARAM, p.plain(p.base)),
+                                    _ => (EV_PARAM_MOD, 0.0),
+                                };
+                                node.push_mod(self.frame, kind, p.param, value);
+                            }
+                            self.moved &= !(1 << target);
+                            self.learnt[target].store(u64::MAX, Ordering::Release);
+                        }
                         *p = pin;
                     }
                 }

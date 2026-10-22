@@ -13,8 +13,8 @@
 //! line of its name, maker and format.
 //!
 //! What does not change is drawn once a scale on a thread of its own, begun as the editor opens;
-//! then only the slots and pin cells that changed, and the list when it does. B1 puts four
-//! pin places under each slot and deepens the drawer while any are occupied (R-FX-PARAMS).
+//! then only the slots and fields that changed, and the list when it does. A loaded effect
+//! has one label strip over four knob places (R-FX-STRIP), whether any are pinned or not.
 
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -37,19 +37,25 @@ use crate::svg::{N, Svg, colour, put};
 
 /// How deep it is (the owner's FX-A: "about 170").
 pub const DEPTH: f64 = 170.0;
-/// B1's four places under each effect (decisions.md R-FX-PARAMS).
-pub const PIN_DEPTH: f64 = 372.0;
+/// The label strip and four knob places under each loaded effect (R-FX-STRIP).
+pub const PIN_DEPTH: f64 = 370.0;
 pub const PINS: usize = 4;
 const PIN_DOT: f64 = 2.8;
 
-/// A pin's knob and name screen, in its effect's column.
+/// The label strip spans the name screen and ON key together.
+pub fn pin_strip(slot: usize) -> (f64, f64, f64, f64) {
+    (middle(slot) - UNIT / 2.0, TOP + 176.0, UNIT, 40.0)
+}
+
+/// Four equal fields, each centred over its knob.
 pub fn pin_at(slot: usize, place: usize) -> (f64, f64) {
-    (middle(slot) + (place as f64 - 1.5) * 160.0, TOP + 290.0)
+    let (x, _, w, _) = pin_strip(slot);
+    (x + w / PINS as f64 * (place as f64 + 0.5), TOP + 288.0)
 }
 
 pub fn pin_screen(slot: usize, place: usize) -> (f64, f64, f64, f64) {
-    let (x, _) = pin_at(slot, place);
-    (x - 70.0, TOP + 180.0, 140.0, 30.0)
+    let (x, y, w, h) = pin_strip(slot);
+    (x + w / PINS as f64 * place as f64, y, w / PINS as f64, h)
 }
 
 /// A pin as the drawer draws it; its target stays its own when the slot moves.
@@ -61,6 +67,8 @@ pub struct FxPin {
     pub value: f64,
     pub dim: bool,
     pub learning: bool,
+    /// The knob is hovered or turning: its own value text is shown brighter.
+    pub text: Option<String>,
 }
 
 /// The PARAMETERS list's FIND and ALL · PINNED line.
@@ -133,6 +141,8 @@ pub enum FxTarget {
     /// A PARAMETERS list's ALL (false) or PINNED (true).
     Filter(bool),
     Pin(usize, usize),
+    Field(usize, usize),
+    Arrow(usize, usize),
 }
 
 /// Whether (`x`, `y`) is on the drawer, open.
@@ -179,6 +189,14 @@ pub fn centre(t: FxTarget) -> (f64, f64) {
         FxTarget::Tab(i) => tab(i),
         FxTarget::Lock => lock_tab(),
         FxTarget::Pin(s, p) => pin_at(s, p),
+        FxTarget::Field(s, p) => {
+            let (x, y, w, h) = pin_screen(s, p);
+            (x + (w - 34.0) / 2.0, y + h / 2.0)
+        }
+        FxTarget::Arrow(s, p) => {
+            let (x, y, w, h) = pin_screen(s, p);
+            (x + w - 17.0, y + h / 2.0)
+        }
         _ => (0.0, 0.0),
     }
 }
@@ -304,15 +322,12 @@ pub struct FxScene {
     pub list: Option<FxList>,
     pub pins: Vec<FxPin>,
     pub occupied: usize,
+    pub offers: [Option<String>; SLOTS],
 }
 
 impl FxScene {
     pub fn depth(&self) -> f64 {
-        if self.pins.is_empty() {
-            DEPTH
-        } else {
-            PIN_DEPTH
-        }
+        if self.occupied == 0 { DEPTH } else { PIN_DEPTH }
     }
 
     pub fn pin(&self, slot: usize, place: usize) -> Option<&FxPin> {
@@ -342,10 +357,14 @@ impl FxScene {
                 for place in 0..PINS.min(count + 1) {
                     let (sx, sy, sw, sh) = pin_screen(slot, place);
                     let (kx, ky) = pin_at(slot, place);
-                    if ((sx - 4.0..sx + sw + 4.0).contains(&x)
-                        && (sy - 4.0..sy + sh + 4.0).contains(&y))
-                        || (place < count && (x - kx).hypot(y - ky) < crate::art::STD.skirt + 12.0)
-                    {
+                    if (sx..sx + sw).contains(&x) && (sy..sy + sh).contains(&y) {
+                        return Some(if x >= sx + sw - 34.0 {
+                            FxTarget::Arrow(slot, place)
+                        } else {
+                            FxTarget::Field(slot, place)
+                        });
+                    }
+                    if place < count && (x - kx).hypot(y - ky) < crate::art::STD.skirt + 12.0 {
                         return Some(FxTarget::Pin(slot, place));
                     }
                 }
@@ -447,6 +466,11 @@ pub fn row_centre(list: &FxList, row: usize) -> (f64, f64) {
 
 // ---- Drawing.
 
+struct PinPart {
+    at: (i32, i32),
+    fields: [Pixmap; 2],
+}
+
 /// What does not change at a scale: the plate with its print, the screens' bezels, glass and
 /// unlit dots, the unlit tabs; the tabs' words and the small print's words apart; the shadow.
 struct Still {
@@ -454,8 +478,10 @@ struct Still {
     plate: Pixmap,
     deep: Pixmap,
     painter: Mutex<crate::Renderer>,
-    pin_parts: Vec<(i32, i32, Pixmap)>,
+    pin_parts: Vec<PinPart>,
+    fields: Vec<PinPart>,
     words: Vec<(i32, i32, Pixmap)>,
+    held: Vec<(i32, i32, Pixmap)>,
     /// Each slot's small print, a patch for each word, in `FxWord::ALL`'s order.
     small: Vec<Vec<(i32, i32, Pixmap)>>,
     unlock: Option<(i32, i32, Pixmap)>,
@@ -606,7 +632,7 @@ impl FxRenderer {
         let depth_changed = self.depth() != scene.depth();
         if depth_changed {
             let still = self.still.as_ref().expect("the still");
-            self.frame = if scene.pins.is_empty() {
+            self.frame = if scene.depth() == DEPTH {
                 still.plate.clone()
             } else {
                 still.deep.clone()
@@ -625,7 +651,13 @@ impl FxRenderer {
         for slot in 0..SLOTS {
             for place in 0..PINS {
                 if was.as_ref().is_none_or(|w| {
-                    w.pin(slot, place) != scene.pin(slot, place) || w.occupied != scene.occupied
+                    let old_free = w.pins.iter().filter(|p| p.slot == slot).count() == place;
+                    let new_free = scene.pins.iter().filter(|p| p.slot == slot).count() == place;
+                    w.pin(slot, place) != scene.pin(slot, place)
+                        || (slot < w.occupied) != (slot < scene.occupied)
+                        || old_free != new_free
+                        || ((old_free || new_free) && w.offers[slot] != scene.offers[slot])
+                        || field_hover(w, slot, place) != field_hover(scene, slot, place)
                 }) && scene.depth() > DEPTH
                 {
                     dirty = Some(union(dirty, self.pin_part(slot, place)));
@@ -633,7 +665,9 @@ impl FxRenderer {
             }
         }
         if was.as_ref().is_none_or(|w| {
-            w.locked != scene.locked || w.held != scene.held || w.hover != scene.hover
+            w.locked != scene.locked
+                || w.held != scene.held
+                || (w.hover == Some(FxTarget::Lock)) != (scene.hover == Some(FxTarget::Lock))
         }) {
             dirty = Some(union(dirty, self.lock_part()));
         }
@@ -728,20 +762,11 @@ impl FxRenderer {
                 break;
             }
         }
-        for slot in 0..SLOTS {
-            for place in 0..PINS {
-                let p = self.pin_part(slot, place);
-                if meets(p, r) {
-                    r = union(Some(r), p);
-                }
-            }
-        }
         r
     }
 
     fn pin_part(&self, slot: usize, place: usize) -> [i32; 4] {
-        let (x, y) = pin_at(slot, place);
-        self.pixels((x - 78.0, TOP + 172.0, x + 78.0, y + 78.0))
+        field_rect(self.scale, slot, place)
     }
 
     /// The frame drawn again inside `r` (each slot reaching into it lying inside it).
@@ -753,7 +778,7 @@ impl FxRenderer {
         let oy = f64::from(top_px(s)) / s;
         copy(
             &mut self.frame,
-            if scene.pins.is_empty() {
+            if scene.depth() == DEPTH {
                 &still.plate
             } else {
                 &still.deep
@@ -787,6 +812,9 @@ impl FxRenderer {
                 level,
             );
             if let Some(names) = &scene.held {
+                if let Some((x, y, pixels)) = still.held.get(i) {
+                    crate::render::put(&mut self.frame, pixels, (*x, *y), 1.0);
+                }
                 let small = 3.0;
                 let places = 21;
                 let text = format!("▸ {}", names[i].to_uppercase());
@@ -849,42 +877,71 @@ impl FxRenderer {
                 );
             }
         }
-        if !scene.pins.is_empty() {
-            for slot in 0..SLOTS {
+        if scene.depth() > DEPTH {
+            for slot in 0..scene.occupied.min(SLOTS) {
                 let count = scene.pins.iter().filter(|p| p.slot == slot).count();
                 for place in 0..PINS {
                     if !meets(self.pin_part(slot, place), r) {
                         continue;
                     }
                     let pin = scene.pin(slot, place);
-                    if pin.is_some()
-                        && let Some((px, py, pixels)) = still.pin_parts.get(slot * PINS + place)
-                    {
-                        crate::render::put(&mut self.frame, pixels, (*px, *py), 1.0);
+                    let arrow = pin.is_some() && field_hover(scene, slot, place)
+                        || pin.is_none() && place == count && scene.offers[slot].is_some();
+                    let part = if pin.is_some() {
+                        &still.pin_parts
+                    } else {
+                        &still.fields
                     }
-                    let (sx, sy, sw, sh) = pin_screen(slot, place);
-                    let left = sx + (sw - 47.0 * PIN_DOT) / 2.0;
-                    let top = sy - oy + sh / 2.0 - CAP_LIFT * PIN_DOT / 5.0 - 3.0 * PIN_DOT;
+                    .get(slot * PINS + place)
+                    .expect("a field's still parts");
+                    let (px, py) = part.at;
+                    let mut field = part.fields[usize::from(arrow)].clone();
+                    let mut cover = vec![0; (field.width() * field.height()) as usize];
+                    let (ox, fy) = (f64::from(px) / s, f64::from(py) / s);
+                    let mut arrow_light = Svg::default();
+                    let (sx, sy, sw, _) = pin_screen(slot, place);
+                    let (left, top, pitch, places) = pin_grid(slot, place, arrow);
+                    let top = top - oy;
                     let (text, level) = match pin {
                         Some(p) => (
-                            p.name.as_str(),
+                            p.text.as_deref().unwrap_or(&p.name),
                             if p.dim || scene.drag.is_some_and(|(s, _)| s == slot) {
                                 0.4
-                            } else {
+                            } else if p.text.is_some() {
                                 1.0
+                            } else {
+                                0.8
                             },
                         ),
-                        None if slot < scene.occupied && place == count => ("+ PIN", 0.5),
+                        None if place == count => (
+                            scene.offers[slot].as_deref().unwrap_or("+ PIN"),
+                            if scene.offers[slot].is_some() {
+                                0.8
+                            } else {
+                                0.4
+                            },
+                        ),
                         _ => ("", 1.0),
                     };
                     text_dots(
-                        &mut self.frame,
-                        &mut self.cover,
+                        &mut field,
+                        &mut cover,
                         s,
-                        (left, top, PIN_DOT),
-                        &centred(text, 8),
+                        (left - ox, top - fy, pitch),
+                        &centred(text, places),
                         level,
                     );
+                    if arrow {
+                        let ax = sx + sw - 34.0;
+                        put!(
+                            arrow_light,
+                            "<path d='M{} {}v32' stroke='#c48027' stroke-opacity='0.45' stroke-width='1.5' stroke-dasharray='1 4'/><path d='M{} {}h16l-8 9z' fill='#f0a030' fill-opacity='0.8'/>",
+                            N(ax - ox),
+                            N(sy + 4.0 - oy - fy),
+                            N(ax + 9.0 - ox),
+                            N(sy + 16.0 - oy - fy)
+                        );
+                    }
                     if let Some(p) = pin {
                         let (x, y) = pin_at(slot, place);
                         let mut c = crate::CONTROLS[crate::controls::MACRO_FIRST];
@@ -896,27 +953,31 @@ impl FxRenderer {
                             crate::art::control(&c, p.value, 0.0)
                         };
                         if let Ok(mut painter) = still.painter.lock()
-                            && let Some((px, py, pixels)) = painter.paint_layer(&layer)
+                            && let Some((kx, ky, pixels)) = painter.paint_layer(&layer)
                         {
                             crate::render::put(
-                                &mut self.frame,
+                                &mut field,
                                 &pixels,
-                                (px, py - top_px(s)),
+                                (kx - px, ky - top_px(s) - py),
                                 level as f32,
                             );
                             if p.learning
-                                && let Some((px, py, pixels)) =
+                                && let Some((kx, ky, pixels)) =
                                     painter.paint_layer(&crate::learn::ring(&c))
                             {
                                 crate::render::put(
-                                    &mut self.frame,
+                                    &mut field,
                                     &pixels,
-                                    (px, py - top_px(s)),
+                                    (kx - px, ky - top_px(s) - py),
                                     1.0,
                                 );
                             }
                         }
                     }
+                    if !arrow_light.0.is_empty() {
+                        svg_over(&self.options, &mut field, s, &arrow_light.0);
+                    }
+                    crate::glow::copy_in(&mut self.frame, &field, (px, py), r);
                 }
             }
         }
@@ -1104,7 +1165,7 @@ impl FxRenderer {
             let index = list.first + k;
             let pointed = list.hover == Some(index) || list.chosen == Some(index);
             let level = if pointed { 1.0 } else { 0.72 };
-            if list.find.is_some() {
+            if list.find.is_some() && row.count.is_none() {
                 // A parameter: pinned or not, its name with FIND's letters lit, its short name
                 // and units (R-FX-PARAMS).
                 let mut line =
@@ -1235,6 +1296,47 @@ impl FxRenderer {
     pub fn list_shown(&self) -> Option<&FxList> {
         self.list.as_ref().map(|l| &l.shown)
     }
+}
+
+/// The split field uses the drawing's smaller lettering, leaving seven characters for
+/// offers such as + DEPTH beside the arrow. Its faint dots follow the same grid as its text.
+fn pin_grid(slot: usize, place: usize, split: bool) -> (f64, f64, f64, usize) {
+    let (x, y, w, h) = pin_screen(slot, place);
+    let (pitch, places, width) = if split {
+        (2.4, 7, w - 34.0)
+    } else {
+        (PIN_DOT, 8, w)
+    };
+    (
+        x + (width - (6 * places - 1) as f64 * pitch) / 2.0,
+        y + h / 2.0 - CAP_LIFT * pitch / 5.0 - 3.0 * pitch,
+        pitch,
+        places,
+    )
+}
+
+/// Fields share a rounded pixel boundary, including at fractional and Retina scales. Only
+/// the two outer fields reach into the strip's bezel; no part carries its neighbour's pixels.
+fn field_rect(s: f64, slot: usize, place: usize) -> [i32; 4] {
+    let (x, y, w, _) = pin_screen(slot, place);
+    [
+        if place == 0 {
+            (s * (x - 7.0)).floor() as i32 - 1
+        } else {
+            (s * x).round() as i32
+        },
+        (s * (y - 7.0)).floor() as i32 - 1 - top_px(s),
+        if place + 1 == PINS {
+            (s * (x + w + 7.0)).ceil() as i32 + 1
+        } else {
+            (s * (x + w)).round() as i32
+        },
+        (s * (TOP + PIN_DEPTH - 2.0)).ceil() as i32 + 1 - top_px(s),
+    ]
+}
+
+fn field_hover(scene: &FxScene, slot: usize, place: usize) -> bool {
+    matches!(scene.hover, Some(FxTarget::Field(s, p) | FxTarget::Arrow(s, p)) if s == slot && p == place)
 }
 
 /// Whether slot `i` shows differently in `now` than in `was`.
@@ -1451,6 +1553,19 @@ fn make_still((scale, skin, lettering): Look) -> Still {
         N(lettering.strip_legend()),
         colour::LEGEND
     );
+    // The short plate is also the deep plate's header: no rounded rule end at their join.
+    for k in 1..SLOTS {
+        let x = (middle(k - 1) + middle(k)) / 2.0;
+        put!(
+            print,
+            "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{}' stroke-width='4' stroke-linecap='round'/>",
+            N(x),
+            N(TOP + 16.0 - oy),
+            N(x),
+            N(TOP + DEPTH + 14.0 - oy),
+            colour::LEGEND
+        );
+    }
     lower::print(&mut plate, s, skin, &options, &print.0);
     // The screens: the rail's name's bezel and glass, every dot faintly there.
     let glass_picture = Pixmap::decode_png(crate::skin::GLASS).expect("a built-in picture decodes");
@@ -1458,10 +1573,6 @@ fn make_still((scale, skin, lettering): Look) -> Still {
     for i in 0..SLOTS {
         let (x, y, w, h) = screen(i);
         super::screen_bezel(&mut bezels, (x, y - oy, w, h));
-    }
-    for i in 0..SLOTS {
-        let (x, _, w, _) = screen(i);
-        super::screen_bezel(&mut bezels, (x, TOP + 118.0 - oy, w, 34.0));
     }
     svg_over(&options, &mut plate, s, &bezels.0);
     let mut cover = vec![0; (plate.width() * plate.height()) as usize];
@@ -1471,6 +1582,29 @@ fn make_still((scale, skin, lettering): Look) -> Still {
         let (left, top) = screen_grid((x, y - oy, w, h));
         unlit_dots(&mut plate, &mut cover, s, (left, top, DOT), PLACES, &[0.0]);
     }
+    // The preset's held names have glass only while there is a held chain to show.
+    let held = (0..SLOTS)
+        .map(|i| {
+            let (x, _, w, _) = screen(i);
+            let y = TOP + 118.0;
+            let mut face = plate.clone();
+            let mut bezel = Svg::default();
+            super::screen_bezel(&mut bezel, (x, y - oy, w, 34.0));
+            svg_over(&options, &mut face, s, &bezel.0);
+            glass(&mut face, &glass_picture, s, (x, y - oy, w, 34.0), 3.0);
+            let rect = [
+                (s * (x - 7.0)).floor() as i32 - 1,
+                (s * (y - 7.0)).floor() as i32 - 1 - top_px(s),
+                (s * (x + w + 7.0)).ceil() as i32 + 1,
+                (s * (y + 41.0)).ceil() as i32 + 1 - top_px(s),
+            ];
+            (
+                rect[0],
+                rect[1],
+                crate::glow::crop(&face, rect).expect("a held name"),
+            )
+        })
+        .collect();
     let lighting = lower::tab_lighting(TAB);
     for i in 0..SLOTS {
         let (x, y) = tab(i);
@@ -1510,33 +1644,20 @@ fn make_still((scale, skin, lettering): Look) -> Still {
         })
         .collect();
     let mut deep = lower::plate(s, skin, PIN_DEPTH, &options);
-    let mut bezels = Svg::default();
-    for slot in 0..SLOTS {
-        for place in 0..PINS {
-            let (x, y, w, h) = pin_screen(slot, place);
-            super::screen_bezel(&mut bezels, (x, y - oy, w, h));
-        }
+    let mut rules = Svg(String::new(), lettering);
+    for k in 1..SLOTS {
+        let x = (middle(k - 1) + middle(k)) / 2.0;
+        put!(
+            rules,
+            "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{}' stroke-width='4' stroke-linecap='round'/>",
+            N(x),
+            N(TOP + 16.0 - oy),
+            N(x),
+            N(TOP + PIN_DEPTH - 14.0 - oy),
+            colour::LEGEND
+        );
     }
-    svg_over(&options, &mut deep, s, &bezels.0);
-    let mut cover = vec![0; (deep.width() * deep.height()) as usize];
-    for slot in 0..SLOTS {
-        for place in 0..PINS {
-            let (x, y, w, h) = pin_screen(slot, place);
-            glass(&mut deep, &glass_picture, s, (x, y - oy, w, h), 3.0);
-            unlit_dots(
-                &mut deep,
-                &mut cover,
-                s,
-                (
-                    x + (w - 47.0 * PIN_DOT) / 2.0,
-                    y - oy + h / 2.0 - CAP_LIFT * PIN_DOT / 5.0 - 3.0 * PIN_DOT,
-                    PIN_DOT,
-                ),
-                8,
-                &[0.0],
-            );
-        }
-    }
+    lower::print(&mut deep, s, skin, &options, &rules.0);
     lower::lamp(&mut deep, s, skin, (0, top_px(s)));
     // The original row keeps exactly its pixels in either depth.
     let rows = ((DEPTH - 12.0) * s).floor() as u32;
@@ -1546,17 +1667,58 @@ fn make_still((scale, skin, lettering): Look) -> Still {
         (0, 0),
         [0, 0, plate.width() as i32, rows as i32],
     );
+    let mut glass_face = deep.clone();
+    let mut bezels = Svg::default();
+    for slot in 0..SLOTS {
+        let (x, y, w, h) = pin_strip(slot);
+        super::screen_bezel(&mut bezels, (x, y - oy, w, h));
+    }
+    svg_over(&options, &mut glass_face, s, &bezels.0);
+    for slot in 0..SLOTS {
+        let (x, y, w, h) = pin_strip(slot);
+        glass(&mut glass_face, &glass_picture, s, (x, y - oy, w, h), 3.0);
+        let mut dividers = Svg::default();
+        for place in 0..PINS {
+            let (sx, sy, _, _) = pin_screen(slot, place);
+            if place > 0 {
+                put!(
+                    dividers,
+                    "<path d='M{} {}v32' stroke='#c48027' stroke-opacity='0.25' stroke-width='1.5' stroke-dasharray='1 4'/>",
+                    N(sx),
+                    N(sy + 4.0 - oy)
+                );
+            }
+        }
+        svg_over(&options, &mut glass_face, s, &dividers.0);
+    }
     let mut pin_parts = Vec::new();
+    let mut fields = Vec::new();
     for slot in 0..SLOTS {
         for place in 0..PINS {
             let (x, y) = pin_at(slot, place);
-            let rect = [
-                (s * (x - 78.0)).floor() as i32 - 1,
-                (s * (TOP + 172.0)).floor() as i32 - 1 - top_px(s),
-                (s * (x + 78.0)).ceil() as i32 + 1,
-                (s * (y + 78.0)).ceil() as i32 + 1 - top_px(s),
-            ];
-            let mut pixels = crate::glow::crop(&deep, rect).expect("a pin's place");
+            let rect = field_rect(s, slot, place);
+            let pixels = crate::glow::crop(&glass_face, rect).expect("a field's place");
+            let mut variants = [pixels.clone(), pixels];
+            for (split, pixels) in variants.iter_mut().enumerate() {
+                let (left, top, pitch, places) = pin_grid(slot, place, split == 1);
+                let mut cover = vec![0; (pixels.width() * pixels.height()) as usize];
+                unlit_dots(
+                    pixels,
+                    &mut cover,
+                    s,
+                    (
+                        left - f64::from(rect[0]) / s,
+                        top - oy - f64::from(rect[1]) / s,
+                        pitch,
+                    ),
+                    places,
+                    &[0.0],
+                );
+            }
+            fields.push(PinPart {
+                at: (rect[0], rect[1]),
+                fields: variants.clone(),
+            });
             let (ox, py) = (f64::from(rect[0]) / s, f64::from(rect[1] + top_px(s)) / s);
             let (cx, cy) = (x - ox, y - py);
             if skin == Skin::Worn {
@@ -1568,7 +1730,9 @@ fn make_still((scale, skin, lettering): Look) -> Still {
                     N(cy + 14.0),
                     N(crate::art::STD.skirt)
                 );
-                svg_over(&options, &mut pixels, s, &shadow.0);
+                for pixels in &mut variants {
+                    svg_over(&options, pixels, s, &shadow.0);
+                }
             }
             let mut ticks = Svg::default();
             for k in 0..11 {
@@ -1588,8 +1752,13 @@ fn make_still((scale, skin, lettering): Look) -> Still {
                 );
             }
             // The print and its lamp use the drawing's place, as the rest of the drawer's does.
-            lower::print(&mut pixels, s, skin, &options, &ticks.0);
-            pin_parts.push((rect[0], rect[1], pixels));
+            for pixels in &mut variants {
+                lower::print(pixels, s, skin, &options, &ticks.0);
+            }
+            pin_parts.push(PinPart {
+                at: (rect[0], rect[1]),
+                fields: variants,
+            });
         }
     }
     // The knob's pictures and its fixed light at each place are prepared here too: the first
@@ -1623,10 +1792,12 @@ fn make_still((scale, skin, lettering): Look) -> Still {
     Still {
         deep,
         pin_parts,
+        fields,
         painter: Mutex::new(painter),
         look: (scale, skin, lettering),
         plate,
         words,
+        held,
         small,
         unlock,
         shadow: lower::cast(s, &options),
@@ -2019,17 +2190,26 @@ mod tests {
     }
     #[test]
     fn the_pins_draw_in_parts_as_they_draw_whole() {
-        for (scale, skin, lettering) in [
-            (0.44, Skin::Worn, Lettering::Standard),
-            (1.0, Skin::Drawn, Lettering::Large),
-        ] {
+        // Logical scales at 1x and 2x backing, with both skins and lettering sizes.
+        for (scale, skin, lettering) in [1.0, 0.37, 0.44, 0.6, 0.74, 0.88, 1.2, 2.0]
+            .into_iter()
+            .flat_map(|scale| {
+                [Skin::Worn, Skin::Drawn].into_iter().flat_map(move |skin| {
+                    [Lettering::Standard, Lettering::Large]
+                        .into_iter()
+                        .map(move |lettering| (scale, skin, lettering))
+                })
+            })
+        {
             let mut scene = scene();
             scene.occupied = 4;
             scene.slots[2].text = "Tape Delay".into();
             scene.slots[3].text = "Plate".into();
             let mut r = FxRenderer::new(scale, skin, lettering);
             r.render(&scene);
-            for step in 0..7 {
+            let mut whole = FxRenderer::new(scale, skin, lettering);
+            whole.render(&scene);
+            for step in 0..12 {
                 match step {
                     0 => {
                         scene.pins = (0..16)
@@ -2040,6 +2220,7 @@ mod tests {
                                 value: 0.35,
                                 dim: false,
                                 learning: false,
+                                text: None,
                             })
                             .collect()
                     }
@@ -2070,13 +2251,44 @@ mod tests {
                             ..FxList::default()
                         });
                     }
-                    _ => {
+                    6 => {
                         scene.pins.clear();
                         scene.list = None;
                     }
+                    7 => scene.offers[0] = Some("+ RATE".into()),
+                    8 => {
+                        scene.pins.push(FxPin {
+                            target: 0,
+                            slot: 0,
+                            name: "RATE".into(),
+                            value: 0.4,
+                            dim: false,
+                            learning: false,
+                            text: None,
+                        });
+                        scene.offers[0] = None;
+                        scene.hover = Some(FxTarget::Field(0, 0));
+                    }
+                    9 => scene.pins[0].text = Some("2.40 s".into()),
+                    10 => {
+                        scene.pins.clear();
+                        scene.occupied = 0;
+                        scene.hover = None;
+                    }
+                    _ => scene.occupied = 1,
                 }
                 let before = r.frame().clone();
                 r.render(&scene);
+                if step == 1 {
+                    assert_eq!(
+                        r.damage(),
+                        within(
+                            field_rect(scale, 1, 2),
+                            [0, 0, r.frame().width() as i32, r.frame().height() as i32]
+                        ),
+                        "only the turned field is redrawn"
+                    );
+                }
                 if step == 0 {
                     let rows = ((DEPTH - 12.0) * scale).floor() as usize;
                     let bytes = rows * before.width() as usize * 4;
@@ -2085,7 +2297,13 @@ mod tests {
                         "the original slot row keeps its screens and legends"
                     );
                 }
-                let mut whole = FxRenderer::new(scale, skin, lettering);
+                whole.shown = None;
+                whole.frame = if scene.depth() == DEPTH {
+                    whole.still.as_ref().unwrap().plate.clone()
+                } else {
+                    whole.still.as_ref().unwrap().deep.clone()
+                };
+                whole.cover = vec![0; (whole.frame.width() * whole.frame.height()) as usize];
                 whole.render(&scene);
                 assert!(r.frame() == whole.frame(), "{scale} {skin:?}, step {step}");
                 assert_eq!(r.depth(), scene.depth());
@@ -2098,6 +2316,49 @@ mod tests {
                 assert!(under(&r) == under(&whole), "the list and shadow");
             }
             assert!(!r.render(&scene));
+        }
+    }
+    #[test]
+    fn the_strip_has_one_column_and_four_equal_fields_at_every_scale() {
+        let mut scene = FxScene::default();
+        assert_eq!(scene.depth(), DEPTH);
+        scene.occupied = 1;
+        assert_eq!(scene.depth(), PIN_DEPTH);
+        for slot in 0..SLOTS {
+            let (x, y, w, h) = pin_strip(slot);
+            assert_eq!(x, screen(slot).0);
+            assert_eq!(x + w, tab(slot).0 + TAB.0 / 2.0);
+            if slot + 1 < SLOTS {
+                assert!(pin_strip(slot + 1).0 - x - w > 50.0);
+            }
+            for place in 0..PINS {
+                let (kx, _) = pin_at(slot, place);
+                let (sx, _, sw, _) = pin_screen(slot, place);
+                assert_eq!(kx, sx + sw / 2.0);
+            }
+            if slot == 0 {
+                assert_eq!(
+                    scene.hit(x + 12.0, y + h / 2.0),
+                    Some(FxTarget::Field(0, 0))
+                );
+                assert_eq!(
+                    scene.hit(x + w / 4.0 - 12.0, y + h / 2.0),
+                    Some(FxTarget::Arrow(0, 0))
+                );
+                assert_eq!(
+                    scene.hit(pin_at(0, 1).0, pin_at(0, 1).1),
+                    None,
+                    "no empty knob"
+                );
+            }
+            for scale in [0.37, 0.44, 0.6, 1.0] {
+                for backing in [1.0, 2.0] {
+                    let end = ((x + w + 7.0) * scale * backing).ceil();
+                    if slot + 1 < SLOTS {
+                        assert!(end < ((pin_strip(slot + 1).0 - 7.0) * scale * backing).floor());
+                    }
+                }
+            }
         }
     }
 }

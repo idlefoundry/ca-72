@@ -109,6 +109,7 @@ fn the_audio_side_never_allocates() {
     for k in 0..600 {
         match k {
             50 => c.set_param(0, 1, 0.5).unwrap(),
+            75 => c.repin(0, 2).unwrap(),
             100 => c.set_bypass(1, true).unwrap(),
             150 => c.move_to(1, 0).unwrap(),
             200 => c.kill(1).unwrap(),

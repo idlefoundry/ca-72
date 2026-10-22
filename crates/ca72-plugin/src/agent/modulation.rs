@@ -328,6 +328,24 @@ pub fn pin(_p: &Ca72Params, args: &Value) -> Reply {
     )
 }
 
+/// `effects.repin`: another parameter under the same target and assignments.
+pub fn repin(_p: &Ca72Params, args: &Value) -> Reply {
+    let fx = effects()?;
+    let target = arg(args, "target")
+        .and_then(Value::as_str)
+        .and_then(|s| Target::of_id(s.trim()))
+        .and_then(Target::fx)
+        .ok_or_else(|| ApiError::params("`target` is a pin's, fx1 to fx16"))?;
+    let pin = pins_now()
+        .into_iter()
+        .find(|p| p.target == target)
+        .ok_or_else(|| ApiError::refused("nothing is pinned there"))?;
+    let rows = fx.params(pin.slot).map_err(ApiError::refused)?;
+    let id = param_of(&rows, arg(args, "parameter"))?;
+    fx.repin(target, id).map_err(ApiError::refused)?;
+    Ok(json!({"pins": pins_now().iter().map(pin_json).collect::<Vec<_>>()}))
+}
+
 /// `effects.unpin`: pin `target` (`fx1` to `fx16`) unpinned, what moved it let go of.
 pub fn unpin(_p: &Ca72Params, args: &Value) -> Reply {
     let fx = effects()?;

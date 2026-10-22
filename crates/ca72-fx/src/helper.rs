@@ -260,7 +260,7 @@ impl HelperProc {
     }
 
     /// The values the plug-ins' editors gave their parameters since the last call
-    /// (instance, parameter, value in the plug-in's units), the latest of each.
+    /// (instance, parameter, value in the plug-in's units), the latest of each, oldest first.
     pub fn take_param_edits(&self) -> Vec<(u32, u32, f64)> {
         std::mem::take(&mut *lock(&self.edits))
     }
@@ -281,11 +281,11 @@ impl HelperProc {
             let Some(v) = e.value.filter(|v| v.is_finite()) else {
                 continue;
             };
-            if let Some(k) = kept.iter_mut().find(|k| k.0 == instance && k.1 == e.param) {
-                k.2 = v;
-            } else if kept.len() < KEEP_EDITS {
-                kept.push((instance, e.param, v));
+            kept.retain(|k| k.0 != instance || k.1 != e.param);
+            if kept.len() == KEEP_EDITS {
+                kept.remove(0);
             }
+            kept.push((instance, e.param, v));
         }
     }
 

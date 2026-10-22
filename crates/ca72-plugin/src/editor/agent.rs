@@ -190,6 +190,7 @@ impl Editing {
             "modulation.remove" => crate::agent::modulation::remove(&self.params, args),
             // (The standalone's effects' parameters and pins: R-FX-PARAMS.)
             "effects.parameters" => crate::agent::modulation::effect_params(&self.params, args),
+            "effects.repin" => crate::agent::modulation::repin(&self.params, args),
             "effects.pin" => crate::agent::modulation::pin(&self.params, args),
             "effects.unpin" => crate::agent::modulation::unpin(&self.params, args),
             "audio.get" => Ok(audio_state()),

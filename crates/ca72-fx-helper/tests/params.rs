@@ -491,3 +491,89 @@ fn pins_and_what_moves_them_go_through_the_saved_chain() {
         assert!(!serde_json::to_string(&old).unwrap().contains("pins"));
     }
 }
+
+#[test]
+fn editor_touches_are_recent_unique_and_follow_the_effect() {
+    let (c, mut r) = chain();
+    c.add(&plugins()[0]).unwrap();
+    assert!(c.touched(0).is_empty());
+    c.set_param(0, P_MIX, 0.7).unwrap();
+    play(&mut r, 2, 0, |_| 0.0, 0);
+    assert!(
+        c.touched(0).is_empty(),
+        "a host value is not an editor touch"
+    );
+    c.set_param(0, CLAP_NUDGE, 0.7).unwrap();
+    play(&mut r, 2, 0, |_| 0.0, 0);
+    assert!(eventually(|| c.touched(0) == [P_GAIN]));
+    // The existing test effect's other editor stand-in chooses its note names.
+    c.set_param(0, 103, 1.0).unwrap();
+    play(&mut r, 2, 0, |_| 0.0, 0);
+    assert!(eventually(|| c.touched(0) == [102, P_GAIN]));
+    c.set_param(0, CLAP_NUDGE, 0.8).unwrap();
+    play(&mut r, 2, 0, |_| 0.0, 0);
+    assert!(eventually(|| c.touched(0) == [P_GAIN, 102]));
+    c.add(&plugins()[0]).unwrap();
+    c.move_to(0, 1).unwrap();
+    assert!(c.touched(0).is_empty());
+    assert_eq!(c.touched(1), [P_GAIN, 102]);
+    let saved = c.saved();
+    let (restored, _runner) = chain();
+    assert!(restored.restore(&saved).is_empty());
+    assert!(restored.touched(1).is_empty(), "touch hints are not saved");
+}
+
+#[test]
+fn a_repin_keeps_the_target_and_assignments_and_releases_the_old_modulation() {
+    for p in plugins() {
+        let (c, mut r) = chain();
+        let mods = Arc::new(Mods::default());
+        c.set_pin_mods(mods.clone());
+        c.add(&p).unwrap();
+        let target = c.pin(0, P_GAIN).unwrap();
+        mods.set(target, &[("lfo1".into(), 0.3), ("macro2".into(), 0.4)]);
+        c.set_param(0, P_MIX, 0.6).unwrap();
+        play(&mut r, 3, 0, |_| 0.0, 0);
+        assert!(eventually(|| c
+            .list_params(0)
+            .unwrap()
+            .iter()
+            .find(|p| p.id == P_MIX)
+            .unwrap()
+            .value
+            .is_some_and(|v| (v - 0.6).abs() < 1e-6)));
+        let out = play(&mut r, 2, 1, |_| 0.25, 0);
+        assert!((out[BLOCK] - 1.2).abs() < 1e-6, "gain is modulated");
+        c.repin(target, P_MIX).unwrap();
+        let out = play(&mut r, 2, 1, |_| 0.0, 0);
+        assert!(
+            (out[BLOCK] - 0.8).abs() < 1e-6,
+            "{}: old gain returned to base: {}",
+            p.desc.format,
+            out[BLOCK]
+        );
+        let pins = c.pins();
+        assert_eq!((pins[0].target, pins[0].id), (target, P_MIX));
+        assert!((pins[0].base.unwrap() - 0.6).abs() < 1e-6);
+        assert_eq!(mods.get(target).len(), 2);
+        let before = c.saved();
+        c.repin(target, P_MIX).unwrap();
+        assert_eq!(
+            c.saved().slots[0].pins,
+            before.slots[0].pins,
+            "same parameter does nothing"
+        );
+        c.pin(0, P_DELAY).unwrap();
+        assert!(c.repin(target, P_DELAY).is_err(), "already pinned");
+        assert!(c.repin(target, P_CRASH).is_err(), "hidden");
+        c.save_now().unwrap();
+        let saved = c.saved();
+        assert_eq!(saved.slots[0].pins[0].mods, mods.get(target));
+        let (restored, _runner) = chain();
+        let mods2 = Arc::new(Mods::default());
+        restored.set_pin_mods(mods2.clone());
+        assert!(restored.restore(&saved).is_empty());
+        assert_eq!(restored.pins()[0].id, P_MIX);
+        assert_eq!(mods2.get(target), mods.get(target));
+    }
+}

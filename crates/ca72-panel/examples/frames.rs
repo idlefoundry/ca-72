@@ -185,6 +185,7 @@ fn fx(s: f64, panel: &Renderer) {
             slot("Tape Delay", true),
             slot("+ ADD EFFECT", false),
         ],
+        occupied: 3,
         ..FxScene::default()
     };
     let mut composed = panel.frame().clone();
@@ -304,6 +305,12 @@ fn fx(s: f64, panel: &Renderer) {
     });
     times("the effects open, nothing changed", &mut |_, _| {});
 
+    times("a last-touched offer changed", &mut |i, sc| {
+        sc.list = None;
+        sc.drag = None;
+        sc.hover = None;
+        sc.offers[0] = Some(if i % 2 == 0 { "+ RATE" } else { "+ DEPTH" }.into());
+    });
     times("16 pins shown in the drawer", &mut |i, sc| {
         sc.list = None;
         sc.drag = None;
@@ -317,11 +324,13 @@ fn fx(s: f64, panel: &Renderer) {
                 value: 0.35 + (i % 2) as f64 * 0.01,
                 dim: false,
                 learning: false,
+                text: Some(format!("{:.2} s", 2.4 + (i % 2) as f64 * 0.01)),
             })
             .collect();
     });
     times("one of 16 pins turned", &mut |i, sc| {
         sc.pins[6].value = (i % 20) as f64 / 20.0;
+        sc.pins[6].text = Some(format!("{:.2} s", 2.0 + (i % 20) as f64 / 20.0));
     });
     times("16 pins, nothing changed", &mut |_, _| {});
     let mut overlay = ca72_panel::modulation::ModRenderer::new(s);

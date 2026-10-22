@@ -213,6 +213,7 @@ agent to use the bridge that came with that instance.
 | `ca72_modulation_remove` | REMOVE, for one knob or all of a source's | `source`, `target?` |
 | `ca72_effect_parameters` | The standalone's effects only: an effect's parameters a player may pin, in name order, with their IDs, names, units, steps, value in %, the plug-in's own text and their pin targets (decisions.md R-FX-PARAMS) | `slot` (1 to 4), `find?` |
 | `ca72_effect_pin` | Pins an effect's parameter (at most 4 an effect): a knob under its effect and a modulation target, `fx1` to `fx16`, that `ca72_modulation_set` then takes | `slot`, `parameter` (its ID or name) |
+| `ca72_effect_repin` | Replaces a pin’s parameter within the same effect, keeping its target, modulation and MIDI Learn; takes the new parameter’s current base | `target` (`fx1` to `fx16`), `parameter` (ID or name) |
 | `ca72_effect_unpin` | Unpins one, what moved it let go of | `target` (`fx1` to `fx16`) |
 | `ca72_audio` | Reads AUDIO & MIDI (read only) | none |
 | `ca72_version` | Returns the version and the update check | `check?` |

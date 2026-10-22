@@ -165,6 +165,7 @@ pub enum Item {
 /// What a modulation item of a menu does (decisions.md R-LFO).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModItem {
+    Repin(usize),
     Unpin(usize),
     /// Source's depth on the knob (its control's index) typed, in its knob's entry field.
     Depth(crate::lfo::Source, crate::lfo::Target, usize),

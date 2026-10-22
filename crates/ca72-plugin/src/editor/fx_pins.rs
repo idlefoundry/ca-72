@@ -113,6 +113,7 @@ impl Editing {
                 }
             }
         }
+        rows.push(Row::Item(ModItem::Repin(t), "REPLACE…".into(), true, false));
         rows.push(Row::Item(ModItem::Unpin(t), "UNPIN".into(), true, false));
         self.learning.open_menu_with(
             self.renderer.fonts(),
@@ -171,7 +172,15 @@ impl Editing {
 
     pub(super) fn fx_scene_now(&self) -> fx_ui::FxScene {
         let mut scene = self.fx_view.scene();
+        let active = self
+            .fx_pin_drag
+            .as_ref()
+            .map(|d| d.target)
+            .or_else(|| self.fx_pin_hit(self.in_drawing(self.pointer)));
         for pin in &mut scene.pins {
+            if active == Some(pin.target) && !pin.dim {
+                pin.text = Some(self.fx_view.pin_text(pin.target).into());
+            }
             pin.learning = self.params.midi_map.armed()
                 == crate::learn::index(lfo::Target::Fx(pin.target).id());
         }

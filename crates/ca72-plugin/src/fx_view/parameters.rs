@@ -16,7 +16,9 @@ pub(super) struct Parameters {
     pub field: Field,
     pub pinned: bool,
     pub rows: Vec<(ParamRow, String)>,
-    found: Vec<usize>,
+    found: Vec<Option<usize>>,
+    touched: Vec<u32>,
+    replace: Option<usize>,
     pub first: usize,
     pub chosen: usize,
     pub note: Option<String>,
@@ -25,16 +27,55 @@ pub(super) struct Parameters {
 pub(super) type ParameterReply = (usize, u64, Result<Vec<(ParamRow, String)>, String>);
 
 impl Parameters {
-    pub(super) fn found(&self) -> &[usize] {
+    pub(super) fn found(&self) -> &[Option<usize>] {
         &self.found
     }
 
     pub(super) fn refilter(&mut self) {
-        self.found = search_params(
+        let usual = search_params(
             &self.rows.iter().map(|(r, _)| r.clone()).collect::<Vec<_>>(),
             &self.field.text,
             self.pinned,
         );
+        self.found.clear();
+        if self.field.text.is_empty() && !self.pinned {
+            let recent: Vec<_> = self
+                .touched
+                .iter()
+                .filter_map(|id| self.rows.iter().position(|(r, _)| r.id == *id))
+                .take(4)
+                .collect();
+            if !recent.is_empty() {
+                self.found.push(None);
+                self.found.extend(recent.into_iter().map(Some));
+                self.found.push(None);
+            }
+        }
+        self.found.extend(usual.into_iter().map(Some));
+        if self.found.get(self.chosen) == Some(&None) {
+            self.chosen = self.found.iter().position(Option::is_some).unwrap_or(0);
+        }
+    }
+
+    fn navigate(&mut self, by: i32) {
+        let n = self.found.len();
+        if n == 0 {
+            return;
+        }
+        let next = (self.chosen as i32 + by).clamp(0, n as i32 - 1) as usize;
+        let chosen = if by < 0 {
+            (0..=next)
+                .rev()
+                .find(|&i| self.found[i].is_some())
+                .or_else(|| (next..n).find(|&i| self.found[i].is_some()))
+        } else {
+            (next..n)
+                .find(|&i| self.found[i].is_some())
+                .or_else(|| (0..=next).rev().find(|&i| self.found[i].is_some()))
+        };
+        if let Some(chosen) = chosen {
+            self.chosen = chosen;
+        }
     }
 
     fn keep_in_view(&mut self) {
@@ -65,9 +106,20 @@ impl FxView {
     }
 
     pub(super) fn poll_parameters(&mut self) {
-        let Some(e) = &self.effects else {
+        let Some(e) = self.effects.clone() else {
             return;
         };
+        for slot in 0..SLOTS {
+            if let Some(ids) = e.touched(slot)
+                && ids != self.touched[slot]
+            {
+                self.touched[slot] = ids.clone();
+                self.recent[slot].clear();
+                if !ids.is_empty() {
+                    self.submit(Job::Recent(slot, ids));
+                }
+            }
+        }
         if let Some(pins) = e.pins() {
             if pins != self.pins {
                 self.pin_texts.retain(|target, _| {
@@ -87,6 +139,11 @@ impl FxView {
             self.pins = pins;
         }
         let mut p = lock(&self.pending);
+        for (slot, ids, rows) in p.recent.drain(..) {
+            if self.touched[slot] == ids {
+                self.recent[slot] = rows;
+            }
+        }
         if let Some((slot, request, reply)) = p.parameters.take()
             && let Some(list) = &mut self.parameters
             && list.slot == slot
@@ -139,6 +196,25 @@ impl FxView {
         }
     }
 
+    pub(super) fn offer(&self, slot: usize) -> Option<&ParamRow> {
+        let id = *self.touched.get(slot)?.first()?;
+        if self.pins.iter().any(|p| p.slot == slot && p.id == id) {
+            return None;
+        }
+        self.recent[slot].iter().find(|r| r.id == id)
+    }
+
+    pub fn open_repin(&mut self, target: usize) {
+        let Some(pin) = self.pin_info(target) else {
+            return;
+        };
+        let slot = pin.slot;
+        self.open_parameters(slot);
+        if let Some(list) = &mut self.parameters {
+            list.replace = Some(target);
+        }
+    }
+
     /// The helper is asked once, on the drawer's load thread; the list shows LOADING meanwhile.
     pub fn open_parameters(&mut self, slot: usize) {
         if self.effect(slot).is_none() {
@@ -153,6 +229,8 @@ impl FxView {
             pinned: false,
             rows: Vec::new(),
             found: Vec::new(),
+            touched: self.touched[slot].clone(),
+            replace: None,
             first: 0,
             chosen: 0,
             note: Some("LOADING…".into()),
@@ -166,19 +244,45 @@ impl FxView {
         let count = self.pins.iter().filter(|pin| pin.slot == p.slot).count();
         Some(FxList {
             slot: p.slot,
-            title: format!(
-                "{}: PARAMETERS",
-                self.effect(p.slot)
-                    .map_or("", |e| e.name.as_str())
-                    .to_uppercase()
-            ),
+            title: p
+                .replace
+                .and_then(|t| self.pin_info(t))
+                .map(|pin| format!("REPLACE {}", pin.name.to_uppercase()))
+                .unwrap_or_else(|| {
+                    format!(
+                        "{}: PARAMETERS",
+                        self.effect(p.slot)
+                            .map_or("", |e| e.name.as_str())
+                            .to_uppercase()
+                    )
+                }),
             note: p
                 .note
                 .clone()
                 .unwrap_or_else(|| format!("{count} OF 4 PINNED")),
             rows: found
                 .iter()
-                .map(|&i| {
+                .enumerate()
+                .map(|(pos, &i)| {
+                    let Some(i) = i else {
+                        return FxRow {
+                            name: if pos == 0 {
+                                "JUST TOUCHED"
+                            } else {
+                                "ALL PARAMETERS"
+                            }
+                            .into(),
+                            count: Some(if pos == 0 {
+                                p.touched
+                                    .iter()
+                                    .filter(|id| p.rows.iter().any(|(r, _)| r.id == **id))
+                                    .count()
+                            } else {
+                                p.rows.len()
+                            }),
+                            ..FxRow::default()
+                        };
+                    };
                     let (r, text) = &p.rows[i];
                     FxRow {
                         name: r.name.clone(),
@@ -215,6 +319,7 @@ impl FxView {
                 value: p.value,
                 dim: !p.live,
                 learning: false,
+                text: None,
             })
             .collect()
     }
@@ -223,13 +328,17 @@ impl FxView {
         let Some(list) = &mut self.parameters else {
             return;
         };
-        let Some(&i) = list.found().get(row) else {
+        let Some(&Some(i)) = list.found().get(row) else {
             return;
         };
         let (r, _) = &list.rows[i];
-        let job = match r.pinned {
-            Some(t) => Job::Unpin(t),
-            None => Job::Pin(list.slot, r.id),
+        let job = if let Some(target) = list.replace {
+            Job::Repin(target, r.id)
+        } else {
+            match r.pinned {
+                Some(t) => Job::Unpin(t),
+                None => Job::Pin(list.slot, r.id),
+            }
         };
         list.note = None;
         self.submit(job);
@@ -283,10 +392,10 @@ impl FxView {
                 let row = p.chosen;
                 self.choose_parameter(row);
             }
-            Key::ArrowUp => p.chosen = p.chosen.saturating_sub(1),
-            Key::ArrowDown => p.chosen = p.chosen.saturating_add(1),
-            Key::PageUp => p.chosen = p.chosen.saturating_sub(LIST_ROWS),
-            Key::PageDown => p.chosen = p.chosen.saturating_add(LIST_ROWS),
+            Key::ArrowUp => p.navigate(-1),
+            Key::ArrowDown => p.navigate(1),
+            Key::PageUp => p.navigate(-(LIST_ROWS as i32)),
+            Key::PageDown => p.navigate(LIST_ROWS as i32),
             Key::ArrowLeft => p.field.left(),
             Key::ArrowRight => p.field.right(),
             Key::Home => p.field.home(),
@@ -521,6 +630,123 @@ mod tests {
             v.unpin(p.target);
         }
         settle(&mut v, |v| v.pins.is_empty());
+        assert_eq!(v.scene().depth(), fx_ui::PIN_DEPTH);
+    }
+    #[test]
+    fn loaded_effects_offer_the_last_touch_and_the_split_field_and_swap_take_one_click() {
+        let fake = Fake::with(&["Room"], &[]);
+        fake.parameters(0, &["Mix", "Rate", "Decay", "Size", "Damping"]);
+        let mut v = FxView::new(Some(fake.clone()));
+        v.poll(Instant::now());
+        assert_eq!(v.scene().depth(), fx_ui::PIN_DEPTH);
+        let field = |place| {
+            let (x, y, _, h) = fx_ui::pin_screen(0, place);
+            (x + 10.0, y + h / 2.0)
+        };
+        let (x, y) = field(0);
+        v.press(x, y);
+        settle(&mut v, |v| {
+            v.parameters.as_ref().is_some_and(|p| p.rows.len() == 5)
+        });
+        key(&mut v, Key::Escape);
+        fake.touched.lock().unwrap().insert(0, vec![1, 2, 0]);
+        settle(&mut v, |v| v.offer(0).is_some_and(|r| r.id == 1));
+        assert_eq!(v.scene().offers[0].as_deref(), Some("+ RATE"));
+        let (sx, sy, sw, sh) = fx_ui::pin_screen(0, 0);
+        v.press(sx + sw - 12.0, sy + sh / 2.0);
+        settle(&mut v, |v| {
+            v.parameters.as_ref().is_some_and(|p| p.rows.len() == 5)
+        });
+        let list = v.scene().list.unwrap();
+        assert_eq!(list.rows[0].name, "JUST TOUCHED");
+        assert!(list.rows[0].count.is_some());
+        assert_eq!(list.rows[1].name, "Rate");
+        assert_eq!(list.rows[2].name, "Decay");
+        assert_eq!(list.hover, Some(1));
+        key(&mut v, Key::PageDown);
+        key(&mut v, Key::PageUp);
+        assert_eq!(
+            v.scene().list.unwrap().hover,
+            Some(1),
+            "Page Up skips the first head"
+        );
+        key(&mut v, Key::ArrowDown);
+        key(&mut v, Key::ArrowUp);
+        assert_eq!(v.scene().list.unwrap().hover, Some(1));
+        key(&mut v, Key::Character("mix".into()));
+        assert!(
+            v.scene()
+                .list
+                .unwrap()
+                .rows
+                .iter()
+                .all(|r| r.count.is_none())
+        );
+        key(&mut v, Key::Escape);
+        key(&mut v, Key::Tab);
+        assert!(
+            v.scene()
+                .list
+                .unwrap()
+                .rows
+                .iter()
+                .all(|r| r.count.is_none())
+        );
+        key(&mut v, Key::Escape);
+        v.press(x, y);
+        settle(&mut v, |v| v.pins.len() == 1);
+        assert_eq!(v.pins[0].id, 1);
+        assert!(
+            v.scene().offers[0].is_none(),
+            "a pinned touch offers nothing"
+        );
+        fake.touched.lock().unwrap().insert(0, vec![999, 1]);
+        settle(&mut v, |v| v.touched[0].first() == Some(&999));
+        assert!(
+            v.scene().offers[0].is_none(),
+            "an unpinnable touch offers nothing"
+        );
+        fake.touched.lock().unwrap().insert(0, vec![2, 1]);
+        settle(&mut v, |v| v.offer(0).is_some_and(|r| r.id == 2));
+        assert_eq!(v.scene().offers[0].as_deref(), Some("+ DECAY"));
+        v.press(x, y);
+        settle(&mut v, |v| {
+            v.parameters.as_ref().is_some_and(|p| p.rows.len() == 5)
+        });
+        assert_eq!(v.scene().list.unwrap().title, "REPLACE RATE");
+        let before = v.pins.clone();
+        key(&mut v, Key::Escape);
+        assert_eq!(v.pins, before, "Escape swaps nothing");
+        v.press(x, y);
+        settle(&mut v, |v| {
+            v.parameters.as_ref().is_some_and(|p| p.rows.len() == 5)
+        });
+        v.choose_parameter(1); // Decay, at the head of JUST TOUCHED.
+        settle(&mut v, |v| v.pins[0].id == 2);
+        assert_eq!(v.pins[0].target, before[0].target);
+        assert!(v.scene().offers[0].is_none());
+        v.close_list();
+        for id in [0, 1] {
+            fake.pin(0, id).unwrap();
+        }
+        fake.touched.lock().unwrap().insert(0, vec![3, 2, 1, 0]);
+        settle(&mut v, |v| {
+            v.pins.len() == 3 && v.offer(0).is_some_and(|r| r.id == 3)
+        });
+        let (x, y, w, h) = fx_ui::pin_screen(0, 3);
+        v.press(x + w - 10.0, y + h / 2.0);
+        assert!(
+            v.list_open(),
+            "the last free field keeps its way to the list"
+        );
+        v.close_list();
+        v.press(x + 10.0, y + h / 2.0);
+        settle(&mut v, |v| v.pins.len() == 4);
+        assert_eq!(v.pins.last().unwrap().id, 3);
+        assert!(v.scene().offers[0].is_none());
+        fake.slots.lock().unwrap().clear();
+        fake.pins.lock().unwrap().clear();
+        settle(&mut v, |v| v.scene().occupied == 0);
         assert_eq!(v.scene().depth(), fx_ui::DEPTH);
     }
 }

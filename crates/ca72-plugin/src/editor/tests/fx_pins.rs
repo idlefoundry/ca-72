@@ -281,7 +281,57 @@ fn pins_keep_their_targets_when_a_slot_moves_and_the_first_free_place_opens_para
     }
     effects_done(&mut e, &fake, 2);
     poll(&mut e);
-    assert_eq!(e.fx_scene.depth(), fx_ui::DEPTH);
+    assert_eq!(e.fx_scene.depth(), fx_ui::PIN_DEPTH);
+    whole(&mut e);
+}
+
+#[test]
+fn replacing_a_pin_keeps_its_sources_and_midi_and_hover_shows_its_value() {
+    let (mut e, fake) = pinned();
+    let target = 1;
+    e.params
+        .lfo_patch
+        .assign(Source::Lfo(0), T::Fx(target), 0.3)
+        .unwrap();
+    e.params
+        .lfo_patch
+        .assign(Source::Macro(1), T::Fx(target), 0.4)
+        .unwrap();
+    let midi = crate::learn::index("fx2").unwrap();
+    let cc = crate::learn::Cc { channel: 2, cc: 74 };
+    e.params.midi_map.assign(midi, cc);
+    let p = pin(&e, target);
+    go(&mut e, p);
+    poll(&mut e);
+    assert_eq!(e.fx_scene.pins[1].text.as_deref(), Some("2.40 s"));
+    press(&mut e);
+    e.draw();
+    assert!(e.fx_scene.pins[1].text.is_some(), "turning shows the value");
+    release(&mut e);
+    right_click(&mut e, p);
+    assert!(
+        menu_items(&e).iter().position(|(s, _)| s == "REPLACE…")
+            < menu_items(&e).iter().position(|(s, _)| s == "UNPIN")
+    );
+    menu_item(&mut e, "REPLACE…");
+    poll(&mut e);
+    assert_eq!(e.fx_scene.list.as_ref().unwrap().title, "REPLACE DECAY");
+    keyed(&mut e, Key::Character("size".into()));
+    poll(&mut e);
+    keyed(&mut e, Key::Enter);
+    effects_done(&mut e, &fake, 1);
+    poll(&mut e);
+    assert_eq!(e.fx_view.pin_info(target).unwrap().name, "Size");
+    assert_eq!(
+        e.params.lfo_patch.depth(Source::Lfo(0), T::Fx(target)),
+        Some(0.3)
+    );
+    assert_eq!(
+        e.params.lfo_patch.depth(Source::Macro(1), T::Fx(target)),
+        Some(0.4)
+    );
+    assert_eq!(e.params.midi_map.assignment(midi), Some(cc));
+    e.fx_view.close_list();
     whole(&mut e);
 }
 
@@ -293,7 +343,11 @@ fn the_fx_pin_pngs() {
         return;
     };
     std::fs::create_dir_all(&out).unwrap();
-    for scale in [0.44, 1.0] {
+    for (scale, backing, size) in [
+        (0.44, 1.0, "0.44"),
+        (1.0, 1.0, "1.0"),
+        (0.3875, 2.0, "mac-0.3875-2x"),
+    ] {
         for (skin, look) in [(Skin::Worn, "worn"), (Skin::Drawn, "drawn")] {
             let (mut e, fake) = pinned();
             fake.slots.lock().unwrap().push(crate::fx_view::SlotInfo {
@@ -309,7 +363,7 @@ fn the_fx_pin_pngs() {
             }
             poll(&mut e);
             let width = (art::W * scale).round() as u32;
-            e.fit(1.0, width, width);
+            e.fit(backing, width, (f64::from(width) * backing).round() as u32);
             e.set_look(skin);
             e.params
                 .lfo_patch
@@ -323,10 +377,45 @@ fn the_fx_pin_pngs() {
             open_lfos(&mut e);
             let save = |e: &mut Editing, state: &str| {
                 window_frame(e)
-                    .save_png(out.join(format!("{look}-{scale}-{state}.png")))
+                    .save_png(out.join(format!("{look}-{size}-{state}.png")))
                     .unwrap();
             };
-            save(&mut e, "b1");
+            let pins = fake.pins.lock().unwrap().clone();
+            fake.pins.lock().unwrap().clear();
+            poll(&mut e);
+            save(&mut e, "new-chain");
+            fake.touched.lock().unwrap().insert(0, vec![1]);
+            poll(&mut e);
+            poll(&mut e);
+            save(&mut e, "offer");
+            *fake.pins.lock().unwrap() = pins;
+            fake.slots.lock().unwrap()[1].name = "ValhallaRoom".into();
+            fake.parameters(1, &["Mix", "Decay", "Depth", "Size", "Pre-delay"]);
+            fake.pin(1, 103).unwrap();
+            fake.touched
+                .lock()
+                .unwrap()
+                .insert(1, vec![102, 101, 103, 100]);
+            poll(&mut e);
+            poll(&mut e);
+            save(&mut e, "three-pins-last-offer");
+            let (x, y, w, h) = fx_ui::pin_screen(1, 1);
+            let field = at(&e, (x + w / 2.0, y + h / 2.0));
+            go(&mut e, field);
+            save(&mut e, "swap-hover");
+            let value = pin(&e, 1);
+            go(&mut e, value);
+            press(&mut e);
+            save(&mut e, "value-while-turning");
+            release(&mut e);
+            e.fx_view.open_repin(1);
+            poll(&mut e);
+            let list = e.fx_scene.list.as_ref().unwrap();
+            let (x, y, _, _) = fx_ui::list_rect(list);
+            let title = at(&e, (x + 20.0, y + 20.0));
+            go(&mut e, title);
+            save(&mut e, "replace-list");
+            e.fx_view.close_list();
             let jack = at(&e, lfo_ui::places(0).jack);
             let to = pin(&e, 1);
             go(&mut e, jack);
@@ -345,7 +434,11 @@ fn the_fx_pin_pngs() {
             e.learning.close_menu();
             e.fx_view.open_parameters(1);
             poll(&mut e);
-            save(&mut e, "parameters");
+            let list = e.fx_scene.list.as_ref().unwrap();
+            let (x, y, _, _) = fx_ui::list_rect(list);
+            let title = at(&e, (x + 20.0, y + 20.0));
+            go(&mut e, title);
+            save(&mut e, "just-touched-list");
             keyed(&mut e, Key::Character("d".into()));
             save(&mut e, "find");
             e.fx_view.close_list();

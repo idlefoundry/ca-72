@@ -1363,6 +1363,7 @@ impl Editing {
     pub(super) fn mod_item(&mut self, m: ModItem) {
         let patch = std::sync::Arc::clone(&self.params.lfo_patch);
         match m {
+            ModItem::Repin(n) => self.fx_view.open_repin(n),
             ModItem::Unpin(n) => self.fx_view.unpin(n),
             ModItem::Depth(s, t, i) => self.start_depth_entry(i, s, t),
             ModItem::Remove(s, t) => {

@@ -423,6 +423,16 @@ impl crate::fx_view::Effects for Host {
         t
     }
 
+    fn touched(&self, slot: usize) -> Option<Vec<u32>> {
+        self.chain.try_touched(slot)
+    }
+
+    fn repin(&self, target: usize, id: u32) -> Result<(), String> {
+        let result = self.chain.repin(target, id);
+        publish_pinned(&self.chain.pins());
+        result
+    }
+
     fn unpin(&self, target: usize) -> Result<(), String> {
         let r = self.chain.unpin(target);
         publish_pinned(&self.chain.pins());

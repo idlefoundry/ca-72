@@ -292,7 +292,7 @@ one a session brought there listed `inert`).
 ## Effect parameters (R-FX-PARAMS)
 
 The standalone's effects' parameters as modulation targets (decisions.md R-FX-PARAMS; the
-mock-ups and layout B1 in `ca72-night/fx-params-mockups`). Up to four parameters of each effect
+single label strip, R-FX-STRIP; drawings in `ca72-night/fx-strip-mockups`). Up to four parameters of each effect
 are **pinned**; each pin is one of sixteen fixed targets, `lfo::Target::Fx(0..16)` (ids `fx1` to
 `fx16`), which stays the pin's while its effect is moved in the chain. The plug-ins have none.
 
@@ -302,7 +302,7 @@ are **pinned**; each pin is one of sixteen fixed targets, `lfo::Target::Fx(0..16
   not. `Lfos::modulated` leaves the pins out: they move no control of the synth's, and the synth's
   sound with a pin moved is the same to the bit. `Ca72::process` hands the block's points to the
   chain (`Runner::process_modulated`) after the synth.
-- **The chain** (`ca72_fx::chain`): `Chain::pin`/`unpin`, `list_params`, `param_text`, `pins`,
+- **The chain** (`ca72_fx::chain`): `Chain::pin`/`repin`/`unpin`, `touched`, `list_params`, `param_text`, `pins`,
   `set_pin_value`; each slot's pins saved beside its state (`SavedSlot::pins`, `SavedPin {id,
   name, base, target, mods}`) in `effects.json`, and so in a session and in a preset that carries
   the chain. The runner turns the points into the effect's events: CLAP's own modulation
@@ -329,9 +329,9 @@ are **pinned**; each pin is one of sixteen fixed targets, `lfo::Target::Fx(0..16
 - **MCP:** `ca72_modulations` lists the pins (`pins`) and labels their assignments with the
   effect's and parameter's names; `ca72_modulation_set`/`_remove` take `fx1` to `fx16` while
   pinned to an effect that runs; `ca72_effect_parameters`, `ca72_effect_pin` and
-  `ca72_effect_unpin` list, pin and unpin.
+  `ca72_effect_repin` and `ca72_effect_unpin` list, pin, replace and unpin.
 
-**The editor's hooks, for the pins' view (B1).** All on `fx_view::Effects` (the drawer reaches
+**The editor's hooks, for the pins' view.** All on `fx_view::Effects` (the drawer reaches
 the chain through it; `fx_view::installed()` is `None` in the plug-ins), and free functions:
 
 | Hook | What it gives |
@@ -341,26 +341,42 @@ the chain through it; `fx_view::installed()` is `None` in the plug-ins), and fre
 | `Effects::param_text(slot, &[(id, plain)]) -> Vec<Option<String>>` | The plug-in's own text for each value ("2.40 s"; VST3's units put after a bare number): the list's value column, the tip and the pop-up. Asks the helper: once a list's rows, or a tip's value as it changes, not every frame. |
 | `Effects::pins() -> Option<Vec<PinInfo>>` | Every pin by target: its slot now, effect, parameter, names, base (`value` 0..1, `plain`), steps, `live` (dim it when false), `missing`. Cheap (the chain's own table; `None` while the chain is busy: keep the last). Also publishes which targets can take a cord. |
 | `Effects::pin(slot, id) -> Result<usize>` / `Effects::unpin(target)` | A click or Enter on a row; UNPIN. A fifth pin of an effect is refused (the error says so). Unpinning lets go of what moved it. |
+| `Effects::touched(slot) -> Option<Vec<u32>>` | Up to four editor touches, newest first and unique; `None` while busy. The chain follows the helper's existing notices, preserving their order; these hints are not saved. A changed touch asks for the pinnable catalogue on the drawer's worker, never in the drawing path. |
+| `Effects::repin(target, id)` | Another parameter of the same effect under the same target; keeps source assignments and MIDI Learn, takes the new parameter's current value as its base, and saves as a pin. The old parameter's modulation is released at its base. |
 | `Effects::set_pin_value(target, travel)` | The pin's knob turned in the drawer: the plug-in's value from the next block, its window following. |
 | `fx_view::pin_target(params, target) -> Option<lfo::Target>` | The target a cord or a macro may land on: `Some(Target::Fx(n))` while pinned to an effect that runs (`lfo::target_of(p, "fxN")`, from `lfo::FX_PINNED`). Its rings and menus are any target's: `Patch::on_knob(Target::Fx(n))`, `Patch::assign`, `set_depth`, `remove`. |
 | `learn::fx_pin(id)`, `learn::is_fx_pin(i)` | MIDI Learn per pin: arm `learn::index("fxN")` as any learnable; the learning list should leave these out where `fx_view::installed()` is `None`. |
 
-**The B1 view.** The slot's right-click menu offers **PARAMETERS…**; the first free **+ PIN**
-place opens the same list. Its plate hangs from the original row's foot, over the pins, so its
-12 lines fit inside the window. The title and pin count share line 0, FIND and ALL · PINNED line
-1, and ten rows follow, in name order. Each row gives its pin bullet, name, the plug-in's own
-value text and its sources (a macro's typed name). Matched letters are brighter and underlined.
-Click or Enter toggles a pin; a fifth pin's refusal stays on the plate. Up/Down and Page Up/Down
-move the marked row, the presets' text field supplies caret editing, Escape clears FIND and then
+**The single label strip (R-FX-STRIP).** Every loaded effect has one piece of glass under its
+name and ON key, with four equal fields exactly above four knob places. The first free field
+reads **+ PIN** and opens the parameter list. Turn a pinnable control in the effect's own
+window and that field offers **+ NAME**: click its name to pin in one click, or its arrow to
+choose another parameter from the list. A touch of an already pinned or unpinnable parameter
+offers nothing. The same split works in the last free field. Empty places have no knob.
+
+Click a pinned field's name (its arrow appears on hover), or choose **REPLACE…** in its knob's
+menu, to replace its parameter. The list is titled **REPLACE DECAY**, for example. Its rows
+replace under the same target, retaining LFOs, macros and MIDI Learn; choosing the current
+parameter or Escape changes nothing. **PARAMETERS…** stays in the slot's right-click menu.
+
+The list hangs from the original row's foot, over the pins, fitting inside the window. The
+title and pin count share line 0, FIND and ALL · PINNED line 1, and ten visible rows follow.
+With FIND empty and ALL selected, **JUST TOUCHED** lists up to four parameters newest first,
+then **ALL PARAMETERS** introduces the usual name order. Both heads are ruled and inert.
+Each row gives its pin bullet, name, the effect's value text and its sources. Matched letters
+are brighter and underlined. Click or Enter toggles a pin in PARAMETERS, replaces in REPLACE;
+a refusal stays on the plate. Up/Down and Page Up/Down skip heads, Escape clears FIND then
 closes, and Tab switches ALL · PINNED. The list holds the keyboard throughout.
 
-The drawer is 372 units deep with any pins, 170 with none; four places under each effect,
-160 units apart, with eight-character dot screens and each knob's ticks on its 300-degree
-sweep. Its still parts (screens, glass, shadows and ticks) are made on the drawer's thread;
-changed cells alone are drawn again. The parameter catalogue and value text are asked for on
-the drawer's worker, never in the drawing path: the catalogue once on opening, pin text when
-values change. Pins are polled every tenth of a second, retaining the last while the chain is
-busy. Closing and reopening the list lists a changed parameter catalogue again.
+The drawer is 370 drawing units deep with any effect loaded, 170 with none, so the first pin
+does not move it. Each 570-unit strip spans the renderer's name screen, gap and ON key; its
+four fields and knobs have 142.5-unit centres. Thin column rules use the LFO page's print.
+A field shows the parameter's short name, or its own brighter value text while its knob is
+hovered or turned. Its still parts (glass, shadows and ticks) and knob materials are made on
+the drawer's thread. Changed fields are drawn as bounded parts, so neighbours' glass and
+letters cannot be blended twice. The worker asks for value text as bases change. Pins and
+touches are polled every tenth of a second, retaining the last while the chain is busy.
+Closing and reopening the list reads a changed parameter catalogue again.
 
 `editor/fx_pins.rs` gives each pin a control number past the panel's controls, as TEMPO has one,
 so `editor/lfo_page.rs` supplies the same cord, coloured rings, one-way macro rings, pop-up depth
@@ -370,6 +386,6 @@ and adds every source's depth. A turn, including scrolling, sets its base and ob
 A pin travels with its slot while its fixed target and MIDI Learn stay its own.
 
 Unavailable pins keep their names, rings and assignments, dimmed, refusing turns and new cords;
-a parameter no longer found reads MISSING. UNPIN is in each pin's menu, followed by MIDI Learn.
+a parameter no longer found reads MISSING. REPLACE… and UNPIN are in each pin's menu, followed by MIDI Learn.
 The learning list names pins by parameter and effect on the standalone's effects rail, never
 on the plug-ins' rail. Both built-in skins and LARGE lettering use the same geometry.

@@ -285,6 +285,15 @@ pub trait Effects: Send + Sync {
         Err("no effects here".into())
     }
     /// Pin target `target` unpinned, what moved it let go of.
+    /// Recent editor touches, newest first, or none while the chain is busy.
+    fn touched(&self, _slot: usize) -> Option<Vec<u32>> {
+        Some(Vec::new())
+    }
+
+    fn repin(&self, _target: usize, _id: u32) -> Result<(), String> {
+        Err("parameters are not available".into())
+    }
+
     fn unpin(&self, _target: usize) -> Result<(), String> {
         Err("no effects here".into())
     }
@@ -319,6 +328,8 @@ enum Job {
     Parameters(usize, u64),
     Pin(usize, u32),
     Unpin(usize),
+    Repin(usize, u32),
+    Recent(usize, Vec<u32>),
     Texts(Vec<PinInfo>),
     Order(FxOrder),
 }
@@ -333,6 +344,7 @@ struct Pending {
     parameters: Option<ParameterReply>,
     pin_error: Option<String>,
     pin_texts: Vec<(PinInfo, String)>,
+    recent: Vec<(usize, Vec<u32>, Vec<ParamRow>)>,
 }
 
 /// How long an effect that would not load is said so on its slot.
@@ -384,6 +396,8 @@ pub struct FxView {
     pins: Vec<PinInfo>,
     pin_texts: std::collections::BTreeMap<usize, String>,
     request: u64,
+    touched: [Vec<u32>; SLOTS],
+    recent: [Vec<ParamRow>; SLOTS],
 }
 
 impl std::fmt::Debug for FxView {
@@ -442,6 +456,8 @@ impl FxView {
             pins: Vec::new(),
             pin_texts: Default::default(),
             request: 0,
+            touched: Default::default(),
+            recent: Default::default(),
         }
     }
 
@@ -565,15 +581,26 @@ impl FxView {
             locked: preset.locked,
             held: preset.held,
             slots,
-            hover: self
-                .hover
-                .filter(|h| matches!(h, FxTarget::Name(_) | FxTarget::Tab(_) | FxTarget::Lock)),
+            hover: self.hover,
             drag: self.press.filter(|p| p.carried).map(|p| (p.slot, p.over)),
             list: self
                 .parameters_list()
                 .or_else(|| self.open.map(|o| self.list(o))),
             pins: self.drawn_pins(),
             occupied: self.slots.len(),
+            offers: std::array::from_fn(|slot| {
+                self.offer(slot).map(|r| {
+                    format!(
+                        "+ {}",
+                        if r.short.is_empty() {
+                            &r.name
+                        } else {
+                            &r.short
+                        }
+                    )
+                    .to_uppercase()
+                })
+            }),
         }
     }
 
@@ -800,8 +827,21 @@ impl FxView {
             return;
         }
         match self.scene().hit(x, y) {
-            Some(FxTarget::Pin(slot, place)) if self.scene().pin(slot, place).is_none() => {
-                self.open_parameters(slot)
+            Some(FxTarget::Field(slot, place)) => {
+                if let Some(pin) = self.scene().pin(slot, place) {
+                    self.open_repin(pin.target);
+                } else if let Some(row) = self.offer(slot) {
+                    self.submit(Job::Pin(slot, row.id));
+                } else {
+                    self.open_parameters(slot);
+                }
+            }
+            Some(FxTarget::Arrow(slot, place)) => {
+                if let Some(pin) = self.scene().pin(slot, place) {
+                    self.open_repin(pin.target);
+                } else {
+                    self.open_parameters(slot);
+                }
             }
             Some(FxTarget::Lock) => {
                 if let Some(e) = &self.effects {
@@ -1093,6 +1133,12 @@ fn run(effects: &dyn Effects, pending: &Mutex<Pending>, job: Job) {
             lock(pending).pin_texts = texts;
             Ok(())
         }
+        Job::Recent(slot, ids) => {
+            let rows = effects.params(*slot).unwrap_or_default();
+            lock(pending).recent.push((*slot, ids.clone(), rows));
+            Ok(())
+        }
+        Job::Repin(target, id) => effects.repin(*target, *id),
         Job::Pin(slot, id) => effects.pin(*slot, *id).map(|_| ()),
         Job::Unpin(target) => effects.unpin(*target),
         Job::Add(g, i) => effects.add(*g, *i),
@@ -1128,13 +1174,13 @@ fn run(effects: &dyn Effects, pending: &Mutex<Pending>, job: Job) {
             p.failed = Some((slot, name, Instant::now()));
         }
     }
-    if matches!(job, Job::Pin(..) | Job::Unpin(_)) {
+    if matches!(job, Job::Pin(..) | Job::Unpin(_) | Job::Repin(..)) {
         p.pin_error = result.clone().err();
     }
     p.done += 1;
     drop(p);
     if let Err(e) = result
-        && !matches!(job, Job::Pin(..) | Job::Unpin(_))
+        && !matches!(job, Job::Pin(..) | Job::Unpin(_) | Job::Repin(..))
     {
         eprintln!("CA-72 effects: {e}");
     }
@@ -1158,6 +1204,7 @@ pub(crate) mod fake {
         pub unlisted: Mutex<usize>,
         pub parameter_rows: Mutex<std::collections::BTreeMap<usize, Vec<ParamRow>>>,
         pub pins: Mutex<Vec<PinInfo>>,
+        pub touched: Mutex<std::collections::BTreeMap<usize, Vec<u32>>>,
         pub pins_busy: std::sync::atomic::AtomicBool,
         pub param_reads: std::sync::atomic::AtomicUsize,
         pub preferences: Mutex<Preferences>,
@@ -1290,6 +1337,36 @@ pub(crate) mod fake {
             pins.sort_by_key(|p| p.target);
             self.note(format!("pin {slot} {id}"));
             Ok(target)
+        }
+        fn touched(&self, slot: usize) -> Option<Vec<u32>> {
+            Some(lock(&self.touched).get(&slot).cloned().unwrap_or_default())
+        }
+        fn repin(&self, target: usize, id: u32) -> Result<(), String> {
+            let rows = lock(&self.parameter_rows);
+            let mut pins = lock(&self.pins);
+            let pin = pins.iter().find(|p| p.target == target).ok_or("no pin")?;
+            if pin.id == id {
+                return Ok(());
+            }
+            if pins.iter().any(|p| p.slot == pin.slot && p.id == id) {
+                return Err("already pinned".into());
+            }
+            let pin = pins
+                .iter_mut()
+                .find(|p| p.target == target)
+                .expect("the pin");
+            let row = rows
+                .get(&pin.slot)
+                .and_then(|r| r.iter().find(|r| r.id == id))
+                .ok_or("no parameter")?;
+            pin.id = id;
+            pin.name.clone_from(&row.name);
+            pin.short.clone_from(&row.short);
+            pin.value = row.value;
+            pin.plain = Some(row.plain);
+            pin.steps = row.steps;
+            self.note(format!("repin {target} {id}"));
+            Ok(())
         }
         fn unpin(&self, target: usize) -> Result<(), String> {
             lock(&self.pins).retain(|p| p.target != target);

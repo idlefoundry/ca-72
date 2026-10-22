@@ -280,7 +280,8 @@ impl Instance {
         serde_json::from_value(v).map_err(|e| e.to_string())
     }
 
-    /// The values its editor gave its parameters since the last call, the latest of each.
+    /// The values its editor gave its parameters since the last call, the latest of each,
+    /// oldest first so the chain can keep the order of touches (R-FX-STRIP).
     pub fn take_edits(&self) -> Vec<(u32, f64)> {
         std::mem::take(&mut *lock(&self.edits))
     }
@@ -1102,10 +1103,8 @@ fn monitor(inner: &Weak<Inner>) {
             for (number, id, value) in p.take_param_edits() {
                 if let Some(i) = instances.iter().find(|i| i.number == number) {
                     let mut e = lock(&i.edits);
-                    match e.iter_mut().find(|x| x.0 == id) {
-                        Some(x) => x.1 = value,
-                        None => e.push((id, value)),
-                    }
+                    e.retain(|x| x.0 != id);
+                    e.push((id, value));
                 }
             }
             for number in p.take_relist() {

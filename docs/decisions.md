@@ -14058,6 +14058,93 @@ by hand; the review pictures use the tests' fake chain through the real editor.
   rescan while the list stays open (reopen to list it again). The engine and helper are the
   existing R-FX-PARAMS implementation; none was changed for the view.
 
+## R-FX-STRIP. One label strip beneath each effect, with a last-touched offer and replacement
+
+**The owner, 2026-10-22**, after trying B1 with ValhallaRoom in the standalone:
+
+> "I don't think we can reasonably expect for people to stumble across the fact that they can add parameters that can then be controlled by LFOs and modulators by right-clicking on the VST that they have loaded."
+
+> "This whole area looks terrible. The screens are smushed together. It's just not great. The whole thing needs to be thought about more carefully."
+
+From the drawings in `ca72-night/fx-strip-mockups/fx-pin-layouts.html` (the supplied
+`page-top.png`, `page-bottom.png` and `offer-variants.png`):
+
+> "I actually like layout 2 the best with the single strip."
+
+For pinning the last control touched, with another way to choose and a way to replace a pin,
+the owner chose **"2 and 3 together"**. Their condition:
+
+> "if they want to select the last thing that they touch, if they want to pin it, should be as simple as a single click. If they want to change that to something else, they shouldn't have to open up the plugin and then touch the thing that they want and then go back down to pin it ... comparably simple ... to change."
+
+**The drawing.** Each loaded effect gets one piece of glass spanning its name screen and ON
+key, with faint dotted dividers over four evenly spaced knob places. It uses the renderer's
+actual 570-unit group (400 + 20 + 150), rather than the mock-up's 574: fields and knobs are
+142.5 units apart. The strip starts 176 units below the drawer's top and is 40 high; knobs
+are at 288. The drawer is 370 deep, leaving the existing held-preset names and fault words
+clear above the strip, and ticks, rings and shadows inside its foot. Empty slots draw no
+strip. Thin column rules use the LFO page's print, width and round ends. The held preset's
+slim name screens now appear only when there is a held chain to show; their empty bezels
+formerly remained visible all the time.
+
+The first free field reads dim **+ PIN**, opening PARAMETERS. A pinnable control turned in
+the effect's own window offers **+ NAME**, lit as a pin's name. Click that name to pin it in
+one click; its rightmost 34 units, divided off with dots and a downward amber triangle, open
+the list. The last free field behaves identically. A touch of a pinned or unpinnable
+parameter offers nothing. Another touch replaces the offer. Empty places have no knob.
+
+Click a pinned field's name to replace its parameter; its arrow appears while hovered.
+**REPLACE…** precedes UNPIN in the knob's menu. The list is titled **REPLACE DECAY**, for
+example, and its rows replace rather than toggle. The same parameter is a no-op, Escape
+changes nothing, and a parameter already on another pin is refused. A pin keeps B1's knob,
+ticks, cords, rings, pop-up depths, tip, menus, MIDI Learn and unavailable/MISSING behaviour.
+Its field shows its short name, or the effect's own brighter value text while its knob is
+hovered or turning. PARAMETERS… remains in the effect slot's menu.
+
+Every parameter list starts, with FIND empty and ALL selected, with up to four **JUST
+TOUCHED** parameters newest first, then **ALL PARAMETERS** in name order. Heads use the
+existing chooser's dotted rules and counts, with no pin bullet, and cannot be chosen.
+Searching or PINNED hides the recent group. Keyboard navigation skips the heads.
+
+**Why B1 smushed.** `middle` divides 2503 units between four effects after the chain LOCK,
+so columns are 625.75 units apart. Four pin screens on 160-unit centres occupy 632 units
+including their 6-unit surrounds (3 × 160 + 140 + 12). The end bezels therefore overlap the
+next column's by 6.25 units even at drawing scale. Inside a column, the 8-unit bezel gap
+shrinks to 3 pixels at 0.37. This is a placement error, not a Retina-only error. Every empty
+place also had its own bezel. The owner's cropped `owner-smushed-strip.webp` shows exactly
+that crowded band; its approximate physical scale is reproduced by the 0.3875 logical / 2×
+review frames. The crop does not give the original window dimensions, so this is a simulated
+size, not a native Mac capture. The new strips have 55.75 units between their glass, 41.75
+including the 7-unit cached margins. Tests check their separation at 0.37, 0.44, 0.6 and 1.0,
+and each at 2× backing. They cannot overlap at any of these scales.
+
+**Control-side changes.** `Chain::touched` / `try_touched` keep four unique recent editor
+parameter IDs per effect, newest first; they follow that effect when it moves and are not
+saved. The helper receiver and sandbox keep repeated values in latest-edit order rather than
+first-insertion order, using the existing `param_edits` protocol. `Effects::touched` is a
+nonblocking poll (`None` keeps the previous hints). A changed touch asks for pinnable names
+on the drawer's worker. Catalogue and value-text requests never run in the drawing path.
+
+`Chain::repin(target, id)` replaces the saved parameter in place, taking the new parameter's
+current base, retaining the target and source assignments. It verifies the slot's identity
+after asking its helper. The runner receives the existing fixed-size pin message and
+releases any modulation of the old parameter at its base before moving the new one; it
+allocates nothing. MIDI Learn stays attached to the target. The chain saves the replacement
+as it saves pins. `ca72_effect_repin` exposes it to the agent tools; the engine and helper
+protocol are unchanged.
+
+**Drawing and cost.** Glass is made once across each entire strip. Bounded fields share one
+rounded pixel boundary, including fractional and 2× scales; a changed field paints only its
+own pixels, avoiding doubled neighbouring lettering or glass. Backgrounds, glass, shadows,
+ticks and knob materials are prepared on the drawer's thread. Only changed fields/knobs are
+redrawn. The parts/whole test also asserts that a single turn damages only that field.
+
+**Choices for the owner to confirm:** option A, the full drawer depth whenever any effect is
+loaded (recommended in the supplied choice list, not separately objected to); the 570-unit
+renderer width and 370-unit depth derived above; the replacement list stays open after a
+selection, showing its new pin and any refusal. No choice blocks this implementation.
+
+**Evidence (Linux, 2026-10-22):** recorded after the final checks below.
+
 ## R-FX-SEARCH. FIND in the standalone’s effects’ chooser, with grouping and six recent choices
 
 **The owner, 2026-10-20:** "we need to add search functionality to the FX page so people can easily find their plugins."
