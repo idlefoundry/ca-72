@@ -14,7 +14,7 @@ use resvg::usvg;
 
 use super::SECTIONS;
 use super::worn::{AMBER, AMBER_LIGHT, TAB_PRINT, edge_eased, svg_over};
-use crate::art::{Lettering, PANEL_H, W};
+use crate::art::{self, Lettering, PANEL_H, W};
 use crate::fonts::{FAMILY, Fonts};
 use crate::skin::Skin;
 use crate::svg::{N, Svg, colour, put};
@@ -196,11 +196,15 @@ pub(super) fn tab_words(
         let (pw, ph) = ((tab.0 * s).ceil() as u32 + 2, (tab.1 * s).ceil() as u32 + 2);
         if let Some(mut p) = Pixmap::new(pw, ph) {
             let mut o = Svg::default();
-            put!(
-                o,
-                "<text x='{}' y='{}' font-size='17' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{TAB_PRINT}' fill-opacity='0.85'>{word}</text>",
-                N(x - left / s),
-                N(y - oy - ptop / s)
+            art::text(
+                &mut o,
+                x - left / s,
+                y - oy - ptop / s,
+                word,
+                17.0,
+                art::Style::Legend,
+                false,
+                &format!("style='fill:{TAB_PRINT};stroke:{TAB_PRINT}' opacity='0.85'"),
             );
             svg_over(options, &mut p, s, &o.0);
             words.push((left as i32, ptop as i32, p));

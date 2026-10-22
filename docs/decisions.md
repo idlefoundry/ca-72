@@ -14872,3 +14872,198 @@ Workspace/all-target Clippy passes with and without all features, with warnings 
 formatting and notices checks pass. The required package run totals 833 passed and 80
 existing ignored. The job summary records commands, logs, the commit and the untested
 native/full-workspace checks. The owner has the new rail pictures to review.
+
+## R-DRAWER-LETTERING. The drawers' print and digits are drawn as the panel's
+
+**Owner direction, 2026-10-22:**
+
+> "why does MP use a different font for their numbers than every other number on the plugin?"
+
+> "it's very obviously different. Look at the difference between the 6 in 16 and the 0 in
+> 0.0. The 0 is very much narrower."
+
+The second comparison was GLOBAL's DRIVE against MPE's CUTOFF.
+
+> "I swear all of the fonts that you use on the MPE screen look different. From the rest of the
+> fonts in the app ... I'm speaking here of the numbers and the big larger fonts like where it
+> says pressure and timbre."
+
+The owner was right about each visible difference, and was first told otherwise. Sharing the
+printed labels' typeface did not give them the same proportions or weight; the readouts are
+seven-segment geometry.
+
+**The three causes at `e9545a1`:**
+
+- Seven-segment digits took their pitch from the window: `((w - 22) / cells).min(44)`.
+  GLOBAL and ARP had three cells in 156 units, pitch 44; MPE had four in the same window,
+  pitch 33.5. MPE's digits and strokes were about 24 % narrower at the same height.
+- The panel's `art::text`, `Style::Legend`, stretches the print 9 % and strokes it at 0.7.
+  The drawers' separate plain bold text did neither. Inspection also found GLOBAL's legacy
+  `strip::print` used plain text, so GLOBAL's legends join the same shared path in this fix.
+  The dial numbers already used the panel's print.
+- PRESSURE and TIMBRE were 44 units, against GLOBAL's section titles at 52. GLOBAL's titles
+  have no added letter spacing or forced printed width; some of the upper panel's titles
+  do, through `Layout`. The drawers follow GLOBAL's unspaced section titles.
+
+**Built:** `seven` uses a constant 44-unit pitch and 53.76-unit digit height, including the
+same stroke thickness, for all readouts. Existing three-cell windows remain 156 by 84;
+MPE keeps four cells in windows 198 by 84 (`4 × 44 + 22`). Its extra cell grows rightwards,
+keeping the window's left edge clear of its own dial numbers. Centring the wider window on
+the old readout centre hid MODULATION's 50; that placement was rejected after rendering.
+
+MPE's unit centres are 1165, 1615, 2325 and 2775; its middle rule moves to 1920. Each pair's
+450-unit pitch clears both its own dial and the next one's numbers, with room for % and OCT
+in LARGE. The title's right edge is 220 units before its first unit's centre. A test measures
+the actual SVG ink, including the dials, unit lettering, bezels, title and rules in both
+lettering sizes. A 425-unit trial leaves only about 2.35 units between neighbouring print in
+STANDARD and fails the six-unit clearance gate; the centred-window trial fails its own
+dial's clearance gate. INPUT remains before the first rule, and all parts stay inside the
+existing drawer and window.
+
+GLOBAL's legends and units, and every drawer's printed legends, units, small print and tab
+words use `art::text` with `Style::Legend`, at their previous sizes. The tabs keep their darker
+ink; the FX status print keeps its spacing and opacity. PRESSURE, TIMBRE, ARP and DIRECTION
+use 52-unit `Style::Title`; LFO 1 to 4 keep 52 and use that style too. The drawn and worn skins share the
+path, in STANDARD and LARGE. Dot screens and the rail are outside this change. No parameter
+ID, sound, saved setting or preset format changes.
+
+**Evidence (Linux, Rust 1.97.1, 2026-10-22):** the digit regression compares the actual pixels
+of two adjacent digits in all eight GLOBAL, four ARP and four MPE windows. The layout test
+rejects both the 425-unit and centred-window trials, and passes the final layout. MPE's
+partial-versus-whole test also covers LARGE at 0.44 and 1.0 in both skins.
+
+`target/drawer-lettering-frames/README.md` indexes the baseline and changed MPE, ARP, LFO,
+FX and GLOBAL windows and matching crops, worn and drawn, LARGE, at 0.44 and 1.0, plus FX
+safety states and same-scale DRIVE/CUTOFF digit and legend comparisons. The baseline binaries
+were built before any renderer edit; `scripts/drawer-lettering-frames.py` reproduces the
+matrix. No approved panel picture is replaced merely to accept these drawer changes.
+
+`cargo run --release -p ca72-panel --example frames -- 0.44 1.0` is measured before and after,
+twice each, with the saved baseline binary between the changed runs under the timing lock.
+The existing harness uses worn STANDARD lettering. At 0.44, MPE's changed CUTOFF median
+goes from 1.0 to 1.2 ms; at 1.0 from 2.0–2.1 to 2.5 ms, reflecting the larger readout.
+Ready first-open is 4.7–5.0 to 5.7–7.1 ms at 0.44, 9.4–10.6 to 11.1–11.2 ms at 1.0.
+ARP's knob frame remains 1.1 / 2.3 ms at the two scales; LFO's PHASE frame remains about
+1.2 / 5.2 ms. The plates still warm on their own threads and unchanged MPE frames remain
+0.0 ms at the harness's precision. Full cold/ready/change results, including the shared
+machine's wall-clock variation, are in `timings.md` beside the frames.
+
+**Agent decisions** (not separately approved): 450 rather than the estimated 425-unit spacing,
+the rightwards window growth, the rule and title placements, and bringing GLOBAL's legacy
+print through the same path. The owner still has the pictures to review. No Mac build,
+Windows host run, installed plug-in or real audio device is used for this job.
+
+**Final checks:** the production-feature package suite passes: 836 tests, 80 intentionally
+ignored, including the two existing approved panel image checks. Workspace/all-target/
+all-feature Clippy, touched-panel default-feature Clippy, formatting and notices pass. The
+full default-feature workspace test run also passes: 1169 tests, 97 intentionally ignored,
+with its log beside the frames. No golden image is changed or re-approved. All 24
+before/after full-window pairs are pixel-identical above the drawers, including the rail.
+Independent read-only source and image review finds no material issue. GLOBAL's existing
+tab-cap words retain their separate print path; the GLOBAL extension here covers its legends,
+units and section titles. These checks and review are not the owner's visual approval.
+
+**Review corrections, 2026-10-22 (the owner's second brief):** the first review matrix omitted
+STANDARD, the default. In that setting PRESSURE and TIMBRE appeared against the rules. The
+eight-unit gate was too small: their actual ink-to-rule-edge gaps were 13.32 and 12.08 units.
+The owner asked to keep both at 52 in `Style::Title`, with "at least the clearance the GLOBAL
+page's section titles have from its rules", and to keep the drawer's depth and the existing
+clearances. The owner also clarified: "ARP and DIRECTION are group legends, not section titles."
+
+**Built:** GLOBAL's smallest measured ink-to-rule-edge clearance is 207.582 drawing units
+(VOICES's left gap; the four-unit rule's half-width is included). MPE now centres PRESSURE
+and TIMBRE beneath their sections, with the same 52-unit title print. Both titles' nearest rule
+gaps exceed 490 units. The capitals' centre is 44 units above the foot, leaving 10.62 units
+below the first readout's bezel and over 24 units above the foot. The drawer remains 265 units
+deep; INPUT, all four units, their windows and the rules keep their positions.
+
+**Agent decision** (not separately approved): use the sections' lower space for their titles,
+as GLOBAL does. The preferred inline adjustments cannot supply GLOBAL's measured gap: even
+with no INPUT padding, the 240-unit screen, two titles, two 207.58-unit rule gaps and the two
+knob/readout pairs need about 2875 units across, against 2708 available. That lower bound
+already tightens each pair to the six-unit printed clearance and each title-to-knob gap to
+six units. Narrowing INPUT's column, tightening the title gap and moving units cannot retain
+all those clearances with inline headings. The owner should confirm the lower title placement
+from the pictures.
+
+ARP and DIRECTION now pass through `strip::bank_legend`, shared with GLOBAL's MODE, VOICES
+PLAYED AS, PLACEMENT and AUTO GAIN: `Style::Legend`, 21 units in STANDARD or 23 in LARGE,
+26 units above the recess's top (67 above the tabs' middle). The LFO and FX audit found no
+other group label promoted to a title: MODE and FX's SLOT/CHAIN labels already use the legend
+style; LFO 1 to 4 name whole sections and retain the 52-unit title style.
+
+The layout regression measures GLOBAL's real title ink, compares both sides of both MPE
+titles against that minimum, and retains the neighbour, own-dial, bezel, rule and drawer-edge
+gaps. With titles now below the row, the six-unit title-to-print clearance is checked against
+each printed part's extents in both axes. Restoring the previous inline placement fails the
+new GLOBAL clearance gate in STANDARD. A second regression checks both ARP banks against the
+shared GLOBAL legend's dimensions and recess offset in STANDARD and LARGE. The MPE
+partial-versus-whole matrix now also includes STANDARD in both skins at 0.44 and 1.0.
+
+`scripts/drawer-lettering-frames.py` now renders STANDARD beside LARGE for every page and
+skin at both scales: 48 full windows before (`e9545a1`) and 48 after, including FX safety
+states. Each has an unscaled page crop; the same-scale MODE/ARP comparisons align the tabs'
+middles, making both letter size and height above the tabs visible. The README under
+`target/drawer-lettering-frames/` indexes the complete matrix. The earlier LARGE-only evidence
+and its review did not establish the default setting's visual quality.
+
+**Checks after the corrections (Linux, 2026-10-22):** the requested production-feature package
+suite passes, 837 tests with 80 intentionally ignored. The full default-feature workspace
+suite passes, 1170 tests with 97 intentionally ignored. Workspace/all-target/all-feature
+Clippy, default-feature panel Clippy, formatting and notices pass. The approved panel images
+remain unchanged. All 48 before/after full-window pairs are pixel-identical above the drawer
+top, including the entire rail. Independent read-only source/image review finds no defect and
+confirms the optimistic inline width calculation. Logs, hashes and the updated image index
+are under `target/drawer-lettering-frames/`; the new logs have a `-2` suffix. No new timing
+claim, Mac build, Windows run, installed plug-in or manual host test is made. The lower title
+placement is still for the owner's visual confirmation.
+
+**Review corrections, 2026-10-22 (the owner's third brief):** the second pass's ARP and
+DIRECTION bank legends stay. Moving PRESSURE and TIMBRE to the foot was "the right idea",
+but at 265 units deep the drawer left the titles "cramped" beside the dials' numbers. The
+owner asked for "Room at the foot as on the GLOBAL page", an independent MPE depth, and each
+section's units centred between its rules or edge, keeping INPUT and the four 198-unit
+readouts, the pairs' internal spacing and every existing clearance test.
+
+**Built:** MPE is 340 units deep; ARP remains 265. The title centres are 50 units above the
+foot, as GLOBAL's are, and the rules run down the deeper plate. The four unit centres are
+1040, 1490, 2230 and 2680. The pairs keep their 450-unit pitch. Their complete printed
+extents, including dial numbers, readouts, % and OCT, are centred within half a drawing unit
+between the rules at 700/1920 or the rule at 1920 and the edge at 3080, in STANDARD and LARGE.
+INPUT's column, the controls' row, title size and section centres stay as in the second pass.
+
+**Measured:** GLOBAL's control-to-title ink gaps are 21.069 / 35.616 / 18.945 units for
+VOICES / STEREO / OUTPUT in STANDARD, and 20.040 / 35.616 / 17.633 in LARGE. The control
+extent includes the dials' stroked print and the readouts' and voices' display's bezels.
+GLOBAL's title-to-foot ink gap is 30.604 units. The new gate uses the largest reference gap
+above the titles, 35.616, for both MPE sections. MPE leaves at least 39.225 above and 30.604
+below. It also retains the previous GLOBAL-derived horizontal title clearance and all
+six-unit print/bezel clearances, and checks the rules' full depth and the pairs' centring.
+A 335-unit trial fails LARGE's new upper gap (34.225); the old 265-unit depth and the old
+unit positions also fail the layout test.
+
+The editor's `Lower::depth`, `lower_frame`, sliding and hit bounds already use `mpe::DEPTH`.
+The editor regression now checks the independent depth, hits in the added band and frame
+composition near its new foot; existing knob and typed-readout tests follow the new places.
+The partial/full renderer matrix checks that the deeper frame and its shadow fit inside the
+unchanged window in both skins and lettering sizes at 0.44 and 1.0, plus the existing 0.87
+case. The drawing's depth bound keeps the drawer inside at every scale.
+
+`target/drawer-lettering-frames/README.md` now indexes the MPE-only before (`e9545a1`) and
+after matrix: STANDARD/LARGE, worn/drawn, 0.44/1.0, matching complete windows, and GLOBAL's
+lower half above MPE at 1.0 STANDARD in each skin. All eight full-window pairs are identical
+above the drawer, including the rail; all crops match their full windows exactly. Earlier
+other-drawer pictures are retained as historical evidence. No approved image is changed.
+
+**Agent decisions** (not separately approved): use the largest of GLOBAL's three upper gaps,
+round the necessary depth up to 340, and centre the complete printed pair rather than just
+the nominal unit centres. The owner still has the pictures to review. No Mac build, Windows
+host run, installed plug-in, real audio device or new performance benchmark is used.
+
+**Third-pass checks (Linux, Rust 1.97.1):** the required production-feature package suite passes:
+837 tests, 80 intentionally ignored. Workspace/all-target/all-feature Clippy, touched-panel
+and plug-in default-feature Clippy, formatting and notices pass. The measured layout gate
+rejects each negative trial by a failing assertion, then passes the final layout.
+The final default-feature workspace run also passes: 1170 tests, 97 intentionally
+ignored, with four test threads on the shared Linux machine. Logs have a `-3` suffix beside
+the frames. These checks and pictures are evidence for review, not the owner's visual approval.

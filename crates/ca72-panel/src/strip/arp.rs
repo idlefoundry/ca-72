@@ -22,7 +22,6 @@ pub use super::lower::{LEFT, RIGHT, SHADOW, TOP, top_px};
 use super::worn::{Lamp, Reading, copy, meets, readout_patch, svg_over, union, within};
 use super::{READOUT, RECESS_PAD, UNIT_READOUT};
 use crate::art::{self, Lettering};
-use crate::fonts::FAMILY;
 use crate::render::Renderer;
 use crate::skin::Skin;
 use crate::svg::{N, Svg, colour, put};
@@ -32,7 +31,7 @@ use crate::svg::{N, Svg, colour, put};
 /// How deep it is, from its top under the rail (`lower::TOP`; the owner, of the slimmer drawer:
 /// "make it even slimmer"; 265 units, the mock-up's).
 pub const DEPTH: f64 = 265.0;
-/// Its row's middle, and how far above it the legends and the banks' titles are.
+/// Its row's middle, and how far above it the knobs' legends are.
 pub const ROW: f64 = TOP + 142.0;
 const LEGEND_UP: f64 = 109.0;
 /// The drawer's tabs, narrower than the strip's (`super::TAB`) so that DIRECTION's five fit
@@ -632,20 +631,12 @@ fn surfaces(oy: f64, skin: Skin) -> String {
 }
 
 /// The plate's print (the frame's units): the rule between the banks and the knobs, the banks'
-/// titles, the knobs' legends and dials, the readouts' units.
+/// legends, the knobs' legends and dials, the readouts' units.
 fn print_svg(oy: f64, lettering: Lettering) -> String {
     let mut s = Svg(String::new(), lettering);
     let (legend, small) = (lettering.strip_legend(), lettering.strip_small());
     let text = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64| {
-        put!(
-            s,
-            "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}'>{}</text>",
-            N(x),
-            N(y - oy),
-            N(size),
-            colour::LEGEND,
-            t
-        );
+        art::text(s, x, y - oy, t, size, art::Style::Legend, false, "");
     };
     put!(
         s,
@@ -657,7 +648,10 @@ fn print_svg(oy: f64, lettering: Lettering) -> String {
         colour::LEGEND
     );
     for b in ArpBank::ALL {
-        text(&mut s, b.x(), ROW - LEGEND_UP, b.title(), legend);
+        let (_, y, _, _) = b.recess();
+        put!(s, "<g id='arp-bank-{b:?}'>");
+        super::bank_legend(&mut s, b.x(), y - oy, b.title());
+        s.0.push_str("</g>");
     }
     for (k, (u, t)) in UNITS.iter().zip(LEGENDS).enumerate() {
         let x = u + super::UNIT_KNOB;
@@ -680,6 +674,46 @@ fn print_svg(oy: f64, lettering: Lettering) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The banks' legends use GLOBAL's size, print and height above the tabs' recesses.
+    #[test]
+    fn the_banks_are_labelled_as_globals_are() {
+        for lettering in [Lettering::Standard, Lettering::Large] {
+            let tree = usvg::Tree::from_str(
+                &art::document(
+                    [0.0, 0.0, art::W, art::H],
+                    3108,
+                    1775,
+                    &print_svg(0.0, lettering),
+                ),
+                &lower::lettered(),
+            )
+            .expect("the print parses");
+            for bank in ArpBank::ALL {
+                let mut expected = Svg(String::new(), lettering);
+                let (_, y, _, _) = super::super::Bank::Mode.recess();
+                super::super::bank_legend(&mut expected, 0.0, y, bank.title());
+                let reference = usvg::Tree::from_str(
+                    &art::document([0.0, 0.0, art::W, art::H], 3108, 1775, &expected.0),
+                    &lower::lettered(),
+                )
+                .expect("GLOBAL's legend parses");
+                let actual = tree
+                    .node_by_id(&format!("arp-bank-{bank:?}"))
+                    .expect("the bank's legend")
+                    .abs_stroke_bounding_box();
+                let reference = reference.root().abs_stroke_bounding_box();
+                assert!((actual.width() - reference.width()).abs() < 0.001);
+                assert!((actual.height() - reference.height()).abs() < 0.001);
+                let gap = bank.recess().1 - f64::from(actual.bottom());
+                let expected_gap = y - f64::from(reference.bottom());
+                assert!(
+                    (gap - expected_gap).abs() < 0.001,
+                    "{lettering:?} {bank:?}: {gap} / {expected_gap}"
+                );
+            }
+        }
+    }
 
     /// Each tab and readout is found where it is drawn, within the drawer; nothing past its
     /// ends; the units clear of each other and of the rule, the banks before it.
