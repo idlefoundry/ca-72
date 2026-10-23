@@ -353,8 +353,11 @@ fn the_engine_reports_one_latency_in_every_mode() {
 #[test]
 fn the_engine_lines_hi_and_lo_up_with_ultra() {
     // The engine's output in each mode against the voice's own: held back by LINE_UP in HI
-    // and LO, not at all in ULTRA (their latest samples' lag, cross-correlated).
-    let at = (0.25 * RATE) as usize;
+    // and LO, not at all in ULTRA (their latest samples' lag, cross-correlated). The key goes
+    // down within the engine's sleep window (decisions.md R68): a voice at rest from the start
+    // (R-CONTOUR-SETTLE) would otherwise sleep first, its oscillators paused, and play at
+    // another phase than the voice that ran on.
+    let at = (0.02 * RATE) as usize;
     let n = (0.5 * RATE) as usize;
     for (m, q, held) in [
         ("HI", Quality::Potato, LINE_UP.0),

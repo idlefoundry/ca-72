@@ -14496,6 +14496,20 @@ positions (to 0.0001 V; with the switch off they had stood up to 0.1 V low past 
 Patches with DECAY under about 6, or the switch off below 7, are unchanged; the comparison's
 EMPHASIS sweeps (DECAY 9.2 to 9.4) start 20 to 50 cents higher.
 
+**Corrected 2026-10-23, later.** Three things the first version missed, found when the plug-in's
+`latency::the_engine_lines_hi_and_lo_up_with_ultra` failed (it had not been run):
+- **The engine's voices sleep sooner.** A voice at rest from the start is silent and still at
+  once, so the engine lets it sleep after its 50 ms window (R68) where before its contours
+  were still creeping to rest; a key pressed later finds its free-running oscillators where
+  they paused. The sound is the same but for that arbitrary phase. The test, which compares the
+  engine's output with a voice that ran on, now presses its key within the window (20 ms).
+- **The settle's length.** 4 s of contour steps doubled what a clean voice costs to make (the
+  plug-in makes them in the background). Now 0.5 s with the hundredths (50 s of the
+  capacitors' own) and 1.5 s as drawn: 2 s, as before; the rest within 1.6 mV of the 4 s
+  settle's at DECAY 10.
+- **The panel's setup** (`Contours::setup`) and the parts at rest are kept by the panel, not
+  the circuit: both are now worked out again when the settle changes the capacitors.
+
 ## R-LO-CONTOUR. LO's filter contour as the circuit's: its rest, its absorbed charge, its current at the control node
 
 **2026-10-23**, after R-LO-HISS's measures. Through the comparison's slow EMPHASIS 10 sweep
