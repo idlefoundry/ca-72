@@ -14460,3 +14460,22 @@ adjusted for this correction. See [the source calibration](calibration/waveform-
 The original greater-than0.97 travel assertion is unchanged. A regression links the
 normalizer to independently sampled source extrema; the eight continuous-waveform and two
 core allocation tests pass. These are functional checks, not hardware or listening acceptance.
+
+## R-LO-HISS. LO's filter sings from the mixer's own noise, as the circuit's does
+
+**Found 2026-10-23** in the hardware comparison's EMPHASIS 10 sweep. The circuit voice puts
+the mixer's own noise on its bus (`voice::MIXER_HISS`, docs/circuit/assumptions.md A6):
+without it, with nothing on the bus, a self-oscillating filter never starts. LO's bus had
+no such term. With every source off at EMPHASIS 10, HI sang at -24 to -26 dBFS from CUTOFF
+-2 to +4 and LO stayed at its floor (-104 dBFS): a patch that plays the filter alone was
+silent in LO.
+
+LO now adds the same noise in its bus's units (a sawtooth at VOLUME 10 peaks at 1; the
+circuit's bus carries 0.0319 mA RMS for it), from an xorshift of its own seeded with the
+voice, so the noise generator's stream is unchanged: one generator step and one add a
+sample. At EMPHASIS 10 LO's self-oscillation now stands within 7 cents of HI's from 214 Hz
+to 5.3 kHz, and at its level within 0.2 dB (-99 cents at 20 kHz). Left as they were, LO's
+own approximations, measured against HI the same day: at EMPHASIS 8 it rings 2 to 4 dB
+louder and 70 to 80 cents flat; with the filter contour held (SUSTAIN 10, AMOUNT 2.5 to 10)
+it stands 15 to 105 cents sharp; through a slow attack (ATTACK 8 and 9.5) 60 to 110 cents
+behind. Through the comparison's slow sweep that adds up to 150 to 340 cents flat of HI.

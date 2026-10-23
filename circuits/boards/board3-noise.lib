@@ -39,8 +39,9 @@ c18   e4 white 0.15u                ; C18 .15 uF: white noise out
 r16   e4 p1 10k                     ; R16 10K
 c3    p1 n3 0.12u                   ; C3 .12 uF, in series with
 r8    n3 n10 3.3k                   ; R8 3.3K
-c2    p1 n2 0.033u                  ; C2 .033 uF
-r13   n2 n10 220                    ; R13 220
+c2    p1 n2 0.022u                  ; C2 .033 uF drawn; .022 uF as the hardware reference
+r13   n2 n10 510                    ; R13 220 drawn; 510 as the hardware reference
+*                                     (docs/calibration, change 33)
 c1    p1 b3 2.5u                    ; C1 2.5 uF
 r7    b3 y3 560k                    ; R7 560K
 r6    y3 c3n 560k                   ; R6 560K

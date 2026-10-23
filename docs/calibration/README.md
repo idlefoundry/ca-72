@@ -632,6 +632,24 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     (R42); their spectra within 2.4 dB, but Cruising Whistle's, whose self-oscillating
     filter's 2nd harmonic (the 6.35 kHz band) the VCA no longer adds to: 5.9 dB down.
 
+33. **The pink network's upper branch: C2 .033 uF to .022 uF, R13 220 to 510**
+    (`noise::C2`, `noise::R13`, `board3-noise.lib`, board3.md, 2026-10-23). The comparison
+    session of 2026-10-21 (rounds 008 and 009, the EVO4 interface: white and pink noise alone
+    at VOLUME 8, an 8 s gate, 6 s averaged) gives the reference's pink against its white,
+    which cancels the interface. Against the CA-72's, the drawn network left the pink 0.8 dB
+    short at 2 kHz, 1.2 at 3.2, 1.7 at 4, 2.4 at 6.3, 3.0 at 10 and 3.9 at 16, rising
+    smoothly from 1 kHz (the white within 0.3 dB to 10 kHz): its upper branch's zero, at 22
+    kHz, comes too late. In ngspice on the noise bench every single part leaves 0.9 dB RMS or
+    more from 150 Hz to 20 kHz; the branch's two together, at E-series values, .022 uF and
+    510 ohm (its zero at 14 kHz) leave 0.20 dB (.022 uF with 470 or 560: 0.23 and 0.24). Now
+    the pink stands within 0.45 dB of the reference's from 125 Hz to 12.7 kHz, and against
+    the white over the whole band -1.36 dB where the reference's is -1.10 (-2.34 before).
+    The netlist and the model change together; against ngspice the noise keeps its budgets
+    (`noise_realtime`: responses within 0.001 dB, discretised pink within 0.17 dB to 16 kHz).
+    One session's take: the pink of earlier sessions was never recorded. A departure from
+    Moog's schematic. Presets with pink noise (in the mixer, or as MODULATION MIX's noise at
+    WHITE) brighten above 2 kHz by up to 3 dB.
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -687,6 +705,29 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   panel set by ear (+3.4 and -7 cents; Hollow Glider's oscillator 3 -16, as on its take). Presets keep their
   knobs' positions where a law changed: those between a law's ends sound as the reference
   would at those marks (Ladder Kick's sweep, for one, starts about 2 semitones lower).
+- **A slow filter sweep at EMPHASIS 10** (the comparison session's round 048, 2026-10-22: three
+  oscillators on A2, AMOUNT OF CONTOUR 10, filter ATTACK about 9.5, DECAY about 9.2): the
+  CA-72's resonance stands within 20 cents of the reference's below 2.5 kHz and falls behind
+  it above: -30 cents at 4 kHz, -50 to -70 at 7 to 12, -90 to -110 at 16, -140 to -155 at 20
+  to 23, rising and falling alike. HI and ULTRA agree within 25 cents; the oscillators'
+  level changes nothing (the same with them off); a fit of ATTACK, DECAY, SUSTAIN and CUTOFF
+  to the whole trajectory leaves 40 cents RMS. It is not the filter's tracking: session E's
+  self-oscillation under CUT CV stands -12 to -28 cents from 4 to 16 kHz (-77 at 22.9). Nor
+  the contours' shapes: replaying session F, the filter contour's attack fully clockwise
+  rises as the reference's at every fraction (14 % slower throughout: a time, which the knob
+  takes) and its slowest decay falls within 4 %. Open: the contour's path into the filter
+  at large contour voltages. The deciding take: FILT CONT recorded through this phrase, and
+  the filter self-oscillating at AMOUNT 10 with FILTER SUSTAIN stepped 0 to 10.
+- **The self-oscillation's waveform** (session E, EMPHASIS 10, CUT CV stepped, 0.95 to 8
+  kHz): the CA-72's 2nd harmonic -34 dBc against the reference's -38, its 3rd -44 to -46
+  against -43, its 7th 5 dB under; and its level 2.0 to 2.9 dB higher against the passband's
+  1 kHz tone. The comparison session's held resonances show the same (round 048: 2nd +2.7
+  dB, 3rd to 6th 3 to 4 dB under). The output stage's asymmetry or the loop's limiting: to
+  separate.
+- **The thump at a note's end** (the comparison session, every short note with LOUDNESS
+  DECAY at 0): after the release the CA-72's output holds a 10 to 20 Hz transient 15 to 17
+  dB larger than the reference's recording for some 300 ms. That session's interface (EVO4)
+  has an input high-pass of its own, unmeasured: to measure before this counts.
 
 ## Reproducing
 

@@ -908,6 +908,13 @@ pub(crate) fn rect_law(bias: f64) -> (f32, f32) {
     (at(d0, d1), at(l0, l1))
 }
 
+/// The mixer's own noise on the bus in the bus's units, a uniform generator's scale at 48 kHz:
+/// the circuit's [`crate::voice::MIXER_HISS`] against its bus's 0.0319 mA RMS for a sawtooth at
+/// VOLUME 10 (both uniform and sawtooth 1/sqrt(3) of their peak RMS).
+const HISS: f64 = crate::voice::MIXER_HISS / 0.0319e-3;
+/// Its generator's seed, apart from the noise's.
+const HISS_SEED: u32 = 0x6869_7373;
+
 /// White noise (xorshift), and pink and red from it (filtered), with the white's band.
 #[derive(Debug, Clone, Copy)]
 struct Noise {
@@ -1225,6 +1232,10 @@ pub struct Light {
     inv: [f32; 3],
     noise: Noise,
     noise_c: NoiseLaw,
+    /// The mixer's own noise on the bus (the circuit's [`crate::voice::MIXER_HISS`]): its
+    /// generator's state and its scale at the rate. The filter's self-oscillation starts
+    /// from it; without it, nothing on the bus, the ladder never sings.
+    hiss: (u32, f32),
     /// FEEDBACK's cable at the rate, samples.
     feedback_delay: f32,
     /// The output's high-passes (its droop): the filter's coupling and the one after the VCA,
@@ -1343,6 +1354,7 @@ impl Light {
                 pink_lp: 0.0,
             },
             noise_c: NoiseLaw::new(rate),
+            hiss: (HISS_SEED, (HISS * (rate / 48e3).sqrt()) as f32),
             feedback_delay: (interpolate(&laws::FEEDBACK_AT, &laws::FEEDBACK_DELAY, rate)
                 - filter_delay)
                 .max(1.0) as f32,
@@ -1500,6 +1512,8 @@ impl Light {
     pub fn set_seed(&mut self, seed: u64) {
         let s = (seed ^ (seed >> 32)) as u32;
         self.noise.state = if s == 0 { 0x4D6F_6F67 } else { s };
+        let h = s ^ HISS_SEED;
+        self.hiss.0 = if h == 0 { HISS_SEED } else { h };
     }
 
     /// The last sample's MOD share of CONTINUOUS's travel (onward), 0..1 (decisions.md R-CONTINUOUS-WAVE).
@@ -2189,7 +2203,16 @@ impl Light {
             self.pre_hp = (a, pre, y);
             pre = y;
         }
-        let bus = gain[0] * w0 + gain[1] * w1 + gain[2] * w2 + noise_gain * noise + ext_bus * pre;
+        let hiss = {
+            let mut x = self.hiss.0;
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            self.hiss.0 = x;
+            (x as i32 as f32) * (self.hiss.1 / 2_147_483_648.0)
+        };
+        let bus =
+            gain[0] * w0 + gain[1] * w1 + gain[2] * w2 + noise_gain * noise + ext_bus * pre + hiss;
         let mut inputs = [0.0; FILTER_OVERSAMPLE];
         self.filter_up.push(f64::from(bus), &mut inputs);
         let mut filtered = 0.0;
@@ -2883,6 +2906,31 @@ mod tests {
                 "CUTOFF {cutoff}, EMPHASIS {emphasis}: HI {d:+.2} dB against LO"
             );
         }
+    }
+
+    /// With every source off, the filter at EMPHASIS 10 sings from the mixer's own noise as
+    /// the circuit's does (decisions.md R-LO-HISS): at CUTOFF's centre, near the circuit's
+    /// 1056 Hz and its level, where without the noise it stayed silent.
+    #[test]
+    fn the_filter_sings_alone_from_the_mixers_noise() {
+        let mut l = Light::new(48_000.0);
+        let mut p = measuring();
+        for o in &mut p.osc {
+            o.on = false;
+        }
+        p.cutoff = 0.5;
+        p.emphasis = 1.0;
+        l.set_panel(&p);
+        l.note(45, true);
+        run(&mut l, 48_000);
+        let x = run(&mut l, 48_000);
+        let rms = (x.iter().map(|y| y * y).sum::<f64>() / x.len() as f64).sqrt();
+        assert!(rms > 0.05, "the filter alone: RMS {rms:.2e}");
+        let f = hz(&x);
+        assert!(
+            (f / 1056.0).log2().abs() * 1200.0 < 50.0,
+            "the filter alone at {f:.0} Hz"
+        );
     }
 
     /// NOTE PRIORITY (decisions.md R50) as the circuit's voice has it: LOW the lowest

@@ -677,6 +677,9 @@ fn envelope_sequences_match_in_both_clap_dialects_at_every_buffer_size() {
                 for block in [32, 64, 128, 256, 512, 1024, 2048] {
                     let p = envelope_instance(block, mode, priority, retrigger);
                     let state = p.save();
+                    // (Both instances load the state, so that both voices' noise, the mixer's
+                    // own in LO too (decisions.md R-LO-HISS), starts from the same seeding.)
+                    assert!(p.load(&state));
                     let a = render(&p, &midi, 105_600);
                     if let Some(reference) = &reference {
                         // A released POLY voice is retired at a block boundary, so its next
