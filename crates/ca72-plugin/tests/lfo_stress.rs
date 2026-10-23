@@ -6,10 +6,11 @@
 //! 256-frame blocks at 48 kHz, each preset's MIDI phrase, the transport playing.
 //!
 //! - `zipper`: each preset rendered as built (the LFOs moving their knobs every `lfo::STEP`
-//!   samples, 32 or 8) and as a reference with the LFOs every sample
-//!   (`engine::set_modulation_step_for_measurement`, the feature `lfo-lab`), twice: as set, and
-//!   with each LFO's PHASE moved back by the 15.5 samples a 32-sample step holds its value late
-//!   on average (aligned). A render that moves a pitch drifts from the reference in phase (the
+//!   samples, 32, the voices gliding a pitch or CUTOFF across each) and as a reference with the
+//!   LFOs every sample (`engine::set_modulation_step_for_measurement`, the feature `lfo-lab`),
+//!   twice: as set, and with each LFO's PHASE moved back by the 15.5 samples a 32-sample step
+//!   holds its value late on average (aligned; not moved where the voices glide, which are not
+//!   late). A render that moves a pitch drifts from the reference in phase (the
 //!   steps' average pitch is a hair from the smooth one's), so no figure here compares
 //!   waveforms with the reference. Per preset and QUALITY it prints:
 //!   - the peak, and the samples not finite and clipped (`bad`);
@@ -31,7 +32,8 @@
 //!   `CA72_LFO_OUT=<dir>` writes each render and its reference as WAVs there, at one gain a
 //!   preset (the louder's peak at -14 dBFS), and `metrics-<label>.csv`. `CA72_LFO_STEP` renders
 //!   at another step instead of the built one (for measuring the choice). `CA72_LFO_LEGACY=1`
-//!   measures before both fixes (32-sample steps, no output-gain ramp). With
+//!   measures before both fixes (32-sample steps held, no output-gain ramp); `CA72_LFO_GLIDE=0`
+//!   holds each step with the output-gain ramp kept. With
 //!   `CA72_LFO_COMPARE=1`, the WAV gain also includes the other version's peak, giving all
 //!   three versions the same gain when run once with LEGACY and once without it.
 //! - `cost`: each preset's controls in the engine on one thread, no workers, 4 s of its
@@ -645,16 +647,12 @@ fn moves_a_pitch(s: &Sound) -> bool {
     })
 }
 
-/// The step a render of preset `s` at QUALITY `q` moves its knobs by: `tried` where it is not 0,
-/// else as built (`lfo::FAST_STEP` where a pitch or CUTOFF is moved at HI or ULTRA, else
-/// `lfo::STEP`).
-fn step_of(s: &Sound, q: &str, tried: usize) -> usize {
-    if tried != 0 {
-        return tried;
-    }
-    if env("CA72_LFO_LEGACY", 0) != 0 {
-        return STEP;
-    }
+/// The step a render of preset `s` moves its knobs by (`tried` where it is not 0, else
+/// `lfo::STEP`), and how late the knobs are on average against the LFOs every sample: half a
+/// step less a sample where each step is held, none where the voices glide a pitch or CUTOFF
+/// across it (decisions.md R-LFO-STRESS; `CA72_LFO_GLIDE=0` or `CA72_LFO_LEGACY=1` holds it).
+fn step_of(s: &Sound, tried: usize) -> (usize, f64) {
+    let step = if tried != 0 { tried } else { STEP };
     let fast = s.values.iter().any(|(k, v)| {
         *v != 0.0
             && k.starts_with("lfo")
@@ -662,10 +660,11 @@ fn step_of(s: &Sound, q: &str, tried: usize) -> usize {
                 .and_then(|(_, t)| ca72_plugin::lfo::Target::of_id(t))
                 .is_some_and(|t| t.fast())
     });
-    if fast && q != "LO" {
-        ca72_plugin::lfo::FAST_STEP
+    let glides = env("CA72_LFO_GLIDE", 1) != 0 && env("CA72_LFO_LEGACY", 0) == 0;
+    if fast && glides && step > 1 {
+        (step, 0.0)
     } else {
-        STEP
+        (step, (step as f64 - 1.0) / 2.0)
     }
 }
 
@@ -674,6 +673,7 @@ fn step_of(s: &Sound, q: &str, tried: usize) -> usize {
 fn zipper() {
     let legacy = env("CA72_LFO_LEGACY", 0) != 0;
     ca72_plugin::engine::set_modulation_legacy_for_measurement(legacy);
+    ca72_plugin::engine::set_modulation_glide_for_measurement(env("CA72_LFO_GLIDE", 1) != 0);
     let out = std::env::var_os("CA72_LFO_OUT").map(PathBuf::from);
     let label = std::env::var("CA72_LFO_LABEL").unwrap_or_else(|_| "built".into());
     if let Some(d) = &out {
@@ -701,13 +701,13 @@ fn zipper() {
         for (n, s) in presets() {
             // (Half the render's step: the second render's first block that long moves the
             // steps' grid by it. The aligned reference is late by the steps' average delay.)
-            let step = step_of(&s, &q, tried);
+            let (step, late) = step_of(&s, tried);
             let half = (step / 2).max(1);
             let built = render(n, &s, &q, tried, BLOCK);
             let moved = render(n, &s, &q, tried, half);
             let set = render(n, &s, &q, 1, BLOCK);
             let set_moved = render(n, &s, &q, 1, half);
-            let aligned = render(n, &delayed(&s, (step as f64 - 1.0) / 2.0), &q, 1, BLOCK);
+            let aligned = render(n, &delayed(&s, late), &q, 1, BLOCK);
             let (mb, mm, ms, msm, ma) = (
                 mono(&built),
                 mono(&moved),
@@ -884,6 +884,7 @@ fn play(c: &Controls, n: u32, seconds: f64, workers: usize, paced: bool) -> (f64
 #[ignore = "a measurement, run by hand (--features lfo-lab)"]
 fn cost() {
     ca72_plugin::engine::set_modulation_legacy_for_measurement(env("CA72_LFO_LEGACY", 0) != 0);
+    ca72_plugin::engine::set_modulation_glide_for_measurement(env("CA72_LFO_GLIDE", 1) != 0);
     for q in qualities() {
         for (n, s) in presets() {
             if tempo(&s) != 120.0 {
@@ -928,6 +929,7 @@ fn cost() {
 #[ignore = "a measurement, run by hand (--features lfo-lab)"]
 fn paced() {
     ca72_plugin::engine::set_modulation_legacy_for_measurement(env("CA72_LFO_LEGACY", 0) != 0);
+    ca72_plugin::engine::set_modulation_glide_for_measurement(env("CA72_LFO_GLIDE", 1) != 0);
     let workers: usize = env("CA72_WORKERS", AUTO);
     if workers != AUTO {
         ca72_plugin::engine::set_budget_for_measurement(workers);
@@ -961,6 +963,7 @@ fn paced() {
 #[ignore = "a measurement, run by hand (--features lfo-lab)"]
 fn layouts() {
     ca72_plugin::engine::set_modulation_legacy_for_measurement(env("CA72_LFO_LEGACY", 0) != 0);
+    ca72_plugin::engine::set_modulation_glide_for_measurement(env("CA72_LFO_GLIDE", 1) != 0);
     for q in qualities() {
         for (n, s) in presets() {
             let mut none = s.clone();

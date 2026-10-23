@@ -1147,6 +1147,58 @@ pub struct Light {
     limit: (f32, f32, f32),
 }
 
+/// Oscillator `o`'s pitch offset from its key on panel `p`, semitones: its RANGE, its
+/// FREQUENCY's law and TUNE's (none for oscillator 3 free of the keys).
+fn pitch_offset(p: &Panel, o: usize) -> f64 {
+    let cubic = |c: [f64; 4], x: f64| c[0] + x * (c[1] + x * (c[2] + x * c[3]));
+    let range = (2.0 - p.osc[o].range.octaves_below_2()) * 12.0;
+    let x = p.osc[o].freq.clamp(0.0, 1.0);
+    let free = o == 2 && !p.osc3_control;
+    let freq = match o {
+        0 => 0.0,
+        1 => {
+            let at = |x: f64| cubic(laws::OSC2_CENTS, x);
+            (at(x) - at(FREQ_CENTRE)) / 100.0
+        }
+        _ if free => {
+            let quintic = |x: f64| {
+                laws::OSC3_FREE_CENTS
+                    .iter()
+                    .rev()
+                    .fold(0.0, |a, c| a * x + c)
+            };
+            (quintic(x) - quintic(FREQ_CENTRE)) / 100.0
+        }
+        _ => {
+            let at = |x: f64| cubic(laws::OSC3_CENTS, x);
+            (at(x) - at(FREQ_CENTRE)) / 100.0
+        }
+    };
+    let tune = if free {
+        0.0
+    } else {
+        p.tune * laws::TUNE_CENTS / 100.0
+    };
+    range + freq + tune
+}
+
+/// The cutoff's log2 Hz from panel `p`'s CUTOFF.
+fn cutoff_log2(p: &Panel) -> f64 {
+    let knob = p.cutoff.clamp(0.0, 1.0) * 20.0;
+    let i = (knob.floor() as usize).min(19);
+    let a = knob - i as f64;
+    let c = &laws::CUTOFF_LOG2;
+    f64::from(c[i]) + (f64::from(c[i + 1]) - f64::from(c[i])) * a
+}
+
+/// What the light voice reads of panel `p`'s pitches and CUTOFF, after their knobs' laws:
+/// each oscillator's offset from its key, semitones, and the cutoff's log2 Hz. The plug-in's
+/// LFOs glide these across their steps (decisions.md R-LFO-STRESS), as ENTROPY's offsets
+/// ([`Light::set_offsets`]).
+pub fn swept_laws(p: &Panel) -> ([f64; 3], f64) {
+    (std::array::from_fn(|o| pitch_offset(p, o)), cutoff_log2(p))
+}
+
 impl Light {
     /// A voice at `rate` Hz, at rest, with the default panel.
     pub fn new(rate: f64) -> Light {
@@ -1375,33 +1427,9 @@ impl Light {
         }
         self.set_for_panel = true;
         self.panel = *p;
-        let cubic = |c: [f64; 4], x: f64| c[0] + x * (c[1] + x * (c[2] + x * c[3]));
         // (MOD moves a CONTINUOUS shape only with the wheel forward: R-CONTINUOUS-WAVE.)
         let depth = light_depth(p.mod_wheel);
         for o in 0..3 {
-            let range = (2.0 - p.osc[o].range.octaves_below_2()) * 12.0;
-            let x = p.osc[o].freq.clamp(0.0, 1.0);
-            let free = o == 2 && !p.osc3_control;
-            let freq = match o {
-                0 => 0.0,
-                1 => {
-                    let at = |x: f64| cubic(laws::OSC2_CENTS, x);
-                    (at(x) - at(FREQ_CENTRE)) / 100.0
-                }
-                _ if free => {
-                    let quintic = |x: f64| {
-                        laws::OSC3_FREE_CENTS
-                            .iter()
-                            .rev()
-                            .fold(0.0, |a, c| a * x + c)
-                    };
-                    (quintic(x) - quintic(FREQ_CENTRE)) / 100.0
-                }
-                _ => {
-                    let at = |x: f64| cubic(laws::OSC3_CENTS, x);
-                    (at(x) - at(FREQ_CENTRE)) / 100.0
-                }
-            };
             let (wave, shape) = light_shape(o, p, depth);
             self.shape_now[o] = p.shape[o]
                 .continuous
@@ -1417,12 +1445,7 @@ impl Light {
                 )),
             };
             (self.osc[o].duty, self.osc[o].level) = rect_law(bias);
-            let tune = if free {
-                0.0
-            } else {
-                p.tune * laws::TUNE_CENTS / 100.0
-            };
-            self.set.offset[o] = range + freq + tune;
+            self.set.offset[o] = pitch_offset(p, o);
             let source = match wave {
                 Waveform::Triangle => laws::SOURCE_OHMS[0],
                 Waveform::Sawtooth | Waveform::ReverseSawtooth => laws::SOURCE_OHMS[1],
@@ -1485,11 +1508,7 @@ impl Light {
         };
         let t = ext_taper(p.ext_volume);
         self.set.ext_gain = laws::EXT_GAIN * t / (1.0 + laws::EXT_LOAD * t * (1.0 - t));
-        let knob = p.cutoff.clamp(0.0, 1.0) * 20.0;
-        let i = (knob.floor() as usize).min(19);
-        let a = knob - i as f64;
-        let c = &laws::CUTOFF_LOG2;
-        self.set.cutoff = f64::from(c[i]) + (f64::from(c[i + 1]) - f64::from(c[i])) * a;
+        self.set.cutoff = cutoff_log2(p);
         self.set.tracking = match (p.keyboard_control_1, p.keyboard_control_2) {
             (false, false) => 0.0,
             (true, false) => laws::KEYBOARD_CONTROL[0],

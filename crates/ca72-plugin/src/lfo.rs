@@ -63,10 +63,6 @@ pub const RISE_MOST: f32 = 10.0;
 pub const SOFT_EDGE: f64 = 0.002;
 /// How often the modulation reaches the voices, samples: the knobs' glide's step.
 pub const STEP: usize = crate::smooth::STEP;
-/// How often while a source moves a pitch or CUTOFF ([`Target::fast`]) at QUALITY HI or ULTRA,
-/// samples (decisions.md R-LFO-STRESS): at [`STEP`] a fast LFO there is heard as a fizz 1.5 kHz
-/// from the sound, its steps' rate; at 8 that is gone, moved to 6 kHz and a quarter as strong.
-pub const FAST_STEP: usize = 8;
 /// The voices that can each have their own LFOs (POLY's most).
 pub const VOICES: usize = POLY_VOICES.2;
 
@@ -226,7 +222,7 @@ impl Target {
     }
 
     /// Whether its steps are heard at [`STEP`] (decisions.md R-LFO-STRESS): a pitch (TUNE, the
-    /// FREQUENCYs) or CUTOFF, moved by [`FAST_STEP`]s instead at HI and ULTRA.
+    /// FREQUENCYs) or CUTOFF, which the voices glide across each step instead.
     pub fn fast(self) -> bool {
         matches!(
             self,
@@ -1259,7 +1255,8 @@ pub fn source_values(lfos: &[f64; LFOS]) -> [f64; SOURCES] {
 }
 
 impl Lfos {
-    /// Whether any source moves a knob whose steps are heard ([`Target::fast`]).
+    /// Whether any source moves a knob whose steps are heard ([`Target::fast`]): the voices
+    /// then glide it across each step.
     pub fn fast(&self) -> bool {
         self.to
             .iter()
@@ -1419,6 +1416,30 @@ impl Bank {
                 }
             }
         }
+    }
+
+    /// What [`Bank::step`] will give next, on the clock `clock`, `dt` s of slew on, without
+    /// moving it (the generators are functions of their time, EDGES' slew aside: decisions.md
+    /// R-LFO-STRESS): the shared values, and in `voices` the first `n` voices' own.
+    pub fn peek(
+        &self,
+        l: &Lfos,
+        clock: &[Option<f64>; LFOS],
+        dt: f64,
+        n: usize,
+        voices: &mut [[f64; LFOS]; VOICES],
+    ) -> [f64; LFOS] {
+        let n = n.min(VOICES);
+        let mut shared = [0.0; LFOS];
+        for (k, (s, &c)) in l.lfo.iter().zip(clock).enumerate() {
+            shared[k] = { self.shared[k] }.value(s, c, dt);
+            if !s.mono {
+                for (values, gens) in voices[..n].iter_mut().zip(&self.voices[..n]) {
+                    values[k] = { gens[k] }.value(s, c, dt);
+                }
+            }
+        }
+        shared
     }
 
     /// Moved on by `n` samples at `rate` Hz, each LFO at `per[k]` cycles a sample.

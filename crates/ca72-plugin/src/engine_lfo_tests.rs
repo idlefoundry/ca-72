@@ -452,20 +452,24 @@ fn lfo_cost() {
     }
 }
 
-/// A pitch or CUTOFF moved at HI or ULTRA steps every `lfo::FAST_STEP` samples; at LO, and any
-/// other knob anywhere, every `lfo::STEP` (decisions.md R-LFO-STRESS): after 32 samples from a
-/// SAWTOOTH's start, the knob is where the LFO was at the last step's first sample.
+/// Every knob steps every `lfo::STEP` samples at every QUALITY (decisions.md R-LFO-STRESS):
+/// after 32 samples from a SAWTOOTH's start, the knob is where the LFO was at the step's first
+/// sample. A pitch or CUTOFF the voice glides across the step, in what the circuit (HI, ULTRA)
+/// or the light voice (LO) reads after the knob's law, to where the LFO is at the next step's
+/// first sample; any other knob it holds.
 #[test]
-fn a_pitch_or_cutoff_steps_finer_at_hi_and_ultra() {
+fn a_pitch_or_cutoff_glides_across_each_step() {
     const HZ: f64 = 40.0;
-    for (potato, ultra, target, last) in [
-        (false, false, Target::Cutoff, 24),
-        (false, true, Target::Cutoff, 24),
-        (false, false, Target::Tune, 24),
-        (false, false, Target::Osc2Frequency, 24),
-        (true, false, Target::Cutoff, 0),
-        (false, false, Target::Volume, 0),
-        (false, false, Target::Emphasis, 0),
+    for (potato, ultra, target, glides) in [
+        (false, false, Target::Cutoff, true),
+        (false, true, Target::Cutoff, true),
+        (false, false, Target::Tune, true),
+        (false, false, Target::Osc2Frequency, true),
+        (false, true, Target::Osc3Frequency, true),
+        (true, false, Target::Cutoff, true),
+        (true, false, Target::Tune, true),
+        (false, false, Target::Volume, false),
+        (false, false, Target::Emphasis, false),
     ] {
         let c = with(
             Controls {
@@ -481,23 +485,48 @@ fn a_pitch_or_cutoff_steps_finer_at_hi_and_ultra() {
         );
         let mut e = engine(&c);
         key(&mut e, 60, true);
-        let (mut l, mut r) = ([0.0f32; 32], [0.0f32; 32]);
+        let (mut l, mut r) = ([0.0f32; lfo::STEP], [0.0f32; lfo::STEP]);
         e.render(&[], &mut l, &mut r);
-        let value = lfo::wave(2.0, f64::from(last) * HZ / RATE);
-        let want = c
-            .lfo
-            .modulated(&c, &lfo::source_values(&[value, 0.0, 0.0, 0.0]));
+        let at = |i: usize| {
+            let value = lfo::wave(2.0, i as f64 * HZ / RATE);
+            c.lfo
+                .modulated(&c, &lfo::source_values(&[value, 0.0, 0.0, 0.0]))
+        };
+        let (now, next) = (at(0), at(lfo::STEP));
+        let what = format!("{target:?}, potato {potato}, ultra {ultra}");
         assert_eq!(
             (e.controls.panel, e.controls.volume),
-            (want.panel, want.volume),
-            "{target:?}, potato {potato}, ultra {ultra}"
+            (now.panel, now.volume),
+            "{what}"
         );
+        let sweep = e.slots[0].play.try_lock().expect("free").sweep;
+        assert_eq!(sweep.on, glides, "{what}");
+        if !glides {
+            continue;
+        }
+        assert_eq!(sweep.at, lfo::STEP as f64, "{what}");
+        let end = |x: f64, step: f64| x + step * lfo::STEP as f64;
+        let close = |a: f64, b: f64| assert!((a - b).abs() < 1e-12, "{what}: {a} against {b}");
+        let (a, b) = (&now.panel, &next.panel);
+        if potato {
+            let ((pa, ca), (pb, cb)) = (ca72::light::swept_laws(a), ca72::light::swept_laws(b));
+            for o in 0..3 {
+                close(end(pa[o] * 100.0, sweep.cents[o]), pb[o] * 100.0);
+            }
+            close(end(ca, sweep.octaves), cb);
+        } else {
+            let s = sweep.circuit;
+            close(
+                end(cutoff_track(a.cutoff), s.cutoff),
+                cutoff_track(b.cutoff),
+            );
+            close(end(a.tune, s.tune), b.tune);
+            close(end(a.osc[1].freq, s.freq[0]), b.osc[1].freq);
+            close(end(a.osc[2].freq, s.freq[1]), b.osc[2].freq);
+        }
     }
 }
 
-/// VOLUME moved by an LFO reaches the output a sample at a time across each step, in a straight
-/// line from where the gain was to where the step puts it (decisions.md R-LFO-STRESS): EDGES
-/// SOFT's slew is then smooth, not a few clicks. Moved by SHARP LFOs alone, or not moved (an LFO
 /// on CUTOFF), the gain is the step's at once, as before.
 #[test]
 fn volume_moved_by_an_lfo_ramps_a_sample_at_a_time() {

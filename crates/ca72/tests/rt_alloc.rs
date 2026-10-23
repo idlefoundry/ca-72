@@ -100,6 +100,12 @@ fn the_voice_does_not_allocate_while_it_plays() {
             detune: [3.0 * (tau * 0.3 * t).sin(), -2.0, 1.5],
             cutoff: 0.03 * (tau * 0.2 * t).sin(),
             timed: [None; 3],
+            // And the plug-in's LFOs' glides (decisions.md R-LFO-STRESS).
+            swept: ca72::voice::Swept {
+                cutoff: 0.02 * (tau * 9.0 * t).sin(),
+                tune: 0.05 * (tau * 9.0 * t).sin(),
+                freq: [0.01, -0.01],
+            },
         });
     }
     // HI's filter stays oversampled as EMPHASIS crosses the regeneration region.
@@ -164,6 +170,11 @@ fn the_voice_on_threads_does_not_allocate_while_it_plays() {
                     detune: [3.0 * (tau * 0.3 * t).sin(), -2.0, 1.5],
                     cutoff: 0.03 * (tau * 0.2 * t).sin(),
                     timed: [None; 3],
+                    swept: ca72::voice::Swept {
+                        cutoff: 0.02 * (tau * 9.0 * t).sin(),
+                        tune: 0.05 * (tau * 9.0 * t).sin(),
+                        freq: [0.01, -0.01],
+                    },
                 }
             },
             |_, y| sink += y,

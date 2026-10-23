@@ -1032,6 +1032,20 @@ pub struct Jacks {
     pub detune: [f64; 3],
     pub cutoff: f64,
     pub timed: [Option<Timed>; 3],
+    /// The plug-in's LFOs' knobs gliding across their steps ([`Swept`]).
+    pub swept: Swept,
+}
+
+/// The plug-in's (decisions.md R-LFO-STRESS): how far the knobs an LFO moves have gone since
+/// its last step, added where the circuit reads them, so that they glide in a straight line
+/// from one step's value to the next instead of stepping: CUTOFF's wiper (a share of its
+/// track), TUNE (its -1..1) and oscillators 2's and 3's FREQUENCY wipers, after their knobs'
+/// laws. All 0: the panel's own, to the bit.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Swept {
+    pub cutoff: f64,
+    pub tune: f64,
+    pub freq: [f64; 2],
 }
 
 /// The volts an octave at a 100K input to the filter's control node, as R51 (the FILTER
@@ -2410,16 +2424,28 @@ impl FrontPart {
                 // resets on the host's clock, none of its pitch inputs or ENTROPY in it.
                 Some(t) if op.range == Range::Lo => self.vcos[n].tick_timed(t, width),
                 _ => {
+                    // (An LFO's knobs where they have glided to since its step: R-LFO-STRESS.)
+                    let freq = match n {
+                        1 | 2 if j.swept.freq[n - 1] != 0.0 => {
+                            op.freq.clamp(0.0, 1.0) + j.swept.freq[n - 1]
+                        }
+                        _ => op.freq,
+                    };
                     let osc = match n {
                         0 => Osc::One,
-                        1 => Osc::Two { freq: op.freq },
+                        1 => Osc::Two { freq },
                         _ => Osc::Three {
-                            freq: op.freq,
+                            freq,
                             control: p.osc3_control,
                         },
                     };
                     let mut tuning = self.tunings[n];
-                    tuning.tune += p.tune.clamp(-1.0, 1.0) * TUNE_HALF_SPAN;
+                    let tune = if j.swept.tune != 0.0 {
+                        p.tune.clamp(-1.0, 1.0) + j.swept.tune
+                    } else {
+                        p.tune.clamp(-1.0, 1.0)
+                    };
+                    tuning.tune += tune * TUNE_HALF_SPAN;
                     let mut d = osc_drive_with(osc, &tuning, v_kbd, &buses, op.range);
                     if j.detune[n] != 0.0 {
                         // ENTROPY (the plug-in's): the oscillator off its calibration, as an
@@ -2479,7 +2505,11 @@ impl FrontPart {
         // The filter's control node: CUTOFF, AMOUNT OF CONTOUR, KEYBOARD CONTROL 1 and 2,
         // R52 (the modulation line with FILTER MODULATION on, else grounded) and R51 (the
         // external control's jack, empty: grounded).
-        let pos = cutoff_track(p.cutoff);
+        let pos = if j.swept.cutoff != 0.0 {
+            (cutoff_track(p.cutoff) + j.swept.cutoff).clamp(0.0, 1.0)
+        } else {
+            cutoff_track(p.cutoff)
+        };
         let r_cut = 200e3 + 5e3 * pos * (1.0 - pos);
         let amt = p.contour_amount.clamp(0.0, 1.0);
         let open = Input {
