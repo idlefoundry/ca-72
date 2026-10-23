@@ -729,8 +729,24 @@ impl Contours {
         (qa, da)
     }
 
-    /// Settles every state at rest (no key) for these settings.
+    /// Settles every state at rest (no key) for these settings. Where a timing capacitor
+    /// rests does not depend on its capacitance, but with DECAY near its top it gets there
+    /// over tens of seconds (its 10 uF through about a megohm): in 2 s it stood a third of a
+    /// volt short (-0.33 V at DECAY 10 against the +0.143 its own release reaches). So first
+    /// with the timing capacitors and their absorption a hundredth of their value, then as
+    /// they are.
     pub fn settle(&mut self, panel: &Panel) {
+        let drawn = self.circuit;
+        for s in [&mut self.circuit.filter, &mut self.circuit.loudness] {
+            s.c *= 0.01;
+            for b in &mut s.absorption {
+                b.0 *= 0.01;
+            }
+        }
+        for _ in 0..(2.0 / self.h) as usize {
+            self.tick(false, panel);
+        }
+        self.circuit = drawn;
         for _ in 0..(2.0 / self.h) as usize {
             self.tick(false, panel);
         }

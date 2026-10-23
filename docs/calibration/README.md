@@ -724,10 +724,15 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   1 kHz tone. The comparison session's held resonances show the same (round 048: 2nd +2.7
   dB, 3rd to 6th 3 to 4 dB under). The output stage's asymmetry or the loop's limiting: to
   separate.
-- **The thump at a note's end** (the comparison session, every short note with LOUDNESS
-  DECAY at 0): after the release the CA-72's output holds a 10 to 20 Hz transient 15 to 17
-  dB larger than the reference's recording for some 300 ms. That session's interface (EVO4)
-  has an input high-pass of its own, unmeasured: to measure before this counts.
+- **The thump at a note's end** (the comparison session, 2026-10-22: every short note with
+  LOUDNESS DECAY at 0 left a 10 to 20 Hz transient 15 to 17 dB larger than the reference's
+  recording). Mostly that session's interface (EVO4): a second-order high-pass at 4 to 6 Hz
+  on the CA-72's renders brings its thump to the recording's in four takes (the mismatch from
+  4.6 to 27 times the reference's thump to 0.3 to 1.0). On the MOTU (its 0.94 Hz high-pass
+  measured, session B) the CA-72's release thump stands 0.76 of its onset's against the
+  reference's 0.42 in session B's bare gates, but 0.68 against 0.70 in session F's take 18,
+  and the VCA balance trims, which set the onset's, move the ratio only between 0.68 and 0.90:
+  no circuit change until a loopback measures the EVO4's own low end.
 
 ## Reproducing
 

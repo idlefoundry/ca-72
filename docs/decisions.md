@@ -14479,3 +14479,51 @@ own approximations, measured against HI the same day: at EMPHASIS 8 it rings 2 t
 louder and 70 to 80 cents flat; with the filter contour held (SUSTAIN 10, AMOUNT 2.5 to 10)
 it stands 15 to 105 cents sharp; through a slow attack (ATTACK 8 and 9.5) 60 to 110 cents
 behind. Through the comparison's slow sweep that adds up to 150 to 340 cents flat of HI.
+
+## R-CONTOUR-SETTLE. A model fault: the contours' rest at power-on with a long DECAY
+
+**Found 2026-10-23.** A voice's contours start where `Contours::settle` leaves them: the
+circuit run with no key for 2 s. With the DECAY switch on and DECAY past about 6, the timing
+capacitor rests through DECAY's pot over tens of seconds, and 2 s left it short: at DECAY 7 the
+filter contour started at -0.11 V, at 10 at -0.34 V, where the circuit's own release settles
+(+0.143 V at every DECAY; the hardware reference's FILT CONT jack reads 0.29 V at rest, its
+buffer 0.14 V over the circuit: docs/calibration change 21). A fresh voice with a long DECAY
+therefore began its first filter sweep up to 0.47 V low, about an octave at AMOUNT OF
+CONTOUR 10. Where a capacitor rests does not depend on its capacitance, so `settle` now runs
+2 s with the timing capacitors and their absorption a hundredth of their value, then 2 s as
+they are. Fresh contours now rest where the release settles at every DECAY and both switch
+positions (to 0.0001 V; with the switch off they had stood up to 0.1 V low past DECAY 7).
+Patches with DECAY under about 6, or the switch off below 7, are unchanged; the comparison's
+EMPHASIS sweeps (DECAY 9.2 to 9.4) start 20 to 50 cents higher.
+
+## R-LO-CONTOUR. LO's filter contour as the circuit's: its rest, its absorbed charge, its current at the control node
+
+**2026-10-23**, after R-LO-HISS's measures. Through the comparison's slow EMPHASIS 10 sweep
+(ATTACK 9.5, DECAY 9.2, AMOUNT 10) LO stood 200 to 280 cents flat of HI. Three causes, each
+measured against HI (`crates/ca72/tests/lo_contour_probe.rs`, ignored diagnostics):
+
+- **Where the contour rests.** LO started every contour at one fixed level (`REST`, 0.074 V);
+  the circuit's rests where its release settles, which DECAY and the switch set (R-CONTOUR-
+  SETTLE). LO now starts, and waits, at its release level (`RELEASED`, `RELEASED_OFF`), the
+  circuit's to 0.01 V.
+- **The absorbed charge.** HI's timing capacitors carry three absorption branches
+  (`contour::C_ABSORPTION`, fitted to the hardware reference in session M): after a fast
+  attack they pull the contour down 0.25 V within 20 ms; after a slow one they are charged and
+  slow the decay. LO had none, and its decay's fall term (`DECAY_FALL`) stood in for the sag,
+  so after a slow attack it decayed too fast (0.06 to 0.09 V low through the sweep's fall).
+  LO now carries the same three branches (a multiply-add each a sample), its time constants
+  the capacitor's own (`ABSORB_TIME_SCALE`: ATTACK 0.885, DECAY 0.85, release 0.8933 of the
+  laws' times) and no fall term: its decay times from DECAY 6 to 10 within 1 % of HI's at 25,
+  50, 75 and 90 %, its attack's within 0.5 to 1.7 %, the sweep's contour within 0.04 V.
+  `the_contours_follow_the_references_laws` now holds the circuit's current numbers (half way
+  0.355 s and nine tenths 1.297 s at DECAY 6; plateau 0.666 s at ATTACK 6).
+- **The contour at the control node.** LO added the contour as octaves, a fixed 2.10 a volt
+  from its rest times a coarse AMOUNT table. The circuit's control node sums currents into its
+  SCALE network: CUTOFF's (±10 V through R55) and the contour's (through AMOUNT's wiper and
+  R74). LO now does the same: CUTOFF's current at each point of its table (`knob_current`),
+  the contour's added (`contour_current`, the circuit's AMOUNT law), the pitch read from the
+  same table at the sum (`node_log2`), so the contour bends where the converter does at the
+  bottom. With the contour held (SUSTAIN 0 to 10, AMOUNT 2.5 to 10) LO stands within 18 to 21
+  cents RMS of HI at CUTOFF -4 and -2 (81 and 94 before).
+
+Through the sweep LO now stands -65 to +51 cents from HI (-200 to -280 before).

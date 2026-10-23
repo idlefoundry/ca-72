@@ -24,7 +24,8 @@ use crate::vco::Timed;
 use crate::voice::OscPanel;
 use crate::voice::{
     ContourKnobs, FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, Panel, Priority,
-    Waveform, emphasis_r14, ext_taper, glide_r, sustain_track, time_pot, volume_track,
+    Waveform, contour_amount_track, cutoff_track, emphasis_r14, ext_taper, glide_r, sustain_track,
+    time_pot, volume_track,
 };
 
 /// Samples between the control laws' updates.
@@ -168,10 +169,6 @@ pub mod laws {
     /// (36, where the keyboard's voltage is 0).
     pub const KEYBOARD_CONTROL: [f64; 3] = [0.3276, 0.6486, 0.9555];
     pub const TRACKING_FROM: f64 = 36.0;
-    /// AMOUNT OF CONTOUR: octaves a volt of the filter contour above its rest at 10, and the
-    /// share at 0, 2.5, 5, 7.5 and 10.
-    pub const CONTOUR_OCTAVES_PER_VOLT: f64 = 2.10;
-    pub const AMOUNT: [f64; 5] = [0.0, 0.192, 0.487, 0.778, 1.0];
     /// EMPHASIS: the loop's gain (4 rings; times `LOOP_SCALE`) at these positions of the knob
     /// drawn with the generic taper (below), for cutoffs of 60, 87, 228, 912 and 3731 Hz (log2
     /// below; between them interpolated, beyond them held): fitted to the drawn circuit's
@@ -279,10 +276,15 @@ pub mod laws {
         [(1.114_91, 1.007_46, 0.0007), (1.115_32, 1.003_32, 0.0008)];
     pub const DECAY_TIME: [(f64, f64, f64); 2] =
         [(1.168, 1.000_67, 0.0003), (1.167, 1.000_55, 0.0003)];
-    /// DECAY from the peak faster the further it has to fall (the circuit's through its
-    /// diodes): its rate times 1 + this times the volts to go (filter, loudness); its 50, 90
-    /// and 99 % times so within 2 % of the circuit's (one exponential's 4 to 6 % apart).
-    pub const DECAY_FALL: [f64; 2] = [0.05, 0.035];
+    /// DECAY from the peak faster the further it has to fall: its rate times 1 + this times
+    /// the volts to go (filter, loudness). It stood in for the absorbed charge's sag after a
+    /// fast attack (0.05 and 0.035); with that charge modelled (`Contour::absorbed`) the
+    /// circuit's decay is one exponential again, within 0.03 V over 30 s at DECAY 7 to 10.
+    pub const DECAY_FALL: [f64; 2] = [0.0, 0.0];
+    /// The contour's capacitor's own share of [`ATTACK_TIME`], [`DECAY_TIME`] and
+    /// [`RELEASE_TIME`] (the rest its absorbed charge's: `Contour::absorbed`), fitted to the
+    /// circuit's slow attacks and decays (decisions.md R-LO-CONTOUR).
+    pub const ABSORB_TIME_SCALE: [f64; 3] = [0.885, 0.85, 0.8933];
     pub const RELEASE_TIME: [(f64, f64, f64); 2] =
         [(1.119_76, 1.002_92, 0.0003), (1.123_86, 1.004_29, 0.0003)];
     /// SUSTAIN's level, V: a cubic in the pot's track (voice.rs's `sustain_track`; filter,
@@ -548,6 +550,40 @@ fn channel(volume: f64, source: f64, series: f64) -> f32 {
         (down / (up + down)) / (up * down / (up + down) + series)
     };
     (law(volume, source) / law(1.0, laws::SOURCE_OHMS[1])) as f32
+}
+
+/// The filter's control node takes currents into its SCALE network (about 2.1K, against
+/// which the panel's 33K to 300K hardly load it): CUTOFF's, from its wiper (the hardware
+/// reference's track, `cutoff_track`) across +-10 V through R55 200K, A.
+fn knob_current(cutoff: f64) -> f64 {
+    let w = cutoff_track(cutoff);
+    (-10.0 + 20.0 * w) / (200e3 + 5e3 * w * (1.0 - w))
+}
+
+/// The filter contour's current into the control node, A a volt of contour: AMOUNT OF
+/// CONTOUR's wiper (the hardware reference's track, [`contour_amount_track`]) through R74
+/// with the pot's own resistance in series ([`crate::voice::contour_input`]).
+fn contour_current(amount: f64) -> f64 {
+    let t = contour_amount_track(amount);
+    t / (crate::vcf::R74 + 5e3 * t * (1.0 - t))
+}
+
+/// The ladder's log2 pitch for a current into the control node: [`laws::CUTOFF_LOG2`] at
+/// CUTOFF's own currents (`at`, [`knob_current`] at each of its points), straight between
+/// them, beyond its ends at their slopes. So the contour moves the filter as CUTOFF would by
+/// the same current, as in the circuit, where the converter's law is not exponential at the
+/// bottom.
+fn node_log2(at: &[f64; 21], current: f64) -> f64 {
+    let c = &laws::CUTOFF_LOG2;
+    let k = match at.iter().position(|&a| a > current) {
+        Some(0) => 0,
+        Some(k) => k - 1,
+        None => 19,
+    }
+    .min(19);
+    let (x0, x1) = (at[k], at[k + 1]);
+    let (y0, y1) = (f64::from(c[k]), f64::from(c[k + 1]));
+    y0 + (y1 - y0) * (current - x0) / (x1 - x0)
 }
 
 /// The keys as the engine plays them: which are held (a bit a MIDI note), lowest first.
@@ -1041,6 +1077,8 @@ impl Ladder {
 #[derive(Debug, Clone, Copy)]
 struct Contour {
     volts: f64,
+    /// The timing capacitor's absorbed charge: each of its three branches' voltage.
+    absorbed: [f64; 3],
     attacking: bool,
     /// Never yet started (it rests where power-on left it).
     fresh: bool,
@@ -1057,8 +1095,11 @@ struct ContourLaw {
     stop: f64,
     sustain: f64,
     released: f64,
-    rest: f64,
     fall: f64,
+    /// The dielectric absorption's branches ([`crate::contour::C_ABSORPTION`] across the
+    /// timing capacitor's 10 uF): each one's share of a sample's settling toward the
+    /// capacitor, and the shares of what moves that the capacitor and the branch take.
+    absorb: [(f64, f64, f64); 3],
 }
 
 impl ContourLaw {
@@ -1089,25 +1130,34 @@ impl ContourLaw {
             )
         };
         let per = |tau: f64| 1.0 - (-1.0 / (tau * rate)).exp();
+        // (The laws' times are the capacitor's with its absorbed charge; the branches below
+        // carry that, so the capacitor's own are this much shorter.)
+        let [ka, kd, kr] = laws::ABSORB_TIME_SCALE;
+        let c = crate::contour::FILTER_SECTION.c;
+        let absorb = crate::contour::C_ABSORPTION.map(|(ck, rk)| {
+            let tau = rk * c * ck / (c + ck);
+            (per(tau), ck / (c + ck), c / (c + ck))
+        });
         ContourLaw {
-            attack: per(tau_a),
-            decay: per(time(laws::DECAY_TIME[which], r_decay)),
-            release: per(tau_r),
+            attack: per(tau_a * ka),
+            decay: per(time(laws::DECAY_TIME[which], r_decay) * kd),
+            release: per(tau_r * kr),
             aim,
             stop: peak - (aim - peak) * laws::ATTACK_ESR[which] / tau_a,
             sustain: c0 + s * (c1 + s * (c2 + s * c3)),
             released,
-            rest,
             fall: laws::DECAY_FALL[which],
+            absorb,
         }
     }
 }
 
 impl Contour {
-    /// At rest: as the circuit's from power-on (a release leaves it a little higher).
+    /// At rest: where the circuit's rests with these settings (its DECAY and the switch).
     fn at_rest(law: &ContourLaw) -> Contour {
         Contour {
-            volts: law.rest,
+            volts: law.released,
+            absorbed: [law.released; 3],
             attacking: false,
             fresh: true,
         }
@@ -1131,9 +1181,20 @@ impl Contour {
                 let to_go = self.volts - law.sustain;
                 self.volts -= to_go * law.decay * (1.0 + law.fall * to_go);
             }
-        } else if !self.fresh {
+        } else if self.fresh {
+            // (Never started: where the circuit rests with these settings.)
+            self.volts = law.released;
+            self.absorbed = [law.released; 3];
+            return self.volts;
+        } else {
             self.attacking = false;
             self.volts += (law.released - self.volts) * law.release;
+        }
+        // The absorbed charge catching up with the capacitor, or giving itself back.
+        for (u, &(a, to_c, to_u)) in self.absorbed.iter_mut().zip(&law.absorb) {
+            let e = (self.volts - *u) * a;
+            self.volts -= e * to_c;
+            *u += e * to_u;
         }
         self.volts
     }
@@ -1150,8 +1211,9 @@ struct Setting {
     gain: [f32; 3],
     noise: f32,
     ext: f32,
-    /// The cutoff's log2 Hz from CUTOFF, the keys' share, AMOUNT OF CONTOUR's octaves a
-    /// volt, EMPHASIS's loop gain at each of [`laws::LOOP_AT_LOG2`]'s cutoffs.
+    /// CUTOFF's current into the control node (A), the keys' share (octaves an octave),
+    /// AMOUNT OF CONTOUR's current a volt of the filter contour (A), EMPHASIS's loop gain at
+    /// each of [`laws::LOOP_AT_LOG2`]'s cutoffs.
     cutoff: f64,
     tracking: f64,
     contour: f64,
@@ -1277,6 +1339,10 @@ pub struct Light {
     /// ENTROPY's offsets: each oscillator's cents and the cutoff's octaves.
     detune: [f64; 3],
     cutoff_offset: f64,
+    /// CUTOFF's currents at its table's points ([`node_log2`]), and the control node's log2
+    /// pitch at the last control step.
+    cutoff_at: [f64; 21],
+    node_log2: f64,
     /// Each oscillator timed: where its cycle stands on the host's clock (decisions.md
     /// R-OSC-TIMED), for the samples that follow; its latest reset while timed, in samples as
     /// [`Light::probe_resets`] counts them, and how many there have been.
@@ -1406,6 +1472,8 @@ impl Light {
             count: 0,
             detune: [0.0; 3],
             cutoff_offset: 0.0,
+            cutoff_at: core::array::from_fn(|i| knob_current(i as f64 / 20.0)),
+            node_log2: f64::from(laws::CUTOFF_LOG2[20]),
             timed: [None; 3],
             timed_resets: [(0.0, 0); 3],
             osc3: 0.0,
@@ -1645,23 +1713,14 @@ impl Light {
         };
         let t = ext_taper(p.ext_volume);
         self.set.ext_gain = laws::EXT_GAIN * t / (1.0 + laws::EXT_LOAD * t * (1.0 - t));
-        let knob = p.cutoff.clamp(0.0, 1.0) * 20.0;
-        let i = (knob.floor() as usize).min(19);
-        let a = knob - i as f64;
-        let c = &laws::CUTOFF_LOG2;
-        self.set.cutoff = f64::from(c[i]) + (f64::from(c[i + 1]) - f64::from(c[i])) * a;
+        self.set.cutoff = knob_current(p.cutoff.clamp(0.0, 1.0));
         self.set.tracking = match (p.keyboard_control_1, p.keyboard_control_2) {
             (false, false) => 0.0,
             (true, false) => laws::KEYBOARD_CONTROL[0],
             (false, true) => laws::KEYBOARD_CONTROL[1],
             (true, true) => laws::KEYBOARD_CONTROL[2],
         };
-        self.set.contour = laws::CONTOUR_OCTAVES_PER_VOLT
-            * interpolate(
-                &[0.0, 0.25, 0.5, 0.75, 1.0],
-                &laws::AMOUNT,
-                p.contour_amount,
-            );
+        self.set.contour = contour_current(p.contour_amount);
         // (EMPHASIS as the knob drawn with its generic taper would set R14.)
         let emphasis = 1.0 - (1.0 + 80.0 * emphasis_r14(p.emphasis) / 50e3).ln() / 81f64.ln();
         self.set.corner = ((0.744 - emphasis) / 0.044).clamp(0.0, 1.0);
@@ -1921,12 +1980,15 @@ impl Light {
             self.dt_step[o] = (to - self.dt[o]) / CONTROL_EVERY as f32;
             self.inv[o] = 1.0 / to.max(1e-9);
         }
+        self.node_log2 = node_log2(
+            &self.cutoff_at,
+            self.set.cutoff + self.set.contour * self.filter_volts,
+        );
         let (g, k) = self.coefficients(0.0);
         self.g_step = (g - self.g) / CONTROL_EVERY as f32;
         self.k = k;
-        let log2 = self.set.cutoff
+        let log2 = self.node_log2
             + self.set.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0
-            + self.set.contour * (self.filter_volts - self.set.contours[0].rest)
             + self.cutoff_offset;
         // The passband at this cutoff.
         let pass = interpolate(&laws::PASS_AT_LOG2, &laws::PASS_DB, log2);
@@ -1949,10 +2011,8 @@ impl Light {
     #[inline(always)]
     fn coefficients(&self, extra: f64) -> (f32, f32) {
         let s = &self.set;
-        let rise = self.filter_volts - s.contours[0].rest;
-        let log2 = s.cutoff
+        let log2 = self.node_log2
             + s.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0
-            + s.contour * rise
             + self.cutoff_offset
             + extra;
         let corner = interpolate(&laws::CORNER_AT_LOG2, &laws::CORNER, log2) * s.corner
@@ -2711,9 +2771,9 @@ mod tests {
     }
 
     /// The contours' times through the reference's laws (voice.rs's `time_pot`), as the
-    /// circuit's: ATTACK 6 takes the loudness contour to its plateau in 0.665 s (the circuit's
-    /// 0.6645), DECAY 6 the filter contour half way down from it in 0.36 to 0.38 s (0.363)
-    /// and nine tenths in 1.27 to 1.33 s (1.304; one exponential through both, 1.25),
+    /// circuit's: ATTACK 6 takes the loudness contour to its plateau in 0.661 s (the circuit's
+    /// 0.666), DECAY 6 the filter contour half way down from it in 0.345 to 0.365 s (0.355)
+    /// and nine tenths in 1.26 to 1.33 s (1.297; with the absorbed charge, R-LO-CONTOUR),
     /// SUSTAIN 5 holds the loudness contour at 1.675 V; and a fast attack stops short of the
     /// plateau, as the circuit's does (ATTACK 0: 4.685 V, against 4.792).
     #[test]
@@ -2753,14 +2813,17 @@ mod tests {
         }
         assert!((peak - 4.685).abs() < 0.01, "ATTACK 0's peak {peak} V");
         assert!(
-            (at - 0.6645).abs() < 0.01,
+            (at - 0.666).abs() < 0.01,
             "ATTACK 6 to its plateau in {at} s"
         );
         let half = half.expect("no decay") - 0.0086;
-        assert!((0.36..0.38).contains(&half), "DECAY 6 half way in {half} s");
+        assert!(
+            (0.345..0.365).contains(&half),
+            "DECAY 6 half way in {half} s"
+        );
         let ninety = ninety.expect("no decay") - 0.0086;
         assert!(
-            (1.27..1.33).contains(&ninety),
+            (1.26..1.33).contains(&ninety),
             "DECAY 6 nine tenths in {ninety} s"
         );
         p.loudness_contour.sustain = 0.5;
