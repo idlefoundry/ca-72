@@ -650,6 +650,22 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     Moog's schematic. Presets with pink noise (in the mixer, or as MODULATION MIX's noise at
     WHITE) brighten above 2 kHz by up to 3 dB.
 
+34. **The preamplifier's FEEDBACK loop: C23 .1 uF to 82 nF, its positive supply +10 to +13 V**
+    (`preamp::C23`, `preamp::V_POS`, `board4-preamp.lib` and its bench, board4.md B4-11,
+    2026-10-23). After R-FEEDBACK-LOOP closed ULTRA's loop at one rate, one FEEDBACK (2.632)
+    matched the comparison's EXT. INPUT VOLUME 0, 5, 8 and 10 takes (rounds 049 to 052), but at
+    10 the loop's own oscillation, which carries the sound there, ran 150 cents low and with
+    too little even harmonic: EXT 10's 99 to 198 Hz bands 4 to 7 dB short. Round 053 recorded
+    the loop alone (the oscillators and noise off, A4 held 8 s three times; the three holds
+    alike within 0.1 Hz). Fitted to it, the rate by C23 and the even harmonics by the clip's
+    asymmetry (B4-11). Against the takes, ULTRA, FEEDBACK 2.632: EXT 0, 5 and 8 unchanged
+    (2.43, 2.42 and 3.14 dB at CUTOFF +2.679); EXT 10 2.83 at CUTOFF +2.15 (3.24 before at its
+    best, +2.30), its bands from 99 Hz to 16 kHz within 1 dB on the first two notes. HI's
+    preamplifier models (`preamp::Plain`, `Delayed`) take the same C23 and clip at +12.9 V.
+    LO's preamplifier (a symmetric clip in `light.rs`) is not changed. A departure from
+    Moog's schematic, for the reference's: only EXTERNAL INPUT's sound moves, and only where
+    its preamplifier clips or below 20 Hz.
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -668,6 +684,12 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   reference's -53.6 to -45.3 (at 0.01 to 0.1 of full scale), where with the filter open it
   is within 0.9 dB: the VCA's 3rd harmonic and the filter's meet at another phase, and the
   CA-72's peak stands 16 Hz under the reference's sine.
+- **FEEDBACK's lock on a high note** (change 34, 2026-10-23): at EXT. INPUT VOLUME 10 the
+  loop's own oscillation locks to a whole fraction of the note (A2 / 2, A3 / 4 and A4 / 8:
+  55.3 Hz, in both). On round 052's A4 the reference's slips 0.7 s in to A4 / 7 (63.2 Hz,
+  +231 cents); the CA-72's holds A4 / 8 at the CUTOFF that matches its brightness and slips
+  as the reference's does only at +2.9, 3.8 dB too bright. One take: whether the reference
+  slips every time is not yet recorded.
 - **EMPHASIS's peak against its passband:** at the same passband loss the CA-72's peak
   stands 1 to 1.5 dB higher than the reference's (+14.7 to +15.3 dB at 6 against +13.9 to
   +14.3; +21.1 to +22.3 at 7 against +19.4 to +21.3), and at 7.5, near regeneration, up to 5
