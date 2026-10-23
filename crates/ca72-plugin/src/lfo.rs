@@ -63,6 +63,11 @@ pub const RISE_MOST: f32 = 10.0;
 pub const SOFT_EDGE: f64 = 0.002;
 /// How often the modulation reaches the voices, samples: the knobs' glide's step.
 pub const STEP: usize = crate::smooth::STEP;
+/// How far an LFO's value halfway across a step may stand off the straight line between the
+/// step's ends (its -1..1) before the step counts as jumping (decisions.md R-LFO-STRESS): a
+/// SHARP edge or a cycle's restart within it, which the voices then hold to the next step
+/// instead of gliding through. A TRIANGLE's corner stands off by its rate over 750 Hz.
+pub const JUMP: f64 = 0.25;
 /// The voices that can each have their own LFOs (POLY's most).
 pub const VOICES: usize = POLY_VOICES.2;
 
@@ -1418,24 +1423,33 @@ impl Bank {
         }
     }
 
-    /// What [`Bank::step`] will give next, on the clock `clock`, `dt` s of slew on, without
-    /// moving it (the generators are functions of their time, EDGES' slew aside: decisions.md
-    /// R-LFO-STRESS): the shared values, and in `voices` the first `n` voices' own.
-    pub fn peek(
+    /// What each LFO's value will be `n` samples on (`per[k]` cycles a sample, at `rate` Hz, on
+    /// the clock `clock` there), without moving it: the generators are functions of their time,
+    /// EDGES' slew aside (decisions.md R-LFO-STRESS). The shared values, and in `voices` the
+    /// first `m` voices' own.
+    #[allow(clippy::too_many_arguments)]
+    pub fn ahead(
         &self,
         l: &Lfos,
+        per: &[f64; LFOS],
         clock: &[Option<f64>; LFOS],
-        dt: f64,
         n: usize,
+        rate: f64,
+        m: usize,
         voices: &mut [[f64; LFOS]; VOICES],
     ) -> [f64; LFOS] {
-        let n = n.min(VOICES);
+        let (dt, m) = (1.0 / rate, m.min(VOICES));
+        let at = |g: &Gen, s: &Settings, k: usize| {
+            let mut g = *g;
+            g.advance(s, per[k], n, dt);
+            g.value(s, clock[k], n as f64 * dt)
+        };
         let mut shared = [0.0; LFOS];
-        for (k, (s, &c)) in l.lfo.iter().zip(clock).enumerate() {
-            shared[k] = { self.shared[k] }.value(s, c, dt);
+        for (k, s) in l.lfo.iter().enumerate() {
+            shared[k] = at(&self.shared[k], s, k);
             if !s.mono {
-                for (values, gens) in voices[..n].iter_mut().zip(&self.voices[..n]) {
-                    values[k] = { gens[k] }.value(s, c, dt);
+                for (values, gens) in voices[..m].iter_mut().zip(&self.voices[..m]) {
+                    values[k] = at(&gens[k], s, k);
                 }
             }
         }

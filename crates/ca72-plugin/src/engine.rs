@@ -1746,7 +1746,8 @@ pub struct Engine {
 
 /// Where the LFOs will have the knobs at the next step (decisions.md R-LFO-STRESS): whether the
 /// voices glide to it, over how many of their samples, the engine's panel there and the LFOs'
-/// values there, shared and each voice's own.
+/// values there, shared and each voice's own; and whether the step jumps (a SHARP edge in it,
+/// [`crate::lfo::JUMP`]), the shared LFOs' and each voice's own, which then hold the step.
 #[derive(Debug, Clone, Default)]
 struct Ahead {
     on: bool,
@@ -1754,6 +1755,8 @@ struct Ahead {
     panel: Panel,
     shared: [f64; crate::lfo::LFOS],
     voices: [[f64; crate::lfo::LFOS]; crate::lfo::VOICES],
+    jumps: bool,
+    voice_jumps: [bool; crate::lfo::VOICES],
 }
 
 impl Default for Engine {
@@ -2248,6 +2251,30 @@ impl Engine {
         let (per, clock) = crate::lfo::Bank::clock(l, &self.position, self.since, rate);
         let voices = if self.many() { self.slots.len() } else { 1 };
         self.bank.step(l, &clock, self.lfo_dt, voices);
+        // (A pitch or CUTOFF moved: where the next step will have the knobs, which the voices
+        // glide to across this one's samples, unless a SHARP edge in it holds it: an LFO's value
+        // halfway across off the line between its ends, R-LFO-STRESS.)
+        let glides = n > 1 && l.fast() && modulation_glides() && !self.rest.asleep;
+        if glides {
+            use crate::lfo::{Bank, JUMP, LFOS};
+            let at = |k: usize| Bank::clock(l, &self.position, self.since + k as f64, rate).1;
+            let (b, a) = (&self.bank, &mut *self.ahead);
+            let mut mid = [[0.0; LFOS]; crate::lfo::VOICES];
+            let mid_shared = b.ahead(l, &per, &at(n / 2), n / 2, rate, voices, &mut mid);
+            a.shared = b.ahead(l, &per, &at(n), n, rate, voices, &mut a.voices);
+            let off = |x: f64, m: f64, y: f64| (m - 0.5 * (x + y)).abs() > JUMP;
+            a.jumps = (0..LFOS).any(|k| off(b.shared_values[k], mid_shared[k], a.shared[k]));
+            for (v, jumps) in a.voice_jumps.iter_mut().enumerate().take(voices) {
+                *jumps = (0..LFOS).any(|k| {
+                    !l.lfo[k].mono && off(b.voice_values[v][k], mid[v][k], a.voices[v][k])
+                });
+            }
+            let next = l.modulated(&self.base, &crate::lfo::source_values(&a.shared));
+            let panel = self.panel_of(&next);
+            let a = &mut *self.ahead;
+            a.panel = panel;
+            a.len = (n * self.over.as_ref().map_or(1, |o| o.factor)) as f64;
+        }
         self.bank.advance(l, &per, n, rate, voices);
         self.lfo_dt = n as f64 / rate;
         self.ahead.on = false;
@@ -2256,22 +2283,6 @@ impl Engine {
         }
         let values = crate::lfo::source_values(&self.bank.shared_values);
         let m = l.modulated(&self.base, &values);
-        // (A pitch or CUTOFF moved: where the next step will have the knobs, which the voices
-        // glide to across this one's samples, R-LFO-STRESS.)
-        let glides = n > 1 && l.fast() && modulation_glides();
-        if glides {
-            let (_, clock) =
-                crate::lfo::Bank::clock(l, &self.position, self.since + n as f64, rate);
-            let a = &mut *self.ahead;
-            a.shared = self
-                .bank
-                .peek(l, &clock, self.lfo_dt, voices, &mut a.voices);
-            let next = l.modulated(&self.base, &crate::lfo::source_values(&a.shared));
-            let panel = self.panel_of(&next);
-            let a = &mut *self.ahead;
-            a.panel = panel;
-            a.len = (n * self.over.as_ref().map_or(1, |o| o.factor)) as f64;
-        }
         if m != self.controls {
             let (was, sharp) = (self.gain_at(), l.sharp_on(crate::lfo::Target::Volume));
             self.take(&m, false);
@@ -3493,8 +3504,9 @@ impl Engine {
         }
         // (Its glide to the next step's knobs, R-LFO-STRESS: ENTROPY's tolerances leave the
         // knobs that glide alone, so the twin's is the voice's.)
-        v.sweep = if self.ahead.on {
-            let a = &*self.ahead;
+        let a = &*self.ahead;
+        let jumps = a.jumps || (self.base.lfo.per_voice() && a.voice_jumps.get(k) == Some(&true));
+        v.sweep = if a.on && !jumps {
             let mut next = a.panel;
             if self.base.lfo.per_voice() && k < crate::lfo::VOICES {
                 let mut feedback = 0.0;

@@ -527,6 +527,40 @@ fn a_pitch_or_cutoff_glides_across_each_step() {
     }
 }
 
+/// A step a SHARP edge falls in is held, not glided through (decisions.md R-LFO-STRESS): a
+/// SAWTOOTH on CUTOFF holds the steps its cycles restart in, and glides across every other.
+#[test]
+fn a_sharp_edge_holds_its_step() {
+    // (Its edges never on a step's first sample, which rounding could put either side.)
+    const HZ: f64 = 37.0;
+    for potato in [false, true] {
+        let c = with(
+            Controls {
+                potato,
+                ..controls()
+            },
+            0,
+            sharp(Mode::Free, 2.0, HZ),
+            Target::Cutoff,
+            0.4,
+            0.5,
+        );
+        let mut e = engine(&c);
+        key(&mut e, 60, true);
+        let (mut l, mut r) = ([0.0f32; lfo::STEP], [0.0f32; lfo::STEP]);
+        let mut held = 0;
+        for step in 0..240 {
+            e.render(&[], &mut l, &mut r);
+            let at = |i: usize| lfo::wave(2.0, i as f64 * HZ / RATE);
+            let edge = (at(step * lfo::STEP) - at((step + 1) * lfo::STEP)).abs() > 0.5;
+            let on = e.slots[0].play.try_lock().expect("free").sweep.on;
+            assert_eq!(on, !edge, "step {step}, potato {potato}");
+            held += usize::from(edge);
+        }
+        assert!(held >= 5, "{held} edges");
+    }
+}
+
 /// on CUTOFF), the gain is the step's at once, as before.
 #[test]
 fn volume_moved_by_an_lfo_ramps_a_sample_at_a_time() {

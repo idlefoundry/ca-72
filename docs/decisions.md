@@ -13339,3 +13339,84 @@ DAWs, Windows, other sample rates or block sizes, multiple instances, a low-end 
 LO/ULTRA listening matrix. The reference and offline renders do not demonstrate live
 playback without dropped voices. The legacy path was checked in source against 1374b0f,
 not against a separately compiled binary of that commit.
+
+**Owner decision, 2026-10-23:** "K, do it": in place of `29ddf24`'s 8-sample step, pitch and
+CUTOFF glide across each 32-sample step, then measure it.
+
+**Changed, 2026-10-23 (`e134f72` and its follow-up):**
+- The LFOs step every 32 samples again at every QUALITY and for every target (`lfo::FAST_STEP`
+  is gone). `1c85e11`'s output-gain ramp stays.
+- While an LFO moves TUNE, oscillator 2 or 3 FREQUENCY or CUTOFF, each voice ramps what it
+  reads of them in a straight line across the step, from the step's value to the next step's.
+  The next step's value comes from copies of the generators moved on (`Bank::ahead`), since
+  they are functions of their time, so the glide adds no delay. The ramp runs inside the
+  voice's run, a sample at a time in its jacks, so runs are not split.
+- The ramp is in the quantity after the knob's law, so the line is a chord of the LFO's curve
+  through it, exact at each step. In the circuit (HI, ULTRA) that is CUTOFF's wiper, TUNE and
+  the FREQUENCY wipers (`Jacks::swept`, added where the front reads them). In the light voice
+  (LO) it is each oscillator's semitones and the cutoff's log2 Hz (`light::swept_laws`), added
+  as ENTROPY's offsets are. GLIDE and clamping apply at the step points as before.
+- A chord across a jump is not a chord of the curve: it smeared preset 12's SHARP SQUARE edges
+  over 32 samples (edge prominence 6.5 dB against the reference's 2.9). So a step in which an
+  LFO's value halfway across stands more than `lfo::JUMP` (0.25 of its -1..1) off the line
+  between the step's ends is held, as before, and the edge stays abrupt. This matches the
+  output-gain ramp, which leaves SHARP alone. A TRIANGLE's corner trips this only above about
+  190 Hz.
+- With nothing assigned, or no pitch or CUTOFF moved, the sound is as before, to the bit. The
+  lab's `CA72_LFO_GLIDE=0` holds each step, for measuring.
+
+**Evidence (Linux reference machine, Ryzen 7 7800X3D, 2026-10-23):** HI, 48 kHz, 256-frame
+blocks, `zipper` on 01, 02, 03, 04, 08, 12 and 15. "32-step" is this build with
+`CA72_LFO_GLIDE=0`; "8-sample" is `5ace018` built separately. Pulse is the excess over its own
+floor. Where the voices glide, the aligned reference is the reference itself, so its floor is
+0 by construction.
+
+| Preset | Pulse dB: 32-step / 8-sample / glide | Grid dBr | Harmonics, glide (1.5, 3, 4.5 kHz) |
+|---|---|---|---|
+| 01 Tri OSC2 FREQ | -1.12 / +1.90 / -1.87 | -28.1 / -28.4 / -35.4 | -6.20, -2.08, -0.06 |
+| 02 Saw TUNE chord | -1.40 / +6.76 / -1.68 | -1.6 / -1.4 / -1.7 | -7.14, +3.75, -1.05 |
+| 03 Tri CUTOFF EMPH 10 | +13.23 / +1.07 / +7.45 | -1.7 / -2.4 / -1.9 | +17.04, +1.08, +7.54 |
+| 04 Saw CUTOFF EMPH 9 | -9.61 / +1.31 / +1.05 | -2.3 / -2.5 / -2.4 | +0.67, +3.35, -3.49 |
+| 08 Saw SOFT CUTOFF | +1.30 / -1.73 / -0.20 | -18.4 / -19.1 / -6.1 | +0.46, +1.10, -1.99 |
+| 12 Timed SHARP SQUARE | +8.78 / +4.31 / +8.72 | -2.2 / -2.1 / -2.2 | +8.08, +11.48, +8.32 |
+| 15 CPU worst | +9.11 / +0.11 / +10.21 | -8.1 / -9.4 / -8.2 | +9.28, +13.72, +6.50 |
+
+- Every grid above is the upper bound, marked `*` by the test, since these presets move a pitch
+  or whistle; 08's glide figure is one of them. All three versions have no non-finite or
+  clipped samples.
+- Below the whistle the glide is the clearest win: a copy of 03 at EMPHASIS 6 gives pulse +1.4
+  dB and grid -44.2 dBr against the 32-step's +11.1 dB excess and -27.1 dBr. Engine renders
+  with a TRIANGLE on CUTOFF at EMPHASIS 0 and 5 differ from the per-sample reference by -61
+  and -55 dB, against -30 and -24 at 8 samples and -16 and -12 held at 32, with nothing left
+  in step with the 32-sample grid. At EMPHASIS 8 to 10 the whistle's phase wanders in every
+  version, and 03's pulse figure varies by a few dB with the alignment.
+- 12's SQUARE has nothing to glide between its edges; they still land on the 32-sample grid,
+  which only a finer step or an edge placed at its own sample would mend. 15's pulse comes
+  mostly from its 24 other knobs (VOLUMEs, EMPHASIS, SUSTAINs, GLIDE, MOD MIX, SHAPE,
+  FEEDBACK), which this change leaves stepping. The 8-sample version stepped those too.
+- LO, 32-step / glide pulse excess: 01 +0.87 / -1.17, 03 -1.13 / -5.19, 04 +5.90 / +7.96,
+  08 -4.67 / -4.99, 12 +1.46 / +1.50, 15 +3.91 / +3.45; the light voice already interpolates
+  its controls every 16 samples.
+- Engine CPU, one thread, no workers, exclusive timing lock, best of three, alternated twice:
+  15 is 2968 / 2936 ms a second of audio at 32-step (+6.7 / +6.6 % over nothing assigned),
+  3304 / 3307 at 8 samples (+19.0 / +19.7 %), 2983 / 2979 with the glide (+7.1 / +7.4 %). 03
+  is 106.8 / 106.4, 111.3 / 110.5 and 110.3 / 110.2.
+- Paced 15, HI, 256 frames, four workers, alternated twice: 32-step 1459 / 1104 runs unheard,
+  145 / 87 blocks late, mean 76 / 73 % of the period; 8-sample 3494 / 3776 unheard, 976 / 1061
+  late, 116 / 121 %; glide 1143 / 1184 unheard, 102 / 125 late, 74 / 75 %. Nothing assigned:
+  364 to 456 unheard, 3 to 6 late. The glide plays as the 32-step version does; the phrase
+  still misses deadlines in every version.
+- `preset_render`, the 19 factory presets at HI, LO and ULTRA, against 393588a: each the same
+  to the bit. `cargo test -p ca72-plugin -p ca72` and the lab's tests, workspace clippy
+  (`--all-targets --all-features -D warnings`) and `cargo fmt --check` pass. The ULTRA split
+  and allocation tests (`threaded`, `rt_alloc`) now move the glide's jacks too.
+
+**Agent recommendation, not an owner decision:** keep the glide. It keeps the 32-step's cost
+and deadlines (8-sample: about ten times as many late blocks) and removes the zipper where
+pitch or CUTOFF moves smoothly (01, 02, 04, 08, and 03 below the whistle). It doesn't help a
+SHARP SQUARE's edge timing (12) or knobs other than pitch and CUTOFF (15). If those matter,
+the next steps would be placing a SHARP edge at its own sample within the step, and gliding
+more knobs (the mixer's VOLUMEs, EMPHASIS) the same way, each measured.
+
+Not tried: human listening, the Mac's live build, other hosts, sample rates or block sizes, a
+slow CPU.
