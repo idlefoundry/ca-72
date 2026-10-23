@@ -14527,3 +14527,42 @@ measured against HI (`crates/ca72/tests/lo_contour_probe.rs`, ignored diagnostic
   cents RMS of HI at CUTOFF -4 and -2 (81 and 94 before).
 
 Through the sweep LO now stands -65 to +51 cents from HI (-200 to -280 before).
+
+## R-FEEDBACK-LOOP. ULTRA's FEEDBACK loop closed at the filter's rate
+
+**2026-10-23**, the owner's go ("give it a try") after the comparison's feedback series
+(session-001, rounds 049 to 052: EXTERNAL INPUT VOLUME 0, 5, 8 and 10 with the Behringer's
+internal return) could not be matched by any knob position at 8 and 10. Agent decisions, not
+separately approved; HI unchanged, for the owner to decide (below).
+
+- **The fault.** FEEDBACK (R8) took the output a sample late, at the sample rate, into the
+  preamplifier, whose four substeps run between its own resamplers (44.5 samples), and the
+  preamplifier's current into the bus, which the filter resamples again (45.5): the loop was
+  some 91 samples (1.9 ms) long. The hardware's loop is in phase and lowpassed (at EXT 5 it
+  raises the note +1.7 dB at the bottom, +0.2 dB at 2.7 kHz; at 10 it oscillates near 55 Hz).
+  The model's turned phase every 530 Hz: at EXT 8 and 10 it fell into an oscillation near
+  500 Hz the hardware does not make.
+- **The change** (`voice::tick_looped`, `voice::loops`; `Vcf::tick_fed`, `Preamp::fine`,
+  `OversampledVca::start` and `step`). Where the VCA already runs at the filter's rate (ULTRA,
+  and the lab's High Fidelity) with FEEDBACK and EXTERNAL INPUT on, the preamplifier, the filter
+  and the VCA run together at 4x: at each of the filter's steps the VCA takes the filter's
+  output, the preamplifier a substep on the jack's voltage with the cable's share of the VCA's
+  output, and its current enters the bus at the filter's next step. A quarter of a sample lies
+  between output and input. The jack's own signal is upsampled by the preamplifier's
+  interpolator; the bus's other currents as before. Nothing else changes: FEEDBACK off, HI
+  and LO are the same samples to the bit.
+- **Against the hardware.** One setting for all four takes (FEEDBACK 2.632, CUTOFF +2.679,
+  ENTROPY 0, the photographed panel): the comparison's spectral distance 2.43, 2.42, 3.10 and
+  3.39 dB (EXT 0, 5, 8, 10), the takes' levels within 0.9 dB of one another. Before, in ULTRA
+  at its best FEEDBACK: 2.84, 2.84, 13.3 and 21.9; the published HI fits 2.50 and 2.70 for 0
+  and 5, none accepted for 8 and 10.
+- **Cost.** ULTRA renders faster with it, about 17 % (an 8 s render 5.9 s against 7.2 s on one
+  core of the Linux reference machine): the preamplifier's decimators and the bus's
+  resampling of its current are skipped.
+- **Tests.** `tests/feedback.rs`: in ULTRA and High Fidelity FEEDBACK at 25 % lights OVERLOAD
+  and makes the note at least twice as loud and no brighter (in HI, a sample late, it still
+  grows harmonics, as R8 had it for every mode); the ends within the rails in all three. The
+  threaded voice runs the same loop on the caller's thread (`threaded.rs`).
+- **HI.** HI's VCA runs at the sample rate; the same loop there needs it at 4x. An estimate
+  from the parts (another agent's, 2026-10-23) put that at 30 to 54 % more per FEEDBACK voice
+  in HI. Left as it was until the owner chooses.

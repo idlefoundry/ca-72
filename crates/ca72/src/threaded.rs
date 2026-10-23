@@ -1003,7 +1003,8 @@ impl Threaded {
         let mut last_drive = self.parts.last_drive;
         for i in 0..len {
             let mut j = jacks(i);
-            if self.feedback > 0.0 {
+            let looped = crate::voice::loops(&p, self.feedback);
+            if self.feedback > 0.0 && !looped {
                 j.ext += self.feedback * self.fed_back;
             }
             let mut c = self.keys.step(p.priority);
@@ -1011,12 +1012,26 @@ impl Threaded {
             let v_kbd = kbd.part.tick(&p, c);
             let control = ctl.part.tick(&p, c);
             let d = bias.part.tick(control.env_l, j.loudness, p.quality);
-            let i_pre = pre.part.tick(&p, j.ext);
-            let (lamp, _) = pre.part.lamp();
-            self.overload = lamp;
-            self.overload_peak = self.overload_peak.max(lamp);
-            let f = self.front.tick(&p, &j, v_kbd, &control, i_pre);
-            let (_, y) = back.part.tick(&p, &f, &d);
+            let y = if looped {
+                let (_, _, y) = crate::voice::tick_looped(
+                    &mut pre.part,
+                    &mut self.front,
+                    &mut back.part,
+                    (&p, &j, v_kbd, &control, &d),
+                    self.feedback,
+                );
+                let (lamp, _) = pre.part.lamp();
+                self.overload = lamp;
+                self.overload_peak = self.overload_peak.max(lamp);
+                y
+            } else {
+                let i_pre = pre.part.tick(&p, j.ext);
+                let (lamp, _) = pre.part.lamp();
+                self.overload = lamp;
+                self.overload_peak = self.overload_peak.max(lamp);
+                let f = self.front.tick(&p, &j, v_kbd, &control, i_pre);
+                back.part.tick(&p, &f, &d).1
+            };
             last_drive = d.to_array();
             self.fed_back = y;
             out(i, y);

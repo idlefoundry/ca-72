@@ -347,6 +347,9 @@ pub struct Preamp {
     /// Potato's model inside FEEDBACK's loop ([`Delayed`]), and whether it runs.
     delayed: Delayed,
     delayed_on: bool,
+    /// Whether the last sample ran inside FEEDBACK's loop a substep at a time
+    /// ([`Preamp::fine`]): its decimators then held nothing new.
+    looped: bool,
     /// Steps whose Newton iterations failed even at a sixteenth of the step (the outputs
     /// then hold): tests require none.
     pub failed: usize,
@@ -465,6 +468,7 @@ impl Preamp {
             plain: None,
             delayed: Delayed::new(latency),
             delayed_on: false,
+            looped: false,
             failed: 0,
         })
     }
@@ -511,8 +515,47 @@ impl Preamp {
         }
     }
 
+    /// The jack's voltage after R9's divider (as [`Preamp::tick`] takes it) at the substeps'
+    /// rate, through its interpolator: for [`Preamp::fine`].
+    pub fn upsample(&mut self, v_in: f64) -> [f64; SUBSTEPS] {
+        let mut fine = [0.0; SUBSTEPS];
+        self.up.push(v_in, &mut fine);
+        fine
+    }
+
+    /// One substep of the circuit (a [`SUBSTEPS`]th of a sample) on `x`, the jack's voltage
+    /// after R9's divider then, no resampler between: FEEDBACK's loop (decisions.md
+    /// R-FEEDBACK-LOOP), which runs the preamplifier, the filter and the VCA at one rate. The
+    /// current SW10 and R46 put into the mixer's bus, A. [`Preamp::fine_outputs`] ends the
+    /// sample.
+    pub fn fine(&mut self, x: f64) -> f64 {
+        self.looped = true;
+        self.net.set(SRC, x);
+        if !Self::step(&mut self.net, self.dt / SUBSTEPS as f64) {
+            self.failed += 1;
+        }
+        self.last = (self.net.v(AMP), self.net.v(OUT));
+        if self.on { self.last.1 / 33e3 } else { 0.0 }
+    }
+
+    /// The sample's outputs after its [`Preamp::fine`] substeps (the lamp's driver as
+    /// [`Preamp::tick`] runs it).
+    pub fn fine_outputs(&mut self) -> PreampOut {
+        self.outputs()
+    }
+
     /// One sample: the jack's voltage after R9's divider (the Thevenin source's voltage).
     pub fn tick(&mut self, v_in: f64) -> PreampOut {
+        if self.looped {
+            // Out of FEEDBACK's loop: the decimators filled with the circuit's outputs as
+            // they are, so that its current carries on rather than starting from nothing.
+            self.looped = false;
+            let (a, o) = (self.net.v(AMP), self.net.v(OUT));
+            for _ in 0..SUBSTEPS * 128 {
+                self.down_amp.push(a);
+                self.down_out.push(o);
+            }
+        }
         if self.delayed_on {
             let o = self.delayed.tick(v_in, self.r_in, self.on, self.dt);
             self.last = (o.amp, o.i_bus * 33e3);
