@@ -686,10 +686,22 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   CA-72's peak stands 16 Hz under the reference's sine.
 - **FEEDBACK's lock on a high note** (change 34, 2026-10-23): at EXT. INPUT VOLUME 10 the
   loop's own oscillation locks to a whole fraction of the note (A2 / 2, A3 / 4 and A4 / 8:
-  55.3 Hz, in both). On round 052's A4 the reference's slips 0.7 s in to A4 / 7 (63.2 Hz,
-  +231 cents); the CA-72's holds A4 / 8 at the CUTOFF that matches its brightness and slips
-  as the reference's does only at +2.9, 3.8 dB too bright. One take: whether the reference
-  slips every time is not yet recorded.
+  55.3 Hz, in both). On A4 the reference's slips about 0.65 s in to A4 / 7 (63.2 Hz, +231
+  cents) and stays there: every time (round 054, three passes) and through 5 s holds (round
+  055; A3 holds A3 / 4 throughout). The CA-72's holds A4 / 8. Ruled out: the note's pitch
+  (steady to 0.1 Hz through the slip), ENTROPY (0 to 10, four seeds: none slips), the return
+  path's response (at EXT 5 each harmonic of each note raised by the same as the reference's,
+  within 0.2 dB), the loop's slow drift (its 2nd harmonic rising over 1 to 2 s by the same as
+  the reference's). The circuit itself does not slip either: the loop closed in ngspice from
+  the netlists (the preamplifier, the filter and the VCA as calibrated, the voice's own mixer
+  bus and contour fed in sample by sample, the cable as FEEDBACK's share at EXT. INPUT) holds
+  A4 / 8 and agrees with the CA-72 within -35 dB of the signal (reltol 1e-4 and 1e-5 alike;
+  the bench, a recording test and a voice probe, kept at
+  `/mnt/lab/artifacts/ca-72/feedback-loop-bench-2026-10-23`). So the reference's loop differs
+  from the drawn circuit's where neither the loop alone nor EXT 0 to 8 shows it; in the CA-72
+  it slips only with less gain round the loop (FEEDBACK 2.4 to 2.5, or the filter's input
+  driven 1 to 1.5 dB less), which the loop alone does not allow. Left there by the owner's
+  decision (2026-10-23: close enough).
 - **EMPHASIS's peak against its passband:** at the same passband loss the CA-72's peak
   stands 1 to 1.5 dB higher than the reference's (+14.7 to +15.3 dB at 6 against +13.9 to
   +14.3; +21.1 to +22.3 at 7 against +19.4 to +21.3), and at 7.5, near regeneration, up to 5
