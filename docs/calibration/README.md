@@ -733,6 +733,12 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   reference's 0.42 in session B's bare gates, but 0.68 against 0.70 in session F's take 18,
   and the VCA balance trims, which set the onset's, move the ratio only between 0.68 and 0.90:
   no circuit change until a loopback measures the EVO4's own low end.
+- **The oscillators' tracking against each other** (the comparison session's detuned lead,
+  2026-10-23): the reference's oscillator 2 tracks about 2 cents an octave shallower than its
+  oscillator 1 (its beat 5.67 Hz at E4 for 4.00 at A3; session C's 1.0016, 0.9996 to 1.0003
+  and 0.9991 octaves a volt), where the CA-72's three track exactly. Not copied: the owner,
+  2026-10-23, keeps exact tracking at ENTROPY 0; a mild per-oscillator scale tolerance is
+  to join ENTROPY later (after 0.3).
 
 ## Reproducing
 
