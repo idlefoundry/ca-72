@@ -26,7 +26,7 @@ use crate::svg::{N, Svg, colour, put};
 
 pub use worn::StripRenderer;
 pub(crate) use worn::{
-    BLUE, Lamp, RED, amber_caps, pixel_screen, screen_still, screen_text, tinted_caps,
+    BLUE, KEY_PRINT, Lamp, RED, amber_caps, pixel_screen, screen_still, screen_text, tinted_caps,
 };
 
 // ---- The layout.

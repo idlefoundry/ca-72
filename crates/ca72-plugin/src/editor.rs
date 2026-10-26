@@ -36,6 +36,7 @@ use ca72_panel::presets::{
     BarTarget, DRAWER_H, DRAWER_TOP, DrawerRenderer, DrawerTarget, PresetKey, ROW_H, drawer_hit,
     in_tags,
 };
+use ca72_panel::render::TempoKeys;
 use ca72_panel::strip::arp::{self as arp_ui, ArpBank, ArpRenderer, ArpScene, ArpTarget};
 use ca72_panel::strip::fx::{self as fx_ui, FxRenderer, FxScene};
 use ca72_panel::strip::lfo::{self as lfo_ui, LfoRenderer, LfoScene};
@@ -1407,6 +1408,10 @@ struct Editing {
     /// double click), and a trackpad's travel over it not yet a beat a minute.
     tempo_drag: Option<(f64, f64, bool, u16)>,
     last_tempo_press: Option<Instant>,
+    /// The standalone's TYPING or PANIC key under the pointer, and PANIC held down (lit while it
+    /// is: decisions.md R-TEMPO-CORNER).
+    tempo_hover: Option<art::TempoKey>,
+    panic_held: bool,
     /// The screens' controls as the engine plays them, modulated ([`Meters::publish_live`]),
     /// and the moving tempo, read at most 30 times a second while a source moves one of them
     /// (decisions.md R-LFO), and when they are next due.
@@ -1797,6 +1802,8 @@ impl Editing {
             rail: Rail::Plugin,
             tempo_drag: None,
             last_tempo_press: None,
+            tempo_hover: None,
+            panic_held: false,
             live: [None; LIVE.len()],
             live_tempo: None,
             live_due: None,
@@ -3505,6 +3512,23 @@ impl Editing {
             }
             return;
         }
+        // Its TYPING and PANIC keys after it (decisions.md R-TEMPO-CORNER).
+        if self.playing.standalone
+            && let Some(k) = art::tempo_key_hit(self.renderer.arrangement(), x, y)
+        {
+            match k {
+                art::TempoKey::Typing => {
+                    self.playing.release();
+                    self.playing.typing = !self.playing.typing;
+                    self.playing.wants_keys = self.playing.typing;
+                }
+                art::TempoKey::Panic => {
+                    self.panic();
+                    self.panic_held = true;
+                }
+            }
+            return;
+        }
         if let Some((dx, dy)) = self.in_drawer((x, y)) {
             match drawer_hit(&self.browser.drawer, dx, dy) {
                 Some(DrawerTarget::Update) => self.update.press(),
@@ -3582,7 +3606,7 @@ impl Editing {
             return;
         }
         if self.keyboard_shown()
-            && let Some(target) = keyboard::hit(self.playing.root, x, y, self.playing.standalone)
+            && let Some(target) = keyboard::hit(self.playing.root, x, y)
         {
             match target {
                 keyboard::Target::Note(note) => self.playing.press(note),
@@ -3590,12 +3614,6 @@ impl Editing {
                     self.playing.shift(target == keyboard::Target::Up);
                     self.keep_settings(Change::KeyboardRoot(self.playing.root));
                 }
-                keyboard::Target::Type => {
-                    self.playing.release();
-                    self.playing.typing = !self.playing.typing;
-                    self.playing.wants_keys = self.playing.typing;
-                }
-                keyboard::Target::Panic => self.panic(),
                 keyboard::Target::Back => {}
             }
             self.hover = None;
@@ -3876,8 +3894,13 @@ impl Editing {
             return;
         }
         let (x, y) = self.in_drawing(self.pointer);
+        self.tempo_hover = if self.playing.standalone {
+            art::tempo_key_hit(self.renderer.arrangement(), x, y)
+        } else {
+            None
+        };
         if self.playing.dragging() {
-            let target = keyboard::hit(self.playing.root, x, y, self.playing.standalone);
+            let target = keyboard::hit(self.playing.root, x, y);
             self.playing.drag(match target {
                 Some(keyboard::Target::Note(note)) => Some(note),
                 _ => None,
@@ -3909,7 +3932,7 @@ impl Editing {
             && !self.fx_view.pressing()
             && !self.learning.over_menu(self.renderer.fonts(), (x, y))
         {
-            keyboard::hit(self.playing.root, x, y, self.playing.standalone)
+            keyboard::hit(self.playing.root, x, y)
         } else {
             None
         };
@@ -4060,6 +4083,7 @@ impl Editing {
     }
 
     fn released(&mut self) {
+        self.panic_held = false;
         self.playing.release_pointer();
         self.fx_pin_drag = None;
         self.fx_view.released();
@@ -4079,6 +4103,7 @@ impl Editing {
     /// before another begins, as the editor closes and as its window loses the focus or the
     /// pointer's capture. A gesture never begins inside another (decisions.md R18).
     fn end_gestures(&mut self) {
+        self.panic_held = false;
         self.playing.release_pointer();
         self.fx_view.cancel_press();
         self.fx_pin_drag = None;
@@ -4464,6 +4489,11 @@ impl Editing {
             .playing
             .standalone
             .then(|| format!("{} BPM", self.tempo_shown()));
+        self.scene.tempo_keys = self.playing.standalone.then_some(TempoKeys {
+            typing: self.playing.typing,
+            panic: self.panic_held,
+            hover: self.tempo_hover,
+        });
         let live = self.live_shown();
         self.strip_scene = strip_scene(
             &self.params,
@@ -4605,15 +4635,25 @@ impl Editing {
             && !self.sources_on(crate::lfo::Target::Tempo).is_empty()
         {
             // (Beside the screen, to its right: above it there is no room in the window.)
-            let (x, y, w, h) = art::tempo_window(self.renderer.arrangement().plate_at());
+            let (_, y, _, h) = art::tempo_window(self.renderer.arrangement().plate_at());
             let text = format!(
                 "TEMPO: {} BPM{}",
                 self.tempo_now(),
                 self.depths_tip(lfo_page::TEMPO_CONTROL)
             );
             let b = art::tip_bounds(self.renderer.fonts(), &text, self.renderer.text_size());
-            let left = x + w + art::TEMPO_SURROUND + 12.0;
+            // (After its TYPING and PANIC keys: decisions.md R-TEMPO-CORNER.)
+            let (px, _) = art::tempo_key_at(self.renderer.arrangement(), art::TempoKey::Panic);
+            let left = px + art::TEMPO_KEY.0 / 2.0 + 12.0;
             return Some((text, left - b[0], y + h / 2.0 - (b[1] + b[3]) / 2.0));
+        }
+        // TYPING's key is a picture: its tip says what it does, after the keys, as TEMPO's.
+        if self.drag.is_none() && self.tempo_hover == Some(art::TempoKey::Typing) {
+            let text = "TYPING: PLAY FROM THE COMPUTER KEYBOARD";
+            let b = art::tip_bounds(self.renderer.fonts(), text, self.renderer.text_size());
+            let (px, py) = art::tempo_key_at(self.renderer.arrangement(), art::TempoKey::Panic);
+            let left = px + art::TEMPO_KEY.0 / 2.0 + 12.0;
+            return Some((text.into(), left - b[0], py - (b[1] + b[3]) / 2.0));
         }
         let (px, py) = self.in_drawing(self.pointer);
         let (nx, ny, nw, nh) = self.rail.name();
@@ -5026,6 +5066,7 @@ impl Editing {
             MouseEvent::CursorLeft => {
                 self.playing.drag(None);
                 self.playing.hover = None;
+                self.tempo_hover = None;
                 if self.drag.is_none() {
                     self.hover = None;
                 }
@@ -7365,7 +7406,10 @@ mod tests {
             host.calls.lock().unwrap().is_empty(),
             "hidden controls cannot gesture"
         );
-        let p = at(&e, (keyboard::TYPING_X, keyboard::HEADER));
+        let p = at(
+            &e,
+            art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Typing),
+        );
         go(&mut e, p);
         press(&mut e);
         release(&mut e);
@@ -7651,7 +7695,10 @@ mod tests {
             assert_eq!(scene.standalone, standalone);
             assert_eq!(scene.typing, standalone);
             e.playing.typing = false;
-            let type_button = at(&e, (keyboard::TYPING_X, keyboard::HEADER));
+            let type_button = at(
+                &e,
+                art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Typing),
+            );
             go(&mut e, type_button);
             press(&mut e);
             release(&mut e);
@@ -7676,7 +7723,10 @@ mod tests {
             assert!(e.playing.key(&key, true));
             assert!(e.playing.notes.pop().expect("local attack").on);
             let generation = e.playing.notes.generation();
-            let panic_button = at(&e, (keyboard::PANIC_X, keyboard::HEADER));
+            let panic_button = at(
+                &e,
+                art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Panic),
+            );
             go(&mut e, panic_button);
             press(&mut e);
             release(&mut e);
@@ -7687,6 +7737,109 @@ mod tests {
             );
             e.playing.release();
         }
+    }
+
+    /// TYPING and PANIC on the walnut after the TEMPO screen (decisions.md R-TEMPO-CORNER):
+    /// pressed from any lower page, the KEYS page's header no longer theirs; TYPING lit while
+    /// on, PANIC while held, each lightened under the pointer; none in a plug-in.
+    #[test]
+    fn typing_and_panic_sit_beside_tempo_and_work_from_every_page() {
+        let (mut e, _, _) = editing_for_api(
+            Ca72Params::default(),
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+            PluginApi::Standalone,
+        );
+        e.playing.visible = true;
+        // Each change drawn in places as it is drawn whole, and only there (R58).
+        let shown_whole = |e: &mut Editing, what: &str| {
+            e.draw();
+            assert!(e.damage.is_some(), "{what}: drawn in places");
+            let mut whole = None;
+            compose(
+                &mut whole,
+                &e.renderer,
+                e.strip.frame(),
+                lower_of(e),
+                None,
+                (
+                    e.page_shows().then(|| e.lfo.frame()),
+                    e.macros_show()
+                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                    &e.modulation,
+                ),
+                None,
+                true,
+                (e.physical_width, e.physical_height()),
+            );
+            assert!(e.composed == whole, "{what}: not as put together whole");
+        };
+        // GLOBAL's page shows, not the piano's.
+        e.strip_press(StripTarget::Bar(BarTarget::Global));
+        e.draw();
+        e.update_scene();
+        assert_eq!(
+            e.scene.tempo_keys,
+            Some(TempoKeys::default()),
+            "the keys with the TEMPO screen"
+        );
+        let typing = at(
+            &e,
+            art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Typing),
+        );
+        go(&mut e, typing);
+        e.update_scene();
+        assert_eq!(
+            e.scene.tempo_keys.map(|k| k.hover),
+            Some(Some(art::TempoKey::Typing))
+        );
+        assert!(
+            e.scene
+                .tip
+                .as_ref()
+                .is_some_and(|t| t.0.starts_with("TYPING"))
+        );
+        press(&mut e);
+        release(&mut e);
+        // (Off TYPING, whose tip floats over everything and so is shown whole.)
+        let panic = at(
+            &e,
+            art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Panic),
+        );
+        go(&mut e, panic);
+        shown_whole(&mut e, "TYPING on");
+        e.update_scene();
+        assert!(e.playing.typing && e.note_typing_allowed());
+        assert!(e.scene.tempo_keys.is_some_and(|k| k.typing && !k.panic));
+        // PANIC lit while it is held, every note let go.
+        let key = KeyboardEvent {
+            key: Key::Character("a".into()),
+            ..Default::default()
+        };
+        assert!(e.keyed(&key));
+        assert!(e.playing.notes.pop().expect("typed attack").on);
+        let generation = e.playing.notes.generation();
+        press(&mut e);
+        e.update_scene();
+        assert!(e.scene.tempo_keys.is_some_and(|k| k.panic));
+        assert!(e.playing.notes.generation() > generation, "PANIC");
+        shown_whole(&mut e, "PANIC held");
+        release(&mut e);
+        shown_whole(&mut e, "PANIC let go");
+        e.update_scene();
+        assert!(e.scene.tempo_keys.is_some_and(|k| !k.panic && k.typing));
+        // TYPING pressed again: off.
+        go(&mut e, typing);
+        press(&mut e);
+        release(&mut e);
+        assert!(!e.playing.typing);
+        // A plug-in's walnut is bare.
+        let (mut p, _, _) = editing_for_api(
+            Ca72Params::default(),
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+            PluginApi::Clap,
+        );
+        p.update_scene();
+        assert_eq!(p.scene.tempo_keys, None);
     }
 
     fn editing_for_api(
@@ -9476,9 +9629,10 @@ mod tests {
         // The keyboard's header under it, the keyboard shown.
         e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
         e.draw();
-        let p = at(&e, (keyboard::TYPING_X, keyboard::HEADER));
+        let root = e.playing.root;
+        let p = at(&e, (keyboard::UP_X, keyboard::HEADER));
         click(&mut e, p);
-        assert!(!e.playing.typing, "TYPING under the drawer");
+        assert_eq!(e.playing.root, root, "OCTAVE under the drawer");
         // A key below it plays.
         let p = at(&e, (1000.0, art::H - 60.0));
         go(&mut e, p);

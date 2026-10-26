@@ -15067,3 +15067,55 @@ rejects each negative trial by a failing assertion, then passes the final layout
 The final default-feature workspace run also passes: 1170 tests, 97 intentionally
 ignored, with four test threads on the shared Linux machine. Logs have a `-3` suffix beside
 the frames. These checks and pictures are evidence for review, not the owner's visual approval.
+
+## R-TEMPO-CORNER. TYPING and PANIC beside the TEMPO screen
+
+**The owner, 2026-10-22**, renaming the keyboard's rail key to KEYS (R-GLOBAL-KEY's addendum):
+"take that icon that is currently being used for that and place it up near the tempo setting."
+Agreed then: TYPING beside the TEMPO screen, and PANIC too ("Should panic also end up there?"),
+so that both work from every page, not only the KEYS page. The tempo-corner mock-up
+(https://claude.ai/artifact/TJJqLW6pa2bJp7z1anDm1o) asked for a word or an icon, and for 82 or
+62 units. **2026-10-26:** "typing should be a computer keyboard icon. Show me both options for
+height" (https://claude.ai/artifact/WQk1Wbo6Smef7P6tFmBkRy), then "Go with 62 units (as tall as
+the rail keys)."
+
+**Built:** on the standalone's top walnut, after the TEMPO screen: TYPING as a computer
+keyboard (its case, two rows of six keys, the space bar), then PANIC as the word.
+- **Size and place:** both are the rail's keys, 86 by 62 units, centred on the screen's height.
+  They sit 14 units after its surround and 14 units apart, the rail's own gap. They follow the
+  screen wherever a pack's layout puts the name plate (`art::tempo_key_at`).
+- **Drawing:** they use the rail's charcoal cap (`Part::RailKey`, or a pack's `key`), its print
+  colour, its light and its pointer lightening. TYPING is lit while on, as PANEL and the page
+  keys are. PANIC is lit only while held.
+- **Where they show:** they are the standalone's alone, as the screen is; a plug-in's wood stays
+  bare. The panel draws them as two layers after the screen's, always present (empty in a
+  plug-in), so the layer count stays fixed.
+- **Tips:** TYPING's icon has a tip ("TYPING: PLAY FROM THE COMPUTER KEYBOARD") after the keys.
+  TEMPO's tip, shown while a source moves it, moves after the keys too.
+- **The KEYS page:** TYPING and PANIC are gone from its header. It keeps OCTAVE, and the
+  "A = C3 · Z / X OCTAVE" legend while typing is on. `keyboard::hit` no longer takes
+  `standalone`.
+- **Behaviour:** what the keys do is unchanged: TYPING lets go of held notes and toggles the
+  computer's keys; PANIC releases every note from every source.
+
+**Tests:** `typing_and_panic_sit_beside_tempo_and_work_from_every_page` presses both from
+GLOBAL's page, checks the lights, the hover and the tip, and checks that a plug-in has none.
+The existing tests that pressed TYPING and PANIC press them in their new places. The ARP
+drawer's test now checks that OCTAVE under the drawer does nothing.
+
+**Evidence (Mac, Rust 1.97.1):** before (a clean test-v03-22oct-b render) and after pictures of
+the window at 0.44 and the walnut and the KEYS header at 1.0, in both looks and every state, in
+the worktree's `target/tempo-corner/`.
+- **Tests:** `cargo test -p ca72-panel` passes: 116 library tests, including
+  `a_frame_put_together_in_part_is_the_frame_put_together_whole` with the keys lit, held,
+  pointed at and gone in both skins, and the new `the_tempo_keys_follow_the_screen_at_the_rails_size_and_gaps`;
+  every integration suite passes, including the approved pictures (plug-in scenes, so
+  unchanged). `cargo test -p ca72-plugin --lib` passes, with and without
+  `standalone-production`: 595 and 584 tests. The new test also checks that each key's
+  change is put together in places exactly as whole.
+- **A catch on the way:** the panel's count of layers drawn whatever the scene (`FIXED`)
+  had to grow by the two keys. Otherwise every frame counted as "something floating" and
+  was redrawn whole, which `the_frame_put_together_in_places_is_the_frame_put_together_whole`
+  caught.
+- **Clippy and rustfmt** pass on both crates.
+- **Not done:** no installed build, host or standalone app was used.

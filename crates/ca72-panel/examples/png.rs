@@ -2,8 +2,9 @@
 //! (pixels a panel unit, 0.5 by default); `CA72_SKIN=worn` in the worn skin; `CA72_MONO=1` the
 //! strip in MONO without DOUBLE (the one voice lit at one of VOICES's places); `CA72_LETTERING=
 //! large` in the large lettering.
-//! `CA72_STANDALONE=1` shows the standalone keyboard's TYPING and PANIC controls and its TEMPO
-//! screen (`CA72_TEMPO=96` another tempo).
+//! `CA72_STANDALONE=1` shows the standalone's TEMPO screen with its TYPING and PANIC keys after
+//! it (`CA72_TEMPO=96` another tempo; `CA72_TYPING=1` TYPING on, `CA72_PANIC=1` PANIC held,
+//! `CA72_TEMPO_HOVER=typing` or `panic` a key under the pointer: decisions.md R-TEMPO-CORNER).
 //! `CA72_ARP=1` drops the arpeggiator's drawer over the lower page (decisions.md R-ARP): ON and
 //! UP lit, a sixteenth, two octaves, GATE 60 %, SWING 25 %, the ARP key lit; `CA72_ARP_HOLD=1`
 //! HOLD lit too, `CA72_ARP_DIRECTION=4` another DIRECTION (ORDER), `CA72_ARP_OCTAVES=5` other
@@ -126,6 +127,16 @@ fn main() {
     if std::env::var("CA72_STANDALONE").is_ok_and(|v| v == "1") {
         let bpm = std::env::var("CA72_TEMPO").unwrap_or_else(|_| "120".into());
         scene.tempo = Some(format!("{bpm} BPM"));
+        let on = |name: &str| std::env::var(name).is_ok_and(|v| v == "1");
+        scene.tempo_keys = Some(ca72_panel::render::TempoKeys {
+            typing: on("CA72_TYPING"),
+            panic: on("CA72_PANIC"),
+            hover: match std::env::var("CA72_TEMPO_HOVER").as_deref() {
+                Ok("typing") => Some(ca72_panel::art::TempoKey::Typing),
+                Ok("panic") => Some(ca72_panel::art::TempoKey::Panic),
+                _ => None,
+            },
+        });
     }
     if std::env::var("CA72_TIP").is_ok_and(|v| v == "1") {
         scene.tip = Some(("CUTOFF FREQUENCY: 1.2 kHz".into(), 2081.0, 300.0));

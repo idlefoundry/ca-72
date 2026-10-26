@@ -2323,6 +2323,122 @@ pub fn tempo_screen(text: &str, arrangement: &Arrangement) -> Layer {
     }
 }
 
+/// The standalone's TYPING and PANIC keys on the walnut after the TEMPO screen (decisions.md
+/// R-TEMPO-CORNER; the owner, 2026-10-26: "typing should be a computer keyboard icon", then "Go
+/// with 62 units (as tall as the rail keys)"): moved up from the KEYS page so that they work from
+/// every page. The standalone's alone, as the screen is; a plug-in's wood stays bare.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TempoKey {
+    Typing,
+    Panic,
+}
+
+impl TempoKey {
+    pub const ALL: [TempoKey; 2] = [TempoKey::Typing, TempoKey::Panic];
+}
+
+/// A TEMPO key's size: the rail's keys'.
+pub const TEMPO_KEY: (f64, f64) = (crate::strip::KEY_W, crate::strip::KEY_H);
+/// The gap after the screen's surround and between the keys: the rail's between its keys.
+const TEMPO_KEY_GAP: f64 = 14.0;
+
+/// Key `k`'s middle, the panel laid out as `arrangement` has it: centred on the screen's
+/// height, a gap after its surround, the next a gap after it.
+pub fn tempo_key_at(arrangement: &Arrangement, k: TempoKey) -> (f64, f64) {
+    let (x, y, w, h) = tempo_window(arrangement.plate_at());
+    let first = x + w + TEMPO_SURROUND + TEMPO_KEY_GAP + TEMPO_KEY.0 / 2.0;
+    let i = TempoKey::ALL.iter().position(|&t| t == k).unwrap_or(0) as f64;
+    (first + i * (TEMPO_KEY.0 + TEMPO_KEY_GAP), y + h / 2.0)
+}
+
+/// The TEMPO key at (`x`, `y`), as far round it as the rail's keys are hit round theirs.
+pub fn tempo_key_hit(arrangement: &Arrangement, x: f64, y: f64) -> Option<TempoKey> {
+    TempoKey::ALL.into_iter().find(|&k| {
+        let (cx, cy) = tempo_key_at(arrangement, k);
+        (x - cx).abs() <= TEMPO_KEY.0 / 2.0 + 4.0 && (y - cy).abs() <= TEMPO_KEY.1 / 2.0 + 6.0
+    })
+}
+
+/// A TEMPO key as the rail's are drawn: their cap, its mark in `print` (a computer keyboard for
+/// TYPING, the word for PANIC), the rail's light over it while `lit` (TYPING on, PANIC held)
+/// and lightened a little under the pointer.
+pub fn tempo_key(
+    arrangement: &Arrangement,
+    k: TempoKey,
+    lit: bool,
+    hover: bool,
+    print: &str,
+) -> Layer {
+    let (w, h) = TEMPO_KEY;
+    let mut over = Svg::default();
+    match k {
+        TempoKey::Typing => {
+            // A computer keyboard: its case, two rows of six keys and the space bar.
+            let (bw, bh) = (46.0, 28.0);
+            put!(
+                over,
+                "<rect x='{}' y='{}' width='{}' height='{}' rx='4' fill='none' stroke='{print}' stroke-width='2.6'/>",
+                N(-bw / 2.0),
+                N(-bh / 2.0),
+                N(bw),
+                N(bh)
+            );
+            for row in 0..2 {
+                for col in 0..6 {
+                    put!(
+                        over,
+                        "<rect x='{}' y='{}' width='3.4' height='3.4' fill='{print}'/>",
+                        N(-bw / 2.0 + 6.5 + f64::from(col) * 6.0),
+                        N(-bh / 2.0 + 6.5 + f64::from(row) * 6.0)
+                    );
+                }
+            }
+            put!(
+                over,
+                "<rect x='{}' y='{}' width='22' height='3.4' fill='{print}'/>",
+                N(-11.0),
+                N(-bh / 2.0 + 19.5)
+            );
+        }
+        TempoKey::Panic => put!(
+            over,
+            "<text x='0' y='0' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{print}'>PANIC</text>"
+        ),
+    }
+    if lit {
+        put!(
+            over,
+            "<rect x='{}' y='{}' width='{}' height='{}' rx='7' fill='#b0702b' opacity='0.28'/>",
+            N(-w / 2.0),
+            N(-h / 2.0),
+            N(w),
+            N(h)
+        );
+    }
+    if hover {
+        put!(
+            over,
+            "<rect x='{}' y='{}' width='{}' height='{}' rx='8' fill='#fff' fill-opacity='0.07'/>",
+            N(-w / 2.0 + 2.0),
+            N(-h / 2.0 + 2.0),
+            N(w - 4.0),
+            N(h - 4.0)
+        );
+    }
+    Layer {
+        origin: tempo_key_at(arrangement, k),
+        bounds: [
+            -w / 2.0 - 6.0,
+            -h / 2.0 - 6.0,
+            w / 2.0 + 8.0,
+            h / 2.0 + 10.0,
+        ],
+        sprites: vec![sprite(Part::RailKey, (w, h), 0.0, (false, false))],
+        over: over.0,
+        ..Layer::default()
+    }
+}
+
 /// A selector's knob's body: as wide as the drawn one's fluted outline, less the pointer's
 /// reach (the picture's wedge reaches its edge, 64 units out, as the drawn fin about does).
 pub(crate) const SELECTOR_R: f64 = 50.0;

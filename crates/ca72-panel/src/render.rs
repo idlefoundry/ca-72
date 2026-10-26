@@ -104,6 +104,15 @@ pub fn compact_grip(frame: &mut Pixmap, scale: f64) {
     }
 }
 
+/// The standalone's TYPING and PANIC keys (decisions.md R-TEMPO-CORNER): TYPING on, PANIC held
+/// down, the key under the pointer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TempoKeys {
+    pub typing: bool,
+    pub panic: bool,
+    pub hover: Option<art::TempoKey>,
+}
+
 /// What the panel shows.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
@@ -137,6 +146,9 @@ pub struct Scene {
     pub entry: Option<crate::value_entry::Field>,
     /// The standalone's TEMPO screen's text (`120 BPM`; decisions.md R-ARP), none in a plug-in.
     pub tempo: Option<String>,
+    /// The standalone's TYPING and PANIC keys after the TEMPO screen (decisions.md
+    /// R-TEMPO-CORNER), none in a plug-in.
+    pub tempo_keys: Option<TempoKeys>,
     /// Oscillators 2's and 3's timed mode (decisions.md R-OSC-TIMED): each key's sign's
     /// division and whether it is inert (its RANGE away from LO: off the panel). A key on and
     /// not inert lights, and its oscillator's FREQUENCY dial is printed in note values (the knob drawn
@@ -222,6 +234,7 @@ impl Default for Scene {
             menu: None,
             entry: None,
             tempo: None,
+            tempo_keys: None,
             timed: [Timed::default(); 2],
             shape: [Shaped::default(); 3],
             glide_long: false,
@@ -1176,6 +1189,26 @@ impl Renderer {
                 .map(|t| art::tempo_screen(t, a))
                 .unwrap_or_default(),
         );
+        // Its keys after it, in the rail's keys' print (a pack's where it has one); two layers
+        // always, as the screen's.
+        let print = self.look.colours.key_print.map_or_else(
+            || crate::strip::KEY_PRINT.to_owned(),
+            |(r, g, b)| format!("#{r:02x}{g:02x}{b:02x}"),
+        );
+        for k in art::TempoKey::ALL {
+            out.push(
+                scene
+                    .tempo_keys
+                    .map(|t| {
+                        let lit = match k {
+                            art::TempoKey::Typing => t.typing,
+                            art::TempoKey::Panic => t.panic,
+                        };
+                        art::tempo_key(a, k, lit, t.hover == Some(k), &print)
+                    })
+                    .unwrap_or_default(),
+            );
+        }
         if let Some(c) = scene.learning.and_then(|i| a.controls.get(i)) {
             out.push(learn::ring(c));
         }
@@ -1656,7 +1689,7 @@ impl Renderer {
     /// strip's own parts (`crate::strip`), which are drawn over this frame's strip.
     pub fn draw_floating(&self, onto: &mut Pixmap) {
         // (The controls', then POWER's, its lamp's, OVERLOAD's, QUALITY's opening's two, the
-        // name plate's and the TEMPO screen's: fixed.)
+        // name plate's, the TEMPO screen's and its two keys': fixed.)
         let fixed = CONTROLS.len() + FIXED;
         for slot in self.slots.iter().skip(fixed) {
             if let Some((x, y, p)) = &slot.pixels {
@@ -1720,8 +1753,8 @@ fn merged(mut rects: Vec<[i32; 4]>) -> Vec<[i32; 4]> {
 
 /// The layers drawn after the controls whatever the scene: MOD's three orbs (each empty while
 /// it does not show), POWER, its lamp, OVERLOAD, QUALITY's opening (its back and its front), the
-/// name plate and the TEMPO screen (empty in a plug-in).
-const FIXED: usize = 10;
+/// name plate, the TEMPO screen and its TYPING and PANIC keys (all three empty in a plug-in).
+const FIXED: usize = 12;
 
 /// The most bands [`in_bands`] draws side by side.
 const BANDS: usize = 8;
@@ -2533,12 +2566,21 @@ mod tests {
                 2 => scene.values[at("pitch_wheel")] = 0.05 * f64::from(i),
                 3 => scene.values[at("osc1_on")] = f64::from(i / 7 % 2),
                 4 => scene.tip = Some(("CUTOFF: 1.2 kHz".into(), 2100.0, 300.0)),
-                // The standalone's TEMPO screen shown, set, and gone (R-ARP).
-                5 => scene.tempo = Some(format!("{} BPM", 100 + i)),
+                // The standalone's TEMPO screen shown, set, and gone (R-ARP), its TYPING and
+                // PANIC keys with it, lit, held and pointed at (R-TEMPO-CORNER).
+                5 => {
+                    scene.tempo = Some(format!("{} BPM", 100 + i));
+                    scene.tempo_keys = Some(TempoKeys {
+                        typing: i > 7,
+                        panic: i < 7,
+                        hover: (i < 7).then_some(art::TempoKey::Typing),
+                    });
+                }
                 _ => {
                     scene.tip = None;
                     if i > 7 {
                         scene.tempo = None;
+                        scene.tempo_keys = None;
                     }
                 }
             }
@@ -2550,6 +2592,69 @@ mod tests {
                 "step {i}: not as put together whole"
             );
         }
+        // The TEMPO keys in the worn skin too, where their caps are pictures.
+        let mut r = Renderer::with_skin(Skin::Worn, s, 1.0);
+        let mut scene = Scene {
+            values: [0.5; CONTROLS.len()],
+            tempo: Some("120 BPM".into()),
+            ..Scene::default()
+        };
+        r.render(&scene);
+        for (i, keys) in [
+            Some(TempoKeys::default()),
+            Some(TempoKeys {
+                typing: true,
+                ..TempoKeys::default()
+            }),
+            Some(TempoKeys {
+                typing: true,
+                panic: true,
+                hover: Some(art::TempoKey::Panic),
+            }),
+            Some(TempoKeys {
+                hover: Some(art::TempoKey::Typing),
+                ..TempoKeys::default()
+            }),
+            None,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            scene.tempo_keys = keys;
+            assert!(r.render(&scene));
+            let mut whole = Renderer::with_skin(Skin::Worn, s, 1.0);
+            whole.render(&scene);
+            assert!(
+                r.frame() == whole.frame(),
+                "worn step {i}: not as put together whole"
+            );
+        }
+    }
+
+    /// The TEMPO keys (R-TEMPO-CORNER): the rail's keys' size, centred on the TEMPO screen's
+    /// height, the rail's gap after its surround and between them, each hit where it is drawn
+    /// and nowhere else.
+    #[test]
+    fn the_tempo_keys_follow_the_screen_at_the_rails_size_and_gaps() {
+        let official = crate::Arrangement::official();
+        let (x, y, w, h) = art::TEMPO_SCREEN;
+        let (tx, ty) = art::tempo_key_at(&official, art::TempoKey::Typing);
+        let (px, py) = art::tempo_key_at(&official, art::TempoKey::Panic);
+        assert_eq!(art::TEMPO_KEY, (crate::strip::KEY_W, crate::strip::KEY_H));
+        assert_eq!((ty, py), (y + h / 2.0, y + h / 2.0));
+        let half = art::TEMPO_KEY.0 / 2.0;
+        assert_eq!(tx - half - (x + w + art::TEMPO_SURROUND), 14.0);
+        assert_eq!(px - half - (tx + half), 14.0);
+        let hit = |x, y| art::tempo_key_hit(&official, x, y);
+        assert_eq!(hit(tx, ty), Some(art::TempoKey::Typing));
+        assert_eq!(hit(px, py), Some(art::TempoKey::Panic));
+        assert_eq!(hit((tx + px) / 2.0, ty), None, "the gap between them");
+        assert_eq!(hit(x + w / 2.0, y + h / 2.0), None, "the screen");
+        assert_eq!(hit(px + half + 5.0, py), None);
+        assert!(
+            !art::tempo_hit(&official, tx, ty),
+            "the screen's own hit stops short"
+        );
     }
 
     /// A timed dial's part of the background (R-OSC-TIMED), in either skin: the background's own

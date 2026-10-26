@@ -41,10 +41,7 @@ const RANGE_W: f64 = 348.0;
 const RANGE_H: f64 = 50.0;
 const RANGE_X: f64 = crate::strip::CW - RANGE_W / 2.0;
 const RANGE_SURROUND: f64 = (BUTTON_H - RANGE_H) / 2.0;
-const ACTION_W: f64 = 230.0;
 pub const UP_X: f64 = RANGE_X + RANGE_W + RANGE_SURROUND + HEADER_GAP + ARROW_W / 2.0;
-pub const TYPING_X: f64 = crate::strip::CO - (ACTION_W + HEADER_GAP) / 2.0;
-pub const PANIC_X: f64 = crate::strip::CO + (ACTION_W + HEADER_GAP) / 2.0;
 /// A held key keeps its material and shading, with a darker surface over the key bed.
 const PRESSED_LEVEL: f32 = 0.65;
 
@@ -53,12 +50,12 @@ pub enum Target {
     Note(u8),
     Down,
     Up,
-    Type,
-    Panic,
     Back,
 }
 
-const BUTTONS: [(f64, f64, &str, Target); 4] = [
+/// The OCTAVE keys. (TYPING and PANIC moved up beside the TEMPO screen, to work from every
+/// page: decisions.md R-TEMPO-CORNER.)
+const BUTTONS: [(f64, f64, &str, Target); 2] = [
     (
         RANGE_X - RANGE_SURROUND - HEADER_GAP - ARROW_W / 2.0,
         ARROW_W,
@@ -66,15 +63,7 @@ const BUTTONS: [(f64, f64, &str, Target); 4] = [
         Target::Down,
     ),
     (UP_X, ARROW_W, "+", Target::Up),
-    (TYPING_X, ACTION_W, "TYPING", Target::Type),
-    (PANIC_X, ACTION_W, "PANIC", Target::Panic),
 ];
-
-fn buttons(standalone: bool) -> impl Iterator<Item = (f64, f64, &'static str, Target)> {
-    BUTTONS.into_iter().filter(move |(_, _, _, target)| {
-        standalone || !matches!(target, Target::Type | Target::Panic)
-    })
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
@@ -209,11 +198,11 @@ fn shape_svg(shape: [[f64; 2]; 8]) -> String {
     path + " Z"
 }
 
-pub fn hit(root: u8, x: f64, y: f64, standalone: bool) -> Option<Target> {
+pub fn hit(root: u8, x: f64, y: f64) -> Option<Target> {
     if !inside(x, y) {
         return None;
     }
-    for (cx, w, _, target) in buttons(standalone) {
+    for (cx, w, _, target) in BUTTONS {
         if (x - cx).abs() <= w / 2.0 && (y - HEADER).abs() <= BUTTON_H / 2.0 {
             return Some(target);
         }
@@ -401,7 +390,7 @@ impl Renderer {
                     self.materials
                         .as_ref()
                         .expect("worn materials loaded")
-                        .draw(&mut self.frame, self.scale, scene.standalone);
+                        .draw(&mut self.frame, self.scale);
                     // A look's drawing over the case, under the key bed and the print.
                     if let Some(art) = &self.dressing.art {
                         let (w, h) = (self.frame.width(), self.frame.height());
@@ -640,12 +629,9 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
         },
         crate::strip::CV,
     );
-    for (x, w, label, target) in buttons(scene.standalone) {
-        let on = target == Target::Type && scene.typing;
-        let fill = if scene.skin == Skin::Worn && !on {
+    for (x, w, label, target) in BUTTONS {
+        let fill = if scene.skin == Skin::Worn {
             "none"
-        } else if on {
-            "#b0702b"
         } else {
             "url(#keycap)"
         };
@@ -665,7 +651,7 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
                 "1"
             },
             fonts.baseline_for_centre(label, 20.0, Weight::Bold, HEADER),
-            if on { "#2a1006" } else { "#d9d2c0" }
+            "#d9d2c0"
         );
     }
     out += &format!(
@@ -763,7 +749,7 @@ impl Materials {
                 .unwrap_or_else(|| decode(crate::skin::BUTTON)),
         }
     }
-    fn draw(&self, frame: &mut Pixmap, s: f64, standalone: bool) {
+    fn draw(&self, frame: &mut Pixmap, s: f64) {
         let along = (art::W * s) as f32 / self.wood.width() as f32;
         let across = along / 2.2;
         // One continuous wooden case surrounds the recessed key bed. Separate
@@ -790,7 +776,7 @@ impl Materials {
                 Transform::from_row(along, 0.0, 0.0, across, 0.0, -260.0 * across),
             ),
         }
-        for (x, w, _, _) in buttons(standalone) {
+        for (x, w, _, _) in BUTTONS {
             let cap = plugin_kit_materials::widened(&self.button, w / BUTTON_H);
             plugin_kit_materials::sprite(frame, &cap, s, (x, HEADER - art::PANEL_H), (w, BUTTON_H));
         }
@@ -856,30 +842,24 @@ mod tests {
             assert_eq!(shape[4][1], BED[3]);
             assert_eq!(shape[5][1], BED[3]);
             assert_eq!(
-                hit(36, (r[0] + r[2]) / 2.0, BED[3] - 5.0, false),
+                hit(36, (r[0] + r[2]) / 2.0, BED[3] - 5.0),
                 Some(Target::Note(note))
             );
             if note > 36 && black(note - 1) {
                 assert!(shape[0][0] > r[0]);
                 assert_eq!(
-                    hit(36, shape[0][0] - CLEARANCE / 2.0, BED[1] + 20.0, false),
+                    hit(36, shape[0][0] - CLEARANCE / 2.0, BED[1] + 20.0),
                     Some(Target::Back)
                 );
-                assert_eq!(
-                    hit(36, r[0] + 5.0, NOTCH_Y - 2.0, false),
-                    Some(Target::Back)
-                );
+                assert_eq!(hit(36, r[0] + 5.0, NOTCH_Y - 2.0), Some(Target::Back));
             }
             if black(note + 1) {
                 assert!(shape[1][0] < r[2]);
                 assert_eq!(
-                    hit(36, shape[1][0] + CLEARANCE / 2.0, BED[1] + 20.0, false),
+                    hit(36, shape[1][0] + CLEARANCE / 2.0, BED[1] + 20.0),
                     Some(Target::Back)
                 );
-                assert_eq!(
-                    hit(36, r[2] - 5.0, NOTCH_Y - 2.0, false),
-                    Some(Target::Back)
-                );
+                assert_eq!(hit(36, r[2] - 5.0, NOTCH_Y - 2.0), Some(Target::Back));
             }
         }
         let first = white_shape(41, 41).expect("first F");
@@ -893,10 +873,10 @@ mod tests {
     fn black_keys_win_and_every_midi_note_is_reachable() {
         let r = rect(36, 37).expect("C sharp");
         assert_eq!(
-            hit(36, (r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0, false),
+            hit(36, (r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0),
             Some(Target::Note(37))
         );
-        assert_eq!(hit(36, r[0], BED[3] - 10.0, false), Some(Target::Note(36)));
+        assert_eq!(hit(36, r[0], BED[3] - 10.0), Some(Target::Note(36)));
         for note in 0..128u8 {
             let root = (note / 12 * 12).min(84);
             let r = rect(root, note).expect("visible");
@@ -906,7 +886,7 @@ mod tests {
                 r[3] - 10.0
             };
             assert_eq!(
-                hit(root, (r[0] + r[2]) / 2.0, y, false),
+                hit(root, (r[0] + r[2]) / 2.0, y),
                 Some(Target::Note(note)),
                 "{note}"
             );
@@ -914,9 +894,9 @@ mod tests {
         assert_eq!(shifted(84, true), 84);
         assert_eq!(shifted(0, false), 0);
         assert_eq!(
-            hit(84, BED[2] - 5.0, BED[3] - 10.0, false),
+            hit(84, BED[2] - 5.0, BED[3] - 10.0),
             Some(Target::Note(127))
         );
-        assert_eq!(hit(36, 100.0, 1400.0, false), None);
+        assert_eq!(hit(36, 100.0, 1400.0), None);
     }
 }

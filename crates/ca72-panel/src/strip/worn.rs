@@ -203,7 +203,7 @@ pub(super) const AMBER_LIGHT: Underlight = Underlight {
 };
 /// The tabs' and the keys' print.
 pub(super) const TAB_PRINT: &str = "#2a1006";
-const KEY_PRINT: &str = "#d9d2c0";
+pub(crate) const KEY_PRINT: &str = "#d9d2c0";
 /// The drops move on at most this far apart, seconds (30 a second).
 const STEP_S: f64 = 1.0 / 30.0;
 /// The name's dots' pitch, and the drops' sizes (a sounding voice's, an idle one's: the
@@ -2307,8 +2307,7 @@ mod tests {
                         5 => sc.keyboard.as_mut().unwrap().root = 53,
                         6 => sc.keyboard.as_mut().unwrap().typing = true,
                         7 => {
-                            sc.keyboard.as_mut().unwrap().hover =
-                                Some(crate::keyboard::Target::Type)
+                            sc.keyboard.as_mut().unwrap().hover = Some(crate::keyboard::Target::Up)
                         }
                         8 => {
                             sc.keyboard.as_mut().unwrap().standalone = false;

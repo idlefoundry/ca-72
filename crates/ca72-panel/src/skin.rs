@@ -264,6 +264,10 @@ pub enum Part {
     KeyBlueLit,
     KeyRed,
     KeyRedLit,
+    /// The rail's keys' charcoal cap (a pack's `key` where it has one), drawn out to a key of
+    /// the rail's: the standalone's TYPING and PANIC beside the TEMPO screen (decisions.md
+    /// R-TEMPO-CORNER).
+    RailKey,
 }
 
 /// How much of a knob's picture its skirt fills (the picture squared about the cap's axis;
@@ -308,6 +312,7 @@ pub struct Pictures {
     key: [Pixmap; 2],
     key_blue: [Pixmap; 2],
     key_red: [Pixmap; 2],
+    rail_key: Pixmap,
     scaled: Vec<((Part, u32, u32), Pixmap)>,
 }
 
@@ -429,6 +434,11 @@ impl Pictures {
             [l.unlit, l.lit]
         };
         let (key_blue, key_red) = (tinted(crate::strip::BLUE), tinted(crate::strip::RED));
+        // (The rail's keys' proportions, as the strip draws its keys out.)
+        let rail_key = plugin_kit_materials::widened(
+            &pack("key").unwrap_or_else(|| decode(BUTTON)),
+            crate::strip::KEY_W / crate::strip::KEY_H,
+        );
         Pictures {
             walnut: png("walnut"),
             face,
@@ -466,6 +476,7 @@ impl Pictures {
             key,
             key_blue,
             key_red,
+            rail_key,
             scaled: Vec::new(),
         }
     }
@@ -511,6 +522,7 @@ impl Pictures {
             Part::KeyBlueLit => &self.key_blue[1],
             Part::KeyRed => &self.key_red[0],
             Part::KeyRedLit => &self.key_red[1],
+            Part::RailKey => &self.rail_key,
         }
     }
 
