@@ -15067,3 +15067,41 @@ rejects each negative trial by a failing assertion, then passes the final layout
 The final default-feature workspace run also passes: 1170 tests, 97 intentionally
 ignored, with four test threads on the shared Linux machine. Logs have a `-3` suffix beside
 the frames. These checks and pictures are evidence for review, not the owner's visual approval.
+
+## R-PRESET-ARROWS. The preset's previous and next keys side by side
+
+**The request, 2026-10-26** (from the owner): users have complained that the preset's
+previous and next arrows sit on either side of the preset's name. They should be together,
+next to each other beside the name, in the editor's realistic look.
+
+**Built (option A, awaiting the owner's review):** the previous key now sits directly before
+the next key, after the name's display and before SAVE, on both rails (the plug-ins' and the
+standalone's with FX). The arrows are 14 units apart, the same gap as between the other rail
+keys. The name's display moves one key to the left and keeps its width (1682 in the plug-ins,
+1582 in the standalone). It keeps its former clearances: 27 units to the star before it, 21
+to the arrows after it. NEXT keeps its place and its 16 units to SAVE. Every other key is
+unchanged. Both looks draw the rail from `Rail::keys` and `Rail::name`, so CLASSIC follows
+too, as do the hit test, MIDI Learn's places and the tips.
+
+**Option B, offered as the alternative:** both arrows before the name, after the star
+(MACRO · ★ · ‹ · › · name), with the name one key further right. A is built because it is
+the usual order in instrument plug-ins (name, then its arrows) and keeps the star beside the
+name it marks. B is a change of the positions in `strip.rs` alone.
+
+`presets::bar_svg`, the old drawn selector, has no caller and is left as it was. No approved
+picture changes: `approved.png` and `approved-large.png` compare only above `PANEL_H`.
+`tests/global_key.rs` checks the new clearances. A new test checks that the arrows sit
+together after the name on both rails, and that each is hit on its own side of the gap
+between them.
+
+**Evidence (Mac, Rust 1.97.1):** before and after renders of the worn and drawn looks, at 0.44
+and 1.0, of the plug-ins' and the standalone's rails, in the worktree's
+`target/arrows/`. `cargo test -p ca72-panel` passes: 115 library tests, including
+`a_frame_drawn_in_parts_is_the_frame_drawn_whole`, and every integration suite, including
+`global_key` and the approved pictures. `cargo test -p ca72-plugin --lib --features
+standalone-production`: 593 passed and 1 failed. The failure was
+`a_held_drone_plays_through_the_engine_as_held_keys`, an audio equality test, while the
+Mac's load was about 44 from other jobs; it passes twice when run alone, and this change
+touches no audio. The editor's parts-against-whole tests (`whole`, `preset`, `rail`) pass
+with and without the standalone, and Clippy passes on the panel crate with all targets.
+No installed build or host was used. The owner has the pictures to review.
