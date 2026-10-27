@@ -64,8 +64,12 @@ busy=$(
     kb=${kb:-0}
     if [ $dry = 1 ]; then
       echo "would delete $((kb / 1024)) MB: $t"
+    elif rm -rf "$t" 2>/dev/null; then
+      echo "deleted $((kb / 1024)) MB: $t"
     else
-      rm -rf "$t" && echo "deleted $((kb / 1024)) MB: $t"
+      # The Mac's privacy protection keeps a LaunchAgent out of ~/Documents and the like.
+      echo "could not delete: $t"
+      continue
     fi
     freed=$((freed + kb))
   done
