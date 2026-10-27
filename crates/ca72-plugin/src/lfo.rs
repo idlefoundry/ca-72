@@ -729,9 +729,10 @@ const LFO_TARGET_SHORT: [[&str; LFO_KNOBS]; LFOS] = [
 
 /// Whether source `s` moves target `t` by its shared copy where it has one of each voice's own
 /// (MONO off): `t` a control the voices share, or an LFO's own knob of an LFO with MONO on (one
-/// copy every voice shares: option C). False for a macro, or an LFO with MONO on.
+/// copy every voice shares: option C). False for a macro, or an LFO with MONO on. The velocity
+/// has one of each voice's own always (its note's); its shared copy is the latest note's.
 pub fn takes_shared(p: &Ca72Params, s: Source, t: Target) -> bool {
-    let own = s.lfo().is_some_and(|n| !p.lfo(n).mono.value());
+    let own = s == Source::Velocity || s.lfo().is_some_and(|n| !p.lfo(n).mono.value());
     own && match t.lfo_knob() {
         Some((n, _)) => p.lfo(n).mono.value(),
         None => !t.per_voice(),
@@ -793,8 +794,12 @@ pub fn is_lfo_target(p: &Ca72Params, param_id: &str) -> bool {
 pub const MACROS: usize = 6;
 /// The most characters a macro's name has (its dot screen's seven).
 pub const NAME_MOST: usize = 7;
-/// Every modulation source: the LFOs, then the macros.
-pub const SOURCES: usize = LFOS + MACROS;
+/// The notes' velocity as a source (decisions.md R-VELOCITY): one, after the macros.
+pub const VELOCITIES: usize = 1;
+/// Every modulation source: the LFOs, then the macros, then the notes' velocity.
+pub const SOURCES: usize = LFOS + MACROS + VELOCITIES;
+/// The velocity's place in the sources' arrays.
+pub const VELOCITY: usize = LFOS + MACROS;
 
 /// A modulation source: something with a value that moves the knobs assigned to it, each by
 /// its own depth, with rings on them (decisions.md R-LFO). Its index ([`Source::index`]) is
@@ -806,6 +811,9 @@ pub enum Source {
     Lfo(usize),
     /// Macro `n` (0 to [`MACROS`] less 1).
     Macro(usize),
+    /// The velocity of each voice's note (decisions.md R-VELOCITY): unipolar, as a macro, but
+    /// each voice's own, as an LFO with MONO off.
+    Velocity,
 }
 
 impl Source {
@@ -818,29 +826,37 @@ impl Source {
     pub fn index(self) -> usize {
         match self {
             Source::Lfo(n) if n < LFOS => n,
-            Source::Macro(n) => Some(LFOS + n)
-                .filter(|i| *i < SOURCES)
-                .unwrap_or(usize::MAX),
-            Source::Lfo(_) => usize::MAX,
+            Source::Macro(n) if n < MACROS => LFOS + n,
+            Source::Velocity => VELOCITY,
+            Source::Lfo(_) | Source::Macro(_) => usize::MAX,
         }
     }
 
     pub fn of_index(i: usize) -> Option<Source> {
         if i < LFOS {
             Some(Source::Lfo(i))
-        } else if i < SOURCES {
+        } else if i < LFOS + MACROS {
             Some(Source::Macro(i - LFOS))
+        } else if i == VELOCITY {
+            Some(Source::Velocity)
         } else {
             None
         }
     }
 
-    /// As presets and sessions save it: `lfo1` to `lfo4`, `macro1` on.
+    /// As presets and sessions save it: `lfo1` to `lfo4`, `macro1` on, `velocity`.
     pub fn id(self) -> String {
         match self {
             Source::Lfo(n) => format!("lfo{}", n + 1),
             Source::Macro(n) => format!("macro{}", n + 1),
+            Source::Velocity => "velocity".into(),
         }
+    }
+
+    /// Whether it can move target `t`: any, but the velocity neither an LFO's own knobs nor
+    /// TEMPO (they run on the generators' ticks, which have no notes: decisions.md R-VELOCITY).
+    pub fn takes(self, t: Target) -> bool {
+        self != Source::Velocity || !(t.is_lfo() || t == Target::Tempo)
     }
 
     pub fn of_id(id: &str) -> Option<Source> {
@@ -1973,6 +1989,8 @@ pub struct Lfos {
     pub law: FreqLaw,
     /// Each macro's value (0..1), where its knob's glide has it.
     pub macros: [f32; MACROS],
+    /// The velocity's CURVE and FLOOR, where it is assigned (else the default's).
+    pub velocity: Response,
 }
 
 impl Default for Lfos {
@@ -1983,7 +2001,40 @@ impl Default for Lfos {
             base: [0.0; TARGETS],
             law: FreqLaw::default(),
             macros: [0.0; MACROS],
+            velocity: Response::default(),
         }
+    }
+}
+
+/// How a note's velocity becomes the source's value (decisions.md R-VELOCITY, the drawer's
+/// VELOCITY row): CURVE, -1 (SOFT) to 1 (HARD), 0 a straight line; FLOOR, 0..1, the least a
+/// note gives. The value is FLOOR + (1 - FLOOR) × velocity ^ (3 ^ CURVE): SOFT's light notes
+/// give more, HARD's less.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct Response {
+    pub curve: f32,
+    pub floor: f32,
+}
+
+/// CURVE's exponent at its ends: 1/3 at SOFT, 3 at HARD.
+pub const CURVE_REACH: f64 = 3.0;
+
+impl Response {
+    /// The source's value (0..1) for velocity `v` (0..1).
+    pub fn at(&self, v: f64) -> f64 {
+        let v = if v.is_finite() {
+            v.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let curve = f64::from(self.curve).clamp(-1.0, 1.0);
+        let floor = f64::from(self.floor).clamp(0.0, 1.0);
+        let shaped = if curve == 0.0 {
+            v
+        } else {
+            v.powf(CURVE_REACH.powf(curve))
+        };
+        floor + (1.0 - floor) * shaped
     }
 }
 
@@ -2014,13 +2065,20 @@ impl From<Law> for FreqLaw {
 }
 
 impl Lfos {
-    /// The sources' values with the LFOs' at `lfos`, the macros' their knobs' (0..1, unipolar).
-    pub fn source_values(&self, lfos: &[f64; LFOS]) -> [f64; SOURCES] {
+    /// The sources' values with the LFOs' at `lfos`, the macros' their knobs' (0..1, unipolar),
+    /// and the velocity's for a note's velocity `velocity` (0..1) through its [`Response`].
+    pub fn source_values(&self, lfos: &[f64; LFOS], velocity: f64) -> [f64; SOURCES] {
         std::array::from_fn(|i| match Source::of_index(i) {
             Some(Source::Lfo(n)) => lfos[n],
             Some(Source::Macro(n)) => f64::from(self.macros[n]),
+            Some(Source::Velocity) => self.velocity.at(velocity),
             None => 0.0,
         })
+    }
+
+    /// Whether the velocity moves anything (an assignment of a depth other than 0).
+    pub fn velocity_active(&self) -> bool {
+        self.to[VELOCITY].iter().flatten().any(|a| a.depth != 0.0)
     }
 
     /// Whether any source modulates anything (an assignment of a depth other than 0).
@@ -2054,9 +2112,13 @@ impl Lfos {
     }
 
     /// Whether source `i` ([`Source::index`]) has a value of each voice's own: an LFO with MONO
-    /// off. The macros never.
+    /// off, and the velocity (its note's). The macros never.
     pub fn own(&self, i: usize) -> bool {
-        matches!(Source::of_index(i), Some(Source::Lfo(n)) if !self.lfo[n].mono)
+        match Source::of_index(i) {
+            Some(Source::Lfo(n)) => !self.lfo[n].mono,
+            Some(Source::Velocity) => true,
+            _ => false,
+        }
     }
 
     /// Whether any LFO is assigned (a depth other than 0): its generator runs.
@@ -2660,7 +2722,7 @@ impl Bank {
             self.cross.tempo = self.cross.routes.tempo(l, |i| match Source::of_index(i) {
                 Some(Source::Lfo(m)) => shared[m],
                 Some(Source::Macro(m)) => f64::from(l.macros[m.min(MACROS - 1)]),
-                None => 0.0,
+                Some(Source::Velocity) | None => 0.0,
             });
             return;
         }
@@ -2703,7 +2765,7 @@ impl Bank {
             cross.shared[j] = moved(l, &routes, j, |i| match Source::of_index(i) {
                 Some(Source::Lfo(m)) => was_shared[m],
                 Some(Source::Macro(m)) => macros(m),
-                None => 0.0,
+                Some(Source::Velocity) | None => 0.0,
             });
             if !l.lfo[j].mono {
                 for (s, was) in cross.voices[..n].iter_mut().zip(&was_voices[..n]) {
@@ -2711,7 +2773,7 @@ impl Bank {
                         Some(Source::Lfo(m)) if l.own(i) => was[m],
                         Some(Source::Lfo(m)) => was_shared[m],
                         Some(Source::Macro(m)) => macros(m),
-                        None => 0.0,
+                        Some(Source::Velocity) | None => 0.0,
                     });
                 }
             }
@@ -2720,7 +2782,7 @@ impl Bank {
         cross.tempo = routes.tempo(l, |i| match Source::of_index(i) {
             Some(Source::Lfo(m)) => was_shared[m],
             Some(Source::Macro(m)) => macros(m),
-            None => 0.0,
+            Some(Source::Velocity) | None => 0.0,
         });
         // Their values here.
         for j in 0..LFOS {
@@ -2819,8 +2881,9 @@ pub fn controls(p: &Ca72Params, knob: &dyn Fn(&FloatParam) -> f32) -> Lfos {
         let i = s.index();
         l.to[i] = patch.assignments(s);
         for a in &mut l.to[i] {
-            // (TEMPO in a plug-in: kept in the patch, never applied, so that nothing runs.)
-            if a.is_some_and(|a| a.target == Target::Tempo && !standalone) {
+            // (TEMPO in a plug-in: kept in the patch, never applied, so that nothing runs. The
+            // velocity on a knob it cannot take likewise: [`Source::takes`].)
+            if a.is_some_and(|a| (a.target == Target::Tempo && !standalone) || !s.takes(a.target)) {
                 *a = None;
             }
         }
@@ -2846,7 +2909,19 @@ pub fn controls(p: &Ca72Params, knob: &dyn Fn(&FloatParam) -> f32) -> Lfos {
             l.macros[n] = (knob(p.macro_param(n)) / 100.0).clamp(0.0, 1.0);
         }
     }
+    // (The velocity's CURVE and FLOOR likewise: R-VELOCITY.)
+    if l.velocity_active() {
+        l.velocity = response(p);
+    }
     l
+}
+
+/// The velocity's CURVE and FLOOR as their parameters have them (decisions.md R-VELOCITY).
+pub fn response(p: &Ca72Params) -> Response {
+    Response {
+        curve: (p.velocity_curve.value() / 100.0).clamp(-1.0, 1.0),
+        floor: (p.velocity_floor.value() / 100.0).clamp(0.0, 1.0),
+    }
 }
 
 // ---- The parameters.
@@ -3482,7 +3557,7 @@ mod tests {
         let l = turned(50.0);
         assert!((l.macros[2] - 0.5).abs() < 1e-6);
         let c = p.controls();
-        let values = l.source_values(&[0.0; LFOS]);
+        let values = l.source_values(&[0.0; LFOS], 0.0);
         assert_eq!(values[Source::Macro(2).index()], 0.5);
         let m = l.modulated(&c, &values);
         assert!(
@@ -3493,13 +3568,13 @@ mod tests {
         assert!((m.panel.emphasis - (c.panel.emphasis - 0.1).max(0.0)).abs() < 1e-6);
         // Clamped at the knob's end; at 0 the knob's own place.
         let l = turned(100.0);
-        let m = l.modulated(&c, &l.source_values(&[0.0; LFOS]));
+        let m = l.modulated(&c, &l.source_values(&[0.0; LFOS], 0.0));
         assert!(
             m.panel.cutoff <= 1.0
                 && (m.panel.cutoff - (c.panel.cutoff + 0.6).min(1.0)).abs() < 1e-6
         );
         let l = turned(0.0);
-        let m = l.modulated(&c, &l.source_values(&[0.0; LFOS]));
+        let m = l.modulated(&c, &l.source_values(&[0.0; LFOS], 0.0));
         assert!((m.panel.cutoff - c.panel.cutoff).abs() < 1e-6);
         assert!(!l.own(Source::Macro(2).index()));
     }

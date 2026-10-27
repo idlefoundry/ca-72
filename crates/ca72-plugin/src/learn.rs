@@ -95,7 +95,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 166] = [
+pub const LEARNABLE: [Learnable; 168] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -181,6 +181,9 @@ pub const LEARNABLE: [Learnable; 166] = [
     knob("pressure_filter", "PRESSURE TO FILTER"),
     knob("timbre_mod", "TIMBRE TO MODULATION"),
     knob("timbre_filter", "TIMBRE TO FILTER"),
+    // The velocity's response (R-VELOCITY).
+    knob("velocity_curve", "VELOCITY CURVE"),
+    knob("velocity_floor", "VELOCITY FLOOR"),
     // Each oscillator's waveform (R-CONTINUOUS-WAVE).
     switch(
         "osc1_shape_mode",
@@ -1196,6 +1199,8 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "pressure_filter" => &p.pressure_filter,
         "timbre_mod" => &p.timbre_mod,
         "timbre_filter" => &p.timbre_filter,
+        "velocity_curve" => &p.velocity_curve,
+        "velocity_floor" => &p.velocity_floor,
         "osc1_shape_mode" => &p.osc1_shape_mode,
         "osc1_shape" => &p.osc1_shape,
         "osc1_shape_mod" => &p.osc1_shape_mod,
@@ -1264,6 +1269,8 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
         "pressure_filter" => &p.pressure_filter,
         "timbre_mod" => &p.timbre_mod,
         "timbre_filter" => &p.timbre_filter,
+        "velocity_curve" => &p.velocity_curve,
+        "velocity_floor" => &p.velocity_floor,
         "osc1_shape" => &p.osc1_shape,
         "osc2_shape" => &p.osc2_shape,
         "osc3_shape" => &p.osc3_shape,
@@ -1410,8 +1417,9 @@ mod tests {
             // GLIDE RANGE, a switch; each LFO's SHAPE, RATE, PHASE and RISE knobs, WAVEFORM,
             // DIVISION and MODE selectors, STEPPED or CONTINUOUS, TIMED and MONO switches: R-LFO;
             // the six macros, knobs: R-MACROS; each LFO's POLARITY, REVERSE and ON switches:
-            // R-LFO's corrections; each LFO's LEVEL, a knob: R-LFO's addendum.)
-            (62, 28, 58)
+            // R-LFO's corrections; each LFO's LEVEL, a knob: R-LFO's addendum; the velocity's
+            // CURVE and FLOOR, knobs: R-VELOCITY.)
+            (64, 28, 58)
         );
     }
 

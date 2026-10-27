@@ -16,6 +16,7 @@ pub mod lfo;
 pub mod lower;
 pub mod macros;
 pub mod mpe;
+pub mod velocity;
 mod worn;
 
 use resvg::tiny_skia::Pixmap;

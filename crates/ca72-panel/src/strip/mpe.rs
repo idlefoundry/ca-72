@@ -5,6 +5,12 @@
 //! MODULATION and CUTOFF; a rule; TIMBRE's MODULATION and CUTOFF, each a knob and its readout,
 //! the strip's own parts. The two groups' titles are centred below them, as GLOBAL's are.
 //!
+//! A second row under them (decisions.md R-VELOCITY) has the notes' velocity: LAST NOTE, a pixel
+//! screen in INPUT's column reading the latest note's; RESPONSE, a screen drawing how a note's
+//! velocity becomes the velocity source's value (its CURVE and FLOOR, the latest note's on it);
+//! MODULATES, a pixel screen of what it moves, as an LFO's; and CURVE and FLOOR, each a knob and
+//! its readout, under TIMBRE's. Its title, VELOCITY, centred below it all.
+//!
 //! The drawer is a plate of its own, as the arpeggiator's is. What does not change is drawn once
 //! a scale on a thread of its own, begun as the editor opens; then only what changed.
 
@@ -29,10 +35,13 @@ use crate::svg::{N, Svg, colour, put};
 
 // ---- The layout (the drawing's units, the drawer open; the mock-up's).
 
-/// Room below the controls for GLOBAL's title gaps (R-DRAWER-LETTERING).
-pub const DEPTH: f64 = 340.0;
-/// The controls keep the arpeggiator's row.
+/// A row's depth: room below its controls for GLOBAL's title gaps (R-DRAWER-LETTERING).
+pub const ROW_DEPTH: f64 = 340.0;
+/// The drawer's: two rows, the expression's and the velocity's (decisions.md R-VELOCITY).
+pub const DEPTH: f64 = 2.0 * ROW_DEPTH;
+/// The controls keep the arpeggiator's row; the velocity's a row's depth below.
 pub const ROW: f64 = super::arp::ROW;
+pub const ROW2: f64 = ROW + ROW_DEPTH;
 const LEGEND_UP: f64 = 109.0;
 /// INPUT's screen: left, top, width, height.
 pub const INPUT: (f64, f64, f64, f64) = (INPUT_X - 120.0, ROW - 25.0, 240.0, 50.0);
@@ -47,17 +56,76 @@ const UNIT_PITCH: f64 = 450.0;
 const PAIR_CENTRE: f64 = 270.0;
 const PRESSURE: f64 = (RULES[0] + RULES[1]) / 2.0 - PAIR_CENTRE;
 const TIMBRE: f64 = (RULES[1] + RIGHT) / 2.0 - PAIR_CENTRE;
-/// The units' middles: PRESSURE's MODULATION and CUTOFF, TIMBRE's MODULATION and CUTOFF. Each
-/// knob is `UNIT_KNOB` left of it; its readout grows rightwards from the strip's window.
-pub const UNITS: [f64; 4] = [PRESSURE, PRESSURE + UNIT_PITCH, TIMBRE, TIMBRE + UNIT_PITCH];
+/// The units' middles: PRESSURE's MODULATION and CUTOFF, TIMBRE's MODULATION and CUTOFF; then,
+/// on the second row under TIMBRE's, the velocity's CURVE and FLOOR. Each knob is `UNIT_KNOB`
+/// left of it; its readout grows rightwards from the strip's window.
+pub const UNITS: [f64; UNIT_COUNT] = [
+    PRESSURE,
+    PRESSURE + UNIT_PITCH,
+    TIMBRE,
+    TIMBRE + UNIT_PITCH,
+    TIMBRE,
+    TIMBRE + UNIT_PITCH,
+];
+pub const UNIT_COUNT: usize = 6;
 /// The knobs' parameters, in the units' order.
-pub const KNOB_PARAMS: [&str; 4] = [
+pub const KNOB_PARAMS: [&str; UNIT_COUNT] = [
     "pressure_mod",
     "pressure_filter",
     "timbre_mod",
     "timbre_filter",
+    "velocity_curve",
+    "velocity_floor",
 ];
-const LEGENDS: [&str; 4] = ["MODULATION", "CUTOFF", "MODULATION", "CUTOFF"];
+const LEGENDS: [&str; UNIT_COUNT] = [
+    "MODULATION",
+    "CUTOFF",
+    "MODULATION",
+    "CUTOFF",
+    "CURVE",
+    "FLOOR",
+];
+
+/// Unit `i`'s row: the expression's, else the velocity's.
+pub const fn unit_row(i: usize) -> f64 {
+    if i < 4 { ROW } else { ROW2 }
+}
+
+/// The velocity's row's screens (decisions.md R-VELOCITY): LAST NOTE in INPUT's column, RESPONSE
+/// (the curve) and MODULATES: left, top, width, height.
+pub const LAST: (f64, f64, f64, f64) = (INPUT_X - 120.0, ROW2 - 25.0, 240.0, 50.0);
+pub const RESPONSE: (f64, f64, f64, f64) = (RESPONSE_X - 220.0, ROW2 - 80.0, 440.0, 160.0);
+const RESPONSE_X: f64 = 1060.0;
+pub const MODULATES: (f64, f64, f64, f64) = (MODULATES_X - 166.0, ROW2 - 25.0, 332.0, 50.0);
+const MODULATES_X: f64 = 1620.0;
+/// The velocity's colour as its screens light it (`velocity::RGB`), and dimmed.
+const VELOCITY_LAMP: (u8, u8, u8) = super::worn::ORANGE;
+/// MODULATES dim (NOT IN USE), as an LFO's.
+const VELOCITY_DIM: (u8, u8, u8) = (120, 70, 30);
+
+/// The RESPONSE screen's curve: CURVE (-1..1) and FLOOR (0..1) as their knobs have them, and the
+/// latest note's velocity (0..1) where it falls, none before a note.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Response {
+    pub curve: f64,
+    pub floor: f64,
+    pub point: Option<f64>,
+}
+
+impl Response {
+    /// The source's value for velocity `v`, as the engine makes it (`lfo::Response`).
+    pub fn at(&self, v: f64) -> f64 {
+        let v = v.clamp(0.0, 1.0);
+        let curve = self.curve.clamp(-1.0, 1.0);
+        let shaped = if curve == 0.0 {
+            v
+        } else {
+            v.powf(3f64.powf(curve))
+        };
+        let floor = self.floor.clamp(0.0, 1.0);
+        floor + (1.0 - floor) * shaped
+    }
+}
 /// Each readout's cells: four, for MODULATION's "-100" (CUTOFF's "-2.5" needs three), the same
 /// in all four. Their windows grow to keep the strip's digit pitch and height.
 pub const CELLS: usize = 4;
@@ -88,12 +156,13 @@ impl Input {
 
 /// Readout `i`'s window (by `UNITS`): left, top, width, height.
 pub fn readout(i: usize) -> (f64, f64, f64, f64) {
-    let x = UNITS[i.min(3)] + UNIT_READOUT;
+    let i = i.min(UNIT_COUNT - 1);
+    let x = UNITS[i] + UNIT_READOUT;
     (
         // Keep the strip's clearance from the knob's outer numbers; the extra cell grows
         // rightwards. Centring the wider window on `x` would cover MODULATION's 50.
         x - READOUT.0 / 2.0,
-        ROW - READOUT.1 / 2.0,
+        unit_row(i) - READOUT.1 / 2.0,
         super::readout_width(CELLS),
         READOUT.1,
     )
@@ -113,7 +182,7 @@ pub fn inside(x: f64, y: f64) -> bool {
 
 /// What a pointer at (`x`, `y`) finds on the drawer, open.
 pub fn hit(x: f64, y: f64) -> Option<MpeTarget> {
-    (0..4).find_map(|i| {
+    (0..UNIT_COUNT).find_map(|i| {
         let (rx, ry, rw, rh) = readout(i);
         ((rx..rx + rw).contains(&x) && (ry..ry + rh).contains(&y)).then_some(MpeTarget::Readout(i))
     })
@@ -134,9 +203,15 @@ pub fn centre(t: MpeTarget) -> (f64, f64) {
 pub struct MpeScene {
     pub input: Input,
     /// Each readout's text, and whether it is lit (by `UNITS`).
-    pub readouts: [(String, bool); 4],
+    pub readouts: [(String, bool); UNIT_COUNT],
     /// Each knob's value, normalized.
-    pub knobs: [f64; 4],
+    pub knobs: [f64; UNIT_COUNT],
+    /// The velocity's row (decisions.md R-VELOCITY): LAST NOTE's text (the latest note's
+    /// velocity, MIDI's 0 to 127; none before a note), MODULATES' (and whether lit, as an
+    /// LFO's), the RESPONSE screen's curve.
+    pub last: String,
+    pub modulates: (String, bool),
+    pub response: Response,
 }
 
 impl Default for MpeScene {
@@ -144,7 +219,10 @@ impl Default for MpeScene {
         MpeScene {
             input: Input::None,
             readouts: std::array::from_fn(|_| (String::new(), true)),
-            knobs: [0.5; 4],
+            knobs: [0.5; UNIT_COUNT],
+            last: String::new(),
+            modulates: ("NOT IN USE".into(), false),
+            response: Response::default(),
         }
     }
 }
@@ -168,9 +246,9 @@ pub struct MpeRenderer {
     warming: Option<JoinHandle<Still>>,
     still: Option<Arc<Still>>,
     frame: Pixmap,
-    readouts: [Option<Reading>; 4],
+    readouts: [Option<Reading>; UNIT_COUNT],
     /// Each knob as drawn: its value, and its pixels at their place in the frame.
-    knobs: [Option<(f64, i32, i32, Pixmap)>; 4],
+    knobs: [Option<(f64, i32, i32, Pixmap)>; UNIT_COUNT],
     shown: Option<MpeScene>,
     damage: Option<[i32; 4]>,
 }
@@ -299,7 +377,16 @@ impl MpeRenderer {
                 if was.input != scene.input {
                     dirty = Some(union(dirty, self.input_part()));
                 }
-                for i in 0..4 {
+                if was.last != scene.last {
+                    dirty = Some(union(dirty, self.screen_part(LAST)));
+                }
+                if was.modulates != scene.modulates {
+                    dirty = Some(union(dirty, self.screen_part(MODULATES)));
+                }
+                if was.response != scene.response {
+                    dirty = Some(union(dirty, self.screen_part(RESPONSE)));
+                }
+                for i in 0..UNIT_COUNT {
                     if was.readouts[i] != scene.readouts[i] {
                         dirty = Some(union(dirty, self.readout_part(i)));
                     }
@@ -341,7 +428,11 @@ impl MpeRenderer {
 
     /// Where INPUT's dots and their glow draw.
     fn input_part(&self) -> [i32; 4] {
-        let (x, y, w, h) = INPUT;
+        self.screen_part(INPUT)
+    }
+
+    /// Where a screen's dots (or the RESPONSE screen's curve) and their glow draw.
+    fn screen_part(&self, (x, y, w, h): (f64, f64, f64, f64)) -> [i32; 4] {
         self.pixels((x, y, x + w, y + h))
     }
 
@@ -359,9 +450,14 @@ impl MpeRenderer {
 
     /// `r` grown until every part that reaches into it lies inside it.
     fn closed(&self, mut r: [i32; 4]) -> [i32; 4] {
-        let mut parts = vec![self.input_part()];
-        parts.extend((0..4).map(|i| self.readout_part(i)));
-        parts.extend((0..4).filter_map(|k| self.knob_part(k)));
+        let mut parts = vec![
+            self.input_part(),
+            self.screen_part(LAST),
+            self.screen_part(MODULATES),
+            self.screen_part(RESPONSE),
+        ];
+        parts.extend((0..UNIT_COUNT).map(|i| self.readout_part(i)));
+        parts.extend((0..UNIT_COUNT).filter_map(|k| self.knob_part(k)));
         loop {
             let mut grew = false;
             for &p in &parts {
@@ -395,8 +491,28 @@ impl MpeRenderer {
                 &Lamp::ORANGE,
             );
         }
+        // The velocity's row: LAST NOTE, MODULATES and the RESPONSE screen's curve.
+        let on = Lamp::ORANGE;
+        if meets(self.screen_part(LAST), r) {
+            let (x, y, w, h) = LAST;
+            screen_text(&mut self.frame, s, (x, y - oy, w, h), &scene.last, &on);
+        }
+        if meets(self.screen_part(MODULATES), r) {
+            let (x, y, w, h) = MODULATES;
+            let (text, lit) = &scene.modulates;
+            let lamp = if *lit { on } else { Lamp::of(VELOCITY_DIM) };
+            screen_text(&mut self.frame, s, (x, y - oy, w, h), text, &lamp);
+        }
+        if meets(self.screen_part(RESPONSE), r) {
+            svg_over(
+                &self.options,
+                &mut self.frame,
+                s,
+                &response_svg(&scene.response, oy),
+            );
+        }
         // The readouts.
-        for i in 0..4 {
+        for i in 0..UNIT_COUNT {
             if !meets(self.readout_part(i), r) {
                 continue;
             }
@@ -422,7 +538,7 @@ impl MpeRenderer {
             }
         }
         // The knobs.
-        for k in 0..4 {
+        for k in 0..UNIT_COUNT {
             if let (Some(part), Some((_, x, y, p))) = (self.knob_part(k), &self.knobs[k])
                 && meets(part, r)
             {
@@ -443,12 +559,15 @@ fn make_still((scale, skin, lettering): Look) -> Still {
     svg_over(&options, &mut plate, s, &surfaces(oy, skin));
     lower::print(&mut plate, s, skin, &options, &print_svg(oy, lettering));
     let glass_picture = png(crate::skin::GLASS);
-    for i in 0..4 {
+    for i in 0..UNIT_COUNT {
         let (x, y, rw, rh) = readout(i);
         glass(&mut plate, &glass_picture, s, (x, y - oy, rw, rh), 5.0);
     }
-    let (x, y, w, h) = INPUT;
-    screen_still(&options, &mut plate, &glass_picture, s, (x, y - oy, w, h));
+    for (x, y, w, h) in [INPUT, LAST, MODULATES] {
+        screen_still(&options, &mut plate, &glass_picture, s, (x, y - oy, w, h));
+    }
+    let (x, y, w, h) = RESPONSE;
+    glass(&mut plate, &glass_picture, s, (x, y - oy, w, h), 12.0);
     lower::lamp(&mut plate, s, skin, (0, top_px(s)));
     let shadow = lower::cast(s, &options);
     Still {
@@ -467,7 +586,25 @@ fn surfaces(oy: f64, skin: Skin) -> String {
         s,
         "<defs><filter id='long' x='-0.6' y='-0.6' width='2.2' height='2.2'><feGaussianBlur stdDeviation='7'/></filter><filter id='softer' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='2'/></filter></defs>"
     );
-    for i in 0..4 {
+    // (The RESPONSE screen's bezel and face, as a readout's, larger.)
+    let (rx, ry, rw, rh) = RESPONSE;
+    put!(
+        s,
+        "<rect x='{}' y='{}' width='{}' height='{}' rx='16' fill='#0b0a09'/><rect x='{}' y='{}' width='{}' height='{}' rx='15' fill='none' stroke='#fff' stroke-opacity='0.07' stroke-width='1.5'/><rect x='{}' y='{}' width='{}' height='{}' rx='12' fill='#100a0e'/>",
+        N(rx - 8.0),
+        y(ry - 8.0),
+        N(rw + 16.0),
+        N(rh + 16.0),
+        N(rx - 7.0),
+        y(ry - 7.0),
+        N(rw + 14.0),
+        N(rh + 14.0),
+        N(rx),
+        y(ry),
+        N(rw),
+        N(rh)
+    );
+    for i in 0..UNIT_COUNT {
         let (x, ry, w, h) = readout(i);
         put!(
             s,
@@ -483,16 +620,17 @@ fn surfaces(oy: f64, skin: Skin) -> String {
         );
     }
     if skin == Skin::Worn {
-        for u in UNITS {
+        for (i, u) in UNITS.into_iter().enumerate() {
             let (x, r) = (u + super::UNIT_KNOB, art::STD.skirt);
+            let row = unit_row(i);
             put!(
                 s,
                 "<circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.55' filter='url(#long)'/><circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.7' filter='url(#softer)'/>",
                 N(x + 10.0),
-                y(ROW + 14.0),
+                y(row + 14.0),
                 N(r),
                 N(x + 2.0),
-                y(ROW + 3.0),
+                y(row + 3.0),
                 N(r)
             );
         }
@@ -508,25 +646,45 @@ fn print_svg(oy: f64, lettering: Lettering) -> String {
     let text = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64| {
         art::text(s, x, y - oy, t, size, art::Style::Legend, false, "");
     };
-    for x in RULES {
+    // (After INPUT and LAST NOTE, the whole depth; between PRESSURE and TIMBRE, theirs; and
+    // across, between the rows.)
+    let line = |s: &mut Svg, (x1, y1): (f64, f64), (x2, y2): (f64, f64)| {
         put!(
             s,
             "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{}' stroke-width='4' stroke-linecap='round'/>",
-            N(x),
-            N(TOP + 16.0 - oy),
-            N(x),
-            N(TOP + DEPTH - 14.0 - oy),
+            N(x1),
+            N(y1 - oy),
+            N(x2),
+            N(y2 - oy),
             colour::LEGEND
         );
-    }
+    };
+    line(
+        &mut s,
+        (RULES[0], TOP + 16.0),
+        (RULES[0], TOP + DEPTH - 14.0),
+    );
+    line(
+        &mut s,
+        (RULES[1], TOP + 16.0),
+        (RULES[1], TOP + ROW_DEPTH - 14.0),
+    );
+    line(
+        &mut s,
+        (LEFT + 24.0, TOP + ROW_DEPTH),
+        (RIGHT - 24.0, TOP + ROW_DEPTH),
+    );
     text(&mut s, INPUT_X, ROW - LEGEND_UP, "INPUT", legend);
+    text(&mut s, INPUT_X, ROW2 - LEGEND_UP, "LAST NOTE", legend);
+    text(&mut s, RESPONSE_X, ROW2 - LEGEND_UP, "RESPONSE", legend);
+    text(&mut s, MODULATES_X, ROW2 - LEGEND_UP, "MODULATES", legend);
     for (g, (u, t)) in GROUPS.into_iter().enumerate() {
         let right = RULES.get(g + 1).copied().unwrap_or(RIGHT);
         put!(s, "<g id='mpe-title-{u}'>");
         art::text(
             &mut s,
             (RULES[g] + right) / 2.0,
-            TOP + DEPTH - 50.0 - oy,
+            TOP + ROW_DEPTH - 50.0 - oy,
             t,
             super::TITLE,
             art::Style::Title,
@@ -535,25 +693,114 @@ fn print_svg(oy: f64, lettering: Lettering) -> String {
         );
         s.0.push_str("</g>");
     }
+    put!(s, "<g id='mpe-title-velocity'>");
+    art::text(
+        &mut s,
+        (RULES[0] + RIGHT) / 2.0,
+        TOP + DEPTH - 50.0 - oy,
+        "VELOCITY",
+        super::TITLE,
+        art::Style::Title,
+        false,
+        "",
+    );
+    s.0.push_str("</g>");
     for (k, (u, t)) in UNITS.iter().zip(LEGENDS).enumerate() {
         put!(s, "<g id='mpe-unit-{k}'>");
         let x = u + super::UNIT_KNOB;
-        text(&mut s, x, ROW - LEGEND_UP, t, legend);
-        let dial = if k % 2 == 0 {
-            crate::controls::Dial::Reach
-        } else {
-            crate::controls::Dial::Cutoff
+        let row = unit_row(k);
+        text(&mut s, x, row - LEGEND_UP, t, legend);
+        let dial = match k {
+            4 => crate::controls::Dial::Reach,
+            5 => crate::controls::Dial::Ten,
+            _ if k % 2 == 0 => crate::controls::Dial::Reach,
+            _ => crate::controls::Dial::Cutoff,
         };
         put!(s, "<g id='mpe-dial-{k}'>");
-        art::draw_dial(&mut s, x, ROW - oy, dial);
+        art::draw_dial(&mut s, x, row - oy, dial);
         s.0.push_str("</g>");
         let (rx, ry, rw, rh) = readout(k);
-        if k % 2 == 0 {
+        if k % 2 == 0 || k >= 4 {
             text(&mut s, rx + rw + 18.0, ry + rh / 2.0, "%", small);
         } else {
             text(&mut s, rx + rw + 36.0, ry + rh / 2.0, "OCT", small);
         }
         s.0.push_str("</g>");
+    }
+    s.0
+}
+
+/// The RESPONSE screen's curve (the frame's units, `oy` its top in the drawing's): a faint
+/// graticule, FLOOR's line, the curve glowing in the velocity's colour, and the latest note's
+/// place on it.
+fn response_svg(r: &Response, oy: f64) -> String {
+    let (x, y, w, h) = RESPONSE;
+    let (pad, y) = (18.0, y - oy);
+    let (x0, x1, y0, y1) = (x + pad, x + w - pad, y + h - pad, y + pad);
+    let (cr, cg, cb) = VELOCITY_LAMP;
+    let c = format!("#{cr:02x}{cg:02x}{cb:02x}");
+    let mut s = Svg::default();
+    put!(
+        s,
+        "<defs><filter id='rglow' x='-0.2' y='-0.2' width='1.4' height='1.4'><feGaussianBlur stdDeviation='4'/></filter></defs>"
+    );
+    for i in 1..8 {
+        let gx = x + w * f64::from(i) / 8.0;
+        put!(
+            s,
+            "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{c}' stroke-opacity='0.1' stroke-width='1.5'/>",
+            N(gx),
+            N(y),
+            N(gx),
+            N(y + h)
+        );
+    }
+    for i in 1..4 {
+        let gy = y + h * f64::from(i) / 4.0;
+        put!(
+            s,
+            "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{c}' stroke-opacity='0.1' stroke-width='1.5'/>",
+            N(x),
+            N(gy),
+            N(x + w),
+            N(gy)
+        );
+    }
+    let at = |v: f64| (x0 + (x1 - x0) * v, y0 + (y1 - y0) * r.at(v));
+    let points: Vec<String> = (0..=64)
+        .map(|i| {
+            let (px, py) = at(f64::from(i) / 64.0);
+            format!("{},{}", N(px), N(py))
+        })
+        .collect();
+    let floor = y0 + (y1 - y0) * r.floor.clamp(0.0, 1.0);
+    put!(
+        s,
+        "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{c}' stroke-opacity='0.35' stroke-width='2' stroke-dasharray='6 6'/>",
+        N(x0),
+        N(floor),
+        N(x1),
+        N(floor)
+    );
+    let line = points.join(" ");
+    put!(
+        s,
+        "<polyline points='{line}' fill='none' stroke='{c}' stroke-width='7' stroke-opacity='0.5' filter='url(#rglow)'/><polyline points='{line}' fill='none' stroke='{c}' stroke-width='3.5' stroke-linejoin='round'/>"
+    );
+    if let Some(v) = r.point.filter(|v| v.is_finite()) {
+        let (px, py) = at(v);
+        put!(
+            s,
+            "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{c}' stroke-opacity='0.4' stroke-width='2' stroke-dasharray='3 5'/><circle cx='{}' cy='{}' r='10' fill='{c}' fill-opacity='0.6' filter='url(#rglow)'/><circle cx='{}' cy='{}' r='6' fill='#fff'/>",
+            N(px),
+            N(y0),
+            N(px),
+            N(py),
+            N(px),
+            N(py),
+            N(px),
+            N(py)
+        );
     }
     s.0
 }
@@ -612,7 +859,8 @@ mod tests {
                 &print_svg(0.0, lettering),
             );
             let tree = usvg::Tree::from_str(&doc, &lower::lettered()).expect("the print parses");
-            for rule in RULES {
+            // (After INPUT the whole depth; between PRESSURE and TIMBRE, their row's.)
+            for (rule, depth) in [(RULES[0], DEPTH), (RULES[1], ROW_DEPTH)] {
                 let ink = tree
                     .root()
                     .children()
@@ -621,7 +869,7 @@ mod tests {
                     .find(|r| (f64::from(r.left()) - rule + 2.0).abs() < 0.01)
                     .expect("a section rule");
                 assert!((f64::from(ink.top()) - TOP - 14.0).abs() < 0.01);
-                assert!((f64::from(ink.bottom()) - TOP - DEPTH + 12.0).abs() < 0.01);
+                assert!((f64::from(ink.bottom()) - TOP - depth + 12.0).abs() < 0.01);
             }
             let bounds = |id: &str| {
                 tree.node_by_id(id)
@@ -706,7 +954,7 @@ mod tests {
                     "{lettering:?}: {title:?}, GLOBAL's gap {global_gap}"
                 );
                 assert!(f64::from(title.top()) > TOP + 14.0);
-                assert!(f64::from(title.bottom()) < TOP + DEPTH - 9.0);
+                assert!(f64::from(title.bottom()) < TOP + ROW_DEPTH - 9.0);
                 let mut end = left + 2.0;
                 let mut first = f64::INFINITY;
                 let mut bottom = 0.0_f64;
@@ -727,7 +975,7 @@ mod tests {
                     );
                     end = f64::from(ink.right()).max(x + w + 6.0);
                     assert!(f64::from(ink.top()) > TOP + 14.0);
-                    assert!(f64::from(ink.bottom()) < TOP + DEPTH - 9.0);
+                    assert!(f64::from(ink.bottom()) < TOP + ROW_DEPTH - 9.0);
                     let mut print = Vec::new();
                     parts(
                         tree.node_by_id(&format!("mpe-unit-{i}")).expect("a unit"),
@@ -759,7 +1007,7 @@ mod tests {
                     "{lettering:?}: pair {first}..{end} centred between {left}..{right}"
                 );
                 let above = f64::from(title.top()) - bottom;
-                let foot = TOP + DEPTH - f64::from(title.bottom());
+                let foot = TOP + ROW_DEPTH - f64::from(title.bottom());
                 assert!(
                     above >= global_above,
                     "{lettering:?}: title gap {above}, GLOBAL {global_above}"
@@ -772,6 +1020,35 @@ mod tests {
                     "{lettering:?} MPE group {group}: above {above}, foot {foot}, pair {first}..{end}"
                 );
             }
+            // The velocity's row (decisions.md R-VELOCITY): its units and screens within it,
+            // clear of its title, which keeps GLOBAL's gaps to them and to the drawer's foot.
+            let title = bounds("mpe-title-velocity");
+            let mut bottom = 0.0_f64;
+            for i in 4..UNIT_COUNT {
+                let ink = bounds(&format!("mpe-unit-{i}"));
+                assert!(
+                    f64::from(ink.top()) > TOP + ROW_DEPTH + 14.0,
+                    "{lettering:?}"
+                );
+                assert!(f64::from(ink.bottom()) < TOP + DEPTH - 9.0, "{lettering:?}");
+                let (_, y, _, h) = readout(i);
+                bottom = bottom.max(f64::from(ink.bottom())).max(y + h + 6.0);
+            }
+            for (_, y, _, h) in [LAST, RESPONSE, MODULATES] {
+                assert!(y > TOP + ROW_DEPTH + 14.0);
+                bottom = bottom.max(y + h + 8.0);
+            }
+            let above = f64::from(title.top()) - bottom;
+            let foot = TOP + DEPTH - f64::from(title.bottom());
+            assert!(
+                above >= global_above && foot >= global_foot,
+                "{lettering:?}: VELOCITY's gaps {above}, {foot}; GLOBAL's {global_above}, {global_foot}"
+            );
+            let (rx, _, rw, _) = RESPONSE;
+            let (mx, _, mw, _) = MODULATES;
+            assert!(rx > RULES[0] + 20.0 && rx + rw + 20.0 < mx);
+            let curve = bounds("mpe-dial-4");
+            assert!(mx + mw + 20.0 < f64::from(curve.left()), "{lettering:?}");
         }
     }
 
@@ -799,6 +1076,8 @@ mod tests {
                     ("0.0".into(), true),
                     ("0".into(), true),
                     ("0.0".into(), true),
+                    ("0".into(), true),
+                    ("0".into(), true),
                 ],
                 ..MpeScene::default()
             };
@@ -810,7 +1089,7 @@ mod tests {
                     + (r.shadow().expect("the drawer's shadow").height() as i32)
                     < (art::H * scale).round() as i32
             );
-            let steps: [&dyn Fn(&mut MpeScene); 5] = [
+            let steps: [&dyn Fn(&mut MpeScene); 10] = [
                 &|s| s.input = Input::Mpe,
                 &|s| s.readouts[0] = ("-100".into(), true),
                 &|s| s.knobs[3] = 0.8,
@@ -818,6 +1097,25 @@ mod tests {
                 &|s| {
                     s.input = Input::None;
                     s.readouts[3] = ("2.5".into(), true);
+                },
+                // (The velocity's row: decisions.md R-VELOCITY.)
+                &|s| s.last = "97".into(),
+                &|s| s.modulates = ("CUTOFF +25".into(), true),
+                &|s| {
+                    s.response = Response {
+                        curve: -0.4,
+                        floor: 0.2,
+                        point: Some(0.7),
+                    }
+                },
+                &|s| {
+                    s.knobs[4] = 0.3;
+                    s.readouts[4] = ("-40".into(), true);
+                },
+                &|s| {
+                    s.knobs[5] = 0.2;
+                    s.readouts[5] = ("20".into(), true);
+                    s.response.point = None;
                 },
             ];
             for step in steps {

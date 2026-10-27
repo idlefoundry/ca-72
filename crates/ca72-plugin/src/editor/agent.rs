@@ -1037,9 +1037,17 @@ impl Editing {
         if notes.len() > 16 {
             return Err(ApiError::params("at most 16 notes at once"));
         }
+        let velocity = match args.get("velocity") {
+            None | Some(Value::Null) => crate::local_notes::TYPED_VELOCITY,
+            Some(v) => v
+                .as_u64()
+                .filter(|v| (1..=127).contains(v))
+                .map(|v| v as u8)
+                .ok_or_else(|| ApiError::params("`velocity` must be 1 to 127"))?,
+        };
         let mut refused = Vec::new();
         for &n in &notes {
-            self.playing.agent(n, true);
+            self.playing.agent_at(n, true, velocity);
             if !self.playing.agent_notes().contains(&n) {
                 refused.push(n);
             }
@@ -1896,6 +1904,7 @@ mod tests {
                 note: 38,
                 start: 0.0,
                 duration: 0.15,
+                velocity: None,
             }],
             seconds: 0.25,
             sample_rate: 48000,

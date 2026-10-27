@@ -164,6 +164,9 @@ pub struct Scene {
     pub shape: [Shaped; 3],
     /// GLIDE in LONG: ×5 printed beside its dial (decisions.md R-GLIDE-LONG).
     pub glide_long: bool,
+    /// The left hand's VELOCITY meter's lamps lit (decisions.md R-VELOCITY:
+    /// `strip::velocity::lit`).
+    pub velocity_lit: usize,
 }
 
 /// An oscillator's waveform as the panel shows it (decisions.md R-CONTINUOUS-WAVE).
@@ -243,6 +246,7 @@ impl Default for Scene {
             timed: [Timed::default(); 2],
             shape: [Shaped::default(); 3],
             glide_long: false,
+            velocity_lit: 0,
         }
     }
 }
@@ -1215,6 +1219,12 @@ impl Renderer {
                     .unwrap_or_default(),
             );
         }
+        // The left hand's VELOCITY: its meter (decisions.md R-VELOCITY),
+        // in a pack's `velocity` colour where it has one.
+        out.push(crate::strip::velocity::meter(
+            scene.velocity_lit,
+            crate::strip::velocity::colour(&self.look.colours),
+        ));
         // The MIDI map mode's marks (R-MIDI-MAP), floating, under the ring, a tip, a note, a menu.
         let small = self.text_size() * learn::MARK_TEXT;
         out.extend(
@@ -1703,7 +1713,7 @@ impl Renderer {
     /// strip's own parts (`crate::strip`), which are drawn over this frame's strip.
     pub fn draw_floating(&self, onto: &mut Pixmap) {
         // (The controls', then POWER's, its lamp's, OVERLOAD's, QUALITY's opening's two, the
-        // name plate's, the TEMPO screen's and its three keys': fixed.)
+        // name plate's, the TEMPO screen's and its three keys', the VELOCITY meter's: fixed.)
         let fixed = CONTROLS.len() + FIXED;
         for slot in self.slots.iter().skip(fixed) {
             if let Some((x, y, p)) = &slot.pixels {
@@ -1768,8 +1778,8 @@ fn merged(mut rects: Vec<[i32; 4]>) -> Vec<[i32; 4]> {
 /// The layers drawn after the controls whatever the scene: MOD's three orbs (each empty while
 /// it does not show), POWER, its lamp, OVERLOAD, QUALITY's opening (its back and its front), the
 /// name plate, the TEMPO screen and its TYPING, PANIC and MIDI keys (all four empty in a
-/// plug-in).
-const FIXED: usize = 13;
+/// plug-in), the left hand's VELOCITY meter (decisions.md R-VELOCITY).
+const FIXED: usize = 14;
 
 /// The most bands [`in_bands`] draws side by side.
 const BANDS: usize = 8;

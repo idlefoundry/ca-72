@@ -38,6 +38,7 @@ pub mod standalone_error;
 pub mod standalone_settings;
 pub mod timed;
 pub mod update;
+pub mod velocity;
 pub mod whats_new;
 
 use std::sync::Arc;
@@ -100,6 +101,9 @@ pub struct Ca72 {
     /// Oscillator 3 timed's bars between blocks (decisions.md R-OSC-TIMED).
     timed_clock: crate::timed::Clock,
     now: usize,
+    /// Each key's velocity as struck, which the notes it gives play at (decisions.md
+    /// R-VELOCITY).
+    played: velocity::Played,
 }
 
 impl std::fmt::Debug for Ca72 {
@@ -166,6 +170,7 @@ impl Ca72 {
             arp: Arp::default(),
             timed_clock: crate::timed::Clock::default(),
             now: 0,
+            played: velocity::Played::default(),
         }
     }
 }
@@ -283,7 +288,7 @@ impl Ca72 {
                     // A note that was already sounding before it was assigned still gets its
                     // release, and lets go of the wheel's polyphonic aftertouch.
                     if self.note_sources.physical(channel, note, false) {
-                        self.play(note, false);
+                        self.play(note, false, 0.0);
                     }
                     self.expressions.event(e, &mut |x| self.engine.event(x));
                     if let Some(value) = self.wheel.event(e, &self.expressions) {
@@ -343,14 +348,17 @@ impl Ca72 {
         }
         if let Some(event) = event_of(e) {
             if let Event::Note { key, on } = event {
-                let channel = match e {
-                    NoteEvent::NoteOn { channel, .. }
-                    | NoteEvent::NoteOff { channel, .. }
-                    | NoteEvent::Choke { channel, .. } => channel,
-                    _ => 0,
+                let (channel, velocity) = match e {
+                    NoteEvent::NoteOn {
+                        channel, velocity, ..
+                    } => (channel, velocity),
+                    NoteEvent::NoteOff { channel, .. } | NoteEvent::Choke { channel, .. } => {
+                        (channel, 0.0)
+                    }
+                    _ => (0, velocity::FULL),
                 };
                 if self.note_sources.physical(channel, key, on) {
-                    self.play(key, on);
+                    self.play(key, on, velocity);
                 }
             } else {
                 if matches!(event, Event::ResetControllers) {
@@ -390,18 +398,22 @@ impl Ca72 {
 
     /// A key pressed or let go, as the note sources pass it: through the arpeggiator, which
     /// hands it on as played while it is off, to the engine.
-    fn play(&mut self, key: u8, on: bool) {
-        let engine = &mut self.engine;
+    /// Struck, `velocity` (0..1) is its velocity (decisions.md R-VELOCITY).
+    fn play(&mut self, key: u8, on: bool, velocity: f32) {
+        if on {
+            self.played.struck(key, velocity);
+        }
+        let (engine, played) = (&mut self.engine, &self.played);
         self.arp.key(key, on, self.now, &mut |key, on| {
-            engine.event(Event::Note { key, on })
+            played.to_engine(engine, key, on)
         });
     }
 
     /// The sustain pedal (control change 64), down or up.
     fn pedal(&mut self, down: bool) {
-        let engine = &mut self.engine;
+        let (engine, played) = (&mut self.engine, &self.played);
         self.arp.pedal(down, self.now, &mut |key, on| {
-            engine.event(Event::Note { key, on })
+            played.to_engine(engine, key, on)
         });
     }
 
@@ -418,9 +430,9 @@ impl Ca72 {
 
     /// What the arpeggiator has due by the block's sample `at` played.
     fn arp_until(&mut self, at: usize) {
-        let engine = &mut self.engine;
+        let (engine, played) = (&mut self.engine, &self.played);
         self.arp
-            .advance(at, &mut |key, on| engine.event(Event::Note { key, on }));
+            .advance(at, &mut |key, on| played.to_engine(engine, key, on));
     }
 
     fn clear_note_sources(&mut self) {
@@ -481,10 +493,11 @@ impl Ca72 {
         let generation = self.local_notes.generation();
         if generation != self.local_generation {
             self.local_generation = generation;
-            let (engine, arp, now) = (&mut self.engine, &mut self.arp, self.now);
+            let (engine, arp, now, played) =
+                (&mut self.engine, &mut self.arp, self.now, &self.played);
             self.note_sources.release_local(|key| {
                 arp.key(key, false, now, &mut |key, on| {
-                    engine.event(Event::Note { key, on })
+                    played.to_engine(engine, key, on)
                 })
             });
         }
@@ -510,7 +523,7 @@ impl Ca72 {
                 break;
             }
             if e.generation == self.local_generation && self.note_sources.local(e.note, e.on) {
-                self.play(e.note, e.on);
+                self.play(e.note, e.on, e.velocity);
             }
         }
     }
@@ -806,6 +819,9 @@ impl Plugin for Ca72 {
             "pressure_filter",
             "timbre_mod",
             "timbre_filter",
+            // And before the velocity's response: a straight line from 0 (R-VELOCITY).
+            "velocity_curve",
+            "velocity_floor",
         ] {
             state
                 .params
@@ -960,10 +976,10 @@ impl Plugin for Ca72 {
         // (Moved by a source, the block begins at the tempo in force at the LFOs' latest tick.)
         let tempo = self.engine.tempo().unwrap_or_else(|| self.params.tempo());
         let clock = arp_clock(context.transport(), self.rate, tempo);
-        let engine = &mut self.engine;
+        let (engine, played) = (&mut self.engine, &self.played);
         self.arp
             .begin(self.params.arp(), clock, len, &mut |key, on| {
-                engine.event(Event::Note { key, on })
+                played.to_engine(engine, key, on)
             });
         // Oscillator 3 timed keeps the arpeggiator's clock, so that the two agree: the host's
         // place every block while it plays, else run on at the tempo (decisions.md
@@ -1088,6 +1104,8 @@ impl Plugin for Ca72 {
             }
             // The LFOs' scopes, orbs and rings (decisions.md R-LFO).
             self.params.lfo_scope.publish(&self.engine.lfo_readings());
+            // The latest note's velocity, the left hand's meter (decisions.md R-VELOCITY).
+            self.meters.publish_velocity(self.engine.last_velocity());
             // The tempo it played at, for the LFO page's timed scopes (decisions.md R-LFO-PAGE),
             // and the TEMPO screen: moved by a source, where the sources have it now (R-LFO).
             self.meters
