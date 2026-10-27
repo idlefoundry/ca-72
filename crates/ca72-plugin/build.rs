@@ -24,7 +24,12 @@ fn main() {
     let ci_tag = std::env::var("GITHUB_REF").is_ok_and(|r| r == format!("refs/tags/{tag}"));
     let at_tag =
         ci_tag || git(&["tag", "--points-at", "HEAD"]).is_some_and(|t| t.lines().any(|l| l == tag));
-    let build = if at_tag {
+    // A beta names itself in place of its commit (CA72_BUILD_LABEL=beta.1: `0.3.0 · BETA.1`),
+    // keeping the version a release's, so the update check and What's New treat it as 0.3.0.
+    let label = std::env::var("CA72_BUILD_LABEL").unwrap_or_default();
+    let build = if !label.is_empty() {
+        label
+    } else if at_tag {
         String::new()
     } else {
         git(&["rev-parse", "--short=7", "HEAD"]).unwrap_or_default()
@@ -33,6 +38,7 @@ fn main() {
 
     // Again when the checkout moves to another commit or the tags change.
     println!("cargo:rerun-if-env-changed=GITHUB_REF");
+    println!("cargo:rerun-if-env-changed=CA72_BUILD_LABEL");
     for path in ["HEAD", "packed-refs", "refs/tags"] {
         if let Some(p) = git(&["rev-parse", "--git-path", path]) {
             println!("cargo:rerun-if-changed={p}");
