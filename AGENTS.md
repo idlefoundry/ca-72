@@ -37,7 +37,9 @@ CONTRIBUTING.md and the README.
   lab storage, in `/mnt/lab/artifacts/ca-72/<topic>/` on Linux or `~/lab/artifacts/ca-72/<topic>/`
   on the Mac, not into the repository or the code folder. Check the share is mounted
   (`df` shows the NAS) before writing to it.
-- `target/` is disposable: a worktree's build output may be deleted once it has been idle for
-  a few days. Keep nothing there you need.
+- `target/` is disposable: every Sunday, `scripts/clean-targets.sh` deletes the build output of
+  any checkout nobody has built in for three days, on the Mac, the desktop and the laptop
+  (installed as `~/.local/bin/ca72-clean-targets`, run by a systemd user timer on Linux and a
+  LaunchAgent on the Mac; `-n` shows what it would delete). Keep nothing there you need.
 - Check free disk space before a long build or a large capture (`df -h`). The Mac's disk is
   the tightest.
