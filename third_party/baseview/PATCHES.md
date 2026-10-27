@@ -12,8 +12,8 @@ today's rustfmt gives it, so that `cargo fmt --all` leaves the tree as it is.
 
 Six changes for Windows (1 to 3, 5, 6 and 9), in `src/win/window.rs`, `src/win/drop_target.rs`,
 `src/win/escape.rs`, `src/event.rs` and `src/window.rs` (the first three the CA-72's
-`docs/decisions.md` R26, R28 and R34), four for macOS (4, 7, 8 and 11) and two for Linux (10 and
-12, below):
+`docs/decisions.md` R26, R28 and R34), four for macOS (4, 7, 8 and 11) and three for Linux (10,
+12 and 13, below):
 
 1. **The window procedure never calls the handler while it is busy.** baseview keeps the
    window's handler in a `RefCell` and borrows it for each event. A message can be sent to
@@ -263,3 +263,21 @@ Upstream's master has since rewritten the Windows backend and the handler's inte
 move to it, the editor must be ported, and the tests above show whether it still needs this.
 The rewrite tells its handler of each `WM_PAINT` and draws then (`WindowHandler::damage`,
 [#344](https://github.com/RustAudio/baseview/pull/344), 2026-10-04), as the second change does.
+
+And one more for Linux, in `src/x11/window.rs` and `src/x11/window_identity.rs` (2026-10-27):
+
+13. **On X11, a window of its own tells the window manager its size.** The window had no
+   `WM_NORMAL_HINTS`, so a tiling window manager sized it as it liked. On Omarchy (Hyprland
+   with XWayland, a 2560 × 1600 screen at 1.6) the CA-72's standalone was tiled to 2522 × 1520
+   pixels around an editor of 2048 × 1170: the panel in the top left corner, black to the right
+   and below. Floated by hand, it took a size Hyprland chose, 1251 × 1520, cutting the panel
+   off on the right. nih-plug's standalone does not refit its editor to a size it did not ask
+   for on Linux (`refits`, so as not to fight the window manager), and the editor cannot
+   follow such a size. Now a window with no parent gets, before it is mapped, its size as
+   both its least and its greatest (`PMinSize | PMaxSize`), and again before each
+   `Window::resize` it asks for. Hyprland floats an XWayland window whose least and greatest
+   sizes are equal: the same standalone opened floating at 1281 × 732 logical pixels (2050 ×
+   1171), the panel filling it. A parented window (a plug-in's editor in a host) is
+   unchanged. Tests `a_window_of_its_own_is_held_to_its_size` and
+   `a_size_of_nothing_is_held_to_a_pixel` (`src/x11/window_identity/tests.rs`) check the
+   request; a resize under Hyprland (the drawer, PANEL, the grip) still needs a graphical check.
