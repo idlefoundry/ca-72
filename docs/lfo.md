@@ -153,6 +153,11 @@ from blocks or steps; otherwise they run as before, to the bit (`Bank::step`, `a
   values at the latest tick).
 - **The sound** reads each generator at its own time between ticks (`Bank::peek`: its cycle on
   at the settings in force, RISE, EDGES' slew, ON's fade, LEVEL), as before every step.
+- **The glide's end** (R-LFO-STRESS), where an LFO moves a pitch or CUTOFF: the same ticks and
+  reading run on a copy of the bank (`Ahead::bank`, kept so the step allocates nothing) to the
+  step's end and halfway, so the glide ends where the next step's knobs will be, the LFOs'
+  moves of each other included. With TEMPO moved, the plug-in ends a run at each tick, so no
+  step spans a change of tempo and the copy's clock is the step's own.
 - **Per voice:** a voice's own LFO (MONO off) is moved by the sources' own values for that voice,
   a shared LFO by their shared copies (option C); a macro is shared.
 - **A note** is taken at the latest tick; a RETRIG or ENV LFO it starts forgets its moved knobs
@@ -226,6 +231,19 @@ one a session brought there listed `inert`).
 - Modulation every 32 samples, where the voices are given their panel: travel after the glide
   plus the sum of depth × value, clamped, through the knob's law; each voice's own where MONO
   is off (option C for the shared targets).
+- Between those steps (R-LFO-STRESS): where an LFO moves TUNE, oscillator 2's or 3's FREQUENCY
+  or CUTOFF (`Target::fast`, `Lfos::fast`), each voice glides what it reads of them in a
+  straight line from the step's value to the next step's, a sample at a time (`Sweep`; in the
+  circuit `Jacks::swept`, after the knob's law; in the light voice `light::swept_laws`). The
+  next step's values come from copies of the generators moved on (`Bank::ahead`; on the ticks,
+  a copy of the bank run to the next step's ticks), so the glide adds no delay and is exact at
+  each step. A step an LFO jumps in (halfway across, more than `lfo::JUMP` off the line between
+  its ends: a SHARP edge, a cycle's restart) is held, so the edge stays abrupt. A macro's part
+  is in both ends, but a macro alone glides nothing: it holds still between steps.
+- MAIN OUTPUT's VOLUME moved by a source ramps a sample at a time across the step to the step's
+  gain, unless only SHARP LFOs move it (`Lfos::sharp_on`); the controls set from outside land at
+  once, as before. Every other knob still steps every 32 samples. With nothing assigned none of
+  this runs.
 - No assignment (or every depth 0): nothing runs, the sound is the same to the bit, and an LFO
   never wakes the sleeping instrument (R68).
 
