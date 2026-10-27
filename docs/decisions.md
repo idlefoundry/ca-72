@@ -10111,7 +10111,11 @@ for a short of their own.)
   window library's is a stub on Windows and Linux and the workspace denies unsafe code.
 - **macOS: App Nap.** A hidden standalone playing no audio was napped: requests took up to
   11.2 s, past `TIMEOUT`. While the socket is open the application holds an NSProcessInfo
-  activity, user initiated with idle sleep allowed (`agent/awake.rs`).
+  activity, user initiated with idle sleep allowed, and latency critical (`agent/awake.rs`).
+  Measured hidden, `--no-devices`, `ca72_get` over 8 to 10 minutes (minimum, median, maximum):
+  none 41 ms, 1.2 s, 11.2 s (priority 4); user initiated alone 14 ms, 104 ms, 345 ms; with
+  latency critical 4 ms, 13 ms, 17 ms (priority 46 throughout). Agents turned off, the
+  priority fell to 4 at once and the socket and record went.
 
 **Tried.**
 - **Windows 11 (26200), MSVC.** The agent, server, bridge, discovery and editor tests (36);
@@ -10126,6 +10130,11 @@ for a short of their own.)
   (AMBIGUOUS, then `ca72_select`), the application quit mid-session and killed (its record
   removed by the bridge's next call). Audio running keeps a hidden application awake through
   coreaudiod's assertion; without it, App Nap, above.
+
+**Found, not fixed:** a standalone left hidden and napped for minutes (no audio, agents off)
+does not finish quitting within plugin-kit-standalone's two seconds (`runtime.rs`) and shows
+its error window; one just hidden quits. Not agents': it wants the activity, or a longer wait,
+while the standalone shuts down.
 
 **Not tried.** Minimising on macOS (Accessibility is needed); requests while a native modal
 loop runs (baseview's frame timer is in the run loop's default mode only); the COPY SETUP items
