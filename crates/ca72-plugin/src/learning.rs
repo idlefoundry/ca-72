@@ -153,6 +153,8 @@ pub enum Item {
     /// The settings' AGENTS (the standalone's; decisions.md R-MCP): AI agents allowed to
     /// operate it through MCP, or not.
     Agents(bool),
+    /// The settings' AGENTS: a client's setup copied.
+    Setup(Setup),
     /// The settings' MPE: INPUT & TIMBRE…, the MPE menu wanted (decisions.md R-MPE); its MPE
     /// INPUT and TIMBRE REST.
     MpeMenu,
@@ -243,6 +245,8 @@ pub enum Pressed {
     Fx(crate::fx_view::FxAction),
     /// The settings' menu: agents allowed (true) or not.
     Agents(bool),
+    /// The settings' menu: a client's setup to be copied.
+    Setup(Setup),
     /// The settings' MPE: INPUT & TIMBRE…, the MPE menu wanted where the settings' was; its
     /// choices (decisions.md R-MPE).
     MpeMenu,
@@ -250,6 +254,28 @@ pub enum Pressed {
     TimbreRest(crate::expression::TimbreRest),
     /// Modulation's (decisions.md R-LFO).
     Mod(ModItem),
+}
+
+/// The settings' AGENTS as the menu shows them (the standalone's; decisions.md R-MCP).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AgentsMenu {
+    /// Whether they are allowed: ALLOW marked, else OFF.
+    pub allowed: bool,
+    /// How they stand, said under the choices (none while they are off).
+    pub status: Option<String>,
+    /// Whether the bridge is beside the application, so that its setups can be copied.
+    pub bridge: bool,
+    /// The setup last copied, and whether it reached the clipboard.
+    pub copied: Option<(Setup, bool)>,
+}
+
+/// A client's setup the settings' AGENTS copies (`crate::agent::setup`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Setup {
+    /// Claude Code's `claude mcp add` command.
+    ClaudeCode,
+    /// The `mcpServers` entry of a client's JSON settings (Claude Desktop's and others').
+    Json,
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -285,6 +311,9 @@ pub struct Learning {
     /// Which of GLIDE's ranges its knob's menu marks (decisions.md R-GLIDE-LONG).
     pub glide_long: bool,
     pub fx_pins: Vec<crate::fx_view::PinInfo>,
+    /// Where the MIDI map mode found a learnable whose control has no place of its own here
+    /// (the arpeggiator's ON, HOLD and DIRECTION: R-MIDI-MAP): its note goes above that.
+    pub found_at: Option<(usize, (f64, f64))>,
 }
 
 /// A parameter's name.
@@ -295,9 +324,13 @@ fn label(i: usize) -> &'static str {
     LEARNABLE.get(i).map_or("", |l| l.label)
 }
 
-fn instruction(i: usize) -> &'static str {
+/// What learnable `i` waits for, `notes` while its arming takes a note (a switch's in the MIDI map
+/// mode: R-MIDI-MAP).
+fn instruction(i: usize, notes: bool) -> &'static str {
     if crate::learn::action(i).is_some() {
         "PRESS A NOTE OR CC PAD ON YOUR MIDI DEVICE"
+    } else if notes {
+        "MOVE A CONTROLLER OR PRESS A NOTE ON YOUR MIDI DEVICE"
     } else {
         "MOVE A CONTROLLER ON YOUR MIDI DEVICE"
     }
@@ -348,6 +381,14 @@ impl Learning {
         note_point(self.rail, p)
     }
 
+    /// Where a note about learnable `i` goes: above its control, else where the MIDI map mode
+    /// found it (R-MIDI-MAP).
+    fn point_of(&self, i: usize) -> Option<(f64, f64)> {
+        place(i)
+            .map(|p| self.note_point(p))
+            .or_else(|| self.found_at.filter(|(j, _)| *j == i).map(|(_, at)| at))
+    }
+
     /// The source heads and UNPIN first, MIDI Learn after them (R-FX-PARAMS).
     pub fn pin_menu_title(&mut self, title: String) {
         let Some(open) = &mut self.open else {
@@ -369,6 +410,23 @@ impl Learning {
             .chain(open.menu.marked.iter_mut())
         {
             *i = (*i + len - first) % len;
+        }
+    }
+
+    /// The learnable parameter `p`'s control operates now: a timed FREQUENCY knob's DIVISION
+    /// (R-OSC-TIMED), and an LFO's RATE while timed its DIVISION (decisions.md R-LFO-PAGE).
+    pub fn learnable_now(&self, p: Place) -> Option<usize> {
+        let learnable = learnable_at(p, self.timed);
+        match p {
+            Place::Panel(c) => CONTROLS
+                .get(c)
+                .and_then(|c| c.param.strip_prefix("lfo"))
+                .and_then(|r| r.strip_suffix("_rate"))
+                .and_then(|n| n.parse::<usize>().ok())
+                .filter(|n| (1..=4).contains(n) && self.lfo_timed[n - 1])
+                .and_then(|n| index(&format!("lfo{n}_division")))
+                .or(learnable),
+            _ => learnable,
         }
     }
 
@@ -427,20 +485,7 @@ impl Learning {
         size: f64,
         rows: Vec<Row>,
     ) {
-        let learnable = place.and_then(|p| learnable_at(p, self.timed));
-        // (An LFO's RATE while timed turns its DIVISION, as a timed oscillator's FREQUENCY:
-        // decisions.md R-LFO-PAGE.)
-        let learnable = match place {
-            Some(Place::Panel(c)) => CONTROLS
-                .get(c)
-                .and_then(|c| c.param.strip_prefix("lfo"))
-                .and_then(|r| r.strip_suffix("_rate"))
-                .and_then(|n| n.parse::<usize>().ok())
-                .filter(|n| (1..=4).contains(n) && self.lfo_timed[n - 1])
-                .and_then(|n| index(&format!("lfo{n}_division")))
-                .or(learnable),
-            _ => learnable,
-        };
+        let learnable = place.and_then(|p| self.learnable_now(p));
         let (title, items) = match learnable {
             Some(MOD_WHEEL) => (
                 format!("MOD WHEEL SOURCE · {}", map.wheel_source().text()),
@@ -673,14 +718,14 @@ impl Learning {
     /// its name, and whether it can be used; `pack` the one the editor is drawn in, if any); under
     /// MOD WHEEL SOURCE, what moves the MOD wheel (`source`: R-MODWHEEL-SOURCE); in the
     /// standalone, under AGENTS, whether AI agents may operate it (`agents`, marked; none in a
-    /// host: decisions.md R-MCP). The title always names this build's version, independent of the
+    /// host: decisions.md R-MCP), how they stand, and the setups for their clients to copy. The title always names this build's version, independent of the
     /// update check; opening this menu does not start a check.
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
         (x, y): (f64, f64),
         size: f64,
-        (skin, lettering, law, source, agents): (Skin, Lettering, Law, Source, Option<bool>),
+        (skin, lettering, law, source, agents): (Skin, Lettering, Law, Source, Option<AgentsMenu>),
         (packs, pack): (&[(String, bool)], Option<usize>),
     ) {
         let mut items: Vec<(Item, String)> = vec![
@@ -725,10 +770,32 @@ impl Learning {
             items.push((Item::Head, "STANDALONE".into()));
             items.push((Item::StandaloneSettings, "AUDIO & MIDI…".into()));
         }
-        if agents.is_some() {
+        if let Some(a) = &agents {
             items.push((Item::Head, "AGENTS".into()));
             items.push((Item::Agents(true), "ALLOW".into()));
             items.push((Item::Agents(false), "OFF".into()));
+            if let Some(status) = &a.status {
+                items.push((Item::Not, status.clone()));
+            }
+            if a.bridge {
+                for (setup, what, paste) in [
+                    (Setup::ClaudeCode, "CLAUDE CODE", "PASTE IT IN A TERMINAL"),
+                    (
+                        Setup::Json,
+                        "JSON FOR OTHER APPS",
+                        "ADD IT TO THE APP'S MCP SERVERS",
+                    ),
+                ] {
+                    let text = match a.copied {
+                        Some((s, true)) if s == setup => format!("COPIED: {paste}"),
+                        Some((s, false)) if s == setup => "COULD NOT COPY TO THE CLIPBOARD".into(),
+                        _ => format!("COPY SETUP: {what}"),
+                    };
+                    items.push((Item::Setup(setup), text));
+                }
+            } else {
+                items.push((Item::Not, "SETUP: NO BRIDGE BESIDE THE APP".into()));
+            }
         }
         let current = |it: &Item| {
             let look = match pack {
@@ -737,7 +804,9 @@ impl Learning {
             };
             look || *it == Item::Lettering(lettering)
                 || *it == Item::Dials(law)
-                || agents.is_some_and(|a| *it == Item::Agents(a))
+                || agents
+                    .as_ref()
+                    .is_some_and(|a| *it == Item::Agents(a.allowed))
         };
         let mut menu = Menu {
             x,
@@ -755,6 +824,7 @@ impl Learning {
                             | Item::Lettering(_)
                             | Item::Dials(_)
                             | Item::Agents(_)
+                            | Item::Setup(_)
                             | Item::StandaloneSettings
                             | Item::SizeMenu
                             | Item::WhatsNew
@@ -1060,6 +1130,7 @@ impl Learning {
             (Some(Item::WheelSource(source)), _) => return Pressed::WheelSource(*source),
             (Some(Item::Fx(a)), _) => return Pressed::Fx(*a),
             (Some(Item::Agents(on)), _) => return Pressed::Agents(*on),
+            (Some(Item::Setup(s)), _) => return Pressed::Setup(*s),
             (Some(Item::MpeMenu), _) => return Pressed::MpeMenu,
             (Some(Item::MpeInput(m)), _) => return Pressed::MpeInput(*m),
             (Some(Item::TimbreRest(r)), _) => return Pressed::TimbreRest(*r),
@@ -1073,12 +1144,22 @@ impl Learning {
     /// learned is no longer).
     pub fn learn(&mut self, map: &MidiMap, i: usize) {
         map.arm(i);
+        self.begun(map, i);
+    }
+
+    /// The same from the MIDI map mode (R-MIDI-MAP): a switch takes a note as well.
+    pub fn learn_with_notes(&mut self, map: &MidiMap, i: usize) {
+        map.arm_with_notes(i);
+        self.begun(map, i);
+    }
+
+    fn begun(&mut self, map: &MidiMap, i: usize) {
         self.notice = None;
         if i < LEARNABLE.len() {
             self.chosen = i;
         }
         self.say(
-            format!("{}: {}", self.label(i), instruction(i)),
+            format!("{}: {}", self.label(i), instruction(i, map.notes_armed())),
             DrawerTone::News,
         );
         self.take_keys = true;
@@ -1180,8 +1261,9 @@ impl Learning {
             Some(Place::Strip(s)) => (None, Some(s)),
             Some(Place::Fx(_) | Place::Preset(_)) | None => (None, None),
         };
+        let notes = map.notes_armed();
         let note = match armed {
-            Some(i) => place(i).map(|p| {
+            Some(i) => self.point_of(i).map(|(x, y)| {
                 let third = match map.refused() {
                     Some(cc) => (
                         format!(
@@ -1199,7 +1281,6 @@ impl Learning {
                         Tone::Dim,
                     ),
                 };
-                let (x, y) = self.note_point(p);
                 Note {
                     x,
                     y,
@@ -1207,7 +1288,7 @@ impl Learning {
                     lines: vec![
                         (format!("MIDI LEARN: {}", self.label(i)), Tone::Accent),
                         (
-                            format!("{} · ESC OR CANCEL STOPS", instruction(i)),
+                            format!("{} · ESC OR CANCEL STOPS", instruction(i, notes)),
                             Tone::Plain,
                         ),
                         third,
@@ -1215,14 +1296,11 @@ impl Learning {
                 }
             }),
             None => self.notice.as_ref().and_then(|(lines, i, _)| {
-                place(*i).map(|p| {
-                    let (x, y) = self.note_point(p);
-                    Note {
-                        x,
-                        y,
-                        size,
-                        lines: lines.clone(),
-                    }
+                self.point_of(*i).map(|(x, y)| Note {
+                    x,
+                    y,
+                    size,
+                    lines: lines.clone(),
                 })
             }),
         };
@@ -1362,6 +1440,75 @@ impl Learning {
 mod tests {
     use super::*;
     use ca72_panel::strip::{StripTarget, centre};
+
+    /// The settings' AGENTS (decisions.md R-MCP): how agents stand under the choices while they
+    /// are allowed, the clients' setups to copy while the bridge is beside the application,
+    /// and the one copied said so.
+    #[test]
+    fn the_settings_agents_say_how_they_stand_and_copy_setups() {
+        let fonts = Fonts::new();
+        let rows = |agents: AgentsMenu| {
+            let mut l = Learning::default();
+            l.open_settings_menu(
+                &fonts,
+                (800.0, 40.0),
+                12.0,
+                (
+                    Skin::Worn,
+                    Lettering::Standard,
+                    Law::Semitones,
+                    Source::DEFAULT,
+                    Some(agents),
+                ),
+                (&[], None),
+            );
+            let items = l.menu().expect("menu").items.clone();
+            let at = items
+                .iter()
+                .position(|(t, _)| t == "AGENTS")
+                .expect("AGENTS");
+            items[at + 1..].to_vec()
+        };
+        let row = |t: &str, on: bool| (t.to_owned(), on);
+        let listening = AgentsMenu {
+            allowed: true,
+            status: Some("LISTENING: 1 AGENT CONNECTED".into()),
+            bridge: true,
+            copied: None,
+        };
+        assert_eq!(
+            rows(listening.clone()),
+            [
+                row("ALLOW", false),
+                row("OFF", true),
+                row("LISTENING: 1 AGENT CONNECTED", false),
+                row("COPY SETUP: CLAUDE CODE", true),
+                row("COPY SETUP: JSON FOR OTHER APPS", true),
+            ]
+        );
+        let copied = AgentsMenu {
+            copied: Some((Setup::ClaudeCode, true)),
+            ..listening.clone()
+        };
+        assert_eq!(rows(copied)[3], row("COPIED: PASTE IT IN A TERMINAL", true));
+        let failed = AgentsMenu {
+            copied: Some((Setup::Json, false)),
+            ..listening
+        };
+        assert_eq!(
+            rows(failed)[4],
+            row("COULD NOT COPY TO THE CLIPBOARD", true)
+        );
+        let off_alone = AgentsMenu::default();
+        assert_eq!(
+            rows(off_alone),
+            [
+                row("ALLOW", true),
+                row("OFF", false),
+                row("SETUP: NO BRIDGE BESIDE THE APP", false),
+            ]
+        );
+    }
 
     /// PREVIOUS and NEXT PRESET's notes go over their arrows on the rail the editor shows: the
     /// standalone's, with FX (R-FX-DRAWER), has NEXT a key further left (R-PRESET-KEYS).

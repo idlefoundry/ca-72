@@ -2,9 +2,10 @@
 //! (pixels a panel unit, 0.5 by default); `CA72_SKIN=worn` in the worn skin; `CA72_MONO=1` the
 //! strip in MONO without DOUBLE (the one voice lit at one of VOICES's places); `CA72_LETTERING=
 //! large` in the large lettering.
-//! `CA72_STANDALONE=1` shows the standalone's TEMPO screen with its TYPING and PANIC keys after
-//! it (`CA72_TEMPO=96` another tempo; `CA72_TYPING=1` TYPING on, `CA72_PANIC=1` PANIC held,
-//! `CA72_TEMPO_HOVER=typing` or `panic` a key under the pointer: decisions.md R-TEMPO-CORNER).
+//! `CA72_STANDALONE=1` shows the standalone's TEMPO screen with its TYPING, PANIC and MIDI keys
+//! after it (`CA72_TEMPO=96` another tempo; `CA72_TYPING=1` TYPING on, `CA72_PANIC=1` PANIC held,
+//! `CA72_MIDI=1` the MIDI map mode's key lit, `CA72_TEMPO_HOVER=typing`, `panic` or `midi` a key
+//! under the pointer: decisions.md R-TEMPO-CORNER, R-MIDI-MAP).
 //! `CA72_ARP=1` drops the arpeggiator's drawer over the lower page (decisions.md R-ARP): ON and
 //! UP lit, a sixteenth, two octaves, GATE 60 %, SWING 25 %, the ARP key lit; `CA72_ARP_HOLD=1`
 //! HOLD lit too, `CA72_ARP_DIRECTION=4` another DIRECTION (ORDER), `CA72_ARP_OCTAVES=5` other
@@ -131,9 +132,11 @@ fn main() {
         scene.tempo_keys = Some(ca72_panel::render::TempoKeys {
             typing: on("CA72_TYPING"),
             panic: on("CA72_PANIC"),
+            midi: on("CA72_MIDI"),
             hover: match std::env::var("CA72_TEMPO_HOVER").as_deref() {
                 Ok("typing") => Some(ca72_panel::art::TempoKey::Typing),
                 Ok("panic") => Some(ca72_panel::art::TempoKey::Panic),
+                Ok("midi") => Some(ca72_panel::art::TempoKey::Midi),
                 _ => None,
             },
         });

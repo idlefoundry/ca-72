@@ -219,7 +219,7 @@ fn directory(args: &Value) -> Result<PathBuf, ApiError> {
     let dir = path(args, "output_dir")?;
     // A new directory every time. Existing references and previous candidates are never
     // overwritten; manifest.json/metrics.json is written last as the completion marker.
-    std::fs::create_dir(&dir).map_err(io_error)?;
+    std::fs::create_dir(&dir).map_err(|e| io_error(format!("{}: {e}", dir.display())))?;
     Ok(dir)
 }
 
