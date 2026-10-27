@@ -288,6 +288,8 @@ impl Editing {
             "midi_learn": {
                 "learning": self.params.midi_map.armed().map(|i| LEARNABLE[i].id),
                 "assigned": self.params.midi_map.assignments().iter().filter(|a| a.is_some()).count(),
+                // (The standalone's MIDI map mode, MIDI on the walnut: R-MIDI-MAP.)
+                "map_mode": self.mapping_on(),
             },
             "notes": {
                 "yours": self.playing.agent_notes(),

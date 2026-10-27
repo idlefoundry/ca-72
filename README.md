@@ -640,6 +640,18 @@ to the next one beginning with it), Enter learns it or stops waiting, Delete or 
 removes its controller, Escape stops waiting and then closes the drawer. It is the only way to
 learn **LOCK**, which has no control on the panel.
 
+**The MIDI map mode (standalone).** Press **MIDI** on the walnut, after TYPING and PANIC. Every
+control that can be learned is outlined, and each that has a controller shows it in small print
+(`CC 74`; on another channel `CH 2 CC 74`). Click a control: it is chosen, not moved, and waits
+as with MIDI LEARN. Move a knob, fader or button on your controller and it is assigned; the mode
+stays on, so click the next control. While a switch waits (an oscillator's ON, POLY, ARP ON,
+HOLD and the like), a note works too: each press of that note then turns the switch over, and
+the note does not play. Clicking another control moves the waiting there. Delete or Backspace
+removes the chosen control's controller. Escape stops waiting; Escape again, or MIDI, leaves the
+mode, as does closing the window. The rail's keys work in the mode, so GLOBAL, LFO, MACRO and
+the ARP, MPE and FX drawers can be opened and their controls mapped too. The plug-ins have no
+MIDI key: use the menu and the list there.
+
 **What can be learned:** the panel's knobs, RANGE and WAVEFORM, and its switches and TIMED
 keys (a timed FREQUENCY knob learns its note value), the left
 hand controller's GLIDE and DECAY switches, and POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD),
@@ -670,8 +682,8 @@ MIDI channel, shown 1 to 16: CC 74 on channel 1 and CC 74 on channel 2 are two c
 Learning a control again replaces its controller. Learning a controller another control has
 moves it, and the note says which control lost it.
 
-**Where they are kept:** with the CA-72 in your host's project, each instance its own, and
-in your host's own presets of the plug-in. Not in the CA-72's presets: choosing, saving or
+**Where they are kept:** with the CA-72 in your host's project (a switch's note too), each
+instance its own, and in your host's own presets of the plug-in. Not in the CA-72's presets: choosing, saving or
 reverting one leaves the controllers as they are. A project saved before MIDI Learn opens
 with none.
 

@@ -406,6 +406,7 @@ area shows, the wheels or the macros, is the computer's (the rail's MACRO key), 
 | OCTAVE - / + | `ca72_view {keyboard_octave}` |
 | TYPING (the computer's keyboard) | not exposed: it's the player's own keyboard, and `ca72_note_on` does more |
 | PANIC | `ca72_panic` |
+| MIDI, the standalone's MIDI map mode (R-MIDI-MAP) | not exposed: the pointer's way to MIDI LEARN, which `ca72_midi_learn` reaches directly; `ca72_describe`'s `midi_learn.map_mode` says whether it is on |
 | A control's menu: MIDI LEARN, CANCEL MIDI LEARN | `ca72_midi_learn {control}`, `{cancel: true}` |
 | REMOVE MIDI ASSIGNMENT | `ca72_midi_forget` |
 | MIDI ASSIGNMENTS… | `ca72_midi_assignments`, `ca72_view {midi_list: true}` |

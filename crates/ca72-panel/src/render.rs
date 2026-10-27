@@ -104,12 +104,13 @@ pub fn compact_grip(frame: &mut Pixmap, scale: f64) {
     }
 }
 
-/// The standalone's TYPING and PANIC keys (decisions.md R-TEMPO-CORNER): TYPING on, PANIC held
-/// down, the key under the pointer.
+/// The standalone's TYPING, PANIC and MIDI keys (decisions.md R-TEMPO-CORNER, R-MIDI-MAP):
+/// TYPING on, PANIC held down, the MIDI map mode on, the key under the pointer.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TempoKeys {
     pub typing: bool,
     pub panic: bool,
+    pub midi: bool,
     pub hover: Option<art::TempoKey>,
 }
 
@@ -146,9 +147,12 @@ pub struct Scene {
     pub entry: Option<crate::value_entry::Field>,
     /// The standalone's TEMPO screen's text (`120 BPM`; decisions.md R-ARP), none in a plug-in.
     pub tempo: Option<String>,
-    /// The standalone's TYPING and PANIC keys after the TEMPO screen (decisions.md
-    /// R-TEMPO-CORNER), none in a plug-in.
+    /// The standalone's TYPING, PANIC and MIDI keys after the TEMPO screen (decisions.md
+    /// R-TEMPO-CORNER, R-MIDI-MAP), none in a plug-in.
     pub tempo_keys: Option<TempoKeys>,
+    /// The MIDI map mode's marks (R-MIDI-MAP): every learnable control in view, outlined, its
+    /// controller in small print; none while it is off.
+    pub marks: Vec<learn::MapMark>,
     /// Oscillators 2's and 3's timed mode (decisions.md R-OSC-TIMED): each key's sign's
     /// division and whether it is inert (its RANGE away from LO: off the panel). A key on and
     /// not inert lights, and its oscillator's FREQUENCY dial is printed in note values (the knob drawn
@@ -235,6 +239,7 @@ impl Default for Scene {
             entry: None,
             tempo: None,
             tempo_keys: None,
+            marks: Vec::new(),
             timed: [Timed::default(); 2],
             shape: [Shaped::default(); 3],
             glide_long: false,
@@ -1189,7 +1194,7 @@ impl Renderer {
                 .map(|t| art::tempo_screen(t, a))
                 .unwrap_or_default(),
         );
-        // Its keys after it, in the rail's keys' print (a pack's where it has one); two layers
+        // Its keys after it, in the rail's keys' print (a pack's where it has one); three layers
         // always, as the screen's.
         let print = self.look.colours.key_print.map_or_else(
             || crate::strip::KEY_PRINT.to_owned(),
@@ -1203,12 +1208,21 @@ impl Renderer {
                         let lit = match k {
                             art::TempoKey::Typing => t.typing,
                             art::TempoKey::Panic => t.panic,
+                            art::TempoKey::Midi => t.midi,
                         };
                         art::tempo_key(a, k, lit, t.hover == Some(k), &print)
                     })
                     .unwrap_or_default(),
             );
         }
+        // The MIDI map mode's marks (R-MIDI-MAP), floating, under the ring, a tip, a note, a menu.
+        let small = self.text_size() * learn::MARK_TEXT;
+        out.extend(
+            scene
+                .marks
+                .iter()
+                .map(|m| learn::map_mark(&self.fonts, m, small)),
+        );
         if let Some(c) = scene.learning.and_then(|i| a.controls.get(i)) {
             out.push(learn::ring(c));
         }
@@ -1689,7 +1703,7 @@ impl Renderer {
     /// strip's own parts (`crate::strip`), which are drawn over this frame's strip.
     pub fn draw_floating(&self, onto: &mut Pixmap) {
         // (The controls', then POWER's, its lamp's, OVERLOAD's, QUALITY's opening's two, the
-        // name plate's, the TEMPO screen's and its two keys': fixed.)
+        // name plate's, the TEMPO screen's and its three keys': fixed.)
         let fixed = CONTROLS.len() + FIXED;
         for slot in self.slots.iter().skip(fixed) {
             if let Some((x, y, p)) = &slot.pixels {
@@ -1753,8 +1767,9 @@ fn merged(mut rects: Vec<[i32; 4]>) -> Vec<[i32; 4]> {
 
 /// The layers drawn after the controls whatever the scene: MOD's three orbs (each empty while
 /// it does not show), POWER, its lamp, OVERLOAD, QUALITY's opening (its back and its front), the
-/// name plate, the TEMPO screen and its TYPING and PANIC keys (all three empty in a plug-in).
-const FIXED: usize = 12;
+/// name plate, the TEMPO screen and its TYPING, PANIC and MIDI keys (all four empty in a
+/// plug-in).
+const FIXED: usize = 13;
 
 /// The most bands [`in_bands`] draws side by side.
 const BANDS: usize = 8;
@@ -2573,6 +2588,7 @@ mod tests {
                     scene.tempo_keys = Some(TempoKeys {
                         typing: i > 7,
                         panic: i < 7,
+                        midi: i > 7,
                         hover: (i < 7).then_some(art::TempoKey::Typing),
                     });
                 }
@@ -2609,7 +2625,13 @@ mod tests {
             Some(TempoKeys {
                 typing: true,
                 panic: true,
+                midi: false,
                 hover: Some(art::TempoKey::Panic),
+            }),
+            Some(TempoKeys {
+                midi: true,
+                hover: Some(art::TempoKey::Midi),
+                ..TempoKeys::default()
             }),
             Some(TempoKeys {
                 hover: Some(art::TempoKey::Typing),
@@ -2640,17 +2662,22 @@ mod tests {
         let (x, y, w, h) = art::TEMPO_SCREEN;
         let (tx, ty) = art::tempo_key_at(&official, art::TempoKey::Typing);
         let (px, py) = art::tempo_key_at(&official, art::TempoKey::Panic);
+        let (mx, my) = art::tempo_key_at(&official, art::TempoKey::Midi);
         assert_eq!(art::TEMPO_KEY, (crate::strip::KEY_W, crate::strip::KEY_H));
-        assert_eq!((ty, py), (y + h / 2.0, y + h / 2.0));
+        assert_eq!((ty, py, my), (y + h / 2.0, y + h / 2.0, y + h / 2.0));
         let half = art::TEMPO_KEY.0 / 2.0;
         assert_eq!(tx - half - (x + w + art::TEMPO_SURROUND), 14.0);
         assert_eq!(px - half - (tx + half), 14.0);
+        // (MIDI after PANIC, the same gap: R-MIDI-MAP.)
+        assert_eq!(mx - half - (px + half), 14.0);
         let hit = |x, y| art::tempo_key_hit(&official, x, y);
         assert_eq!(hit(tx, ty), Some(art::TempoKey::Typing));
         assert_eq!(hit(px, py), Some(art::TempoKey::Panic));
+        assert_eq!(hit(mx, my), Some(art::TempoKey::Midi));
         assert_eq!(hit((tx + px) / 2.0, ty), None, "the gap between them");
+        assert_eq!(hit((px + mx) / 2.0, py), None, "the gap before MIDI");
         assert_eq!(hit(x + w / 2.0, y + h / 2.0), None, "the screen");
-        assert_eq!(hit(px + half + 5.0, py), None);
+        assert_eq!(hit(mx + half + 5.0, my), None);
         assert!(
             !art::tempo_hit(&official, tx, ty),
             "the screen's own hit stops short"

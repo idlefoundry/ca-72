@@ -2326,15 +2326,19 @@ pub fn tempo_screen(text: &str, arrangement: &Arrangement) -> Layer {
 /// The standalone's TYPING and PANIC keys on the walnut after the TEMPO screen (decisions.md
 /// R-TEMPO-CORNER; the owner, 2026-10-26: "typing should be a computer keyboard icon", then "Go
 /// with 62 units (as tall as the rail keys)"): moved up from the KEYS page so that they work from
-/// every page. The standalone's alone, as the screen is; a plug-in's wood stays bare.
+/// every page. MIDI after them, the MIDI map mode's (R-MIDI-MAP). The standalone's alone, as the
+/// screen is; a plug-in's wood stays bare.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TempoKey {
     Typing,
     Panic,
+    Midi,
 }
 
 impl TempoKey {
-    pub const ALL: [TempoKey; 2] = [TempoKey::Typing, TempoKey::Panic];
+    pub const ALL: [TempoKey; 3] = [TempoKey::Typing, TempoKey::Panic, TempoKey::Midi];
+    /// The last, after which a tip beside the keys goes.
+    pub const LAST: TempoKey = TempoKey::Midi;
 }
 
 /// A TEMPO key's size: the rail's keys'.
@@ -2360,8 +2364,8 @@ pub fn tempo_key_hit(arrangement: &Arrangement, x: f64, y: f64) -> Option<TempoK
 }
 
 /// A TEMPO key as the rail's are drawn: their cap, its mark in `print` (a computer keyboard for
-/// TYPING, the word for PANIC), the rail's light over it while `lit` (TYPING on, PANIC held)
-/// and lightened a little under the pointer.
+/// TYPING, the word for PANIC and MIDI), the rail's light over it while `lit` (TYPING on, PANIC
+/// held, the MIDI map mode on) and lightened a little under the pointer.
 pub fn tempo_key(
     arrangement: &Arrangement,
     k: TempoKey,
@@ -2403,6 +2407,10 @@ pub fn tempo_key(
         TempoKey::Panic => put!(
             over,
             "<text x='0' y='0' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{print}'>PANIC</text>"
+        ),
+        TempoKey::Midi => put!(
+            over,
+            "<text x='0' y='0' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{print}'>MIDI</text>"
         ),
     }
     if lit {

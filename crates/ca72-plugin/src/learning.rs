@@ -285,6 +285,9 @@ pub struct Learning {
     /// Which of GLIDE's ranges its knob's menu marks (decisions.md R-GLIDE-LONG).
     pub glide_long: bool,
     pub fx_pins: Vec<crate::fx_view::PinInfo>,
+    /// Where the MIDI map mode found a learnable whose control has no place of its own here
+    /// (the arpeggiator's ON, HOLD and DIRECTION: R-MIDI-MAP): its note goes above that.
+    pub found_at: Option<(usize, (f64, f64))>,
 }
 
 /// A parameter's name.
@@ -295,9 +298,13 @@ fn label(i: usize) -> &'static str {
     LEARNABLE.get(i).map_or("", |l| l.label)
 }
 
-fn instruction(i: usize) -> &'static str {
+/// What learnable `i` waits for, `notes` while its arming takes a note (a switch's in the MIDI map
+/// mode: R-MIDI-MAP).
+fn instruction(i: usize, notes: bool) -> &'static str {
     if crate::learn::action(i).is_some() {
         "PRESS A NOTE OR CC PAD ON YOUR MIDI DEVICE"
+    } else if notes {
+        "MOVE A CONTROLLER OR PRESS A NOTE ON YOUR MIDI DEVICE"
     } else {
         "MOVE A CONTROLLER ON YOUR MIDI DEVICE"
     }
@@ -348,6 +355,14 @@ impl Learning {
         note_point(self.rail, p)
     }
 
+    /// Where a note about learnable `i` goes: above its control, else where the MIDI map mode
+    /// found it (R-MIDI-MAP).
+    fn point_of(&self, i: usize) -> Option<(f64, f64)> {
+        place(i)
+            .map(|p| self.note_point(p))
+            .or_else(|| self.found_at.filter(|(j, _)| *j == i).map(|(_, at)| at))
+    }
+
     /// The source heads and UNPIN first, MIDI Learn after them (R-FX-PARAMS).
     pub fn pin_menu_title(&mut self, title: String) {
         let Some(open) = &mut self.open else {
@@ -369,6 +384,23 @@ impl Learning {
             .chain(open.menu.marked.iter_mut())
         {
             *i = (*i + len - first) % len;
+        }
+    }
+
+    /// The learnable parameter `p`'s control operates now: a timed FREQUENCY knob's DIVISION
+    /// (R-OSC-TIMED), and an LFO's RATE while timed its DIVISION (decisions.md R-LFO-PAGE).
+    pub fn learnable_now(&self, p: Place) -> Option<usize> {
+        let learnable = learnable_at(p, self.timed);
+        match p {
+            Place::Panel(c) => CONTROLS
+                .get(c)
+                .and_then(|c| c.param.strip_prefix("lfo"))
+                .and_then(|r| r.strip_suffix("_rate"))
+                .and_then(|n| n.parse::<usize>().ok())
+                .filter(|n| (1..=4).contains(n) && self.lfo_timed[n - 1])
+                .and_then(|n| index(&format!("lfo{n}_division")))
+                .or(learnable),
+            _ => learnable,
         }
     }
 
@@ -427,20 +459,7 @@ impl Learning {
         size: f64,
         rows: Vec<Row>,
     ) {
-        let learnable = place.and_then(|p| learnable_at(p, self.timed));
-        // (An LFO's RATE while timed turns its DIVISION, as a timed oscillator's FREQUENCY:
-        // decisions.md R-LFO-PAGE.)
-        let learnable = match place {
-            Some(Place::Panel(c)) => CONTROLS
-                .get(c)
-                .and_then(|c| c.param.strip_prefix("lfo"))
-                .and_then(|r| r.strip_suffix("_rate"))
-                .and_then(|n| n.parse::<usize>().ok())
-                .filter(|n| (1..=4).contains(n) && self.lfo_timed[n - 1])
-                .and_then(|n| index(&format!("lfo{n}_division")))
-                .or(learnable),
-            _ => learnable,
-        };
+        let learnable = place.and_then(|p| self.learnable_now(p));
         let (title, items) = match learnable {
             Some(MOD_WHEEL) => (
                 format!("MOD WHEEL SOURCE · {}", map.wheel_source().text()),
@@ -1073,12 +1092,22 @@ impl Learning {
     /// learned is no longer).
     pub fn learn(&mut self, map: &MidiMap, i: usize) {
         map.arm(i);
+        self.begun(map, i);
+    }
+
+    /// The same from the MIDI map mode (R-MIDI-MAP): a switch takes a note as well.
+    pub fn learn_with_notes(&mut self, map: &MidiMap, i: usize) {
+        map.arm_with_notes(i);
+        self.begun(map, i);
+    }
+
+    fn begun(&mut self, map: &MidiMap, i: usize) {
         self.notice = None;
         if i < LEARNABLE.len() {
             self.chosen = i;
         }
         self.say(
-            format!("{}: {}", self.label(i), instruction(i)),
+            format!("{}: {}", self.label(i), instruction(i, map.notes_armed())),
             DrawerTone::News,
         );
         self.take_keys = true;
@@ -1180,8 +1209,9 @@ impl Learning {
             Some(Place::Strip(s)) => (None, Some(s)),
             Some(Place::Fx(_) | Place::Preset(_)) | None => (None, None),
         };
+        let notes = map.notes_armed();
         let note = match armed {
-            Some(i) => place(i).map(|p| {
+            Some(i) => self.point_of(i).map(|(x, y)| {
                 let third = match map.refused() {
                     Some(cc) => (
                         format!(
@@ -1199,7 +1229,6 @@ impl Learning {
                         Tone::Dim,
                     ),
                 };
-                let (x, y) = self.note_point(p);
                 Note {
                     x,
                     y,
@@ -1207,7 +1236,7 @@ impl Learning {
                     lines: vec![
                         (format!("MIDI LEARN: {}", self.label(i)), Tone::Accent),
                         (
-                            format!("{} · ESC OR CANCEL STOPS", instruction(i)),
+                            format!("{} · ESC OR CANCEL STOPS", instruction(i, notes)),
                             Tone::Plain,
                         ),
                         third,
@@ -1215,14 +1244,11 @@ impl Learning {
                 }
             }),
             None => self.notice.as_ref().and_then(|(lines, i, _)| {
-                place(*i).map(|p| {
-                    let (x, y) = self.note_point(p);
-                    Note {
-                        x,
-                        y,
-                        size,
-                        lines: lines.clone(),
-                    }
+                self.point_of(*i).map(|(x, y)| Note {
+                    x,
+                    y,
+                    size,
+                    lines: lines.clone(),
                 })
             }),
         };
