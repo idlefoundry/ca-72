@@ -1087,3 +1087,88 @@ fn volume_moved_by_an_lfo_ramps_a_sample_at_a_time() {
         assert_eq!(f64::from(e.faded(1.0, 1.0).0), f64::from(now as f32));
     }
 }
+
+/// The glide's end is where the next step puts the knob, to the last bit or two
+/// (decisions.md R-LFO-STRESS), on either of the LFOs' paths: where one LFO moves another's
+/// RATE (the generators on their ticks, R-LFO's addendum), and with a macro on the same knob,
+/// whose part is in both ends. A macro alone on CUTOFF holds still between steps: no glide.
+#[test]
+fn the_glide_ends_where_the_next_step_puts_the_knob() {
+    use crate::lfo::{LfoKnob, Source};
+    for potato in [false, true] {
+        let base = Controls {
+            potato,
+            ..controls()
+        };
+        // LFO 1, a TRIANGLE at 3 Hz on CUTOFF; LFO 2 at 0.5 Hz moving LFO 1's RATE.
+        let tri = |hz| Settings {
+            edges: Edges::Soft,
+            ..sharp(Mode::Free, 0.0, hz)
+        };
+        let mut cross = with(base, 0, tri(3.0), Target::Cutoff, 0.4, 0.5);
+        cross = with(
+            cross,
+            1,
+            tri(0.5),
+            Target::of_lfo(0, LfoKnob::Rate),
+            0.3,
+            0.0,
+        );
+        cross.lfo.base[Target::of_lfo(0, LfoKnob::Rate).index()] = lfo::RATE_RANGE.normalize(3.0);
+        let mut macro_too = cross;
+        macro_too.lfo.to[Source::Macro(0).index()][0] = Some(Assignment {
+            target: Target::Cutoff,
+            depth: 0.2,
+        });
+        macro_too.lfo.macros[0] = 0.5;
+        let mut macro_alone = base;
+        macro_alone.lfo.to[Source::Macro(0).index()][0] =
+            macro_too.lfo.to[Source::Macro(0).index()][0];
+        macro_alone.lfo.base[Target::Cutoff.index()] = 0.5;
+        macro_alone.lfo.macros[0] = 0.5;
+        for (what, c, glides) in [
+            ("an LFO moving an LFO", cross, true),
+            ("and a macro", macro_too, true),
+            ("a macro alone", macro_alone, false),
+        ] {
+            let what = format!("{what}, potato {potato}");
+            let mut e = engine(&c);
+            key(&mut e, 60, true);
+            let (mut l, mut r) = ([0.0f32; lfo::STEP], [0.0f32; lfo::STEP]);
+            e.render(&[], &mut l, &mut r);
+            assert_eq!(e.lfo_cross().on, glides, "{what}: on the ticks");
+            for step in 0..60 {
+                let (now, sweep) = (
+                    e.controls.panel,
+                    e.slots[0].play.try_lock().expect("free").sweep,
+                );
+                e.render(&[], &mut l, &mut r);
+                assert_eq!(sweep.on, glides, "{what}, step {step}");
+                if !glides {
+                    continue;
+                }
+                let next = e.controls.panel;
+                assert_ne!(now.cutoff, next.cutoff, "{what}, step {step}: it moves");
+                let end = |x: f64, d: f64| x + d * lfo::STEP as f64;
+                let close = |a: f64, b: f64| {
+                    assert!(
+                        (a - b).abs() < 1e-12,
+                        "{what}, step {step}: {a} against {b}"
+                    )
+                };
+                if potato {
+                    let (ca, cb) = (
+                        ca72::light::swept_laws(&now).1,
+                        ca72::light::swept_laws(&next).1,
+                    );
+                    close(end(ca, sweep.octaves), cb);
+                } else {
+                    close(
+                        end(cutoff_track(now.cutoff), sweep.circuit.cutoff),
+                        cutoff_track(next.cutoff),
+                    );
+                }
+            }
+        }
+    }
+}
