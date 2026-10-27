@@ -15338,3 +15338,112 @@ rustfmt pass. Pictures from `the_midi_map_pngs` (ignored; `CA72_MIDI_MAP_PNG`), 
 1720 logical pixels and twice that in pixels: the mode off, on over GLOBAL with controllers and a
 switch's note learned, a knob waiting, the LFO page and the macros, the ARP drawer, a plug-in,
 and the walnut's keys close up, in `/mnt/lab/artifacts/ca-72/midi-map/`.
+
+## R-VELOCITY. The notes' velocity as a modulation source
+
+**The owner, 2026-10-27:** "how could we map ... midi velocity onto different parameters? So
+very much like the same way that you can map an LFO onto a specific parameter." Of the three
+mock-ups (A, a VELOCITY jack in the left hand patched as an LFO's OUT; B, a VELOCITY row in the
+expression drawer; C, a velocity dial in every knob's pop-up): "I want A to be where the velocity
+connector permanently lives but then I do also like B having that second row that ... controls
+the velocity settings because I do think those extra controls need to be there and I would
+still keep a cord and not give everything velocity controls." To the four questions asked
+before the work: the jack **hides with the wheels** while the macros show; CURVE and FLOOR are
+**the patch's** (saved with presets and sessions); in MONO or UNISON a legato key's velocity is
+**the new key's**, glided to; the on-screen keyboard plays by **where on the key** it is pressed,
+typed keys and an agent's notes at 100.
+
+Until now the instrument took no notice of velocity: `event_of` dropped it (the Model D has
+none). With nothing assigned it still takes none: every sample is as before, to the bit.
+
+**The engine** (`lfo.rs`, `engine.rs`, `velocity.rs`; docs/lfo.md).
+- `Source::Velocity`, after the macros (`lfo::VELOCITY`, `SOURCES` = 4 + 6 + 1; no source's
+  index moves), its ID `velocity` (`velocity_to_cutoff = 40` in a preset). It is **unipolar**,
+  as a macro (its knobs move one way, their rings one way), and **each voice's own**, as an LFO
+  with MONO off (`Lfos::own`): the controls every voice shares (VOLUME, the strip's) take its
+  shared copy, the latest note's (option C).
+- A key's velocity reaches the engine as `Event::NoteVelocity { key, velocity }` before its note,
+  as R-MPE's `NoteExpression` does (so `Event::Note` and its hundred-odd builders are unchanged);
+  alone it never wakes the instrument. A POLY voice takes its note's at its attack; the one
+  instrument and UNISON's voices the key NOTE PRIORITY sounds, at once for a new phrase, gliding
+  over R-MPE's 4 ms as the keys change under one, back to the held key's as the legato one lets
+  go. The knobs it moves are moved as the note starts (`Engine::velocity_moved`), not a step
+  later.
+- **CURVE and FLOOR** (`velocity_curve`, -100 SOFT to 100 HARD, 0 a straight line;
+  `velocity_floor`, 0 to 100 %): the source's value is FLOOR + (1 − FLOOR) × v ^ 3^CURVE
+  (`lfo::Response`). Host parameters after every other (no parameter moves), a preset's sound
+  parameters (one saved before reads a straight line from 0), MIDI-learnable, in the MCP's table
+  (EXPRESSION). They reach the engine only while the velocity moves something, as a macro's
+  value does.
+- **Where each note's velocity comes from** (`velocity::Played`): MIDI's and a host's note-on;
+  the arpeggiator, whose notes come by key alone, plays each at the velocity of the key of its
+  pitch class struck latest (the key itself, or the one its octaves come from); the on-screen
+  keyboard and an agent's notes through the local notes' queue, which carries seven bits of it
+  (its generation 48 bits now); offline renders by each note's `velocity`.
+
+**The left hand** (`ca72_panel::strip::velocity`, `art.rs`). A VELOCITY row under DECAY's: its
+jack (the left hand's, drawn whole, not dimmed as GLIDE's and DECAY's are; no collar, as an
+LFO's OUT has none), the legend, and ten lamps lit to the latest note's velocity while the
+velocity moves something, dark otherwise (a tenth each; a layer of the panel's, drawn again only
+as the lamps change). The wheels moved down 55 for it (`WHEEL_Y`
+595). Shown with the wheels: the macros, laid over the left hand, hide it, and it is not found
+under them. A cord is dragged from it as from an LFO's OUT, every knob that can take it ringed,
+let go at +25 %; its right-click menu has REMOVE ALL ASSIGNMENTS and a head for each knob it
+moves with DEPTH… and REMOVE; its tip says what it moves. Everything else of modulation (the
+rings, the pop-up's dial, Alt-drag, the knobs' menus, now with a VELOCITY head) is the sources'.
+
+**The owner, 2026-10-27, trying the test build:** of the collar, "permanently colored with a
+circle around it, which is not our default behavior" (taken away); "make sure that when a user
+hovers over the velocity that they can see the cables going to the different knobs [it] affects"
+(it was not yet so for any jack: a jack's hover gave only its tip); "the velocity meter should be
+blank unless it's actually connected to something". So, **for every source's jack** (an LFO's OUT
+while the LFO page shows, a macro's while the macros show, the velocity's with the wheels):
+the pointer on it, nothing dragged, draws a cord from it to each knob it moves, as a dragged one
+is drawn over a knob (its plug there, the knob ringed brightly in the source's colour), and that
+source's rings on them (`ModScene::patched`, `Editing::hovered_jack`). The macros' jacks keep the
+collars R-MACROS gave them.
+
+**The owner, 2026-10-27, then:** "do you think we should no longer call that tab MPE, but instead
+... expression? or EXP?" (the agent recommended EXP: three letters as LFO and ARP beside it, the
+usual name of an expression input, and the drawer no longer MPE's alone), and "since you're making
+hover cable standard now, I would also add the ability to turn those off in our settings". So the
+rail's key that drops the expression drawer reads **EXP** (`BarTarget::Mpe` as it was; SETTINGS'
+MPE heading, MPE's own input and timbre, is unchanged). And SETTINGS has **HOVER CABLES: ON**
+(or OFF), one row under WINDOW that toggles it (the menu is already taller than the window at its
+opening size, so no heading of its own), a per-computer setting (`settings.toml`'s
+`hover_cables`, true unless set). Off, a jack's hover gives its tip alone, as before. Not yet in
+the MCP's `ca72_settings`.
+
+**The expression drawer's second row** (`strip/mpe.rs`). The drawer is two rows deep (680); under
+INPUT, LAST NOTE (the latest note's velocity, 0 to 127); RESPONSE, a screen drawing the curve,
+FLOOR's line and the latest note on it; MODULATES, as an LFO's screen; then CURVE and FLOOR,
+each a knob and its four-cell readout, under TIMBRE's, typed into as TIMBRE's are; the title
+VELOCITY centred under the row. A rule runs between the rows; PRESSURE's and TIMBRE's rule only
+down theirs. CURVE and FLOOR are panel controls (`Place::Mpe`), after every other control.
+
+**Agent decisions, 2026-10-27** (not separately approved):
+- **The velocity moves neither an LFO's own knobs nor TEMPO** (`Source::takes`): they run on the
+  generators' ticks, which have no notes. Their knobs are not ringed for its cord, and the knobs'
+  menus do not offer it; an assignment made otherwise is kept and never applied.
+- **Its colour** (the owner, 2026-10-27, of the first build's magenta placeholder: "I don't care
+  for the magenta color ... since the velocity is a native feeling element to the UI, can we
+  color it the same color as the text in the preset bar and the ... screen-based controls"): the
+  panel's lamps' orange, FF7028 (`strip::velocity::RGB`, `worn::ORANGE`), for its meter,
+  cords and rings and the drawer's VELOCITY row, and in a look its lamps' colour. It is not
+  changeable per computer, as the LFOs' and macros' are. It sits near LFO 1's amber (FFB020):
+  where both ring one knob, the pop-up and the tip name each.
+- **CURVE and FLOOR are MIDI-learnable** (in `learn::LEARNABLE` after TIMBRE's) **and do not
+  glide** (`smooth::TIMING`, as the arpeggiator's GATE and SWING: they shape a value each note
+  takes as it is struck).
+- **The on-screen keyboard:** 1 at a key's top to 127 at its foot (a finger further down a key
+  strikes it with more of its weight); a glissando strikes each key it reaches where the pointer
+  is.
+- **A key never struck** (a note from a source with no velocity) plays at full velocity.
+- The left-hand meter and LAST NOTE show the latest note's velocity as it came; the rings' points
+  and the RESPONSE screen's dot where CURVE and FLOOR take it.
+- **Skin packs:** the jack is drawn as the left hand's others are (a pack's jack picture in the
+  worn look); its lamps, cords and rings are drawn in a pack's `velocity` colour
+  (`[look.colours]`, as `key_print` and `wheel` are), else its `lamp`, else the built-in
+  orange, so the official looks draw as before; documented in docs/skin-packs.md (The strip).
+  Only the colour: the lamps' wells and their shape stay the plug-in's. The
+  drawer's row, as the drawers, draws its base look's (the built-in orange).

@@ -806,6 +806,52 @@ fn a_packs_switches_show_their_state_and_its_wheels_their_colour() {
     assert!(draw(wheel, 0.0) != draw(one, 0.0));
 }
 
+/// A pack's `velocity` colour dresses the left hand's VELOCITY lamps; without it
+/// they are drawn as the official looks draw them.
+#[test]
+fn a_packs_velocity_colour_dresses_the_meter() {
+    let with = |colour: Option<&str>| {
+        edited(move |d| {
+            if let Some(c) = colour {
+                let text = std::fs::read_to_string(d.join("skin.toml")).expect("read");
+                std::fs::write(
+                    d.join("skin.toml"),
+                    text + &format!("\n[look.colours]\nvelocity = \"{c}\"\n"),
+                )
+                .expect("written");
+            }
+        })
+    };
+    let draw = |look: Look, lit: usize| {
+        let mut r = Renderer::with_pack(look, Lettering::Standard, 0.3, 1.0);
+        r.render(&Scene {
+            velocity_lit: lit,
+            ..Scene::default()
+        });
+        r.frame().data().to_vec()
+    };
+    let open = |colour| {
+        let dir = with(colour);
+        Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"))
+    };
+    let (plain, blue) = (open(None), open(Some("#40c0ff")));
+    assert_eq!(plain.colours.velocity, None);
+    assert_eq!(blue.colours.velocity, Some((0x40, 0xc0, 0xff)));
+    assert!(!blue.report.has("look.unknown"), "{}", blue.report);
+    // The built-in colour's the default: given it, the pack draws as without it.
+    let orange = open(Some("#ff7028"));
+    assert!(draw(orange, 6) == draw(plain.clone(), 6));
+    // The pack's colour draws the lamps, lit or not, in it.
+    assert!(draw(blue.clone(), 6) != draw(plain.clone(), 6));
+    assert!(draw(blue, 0) != draw(plain, 0));
+    let bad = with(Some("pink"));
+    assert!(
+        Look::open(bad.path())
+            .expect_err("refused")
+            .has("look.colour")
+    );
+}
+
 /// The keyboard view in a look: given an official one it is drawn exactly as before; a pack's
 /// keys and its drawing over the case change it.
 #[test]

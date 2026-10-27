@@ -1131,7 +1131,8 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
                     BarTarget::Keyboard => "KEYS",
                     BarTarget::Arp => "ARP",
                     BarTarget::Fx => "FX",
-                    BarTarget::Mpe => "MPE",
+                    // (EXP: the expression's drawer, MPE's and the velocity's: R-VELOCITY.)
+                    BarTarget::Mpe => "EXP",
                     BarTarget::Lfo => "LFO",
                     BarTarget::Macro => "MACRO",
                     _ => "SAVE",
@@ -2037,7 +2038,7 @@ mod tests {
                     (BarTarget::Keyboard, "KEYS"),
                     (BarTarget::Lfo, "LFO"),
                     (BarTarget::Arp, "ARP"),
-                    (BarTarget::Mpe, "MPE"),
+                    (BarTarget::Mpe, "EXP"),
                 ];
                 if rail == Rail::Effects {
                     expected.push((BarTarget::Fx, "FX"));

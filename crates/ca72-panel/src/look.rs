@@ -506,6 +506,7 @@ impl Look {
                 ("wheel", &c.wheel, &mut colours.wheel),
                 ("display", &c.display, &mut colours.display),
                 ("selection", &c.selection, &mut colours.selection),
+                ("velocity", &c.velocity, &mut colours.velocity),
             ] {
                 if let Some(v) = value {
                     match hex(v) {
@@ -709,6 +710,8 @@ struct ColoursTable {
     display: Option<String>,
     #[serde(default)]
     selection: Option<String>,
+    #[serde(default)]
+    velocity: Option<String>,
     #[serde(flatten)]
     rest: Rest,
 }
@@ -729,6 +732,9 @@ pub struct Colours {
     pub display: Option<(u8, u8, u8)>,
     /// The drawer's current row's band, lettered in its typeface (else faintly the lamps').
     pub selection: Option<(u8, u8, u8)>,
+    /// The left hand's VELOCITY meter's lamps and its cords (else the look's `lamp`, else the built-in
+    /// `strip::velocity::RGB`; decisions.md R-VELOCITY).
+    pub velocity: Option<(u8, u8, u8)>,
 }
 
 /// A colour written `#rrggbb`.

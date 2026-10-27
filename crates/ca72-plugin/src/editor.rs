@@ -66,6 +66,7 @@ mod fx_pins;
 mod lfo_page;
 mod macros;
 mod mapping;
+mod velocity;
 use entry::Entry;
 
 /// The share of the usable screen the editor opens at until it is resized.
@@ -226,6 +227,9 @@ pub struct Meters {
     /// R-LFO): ENTROPY, WIDTH, DETUNE, DRIVE, LEVEL and INNER ([`LIVE`]'s order), the controls'
     /// own units; NaN before a block.
     live: [AtomicU32; LIVE.len()],
+    /// The latest note's velocity as it came, 0..1 (the left hand's meter, the drawer's LAST
+    /// NOTE: decisions.md R-VELOCITY); NaN before a note.
+    velocity: AtomicU32,
 }
 
 /// The modulation targets with a screen on the strip (decisions.md R-LFO: the owner, 2026-10-20,
@@ -253,6 +257,7 @@ impl Default for Meters {
             shapes: std::array::from_fn(|_| AtomicU32::new(f32::NAN.to_bits())),
             tempo: AtomicU32::new(f32::NAN.to_bits()),
             live: std::array::from_fn(|_| AtomicU32::new(f32::NAN.to_bits())),
+            velocity: AtomicU32::new(f32::NAN.to_bits()),
         }
     }
 }
@@ -285,6 +290,18 @@ impl Meters {
         {
             a.store((v as f32).to_bits(), Ordering::Relaxed);
         }
+    }
+
+    /// The latest note's velocity (decisions.md R-VELOCITY), none before a note.
+    pub fn publish_velocity(&self, velocity: Option<f32>) {
+        let v = velocity.unwrap_or(f32::NAN);
+        self.velocity.store(v.to_bits(), Ordering::Relaxed);
+    }
+
+    /// [`Meters::publish_velocity`]'s.
+    pub(crate) fn velocity(&self) -> Option<f64> {
+        let v = f64::from(f32::from_bits(self.velocity.load(Ordering::Relaxed)));
+        v.is_finite().then_some(v)
     }
 
     /// [`Meters::publish_live`]'s, by [`LIVE`]'s order; none before a block.
@@ -633,6 +650,9 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "pressure_filter" => &p.pressure_filter,
         "timbre_mod" => &p.timbre_mod,
         "timbre_filter" => &p.timbre_filter,
+        // Its second row, the velocity's (decisions.md R-VELOCITY).
+        "velocity_curve" => &p.velocity_curve,
+        "velocity_floor" => &p.velocity_floor,
         // The macros' (decisions.md R-MACROS).
         id if crate::lfo::macro_of_id(id).is_some() => {
             p.macro_param(crate::lfo::macro_of_id(id).unwrap_or(0))
@@ -1934,6 +1954,7 @@ impl Editing {
                 self.settings.frequency,
                 self.params.midi_map.wheel_source(),
                 agents,
+                self.settings.hover_cables,
             ),
             (&packs, pack),
         );
@@ -2745,7 +2766,7 @@ impl Editing {
     fn start_mpe_typing(&mut self, i: usize) {
         self.playing.release();
         self.knob_entry = None;
-        self.typing = Some((Typed::Mpe(i.min(3)), String::new()));
+        self.typing = Some((Typed::Mpe(i.min(mpe_ui::UNIT_COUNT - 1)), String::new()));
         self.typing_keys = true;
     }
 
@@ -2886,7 +2907,7 @@ impl Editing {
                         (Typed::Arp(1), _) => false,
                         // (MODULATION's -100 to 100, CUTOFF's -4 to 4 with a point.)
                         (Typed::Mpe(_), '0'..='9') => digits < 3,
-                        (Typed::Mpe(i), '.') => i % 2 == 1 && !text.contains('.'),
+                        (Typed::Mpe(i), '.') => i % 2 == 1 && i < 4 && !text.contains('.'),
                         (Typed::Mpe(_), '-') => text.is_empty(),
                         (Typed::Mpe(_), _) => false,
                         (Typed::Tempo, '0'..='9') => cells < 3,
@@ -3001,13 +3022,15 @@ impl Editing {
         if !v.is_finite() {
             return;
         }
-        let i = i.min(3);
+        let i = i.min(mpe_ui::UNIT_COUNT - 1);
         let p = &self.params;
         let q = [
             &p.pressure_mod,
             &p.pressure_filter,
             &p.timbre_mod,
             &p.timbre_filter,
+            &p.velocity_curve,
+            &p.velocity_floor,
         ][i];
         let normalized = q.preview_normalized(v);
         if let Some(c) = ca72_panel::controls::index(mpe_ui::KNOB_PARAMS[i]) {
@@ -3477,6 +3500,10 @@ impl Editing {
                 self.set_lettering(lettering);
                 return;
             }
+            Pressed::HoverCables(on) => {
+                self.keep_settings(Change::HoverCables(on));
+                return;
+            }
             Pressed::Agents(on) => {
                 self.set_agents(on);
                 return;
@@ -3624,6 +3651,10 @@ impl Editing {
         if on_macros && self.macro_press((x, y), modifiers) {
             return;
         }
+        // The left hand's VELOCITY jack, with the wheels: an assignment dragged (R-VELOCITY).
+        if self.velocity_press((x, y)) {
+            return;
+        }
         // The LFO page, in the lower page's place.
         if self.page_shows() && lfo_ui::inside(x, y) {
             self.page_press((x, y), modifiers);
@@ -3633,7 +3664,10 @@ impl Editing {
             && let Some(target) = keyboard::hit(self.playing.root, x, y)
         {
             match target {
-                keyboard::Target::Note(note) => self.playing.press(note),
+                keyboard::Target::Note(note) => {
+                    let v = velocity::key_velocity(self.playing.root, note, y);
+                    self.playing.press_at(note, v);
+                }
                 keyboard::Target::Down | keyboard::Target::Up => {
                     self.playing.shift(target == keyboard::Target::Up);
                     self.keep_settings(Change::KeyboardRoot(self.playing.root));
@@ -3763,7 +3797,8 @@ impl Editing {
             return;
         }
         let size = self.renderer.text_size() * MENU_TEXT;
-        let map = &self.params.midi_map;
+        let params = Arc::clone(&self.params);
+        let map = &params.midi_map;
         // (A drawer dropped from the rail is over the keyboard's top: its own menus.)
         if self.keyboard_shown() && keyboard::inside(x, y) && !self.in_lower((x, y)) {
             self.learning.close_menu();
@@ -3821,6 +3856,10 @@ impl Editing {
                 }
                 None => self.learning.close_menu(),
             }
+            return;
+        }
+        // The left hand's VELOCITY jack's: what it modulates (decisions.md R-VELOCITY).
+        if self.velocity_menu((x, y)) {
             return;
         }
         // The macros': a knob's, else its macro's colour and RENAME… (decisions.md R-MACROS).
@@ -3925,10 +3964,13 @@ impl Editing {
         };
         if self.playing.dragging() {
             let target = keyboard::hit(self.playing.root, x, y);
-            self.playing.drag(match target {
-                Some(keyboard::Target::Note(note)) => Some(note),
-                _ => None,
-            });
+            match target {
+                Some(keyboard::Target::Note(note)) => {
+                    let v = velocity::key_velocity(self.playing.root, note, y);
+                    self.playing.drag_at(Some(note), v);
+                }
+                _ => self.playing.drag(None),
+            }
             return;
         }
         if self.fx_pin_moved(modifiers) {
@@ -4497,6 +4539,12 @@ impl Editing {
         self.learning.timed = [self.params.timed_now(1), self.params.timed_now(2)];
         self.learning.lfo_timed = std::array::from_fn(|n| self.params.lfo(n).timed.value());
         self.scene.overload = Meters::load(&self.meters.overload);
+        // (Dark until the velocity moves something: decisions.md R-VELOCITY.)
+        self.scene.velocity_lit = if self.params.lfo_patch.count(crate::lfo::Source::Velocity) > 0 {
+            ca72_panel::strip::velocity::lit(self.meters.velocity())
+        } else {
+            0
+        };
         self.move_opening(Instant::now(), self.params.quality.value());
         self.scene.midi = (
             Meters::load(&self.meters.bend),
@@ -4605,7 +4653,13 @@ impl Editing {
         } else {
             mpe_ui::Input::None
         };
-        self.mpe_scene = mpe_scene(&self.params, &self.scene.values, input);
+        self.mpe_scene = mpe_scene(
+            &self.params,
+            &self.scene.values,
+            input,
+            self.meters.velocity(),
+            self.playing.standalone,
+        );
         // A value being typed: what is typed so far, lit, the next digit's place marked while
         // there is room for one.
         if let Some((r, text)) = &self.typing {
@@ -4628,7 +4682,9 @@ impl Editing {
                     }
                 }
                 Typed::Arp(i) => self.arp_scene.readouts[(*i).min(3)] = (shown, true),
-                Typed::Mpe(i) => self.mpe_scene.readouts[(*i).min(3)] = (shown, true),
+                Typed::Mpe(i) => {
+                    self.mpe_scene.readouts[(*i).min(mpe_ui::UNIT_COUNT - 1)] = (shown, true);
+                }
                 Typed::Tempo => self.scene.tempo = Some(format!("{shown} BPM")),
             }
         }
@@ -4642,6 +4698,11 @@ impl Editing {
         }
         if self.drag.is_none()
             && let Some(t) = self.macro_tip()
+        {
+            return Some(t);
+        }
+        if self.drag.is_none()
+            && let Some(t) = self.velocity_tip()
         {
             return Some(t);
         }
@@ -5398,7 +5459,15 @@ fn reaching(p: &Ca72Params) -> bool {
 /// What the expression drawer shows (decisions.md R-MPE): the readouts in the knobs' units
 /// (MODULATION's whole percent, CUTOFF's octaves to a tenth), the knobs as the panel shows them
 /// (a knob dragged where the drag has it), and what INPUT heard.
-fn mpe_scene(p: &Ca72Params, values: &[f64; CONTROLS.len()], input: mpe_ui::Input) -> MpeScene {
+/// Its second row the velocity's (decisions.md R-VELOCITY): the latest note's (`velocity`, 0..1)
+/// on LAST NOTE and the RESPONSE screen, what it moves on MODULATES, CURVE's and FLOOR's percent.
+fn mpe_scene(
+    p: &Ca72Params,
+    values: &[f64; CONTROLS.len()],
+    input: mpe_ui::Input,
+    velocity: Option<f64>,
+    standalone: bool,
+) -> MpeScene {
     let knob = |id: &str| ca72_panel::controls::index(id).map_or(0.5, |i| values[i]);
     // (No "-0".)
     let shown = |v: f32, places: usize| {
@@ -5419,8 +5488,26 @@ fn mpe_scene(p: &Ca72Params, values: &[f64; CONTROLS.len()], input: mpe_ui::Inpu
             (shown(p.pressure_filter.value(), 1), true),
             (shown(p.timbre_mod.value(), 0), true),
             (shown(p.timbre_filter.value(), 1), true),
+            (shown(p.velocity_curve.value(), 0), true),
+            (shown(p.velocity_floor.value(), 0), true),
         ],
         knobs: mpe_ui::KNOB_PARAMS.map(knob),
+        last: velocity.map_or(String::new(), |v| {
+            format!("{}", (v.clamp(0.0, 1.0) * 127.0).round())
+        }),
+        modulates: lfo_page::source_screen_text(
+            &p.lfo_patch,
+            crate::lfo::Source::Velocity,
+            standalone,
+        ),
+        response: {
+            let r = crate::lfo::response(p);
+            mpe_ui::Response {
+                curve: f64::from(r.curve),
+                floor: f64::from(r.floor),
+                point: velocity,
+            }
+        },
     }
 }
 
@@ -9494,7 +9581,8 @@ mod tests {
             e.learning
                 .menu()
                 .map(|m| (m.heads.clone(), m.marked.clone())),
-            Some((vec![0, 3, 6, 9, 12, 14], vec![1, 4, 7]))
+            // (WINDOW's HOVER CABLES row before MOD WHEEL SOURCE: R-VELOCITY.)
+            Some((vec![0, 3, 6, 9, 13, 15], vec![1, 4, 7]))
         );
         // Oscillator 2 at +5 semitones, oscillator 3's pot at its clockwise end (+8.22).
         let ps: Arc<dyn Params> = params.clone();
@@ -10499,7 +10587,7 @@ mod tests {
         e.update_scene();
         assert_eq!(
             e.mpe_scene.readouts.clone().map(|r| r.0),
-            ["-100", "0.0", "30", "-0.5"].map(str::to_owned)
+            ["-100", "0.0", "30", "-0.5", "0", "0"].map(str::to_owned)
         );
         // A knob turned: a gesture, and the frame shown the frame put together whole.
         let ptr = params.timbre_filter.as_ptr();
@@ -16657,6 +16745,96 @@ mod tests {
                 .any(|c| matches!(c, Call::Set(p, _) if *p == lvl)),
             "{calls:?}"
         );
+    }
+
+    /// The left hand's VELOCITY meter is dark until the velocity moves something, then lit to
+    /// the latest note (decisions.md R-VELOCITY).
+    #[test]
+    fn the_velocity_meter_is_dark_until_assigned() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _, params) = editing();
+        e.meters.publish_velocity(Some(0.76));
+        e.draw();
+        assert_eq!(e.scene.velocity_lit, 0, "nothing assigned");
+        params
+            .lfo_patch
+            .assign(Source::Velocity, T::Cutoff, 0.25)
+            .expect("room");
+        e.draw();
+        assert_eq!(e.scene.velocity_lit, 8);
+        params.lfo_patch.remove(Source::Velocity, T::Cutoff);
+        e.draw();
+        assert_eq!(e.scene.velocity_lit, 0, "its last assignment taken away");
+    }
+
+    /// The left hand's VELOCITY jack (decisions.md R-VELOCITY): a cord dragged from it lands at
+    /// +25 %, as an LFO's; the pointer on it shows a cord to each knob it moves, in its colour
+    /// (as on a macro's jack); with the macros shown it is neither found nor hovered.
+    #[test]
+    fn the_velocity_jack_is_patched_from_and_shows_its_cords() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _, params) = editing();
+        e.playing.visible = false;
+        let jack = at(&e, ca72_panel::strip::velocity::jack_at());
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.draw();
+        let cord = e.mod_scene.cord.clone().expect("a cord");
+        assert_eq!(cord.from, ca72_panel::strip::velocity::jack_at());
+        assert_eq!(cord.colour, ca72_panel::strip::velocity::RGB);
+        release(&mut e);
+        assert_eq!(
+            params.lfo_patch.depth(Source::Velocity, T::Cutoff),
+            Some(0.25)
+        );
+        params
+            .lfo_patch
+            .assign(Source::Velocity, T::Volume, 0.5)
+            .expect("room");
+        // Away from the jack: no cords.
+        e.draw();
+        assert!(e.mod_scene.patched.is_empty());
+        // On it: one to each knob it moves, from it, each ringing its knob.
+        go(&mut e, jack);
+        e.draw();
+        let mut to: Vec<_> = e.mod_scene.patched.iter().map(|c| c.to).collect();
+        to.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
+        let mut want = vec![centre("cutoff"), centre("volume")];
+        want.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
+        assert_eq!(to, want);
+        for c in &e.mod_scene.patched {
+            assert_eq!(c.from, ca72_panel::strip::velocity::jack_at());
+            assert_eq!(c.colour, ca72_panel::strip::velocity::RGB);
+            assert!(c.over.is_some() && c.targets.is_empty());
+        }
+        // The macros over the left hand: the jack is not there.
+        macro_key(&mut e);
+        go(&mut e, cutoff);
+        go(&mut e, jack);
+        e.draw();
+        assert!(e.mod_scene.patched.is_empty());
+        // A macro's jack shows its cords alike.
+        params
+            .lfo_patch
+            .assign(Source::Macro(0), T::Emphasis, 0.3)
+            .expect("room");
+        let macro_jack = at(&e, ca72_panel::strip::macros::jack_at(0));
+        go(&mut e, macro_jack);
+        e.draw();
+        let to: Vec<_> = e.mod_scene.patched.iter().map(|c| c.to).collect();
+        assert_eq!(to, [centre("emphasis")]);
+        // SETTINGS: HOVER CABLES off, none; on again, back.
+        e.keep_settings(crate::settings::Change::HoverCables(false));
+        e.draw();
+        assert!(e.mod_scene.patched.is_empty(), "turned off");
+        e.keep_settings(crate::settings::Change::HoverCables(true));
+        e.draw();
+        assert_eq!(e.mod_scene.patched.len(), 1);
     }
 
     /// An assignment dragged from a macro's jack lands on a knob at +25 %, as an LFO's; while

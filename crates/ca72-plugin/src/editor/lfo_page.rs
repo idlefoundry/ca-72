@@ -39,11 +39,13 @@ const SCOPE_CLEAR: f64 = 4.0;
 /// drag takes for its own.
 const DEPTH_DRAG: f64 = 240.0;
 /// A source's colour: an LFO's the computer's phosphor for it, a macro's the computer's colour
-/// for it (decisions.md R-MACROS).
+/// for it (decisions.md R-MACROS), the velocity's the panel's lamps' orange (R-VELOCITY; in a
+/// look, its: `Editing::source_colour`).
 pub(super) fn colour(settings: &Settings, s: Source) -> [u8; 3] {
     match s {
         Source::Lfo(n) => settings.lfo_colors[n.min(LFOS - 1)].rgb(),
         Source::Macro(n) => settings.macro_colors[n.min(lfo::MACROS - 1)].rgb(),
+        Source::Velocity => ca72_panel::strip::velocity::RGB,
     }
 }
 
@@ -60,6 +62,7 @@ pub(super) fn label(patch: &lfo::Patch, s: Source) -> String {
                 name
             }
         }
+        Source::Velocity => "VELOCITY".into(),
     }
 }
 
@@ -365,11 +368,17 @@ pub(super) fn screen_text(
     if !on {
         return ("MUTED".into(), false);
     }
-    let a: Vec<_> = patch
-        .assignments(Source::Lfo(n))
-        .into_iter()
-        .flatten()
-        .collect();
+    source_screen_text(patch, Source::Lfo(n), standalone)
+}
+
+/// A MODULATES screen's text and whether it is lit, for any source: NOT IN USE, the one knob it
+/// moves and its depth, or how many (the velocity's, in the expression drawer: R-VELOCITY).
+pub(super) fn source_screen_text(
+    patch: &lfo::Patch,
+    source: Source,
+    standalone: bool,
+) -> (String, bool) {
+    let a: Vec<_> = patch.assignments(source).into_iter().flatten().collect();
     match a.len() {
         0 => ("NOT IN USE".into(), false),
         // (TEMPO in a plug-in: kept, doing nothing, dim; its tip and menu say why.)
@@ -534,6 +543,15 @@ impl Editing {
         }
     }
 
+    /// A source's colour in this look: the velocity's the look's lamps' (as its jack's collar
+    /// and meter: decisions.md R-VELOCITY), the rest as [`colour`].
+    pub(super) fn source_colour(&self, s: Source) -> [u8; 3] {
+        match s {
+            Source::Velocity => ca72_panel::strip::velocity::colour(&self.renderer.look().colours),
+            _ => colour(&self.settings, s),
+        }
+    }
+
     /// A source's present output (-1..1; a macro's 0..1, its knob's) and whether it moves (a
     /// macro's point always shows).
     fn reading_of(&self, s: Source) -> (f64, bool) {
@@ -543,6 +561,11 @@ impl Editing {
                 (f64::from(r.value), r.moving)
             }
             Source::Macro(n) if n < lfo::MACROS => (self.macro_value(n), true),
+            // (The latest note's, through CURVE and FLOOR: R-VELOCITY.)
+            Source::Velocity => match self.meters.velocity() {
+                Some(v) => (lfo::response(&self.params).at(v), true),
+                None => (0.0, false),
+            },
             _ => (0.0, false),
         }
     }
@@ -593,7 +616,7 @@ impl Editing {
             let (screen, in_use) =
                 screen_text(&self.params.lfo_patch, n, on, self.playing.standalone);
             *col = Column {
-                colour: colour(&self.settings, Source::Lfo(n)),
+                colour: self.source_colour(Source::Lfo(n)),
                 wave: if continuous {
                     f64::from(q.waveform.unmodulated_normalized_value())
                 } else {
@@ -639,6 +662,9 @@ impl Editing {
             _ => None,
         };
         let dragged = self.modulating.depth.as_ref().map(|d| d.control);
+        // (The pointer on a source's jack: a cord to each knob it moves, R-VELOCITY.)
+        let jack = self.hovered_jack();
+        let mut patched = Vec::new();
         let mut knobs = Vec::new();
         let mut targets = Vec::new();
         let mut over = None;
@@ -677,8 +703,9 @@ impl Editing {
                 (place, art::sweep(&c.kind), None, None)
             };
             if let Some(p) = patching {
-                let room = self.params.lfo_patch.depth(p.source, t).is_some()
-                    || self.params.lfo_patch.count(p.source) < lfo::MOST;
+                let room = (self.params.lfo_patch.depth(p.source, t).is_some()
+                    || self.params.lfo_patch.count(p.source) < lfo::MOST)
+                    && p.source.takes(t);
                 if room && self.mod_live(i) {
                     under_room |= under == Some(i);
                     match (screen, under == Some(i)) {
@@ -689,9 +716,24 @@ impl Editing {
                     }
                 }
             }
+            let from_jack = jack.filter(|s| self.params.lfo_patch.depth(*s, t).is_some());
+            if let Some(s) = from_jack
+                && let Some(from) = self.jack_of(s)
+            {
+                patched.push(Cord {
+                    from,
+                    to: screen.map_or(place.0, |(x, y, w, h)| (x + w / 2.0, y + h / 2.0)),
+                    colour: self.source_colour(s),
+                    targets: Vec::new(),
+                    over: screen.is_none().then_some(place),
+                    boxes: Vec::new(),
+                    over_box: screen,
+                });
+            }
             let shown = super::fx_pins::target(i).is_some()
                 || page
                 || patching.is_some()
+                || from_jack.is_some()
                 || hovered == Some(i)
                 || self.modulating.popup == Some(i)
                 || dragged == Some(i);
@@ -722,9 +764,9 @@ impl Editing {
                     let (value, moving) = self.reading_of(s);
                     let one_way = self.one_way(s);
                     Ring {
-                        colour: colour(&self.settings, s),
+                        colour: self.source_colour(s),
                         depth: f64::from(d),
-                        point: ((page || s.macro_n().is_some()) && moving)
+                        point: ((page || s.macro_n().is_some() || s == Source::Velocity) && moving)
                             .then(|| (travel + f64::from(d) * value).clamp(0.0, 1.0)),
                         one_way,
                         dim: self.muted(s) || !self.mod_live(i),
@@ -742,15 +784,11 @@ impl Editing {
             });
         }
         let cord = patching.and_then(|p| {
-            let from = match p.source {
-                Source::Lfo(n) if n < LFOS => lfo_ui::places(n).jack,
-                Source::Macro(n) if n < lfo::MACROS => ca72_panel::strip::macros::jack_at(n),
-                _ => return None,
-            };
+            let from = self.jack_of(p.source)?;
             Some(Cord {
                 from,
                 to: p.at,
-                colour: colour(&self.settings, p.source),
+                colour: self.source_colour(p.source),
                 targets,
                 over,
                 boxes,
@@ -784,7 +822,7 @@ impl Editing {
                     dials: on
                         .iter()
                         .map(|&(s, d)| PopDial {
-                            colour: colour(&self.settings, s),
+                            colour: self.source_colour(s),
                             label: label(&self.params.lfo_patch, s),
                             depth: f64::from(d),
                             shared: lfo::takes_shared(&self.params, s, t),
@@ -796,7 +834,53 @@ impl Editing {
                     size: self.renderer.text_size(),
                 })
             });
-        ModScene { knobs, cord, popup }
+        ModScene {
+            knobs,
+            cord,
+            patched,
+            popup,
+        }
+    }
+
+    /// Where source `s`'s jack is: an LFO's OUT, a macro's, the left hand's VELOCITY.
+    fn jack_of(&self, s: Source) -> Option<(f64, f64)> {
+        match s {
+            Source::Lfo(n) if n < LFOS => Some(lfo_ui::places(n).jack),
+            Source::Macro(n) if n < lfo::MACROS => Some(ca72_panel::strip::macros::jack_at(n)),
+            Source::Velocity => Some(ca72_panel::strip::velocity::jack_at()),
+            _ => None,
+        }
+    }
+
+    /// The source whose jack the pointer is on (it showing; nothing dragged): its cords shown to
+    /// every knob it moves (decisions.md R-VELOCITY).
+    pub(super) fn hovered_jack(&self) -> Option<Source> {
+        // (Turned off in SETTINGS: HOVER CABLES.)
+        if !self.settings.hover_cables
+            || self.modulating.patching.is_some()
+            || self.modulating.depth.is_some()
+        {
+            return None;
+        }
+        if self.on_velocity_jack() {
+            return Some(Source::Velocity);
+        }
+        if self.macros_show()
+            && let Some(ca72_panel::strip::macros::MacroTarget::Jack(n)) = self.macro_view.hover
+        {
+            return Some(Source::Macro(n));
+        }
+        if self.page_shows() {
+            if let Some(LfoTarget::Jack(n)) = self.modulating.hover {
+                return Some(Source::Lfo(n));
+            }
+            if let Some(Target::Control(i)) = self.hover
+                && let Some(n) = level_of_control(i)
+            {
+                return Some(Source::Lfo(n));
+            }
+        }
+        None
     }
 
     /// What a control's tip adds: each source on it and its depth (" · LFO 1 +40 % · LFO 2
@@ -838,7 +922,7 @@ impl Editing {
     pub(super) fn one_way(&self, s: Source) -> bool {
         match s {
             Source::Lfo(n) => self.params.lfo_keys(n).polarity.value() == lfo::Polarity::Uni,
-            Source::Macro(_) => true,
+            Source::Macro(_) | Source::Velocity => true,
         }
     }
 
@@ -1095,6 +1179,7 @@ impl Editing {
                 && self.in_view(i)
                 && self.mod_live(i)
                 && let Some(t) = self.mod_target(i)
+                && p.source.takes(t)
                 && self.params.lfo_patch.depth(p.source, t).is_none()
                 // (Let go on its own jack without leaving it: a click, not a cord.)
                 && (p.away || level_of_control(i).map(Source::Lfo) != Some(p.source))
@@ -1224,9 +1309,17 @@ impl Editing {
     /// that do not move it yet).
     fn assign_rows(&self, t: ModTarget) -> Vec<Row> {
         let mut rows = Vec::new();
-        for (head, macros) in [("LFO", false), ("MACRO", true)] {
+        let kind = |s: Source| match s {
+            Source::Lfo(_) => 0,
+            Source::Macro(_) => 1,
+            Source::Velocity => 2,
+        };
+        for (head, k) in [("LFO", 0), ("MACRO", 1), ("VELOCITY", 2)] {
+            if !Source::all().any(|s| kind(s) == k && s.takes(t)) {
+                continue;
+            }
             rows.push(Row::Head(head.into()));
-            for s in Source::all().filter(|s| s.macro_n().is_some() == macros) {
+            for s in Source::all().filter(|s| kind(*s) == k && s.takes(t)) {
                 let free = self.params.lfo_patch.depth(s, t).is_none()
                     && self.params.lfo_patch.count(s) < lfo::MOST;
                 rows.push(Row::Item(

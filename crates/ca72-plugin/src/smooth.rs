@@ -92,8 +92,10 @@ pub const KNOBS: [&str; 42] = [
 
 /// The continuous knobs that do not glide: the arpeggiator's GATE and SWING, which set when its
 /// notes start and stop, each note taking them as it is played (`crate::arp`), so that a change
-/// has no level to step and a glide would only make it late (decisions.md R-KNOB-GLIDE).
-pub const TIMING: [&str; 2] = ["arp_gate", "arp_swing"];
+/// has no level to step and a glide would only make it late (decisions.md R-KNOB-GLIDE); and the
+/// velocity's CURVE and FLOOR, which shape the value each note takes as it is struck
+/// (R-VELOCITY).
+pub const TIMING: [&str; 4] = ["arp_gate", "arp_swing", "velocity_curve", "velocity_floor"];
 
 /// Knob `k`'s parameter ([`KNOBS`]' order).
 pub fn param(p: &Ca72Params, k: usize) -> Option<&FloatParam> {

@@ -69,7 +69,7 @@ pub fn render_schema(p: &crate::params::Ca72Params) -> Value {
             "preset":{"type":"string","description":"Library preset to render without loading it into the live synth; excludes snapshot. With neither, captures the selected live instance."},
             "preset_file":{"type":"string","description":"Absolute path to the exact user-preset TOML to reload, up to 1 MiB. Excludes snapshot and preset. Does not import or change the player's library. Recorded render conditions from ca72_preset_export can be supplied again."},
             "notes":{"type":"array","minItems":1,"maxItems":4096,"items":{
-                "type":"object","properties":{"note":{"type":"integer","minimum":0,"maximum":127},"start":{"type":"number","minimum":0},"duration":{"type":"number","exclusiveMinimum":0}},"required":["note","start","duration"],"additionalProperties":false}},
+                "type":"object","properties":{"note":{"type":"integer","minimum":0,"maximum":127},"start":{"type":"number","minimum":0},"duration":{"type":"number","exclusiveMinimum":0},"velocity":{"type":"integer","minimum":1,"maximum":127,"default":100,"description":"How hard it is struck; moves only what VELOCITY is assigned to."}},"required":["note","start","duration"],"additionalProperties":false}},
             "seconds":{"type":"number","minimum":0.05,"maximum":60,"default":3,"description":"Total rendered time, including release tail. Every note must end within it."},
             "sample_rate":{"type":"integer","minimum":8000,"maximum":192000,"default":48000},
             "seed":{"type":"integer","minimum":0,"description":"Random seed for repeatable noise, component variations and arpeggiator randomness; default is captured seed, or 72 for a library preset."},

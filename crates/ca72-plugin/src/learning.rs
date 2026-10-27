@@ -155,6 +155,9 @@ pub enum Item {
     Agents(bool),
     /// The settings' AGENTS: a client's setup copied.
     Setup(Setup),
+    /// The settings' HOVER CABLES: the cords from a jack the pointer is on shown (true) or not
+    /// from now (decisions.md R-VELOCITY), the row toggling it.
+    HoverCables(bool),
     /// The settings' MPE: INPUT & TIMBRE…, the MPE menu wanted (decisions.md R-MPE); its MPE
     /// INPUT and TIMBRE REST.
     MpeMenu,
@@ -247,6 +250,8 @@ pub enum Pressed {
     Agents(bool),
     /// The settings' menu: a client's setup to be copied.
     Setup(Setup),
+    /// The settings' menu: the cords from a hovered jack shown (true) or not.
+    HoverCables(bool),
     /// The settings' MPE: INPUT & TIMBRE…, the MPE menu wanted where the settings' was; its
     /// choices (decisions.md R-MPE).
     MpeMenu,
@@ -725,7 +730,14 @@ impl Learning {
         fonts: &Fonts,
         (x, y): (f64, f64),
         size: f64,
-        (skin, lettering, law, source, agents): (Skin, Lettering, Law, Source, Option<AgentsMenu>),
+        (skin, lettering, law, source, agents, cables): (
+            Skin,
+            Lettering,
+            Law,
+            Source,
+            Option<AgentsMenu>,
+            bool,
+        ),
         (packs, pack): (&[(String, bool)], Option<usize>),
     ) {
         let mut items: Vec<(Item, String)> = vec![
@@ -757,6 +769,15 @@ impl Learning {
             (Item::Head, "WINDOW"),
             (Item::SizeMenu, "SIZE\u{2026}"),
             (Item::WhatsNew, "WHAT'S NEW…"),
+            // (A row that toggles it, the menu already taller than the window: R-VELOCITY.)
+            (
+                Item::HoverCables(!cables),
+                if cables {
+                    "HOVER CABLES: ON"
+                } else {
+                    "HOVER CABLES: OFF"
+                },
+            ),
             (Item::Head, "MOD WHEEL SOURCE"),
             (Item::WheelMenu(None), "CHOOSE SOURCE…"),
             // (Its two settings in a menu of their own: this one is already taller than the
@@ -825,6 +846,7 @@ impl Learning {
                             | Item::Dials(_)
                             | Item::Agents(_)
                             | Item::Setup(_)
+                            | Item::HoverCables(_)
                             | Item::StandaloneSettings
                             | Item::SizeMenu
                             | Item::WhatsNew
@@ -1131,6 +1153,7 @@ impl Learning {
             (Some(Item::Fx(a)), _) => return Pressed::Fx(*a),
             (Some(Item::Agents(on)), _) => return Pressed::Agents(*on),
             (Some(Item::Setup(s)), _) => return Pressed::Setup(*s),
+            (Some(Item::HoverCables(on)), _) => return Pressed::HoverCables(*on),
             (Some(Item::MpeMenu), _) => return Pressed::MpeMenu,
             (Some(Item::MpeInput(m)), _) => return Pressed::MpeInput(*m),
             (Some(Item::TimbreRest(r)), _) => return Pressed::TimbreRest(*r),
@@ -1459,6 +1482,7 @@ mod tests {
                     Law::Semitones,
                     Source::DEFAULT,
                     Some(agents),
+                    true,
                 ),
                 (&[], None),
             );

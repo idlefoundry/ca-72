@@ -206,7 +206,7 @@ agent to use the bridge that came with that instance.
 | `ca72_settings` | Reads the settings and window sizes | none |
 | `ca72_settings_set` | Changes settings as the SETTINGS menu does | `look? lettering? frequency_dials? quality_indicator? tempo? mod_wheel_source? mpe_input? timbre_rest? size? agents?` (`agents` only false) |
 | `ca72_view` | Changes the view as the rail and keyboard keys do | `presets? panel? lower_page? keyboard? keyboard_octave? midi_list?` |
-| `ca72_note_on` / `ca72_note_off` | Presses or lets go of keys (no velocity: the instrument has none); `note_off` with no notes lets go of all the agent's | `notes` (numbers 0 to 127, or names, C4 = 60) |
+| `ca72_note_on` / `ca72_note_off` | Presses or lets go of keys, `note_on` at `velocity` (1 to 127, 100 if omitted; it moves only what the patch's VELOCITY is assigned to: decisions.md R-VELOCITY); `note_off` with no notes lets go of all the agent's | `notes` (numbers 0 to 127, or names, C4 = 60), `velocity` |
 | `ca72_play` | Plays notes for a while, then lets go | `notes, seconds` (0.01 to 30) |
 | `ca72_panic` | PANIC | none |
 | `ca72_midi_learn` | Learns, cancels, or assigns outright | `control?, cancel?, channel?, cc?, note?` (`note` for PREVIOUS and NEXT PRESET only) |
