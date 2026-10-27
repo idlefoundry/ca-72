@@ -1,21 +1,23 @@
 //! A CA-72 listening for agents kept awake. On macOS, App Nap slows a hidden application that
 //! plays no audio until its window's frames, which carry the agents' requests out, come seconds
 //! apart, and requests time out. While the socket is open the application tells the system
-//! that it is doing what its user asked (`NSActivityUserInitiatedAllowingIdleSystemSleep`),
-//! which App Nap respects; the computer may still sleep. Elsewhere nothing is needed.
+//! that it is doing what its user asked, and that its timing matters
+//! (`NSActivityUserInitiatedAllowingIdleSystemSleep | NSActivityLatencyCritical`): App Nap lets
+//! it be, and its frames' timer is not stretched while it is hidden. The computer may still
+//! sleep, and only while agents are allowed is this asked. Elsewhere nothing is needed.
 
 /// Held while agents may reach the application.
 #[derive(Debug)]
 pub struct Awake {
     #[cfg(target_os = "macos")]
-    token: mac::Token,
+    _token: mac::Token,
 }
 
 impl Awake {
     pub fn begin() -> Awake {
         Awake {
             #[cfg(target_os = "macos")]
-            token: mac::Token::begin("Answering AI agents (SETTINGS > AGENTS)"),
+            _token: mac::Token::begin("Answering AI agents (SETTINGS > AGENTS)"),
         }
     }
 }
@@ -25,8 +27,9 @@ mod mac {
     use cocoa::base::{id, nil};
     use cocoa::foundation::NSString;
 
-    /// `NSActivityUserInitiated` without `NSActivityIdleSystemSleepDisabled`.
-    const USER_INITIATED_ALLOWING_IDLE_SLEEP: u64 = 0x00FF_FFFF & !(1 << 20);
+    /// `NSActivityUserInitiated` without `NSActivityIdleSystemSleepDisabled`, and
+    /// `NSActivityLatencyCritical`.
+    const OPTIONS: u64 = (0x00FF_FFFF & !(1 << 20)) | 0xFF_0000_0000;
 
     /// The activity NSProcessInfo gave, ended as it is dropped.
     #[derive(Debug)]
@@ -48,7 +51,7 @@ mod mac {
             unsafe {
                 let info: id = msg_send![class!(NSProcessInfo), processInfo];
                 let reason = NSString::alloc(nil).init_str(reason);
-                let token: id = msg_send![info, beginActivityWithOptions: USER_INITIATED_ALLOWING_IDLE_SLEEP reason: reason];
+                let token: id = msg_send![info, beginActivityWithOptions: OPTIONS reason: reason];
                 let _: () = msg_send![reason, release];
                 let _: id = msg_send![token, retain];
                 Token(token)
