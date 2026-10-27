@@ -211,6 +211,46 @@ impl Expression {
     };
 }
 
+/// A note's velocity as a voice has it, the velocity source's (decisions.md R-VELOCITY): its
+/// note's, 0..1 (`to`), and where it has got gliding there (`now`): at once for a new note,
+/// over [`EXPRESSION_GLIDE`] as the key the instruments sound changes under a phrase.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Velocity {
+    to: f32,
+    now: f64,
+}
+
+impl Velocity {
+    /// A key's velocity before it is told one: full (a note from a source without one).
+    const FULL: f32 = 1.0;
+
+    fn new() -> Velocity {
+        Velocity {
+            to: Velocity::FULL,
+            now: f64::from(Velocity::FULL),
+        }
+    }
+
+    /// Velocity `v` from now, at once or gliding.
+    fn take(&mut self, v: f32, at_once: bool) {
+        self.to = v;
+        if at_once {
+            self.now = f64::from(v);
+        }
+    }
+
+    /// A share `share` of the way on to its note's.
+    fn glide(&mut self, share: f64) {
+        self.now += (f64::from(self.to) - self.now) * share;
+    }
+
+    /// Where [`Velocity::glide`] by `share` will have it, without moving it (the LFOs' next
+    /// step, decisions.md R-LFO-STRESS).
+    fn ahead(&self, share: f64) -> f64 {
+        self.now + (f64::from(self.to) - self.now) * share
+    }
+}
+
 impl Default for Controls {
     fn default() -> Self {
         Controls {
@@ -260,6 +300,12 @@ pub enum Event {
     /// All Sound Off (control change 120): every key released and the sound gone at once, the
     /// output faded out over [`HUSH_FADE`] and every voice put to rest (decisions.md R18).
     AllSoundOff,
+    /// A key's velocity (0..1) for its next note (decisions.md R-VELOCITY): sent before the
+    /// note, the note starts with it; what the velocity source gives the voice playing it.
+    NoteVelocity {
+        key: u8,
+        velocity: f32,
+    },
     /// A key's own expression from now (decisions.md R-MPE): the voice playing it while it is
     /// held, and the next note on it. Sent before the key's note, its note starts with it.
     NoteExpression {
@@ -546,6 +592,8 @@ struct Slot {
     /// (a new note on it), not gliding there from the last note's.
     expression: Expression,
     fresh: bool,
+    /// Its note's velocity (decisions.md R-VELOCITY).
+    velocity: Velocity,
 }
 
 impl Slot {
@@ -1661,6 +1709,12 @@ pub struct Engine {
     pressed: [u64; 128],
     presses: u64,
     sounding: Option<u8>,
+    /// Each key's velocity as last told, the velocity every voice shares (the latest note's,
+    /// the instruments' sounding key's: decisions.md R-VELOCITY) and the latest note's as it
+    /// came (for the editor's meter).
+    velocities: [f32; 128],
+    velocity: Velocity,
+    last_velocity: f32,
     lamp: f32,
     /// A voice's place's glide a sample at the voices' rate ([`glide_share`]), and the one
     /// instrument's while it scatters ([`TURN_GLIDE`]).
@@ -1770,6 +1824,9 @@ struct Ahead {
     /// A copy of the generators to run the next step's ticks on, where the LFOs move each
     /// other or TEMPO (R-LFO's addendum): kept here so that the step allocates nothing.
     bank: crate::lfo::Bank,
+    /// The share of the way the velocity source glides on at the next step (R-VELOCITY; 0
+    /// while nothing takes it): the glide's end reads each voice's there.
+    velocity: f64,
 }
 
 impl Default for Engine {
@@ -1836,6 +1893,9 @@ impl Engine {
             pressed: [0; 128],
             presses: 0,
             sounding: None,
+            velocities: [Velocity::FULL; 128],
+            velocity: Velocity::new(),
+            last_velocity: 0.0,
             lamp: 0.0,
             render_recoveries: 0,
             render_sanitised: 0,
@@ -2021,6 +2081,7 @@ impl Engine {
                 rest: false,
                 expression: Expression::NONE,
                 fresh: false,
+                velocity: Velocity::new(),
             })
             .collect();
         // (Each voice's lock taken once here, off the audio thread: on macOS the standard
@@ -2187,7 +2248,10 @@ impl Engine {
     pub fn controls_now(&self) -> Controls {
         let l = &self.base.lfo;
         if l.active() {
-            l.modulated(&self.base, &l.source_values(&self.bank.shared_values))
+            l.modulated(
+                &self.base,
+                &l.source_values(&self.bank.shared_values, self.velocity.now),
+            )
         } else {
             self.base
         }
@@ -2285,7 +2349,9 @@ impl Engine {
             // (The knobs where the LFOs have them now: decisions.md R-LFO. None assigned, the
             // controls as given.)
             let m = if c.lfo.active() {
-                let values = c.lfo.source_values(&self.bank.shared_values);
+                let values = c
+                    .lfo
+                    .source_values(&self.bank.shared_values, self.velocity.now);
                 c.lfo.modulated(c, &values)
             } else {
                 *c
@@ -2336,6 +2402,14 @@ impl Engine {
     /// the generators run on and nothing more.
     fn modulate(&mut self, n: usize) {
         let rate = self.lfo_rate();
+        // (The velocity on to the key the instruments sound now: R-VELOCITY.)
+        if self.base.lfo.velocity_active() {
+            let share = 1.0 - (-(n as f64) / (rate * EXPRESSION_GLIDE)).exp();
+            self.velocity.glide(share);
+            for s in &mut self.slots {
+                s.velocity.glide(share);
+            }
+        }
         let l = &self.base.lfo;
         let voices = if self.many() { self.slots.len() } else { 1 };
         // (A pitch or CUTOFF an LFO moves: where the next step will have the knobs, which the
@@ -2386,7 +2460,7 @@ impl Engine {
         // no voices), asleep or not: an effect's tail plays on (R-FX-PARAMS).
         let moved = l.fx_moved();
         if moved != 0 {
-            let values = l.source_values(&self.bank.shared_values);
+            let values = l.source_values(&self.bank.shared_values, self.velocity.now);
             let at = self.played.saturating_sub(self.block_from) as u32;
             self.fx.push(moved, at, l.fx_offsets(&values));
         }
@@ -2400,7 +2474,14 @@ impl Engine {
                     !l.lfo[k].mono && off(b.voice_values[v][k], mid_voices[v][k], a.voices[v][k])
                 });
             }
-            let next = l.modulated(&self.base, &l.source_values(&a.shared));
+            // (The velocity where the next step will have it, gliding under a phrase: R-VELOCITY.)
+            a.velocity = if l.velocity_active() {
+                1.0 - (-(n as f64) / (rate * EXPRESSION_GLIDE)).exp()
+            } else {
+                0.0
+            };
+            let velocity = self.velocity.ahead(a.velocity);
+            let next = l.modulated(&self.base, &l.source_values(&a.shared, velocity));
             let panel = self.panel_of(&next);
             let a = &mut *self.ahead;
             a.panel = panel;
@@ -2410,7 +2491,7 @@ impl Engine {
         if self.rest.asleep {
             return;
         }
-        let values = l.source_values(&self.bank.shared_values);
+        let values = l.source_values(&self.bank.shared_values, self.velocity.now);
         let m = l.modulated(&self.base, &values);
         if m != self.controls {
             let (was, sharp) = (self.gain_at(), l.sharp_on(crate::lfo::Target::Volume));
@@ -2540,8 +2621,19 @@ impl Engine {
     }
 
     pub fn event(&mut self, e: Event) {
-        // (Expression alone never wakes the instrument: asleep, no key is down to hear it.)
+        // (Expression alone never wakes the instrument: asleep, no key is down to hear it. A
+        // velocity neither: its note does.)
         match e {
+            Event::NoteVelocity { key, velocity } => {
+                if let Some(v) = self.velocities.get_mut(usize::from(key)) {
+                    *v = if velocity.is_finite() {
+                        velocity.clamp(0.0, 1.0)
+                    } else {
+                        Velocity::FULL
+                    };
+                }
+                return;
+            }
             Event::NoteExpression { key, expression } => {
                 return self.note_expression(key, expression);
             }
@@ -2575,6 +2667,7 @@ impl Engine {
                 if on {
                     self.presses += 1;
                     self.pressed[usize::from(key)] = self.presses;
+                    self.last_velocity = self.velocities[usize::from(key)];
                 }
                 // (Each LFO's RETRIG resets on every key, independently of the contours.
                 // FREE's RISE and shared ENV still follow the main trigger. Bring the
@@ -2604,6 +2697,9 @@ impl Engine {
                         }
                     }
                 }
+                if on {
+                    self.velocity_moved();
+                }
             }
             Event::PitchBend(b) => {
                 self.bend = b.clamp(-1.0, 1.0);
@@ -2625,7 +2721,10 @@ impl Engine {
             }
             Event::AllNotesOff => self.release_all(),
             Event::AllSoundOff => self.all_sound_off(),
-            Event::NoteExpression { .. } | Event::ChannelPressure(_) | Event::Timbre(_) => {}
+            Event::NoteVelocity { .. }
+            | Event::NoteExpression { .. }
+            | Event::ChannelPressure(_)
+            | Event::Timbre(_) => {}
         }
     }
 
@@ -2674,12 +2773,37 @@ impl Engine {
         };
         let fresh = phrase || self.sounding.is_none();
         let e = self.keys[usize::from(key)];
+        let v = self.velocities[usize::from(key)];
         self.sounding = Some(key);
+        self.velocity.take(v, fresh);
         for k in 0..self.instruments() {
             let s = &mut self.slots[k];
             s.expression = e;
             s.fresh |= fresh;
+            s.velocity.take(v, fresh);
         }
+    }
+
+    /// The knobs the velocity moves where a note has just put it (decisions.md R-VELOCITY), so
+    /// that the note starts there, not a step later: as [`Engine::modulate`] moves them.
+    fn velocity_moved(&mut self) {
+        let l = &self.base.lfo;
+        if !l.velocity_active() || self.rest.asleep {
+            return;
+        }
+        let values = l.source_values(&self.bank.shared_values, self.velocity.now);
+        let m = l.modulated(&self.base, &values);
+        if m != self.controls {
+            self.take(&m, false);
+        } else if l.per_voice() {
+            self.panel_gen = self.panel_gen.wrapping_add(1);
+        }
+    }
+
+    /// The latest note's velocity as it came, 0..1 (the editor's meter: decisions.md
+    /// R-VELOCITY), none before a note.
+    pub fn last_velocity(&self) -> Option<f32> {
+        (self.presses > 0).then_some(self.last_velocity)
     }
 
     /// Key `key`'s own expression as last told (for the plug-in's tests).
@@ -2855,10 +2979,13 @@ impl Engine {
             .unwrap_or(0);
         self.counter += 1;
         let e = self.keys[usize::from(key)];
+        let v = self.velocities[usize::from(key)];
+        self.velocity.take(v, true);
         let s = &mut self.slots[pick];
         s.drop = s.active && s.shown;
         (s.note, s.gate, s.age, s.active, s.peak) = (key, true, self.counter, true, 0.0);
         (s.expression, s.fresh) = (e, true);
+        s.velocity.take(v, true);
         // (Its own LFOs start with each note it takes: decisions.md R-LFO.)
         self.bank.start_voice(&self.base.lfo, pick, true);
     }
@@ -3653,8 +3780,14 @@ impl Engine {
             self.base.lfo.voice(
                 &mut q,
                 &mut feedback,
-                &self.base.lfo.source_values(&self.bank.shared_values),
-                &self.base.lfo.source_values(&self.bank.voice_values[k]),
+                &self
+                    .base
+                    .lfo
+                    .source_values(&self.bank.shared_values, self.velocity.now),
+                &self
+                    .base
+                    .lfo
+                    .source_values(&self.bank.voice_values[k], self.slots[k].velocity.now),
             );
             own = q;
             &own
@@ -3697,8 +3830,14 @@ impl Engine {
                 self.base.lfo.voice(
                     &mut next,
                     &mut feedback,
-                    &self.base.lfo.source_values(&a.shared),
-                    &self.base.lfo.source_values(&a.voices[k]),
+                    &self
+                        .base
+                        .lfo
+                        .source_values(&a.shared, self.velocity.ahead(a.velocity)),
+                    &self
+                        .base
+                        .lfo
+                        .source_values(&a.voices[k], self.slots[k].velocity.ahead(a.velocity)),
                 );
             }
             Sweep::between(p, &next, a.len, v.potato)
@@ -7311,6 +7450,10 @@ mod lfo_tests;
 #[cfg(test)]
 #[path = "engine_lfo_cross_tests.rs"]
 mod lfo_cross_tests;
+
+#[cfg(test)]
+#[path = "engine_velocity_tests.rs"]
+mod velocity_tests;
 
 /// The most points a block keeps for the effects' pins: one each [`crate::lfo::STEP`] samples
 /// of an 8192-sample block.

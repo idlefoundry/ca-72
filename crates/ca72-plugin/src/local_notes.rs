@@ -12,7 +12,25 @@ pub const CAPACITY: usize = 256;
 pub struct LocalEvent {
     pub note: u8,
     pub on: bool,
+    /// Its velocity, 0..1, in MIDI's 128 steps (decisions.md R-VELOCITY).
+    pub velocity: f32,
     pub generation: u64,
+}
+
+/// A local note's velocity when its source has none (typed keys, an agent's by default): 100
+/// of MIDI's 127 (decisions.md R-VELOCITY).
+pub const TYPED_VELOCITY: u8 = 100;
+
+/// The generation's bits in a packet, above its velocity's, the event's and the note's.
+const GENERATION_BITS: u32 = 48;
+
+/// A queued event: the generation, the velocity's seven bits, a set bit, on and the note.
+fn packet(generation: u64, note: u8, on: bool, velocity: u8) -> u64 {
+    (generation << 16)
+        | (u64::from(velocity.min(127)) << 9)
+        | (1 << 8)
+        | (u64::from(on) << 7)
+        | u64::from(note & 127)
 }
 
 #[derive(Debug)]
@@ -39,14 +57,18 @@ impl Default for LocalNotes {
 impl LocalNotes {
     /// Nonblocking: failure invalidates all queued local notes and requests their release.
     pub fn note(&self, note: u8, on: bool) -> bool {
+        self.note_at(note, on, TYPED_VELOCITY)
+    }
+
+    /// [`LocalNotes::note`] at velocity `velocity` (MIDI's 0 to 127).
+    pub fn note_at(&self, note: u8, on: bool, velocity: u8) -> bool {
         if note > 127 {
             return false;
         }
         // Capture the epoch before any producer reservation. If this producer is interrupted
         // by a release, its resumed publication stays stale instead of reviving that note.
         let generation = self.generation();
-        let packet = (generation << 9) | (1 << 8) | (u64::from(on) << 7) | u64::from(note);
-        if !self.queue.try_push(packet) {
+        if !self.queue.try_push(packet(generation, note, on, velocity)) {
             self.release();
             return false;
         }
@@ -54,7 +76,7 @@ impl LocalNotes {
     }
 
     pub fn generation(&self) -> u64 {
-        self.generation.load(Ordering::Acquire) & ((1u64 << 55) - 1)
+        self.generation.load(Ordering::Acquire) & ((1u64 << GENERATION_BITS) - 1)
     }
 
     /// Local notes only. Physical notes stay held when an editor closes or changes view.
@@ -101,7 +123,8 @@ impl LocalNotes {
         Some(LocalEvent {
             note: (packet & 127) as u8,
             on: packet & (1 << 7) != 0,
-            generation: packet >> 9,
+            velocity: ((packet >> 9) & 127) as f32 / 127.0,
+            generation: packet >> 16,
         })
     }
 
@@ -265,7 +288,7 @@ mod tests {
         }
         // A producer captured this packet before it was preempted by a release. Resuming
         // after the release cannot promote it into the new epoch.
-        let packet = (q.generation() << 9) | (1 << 8) | (1 << 7) | 60;
+        let packet = packet(q.generation(), 60, true, 100);
         q.release();
         assert!(q.queue.try_push(packet));
         assert_ne!(
@@ -274,6 +297,20 @@ mod tests {
         );
         assert!(q.note(62, true));
         assert_eq!(q.pop().expect("fresh producer").generation, q.generation());
+    }
+
+    #[test]
+    fn a_local_note_carries_its_velocity() {
+        let q = LocalNotes::default();
+        assert!(q.note_at(60, true, 127));
+        assert!(q.note_at(61, true, 1));
+        assert!(q.note(62, true));
+        let e = q.pop().expect("first");
+        assert_eq!((e.note, e.on, e.velocity), (60, true, 1.0));
+        assert_eq!(q.pop().expect("second").velocity, 1.0 / 127.0);
+        let typed = q.pop().expect("typed");
+        assert_eq!(typed.velocity, f32::from(TYPED_VELOCITY) / 127.0);
+        assert_eq!(typed.generation, q.generation());
     }
 
     #[test]

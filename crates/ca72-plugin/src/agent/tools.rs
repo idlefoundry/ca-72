@@ -53,6 +53,11 @@ fn notes_schema() -> Value {
     })
 }
 
+/// A note's velocity (decisions.md R-VELOCITY).
+fn velocity_schema() -> Value {
+    json!({"type": "integer", "minimum": 1, "maximum": 127, "default": 100, "description": "How hard the keys are struck, MIDI's 1 to 127."})
+}
+
 /// A parameter's id, label or host name.
 fn param_key(p: &Ca72Params) -> Value {
     json!({"type": "string", "description": "A parameter's id (see ca72_describe), its panel label or its host name.", "examples": values::ids(p)})
@@ -322,8 +327,13 @@ pub fn tools() -> Vec<Tool> {
         t(
             "ca72_note_on",
             "notes.on",
-            "Press keys, as the on-screen keyboard does (the instrument has no velocity), until ca72_note_off. The CA-72 plays them as any key held: one note at a time by NOTE PRIORITY unless POLY or UNISON. A note already held by you is held still.",
-            |_| obj(json!({"notes": notes_schema()}), &["notes"]),
+            "Press keys, as the on-screen keyboard does, until ca72_note_off, at `velocity` (1 to 127, 100 if omitted; it moves only what the patch's VELOCITY is assigned to). The CA-72 plays them as any key held: one note at a time by NOTE PRIORITY unless POLY or UNISON. A note already held by you is held still.",
+            |_| {
+                obj(
+                    json!({"notes": notes_schema(), "velocity": velocity_schema()}),
+                    &["notes"],
+                )
+            },
             false,
             false,
             Instance,
@@ -343,7 +353,7 @@ pub fn tools() -> Vec<Tool> {
             "Play notes together for `seconds` (0.01 to 30), then let them go; returns at once. To hear a sound's release, wait out its decay before the next.",
             |_| {
                 obj(
-                    json!({"notes": notes_schema(), "seconds": {"type": "number", "minimum": 0.01, "maximum": 30}}),
+                    json!({"notes": notes_schema(), "seconds": {"type": "number", "minimum": 0.01, "maximum": 30}, "velocity": velocity_schema()}),
                     &["notes", "seconds"],
                 )
             },
@@ -363,7 +373,7 @@ pub fn tools() -> Vec<Tool> {
         t(
             "ca72_modulations",
             "modulation.list",
-            "What each modulation source (LFO 1 to LFO 4, `lfo1` to `lfo4`; MACRO 1 to MACRO 6, `macro1` to `macro6`) modulates: each knob by its id and label with its depth in % of the knob's travel (-100 to 100; negative inverts), `shared` where an LFO with MONO off still moves it with one copy (a knob every voice shares: MAIN OUTPUT VOLUME, the strip's), `inert` where it does nothing now; each LFO's EDGES and MONO; each macro's typed `name` (\"\" for none) and its knob's `value` in %; the most a source takes (8); and the knobs that can take one now. A macro moves its knobs one way, by depth × its value. The LFOs' own controls and the macros' knobs are parameters (`lfo1_rate`, `macro1`: ca72_describe).",
+            "What each modulation source (LFO 1 to LFO 4, `lfo1` to `lfo4`; MACRO 1 to MACRO 6, `macro1` to `macro6`; VELOCITY, `velocity`) modulates: each knob by its id and label with its depth in % of the knob's travel (-100 to 100; negative inverts), `shared` where an LFO with MONO off still moves it with one copy (a knob every voice shares: MAIN OUTPUT VOLUME, the strip's), `inert` where it does nothing now; each LFO's EDGES and MONO; each macro's typed `name` (\"\" for none) and its knob's `value` in %; the most a source takes (8); and the knobs that can take one now. A macro moves its knobs one way, by depth × its value; VELOCITY one way too, each voice by its own note's velocity through the expression drawer's CURVE and FLOOR (`velocity_curve`, `velocity_floor`). The LFOs' own controls and the macros' knobs are parameters (`lfo1_rate`, `macro1`: ca72_describe).",
             none,
             true,
             false,
@@ -372,7 +382,7 @@ pub fn tools() -> Vec<Tool> {
         t(
             "ca72_modulation_set",
             "modulation.set",
-            "Make a source modulate a knob, as dragging from an LFO's OUT jack or a macro's jack does, or change its depth: `source` (lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name), `target` (a continuous knob of the panel or the strip by id or label; an oscillator's WAVEFORM only while CONTINUOUS; including an LFO's own RATE (while untimed), PHASE, RISE, continuous shape and LEVEL; not a switch, selector, wheel, VOICES, a timed dial or a macro) and `depth` in % of the knob's travel, -100 to 100 (25 if a new one is given none). `edges` (SOFT or SHARP) sets an LFO's EDGES; `name` (at most 7 characters, capitals; \"\" for none) a macro's name. A source takes at most 8 knobs. Patch state, saved with presets and sessions. Returns what every source modulates.",
+            "Make a source modulate a knob, as dragging from an LFO's OUT jack, a macro's jack or the left hand's VELOCITY jack does, or change its depth: `source` (lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name; velocity), `target` (a continuous knob of the panel or the strip by id or label; an oscillator's WAVEFORM only while CONTINUOUS; including an LFO's own RATE (while untimed), PHASE, RISE, continuous shape and LEVEL; not a switch, selector, wheel, VOICES, a timed dial or a macro; VELOCITY not an LFO's own knob nor TEMPO) and `depth` in % of the knob's travel, -100 to 100 (25 if a new one is given none). `edges` (SOFT or SHARP) sets an LFO's EDGES; `name` (at most 7 characters, capitals; \"\" for none) a macro's name. A source takes at most 8 knobs. Patch state, saved with presets and sessions. Returns what every source modulates.",
             modulation_set_schema,
             false,
             false,
@@ -385,7 +395,7 @@ pub fn tools() -> Vec<Tool> {
             |p| {
                 obj(
                     json!({
-                        "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name."},
+                        "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name; velocity."},
                         "target": param_key(p),
                     }),
                     &["source"],
@@ -577,7 +587,7 @@ pub fn tools() -> Vec<Tool> {
 pub(crate) fn modulation_set_schema(p: &Ca72Params) -> Value {
     obj(
         json!({
-            "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name."},
+            "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name; velocity."},
             "target": param_key(p),
             "depth": {"type": "number", "minimum": -100, "maximum": 100},
             "edges": {"type": "string", "enum": ["SOFT", "SHARP"]},

@@ -27,6 +27,8 @@
 //! `CA72_SET=param=value,...` controls at other values; `CA72_TIMED=2:1:9,3:0:13` oscillator 2's
 //! or 3's TIMED on or off and its division (decisions.md R-OSC-TIMED).
 //! `CA72_GLIDE_LONG=1` prints LONG's ×5 beside GLIDE (decisions.md R-GLIDE-LONG).
+//! `CA72_VELOCITY=0.76` lights the left hand's VELOCITY meter for a note at that velocity
+//! (decisions.md R-VELOCITY); `CA72_MPE=1` draws the drawer's VELOCITY row as its mock-up had it.
 //! `CA72_PACK=<folder>` in a skin pack's look (decisions.md R-SKIN-PACKS), what its checks
 //! found printed.
 //! `CA72_TIP=1` adds CUTOFF's hover tip; `CA72_MENU=settings` the built-in standalone
@@ -85,6 +87,13 @@ fn main() {
     }
     let mut scene = Scene {
         glide_long: std::env::var("CA72_GLIDE_LONG").is_ok_and(|v| v == "1"),
+        // (`CA72_VELOCITY=0.76`: the left hand's VELOCITY meter lit for a note at 0.76:
+        // decisions.md R-VELOCITY.)
+        velocity_lit: ca72_panel::strip::velocity::lit(
+            std::env::var("CA72_VELOCITY")
+                .ok()
+                .and_then(|v| v.parse().ok()),
+        ),
         ..Scene::default()
     };
     // The plugin's defaults: as the mock-up was drawn; the strip's knobs at what its readouts
@@ -580,8 +589,18 @@ fn drop_mpe(
                 r2("1.0"),
                 r2("-30"),
                 r2("2.5"),
+                r2("-35"),
+                r2("15"),
             ],
-            knobs: [0.75, 5.0 / 8.0, 0.35, 6.5 / 8.0],
+            knobs: [0.75, 5.0 / 8.0, 0.35, 6.5 / 8.0, 0.325, 0.15],
+            // (The velocity's row, decisions.md R-VELOCITY: the mock-up's.)
+            last: "97".into(),
+            modulates: ("3 KNOBS".into(), true),
+            response: mpe::Response {
+                curve: -0.35,
+                floor: 0.15,
+                point: Some(97.0 / 127.0),
+            },
         },
         r,
     );

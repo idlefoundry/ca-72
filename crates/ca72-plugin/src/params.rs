@@ -959,6 +959,44 @@ pub struct Ca72Params {
     pub lfo3_level: crate::lfo::LfoLevel,
     #[nested(id_prefix = "lfo4", group = "LFO 4")]
     pub lfo4_level: crate::lfo::LfoLevel,
+    // The velocity's response (decisions.md R-VELOCITY), after everything, so that no parameter
+    // before it moves. A preset's, as any sound parameter: a preset or a session saved before
+    // reads a straight line from 0 (`Ca72::filter_state`, `presets::targets`).
+    /// CURVE: -100 % (SOFT: light notes give more) to 100 % (HARD: they give less), 0 a
+    /// straight line ([`crate::lfo::Response`]).
+    #[id = "velocity_curve"]
+    pub velocity_curve: FloatParam,
+    /// FLOOR: the least the velocity gives, the softest note's, 0 to 100 %.
+    #[id = "velocity_floor"]
+    pub velocity_floor: FloatParam,
+}
+
+/// The velocity's CURVE, -100 (SOFT) to 100 % (HARD), 0 by default.
+fn velocity_curve() -> FloatParam {
+    FloatParam::new(
+        "Velocity Curve",
+        0.0,
+        FloatRange::Linear {
+            min: -100.0,
+            max: 100.0,
+        },
+    )
+    .with_unit(" %")
+    .with_value_to_string(formatters::v2s_f32_rounded(0))
+}
+
+/// The velocity's FLOOR, 0 to 100 %, 0 by default.
+fn velocity_floor() -> FloatParam {
+    FloatParam::new(
+        "Velocity Floor",
+        0.0,
+        FloatRange::Linear {
+            min: 0.0,
+            max: 100.0,
+        },
+    )
+    .with_unit(" %")
+    .with_value_to_string(formatters::v2s_f32_rounded(0))
 }
 
 /// How far PRESSURE and TIMBRE move a voice's cutoff at most, either way, octaves.
@@ -1335,6 +1373,8 @@ impl Default for Ca72Params {
             lfo2_level: crate::lfo::LfoLevel::new(2),
             lfo3_level: crate::lfo::LfoLevel::new(3),
             lfo4_level: crate::lfo::LfoLevel::new(4),
+            velocity_curve: velocity_curve(),
+            velocity_floor: velocity_floor(),
         }
     }
 }

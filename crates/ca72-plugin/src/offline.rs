@@ -310,6 +310,9 @@ pub struct Note {
     pub note: u8,
     pub start: f64,
     pub duration: f64,
+    /// Its velocity, MIDI's 0 to 127 (decisions.md R-VELOCITY); 100 if none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub velocity: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -404,29 +407,35 @@ fn render_inner(snapshot: &Snapshot, request: &Request) -> Result<Render, ApiErr
     p.smooth.prepare(p.rate, BLOCK, &p.params);
     let latency = p.engine.latency() as usize;
     let frames = (request.seconds * p.rate).round() as usize;
-    let mut events: Vec<(usize, u8, bool)> = request
+    let mut events: Vec<(usize, u8, bool, f32)> = request
         .notes
         .iter()
         .flat_map(|n| {
+            let velocity = f32::from(
+                n.velocity
+                    .unwrap_or(crate::local_notes::TYPED_VELOCITY)
+                    .min(127),
+            ) / 127.0;
             [
-                ((n.start * p.rate).round() as usize, n.note, true),
+                ((n.start * p.rate).round() as usize, n.note, true, velocity),
                 (
                     ((n.start + n.duration) * p.rate).round() as usize,
                     n.note,
                     false,
+                    0.0,
                 ),
             ]
         })
         .collect();
     // Release before attack at the same sample. Stable ordering keeps chords reproducible.
-    events.sort_by_key(|(at, _, on)| (*at, *on));
+    events.sort_by_key(|(at, _, on, _)| (*at, *on));
     let mut next = 0;
     let mut channels: Vec<Vec<f32>> = (0..2)
         .map(|_| Vec::with_capacity(frames + latency))
         .collect();
     for at in (0..frames + latency).step_by(BLOCK) {
         let n = BLOCK.min(frames + latency - at);
-        while let Some(&(sample, note, on)) = events.get(next) {
+        while let Some(&(sample, note, on, velocity)) = events.get(next) {
             if sample >= at + n {
                 break;
             }
@@ -437,7 +446,7 @@ fn render_inner(snapshot: &Snapshot, request: &Request) -> Result<Render, ApiErr
                     voice_id: None,
                     channel: 0,
                     note,
-                    velocity: 1.0,
+                    velocity,
                 }
             } else {
                 NoteEvent::NoteOff {
@@ -540,6 +549,7 @@ mod tests {
                 note: 48,
                 start: 0.0,
                 duration: 0.08,
+                velocity: None,
             }],
             seconds: 0.12,
             sample_rate: 48_000,
@@ -575,6 +585,7 @@ mod tests {
                 note: 48,
                 start: 0.0,
                 duration: 0.12,
+                velocity: None,
             }],
             seconds: 0.16,
             sample_rate: 48000,
@@ -609,6 +620,7 @@ mod tests {
                 note: 48,
                 start: 0.5 / 48000.0,
                 duration: 0.6 / 48000.0,
+                velocity: None,
             }],
             seconds: 0.1,
             sample_rate: 48000,

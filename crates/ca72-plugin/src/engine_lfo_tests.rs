@@ -970,7 +970,7 @@ fn a_pitch_or_cutoff_glides_across_each_step() {
         let at = |i: usize| {
             let value = lfo::wave(2.0, i as f64 * HZ / RATE);
             c.lfo
-                .modulated(&c, &c.lfo.source_values(&[value, 0.0, 0.0, 0.0]))
+                .modulated(&c, &c.lfo.source_values(&[value, 0.0, 0.0, 0.0], 1.0))
         };
         let (now, next) = (at(0), at(lfo::STEP));
         let what = format!("{target:?}, potato {potato}, ultra {ultra}");
@@ -1090,8 +1090,9 @@ fn volume_moved_by_an_lfo_ramps_a_sample_at_a_time() {
 
 /// The glide's end is where the next step puts the knob, to the last bit or two
 /// (decisions.md R-LFO-STRESS), on either of the LFOs' paths: where one LFO moves another's
-/// RATE (the generators on their ticks, R-LFO's addendum), and with a macro on the same knob,
-/// whose part is in both ends. A macro alone on CUTOFF holds still between steps: no glide.
+/// RATE (the generators on their ticks, R-LFO's addendum), with a macro on the same knob, whose
+/// part is in both ends, and with the note's velocity on it (each voice's own, R-VELOCITY). A
+/// macro alone on CUTOFF holds still between steps: no glide.
 #[test]
 fn the_glide_ends_where_the_next_step_puts_the_knob() {
     use crate::lfo::{LfoKnob, Source};
@@ -1126,20 +1127,30 @@ fn the_glide_ends_where_the_next_step_puts_the_knob() {
             macro_too.lfo.to[Source::Macro(0).index()][0];
         macro_alone.lfo.base[Target::Cutoff.index()] = 0.5;
         macro_alone.lfo.macros[0] = 0.5;
+        let mut velocity_too = cross;
+        velocity_too.lfo.to[Source::Velocity.index()][0] = Some(Assignment {
+            target: Target::Cutoff,
+            depth: 0.3,
+        });
         for (what, c, glides) in [
             ("an LFO moving an LFO", cross, true),
             ("and a macro", macro_too, true),
+            ("and the velocity", velocity_too, true),
             ("a macro alone", macro_alone, false),
         ] {
             let what = format!("{what}, potato {potato}");
             let mut e = engine(&c);
+            e.event(Event::NoteVelocity {
+                key: 60,
+                velocity: 0.3,
+            });
             key(&mut e, 60, true);
             let (mut l, mut r) = ([0.0f32; lfo::STEP], [0.0f32; lfo::STEP]);
             e.render(&[], &mut l, &mut r);
             assert_eq!(e.lfo_cross().on, glides, "{what}: on the ticks");
             for step in 0..60 {
                 let (now, sweep) = (
-                    e.controls.panel,
+                    panel(&e, 0),
                     e.slots[0].play.try_lock().expect("free").sweep,
                 );
                 e.render(&[], &mut l, &mut r);
@@ -1147,7 +1158,7 @@ fn the_glide_ends_where_the_next_step_puts_the_knob() {
                 if !glides {
                     continue;
                 }
-                let next = e.controls.panel;
+                let next = panel(&e, 0);
                 assert_ne!(now.cutoff, next.cutoff, "{what}, step {step}: it moves");
                 let end = |x: f64, d: f64| x + d * lfo::STEP as f64;
                 let close = |a: f64, b: f64| {

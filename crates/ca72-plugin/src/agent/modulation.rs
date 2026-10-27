@@ -15,13 +15,13 @@ use super::{ApiError, Reply, arg, values};
 use crate::lfo::{self, Edges, Refused, Source, Target};
 use crate::params::Ca72Params;
 
-/// A source as an agent names it: its id (`lfo1`, `macro1`), its label (`LFO 1`, `MACRO 1`), a
-/// macro's typed name, or its number (1 to 4, an LFO's).
+/// A source as an agent names it: its id (`lfo1`, `macro1`, `velocity`), its label (`LFO 1`,
+/// `MACRO 1`, `VELOCITY`), a macro's typed name, or its number (1 to 4, an LFO's).
 pub fn source_of(p: &Ca72Params, v: Option<&Value>) -> Result<Source, ApiError> {
     let bad = || {
         ApiError::params(
-            "`source` must be an LFO (lfo1 to lfo4, \"LFO 1\" or 1 to 4) or a macro (macro1 to \
-             macro6, \"MACRO 1\" or its name)",
+            "`source` must be an LFO (lfo1 to lfo4, \"LFO 1\" or 1 to 4), a macro (macro1 to \
+             macro6, \"MACRO 1\" or its name) or velocity",
         )
         .with_data(json!({"sources": Source::all().map(|s| s.id()).collect::<Vec<_>>()}))
     };
@@ -61,6 +61,7 @@ fn label(s: Source) -> String {
     match s {
         Source::Lfo(n) => format!("LFO {}", n + 1),
         Source::Macro(n) => format!("MACRO {}", n + 1),
+        Source::Velocity => "VELOCITY".into(),
     }
 }
 
@@ -389,6 +390,12 @@ pub fn set(p: &Ca72Params, args: &Value) -> Reply {
         None => None,
         Some(t) => {
             let t = target_of(p, Some(t))?;
+            // (The velocity moves neither an LFO's own knobs nor TEMPO: R-VELOCITY.)
+            if !source.takes(t) {
+                return Err(ApiError::params(
+                    "VELOCITY cannot move an LFO's own knobs or TEMPO",
+                ));
+            }
             let depth = match arg(args, "depth") {
                 Some(Value::Number(n)) => n.as_f64().unwrap_or(f64::NAN),
                 None if p.lfo_patch.depth(source, t).is_none() => {

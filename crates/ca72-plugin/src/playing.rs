@@ -4,7 +4,7 @@ use ca72_panel::keyboard::{self, Scene};
 use keyboard_types::{Code, Key, KeyState, KeyboardEvent, Modifiers};
 use std::sync::Arc;
 
-use crate::local_notes::LocalNotes;
+use crate::local_notes::{LocalNotes, TYPED_VELOCITY};
 
 #[derive(Clone, Copy, Debug)]
 struct PlayedKey {
@@ -112,7 +112,7 @@ impl Playing {
             {
                 let note = held.note;
                 held.sounding = false;
-                self.own(note, false);
+                self.own(note, false, 0);
             }
         }
         // Retain each physical key until keyup, including hosts that forward
@@ -120,7 +120,9 @@ impl Playing {
         self.typing_root = root;
     }
 
-    fn own(&mut self, note: u8, on: bool) -> bool {
+    /// Note `note` owned once more (`on`) or once less; sounding (or let go) when the first
+    /// owner takes it (the last lets go), at velocity `velocity` (MIDI's 0 to 127).
+    fn own(&mut self, note: u8, on: bool, velocity: u8) -> bool {
         if note > 127 {
             return false;
         }
@@ -134,54 +136,71 @@ impl Playing {
         } else {
             false
         };
-        if changed && !self.notes.note(note, on) {
+        if changed && !self.notes.note_at(note, on, velocity) {
             self.sync();
             return false;
         }
         true
     }
 
-    pub fn pointer(&mut self, note: Option<u8>) {
+    /// The pointer on `note` (struck at `velocity`, MIDI's 0 to 127) or off the keys.
+    pub fn pointer(&mut self, note: Option<u8>, velocity: u8) {
         if self.pointer_note == note {
             return;
         }
         if let Some(old) = self.pointer_note.take() {
-            self.own(old, false);
+            self.own(old, false, 0);
         }
         if let Some(note) = note
-            && self.own(note, true)
+            && self.own(note, true, velocity)
         {
             self.pointer_note = Some(note);
         }
     }
 
     pub fn press(&mut self, note: u8) {
+        self.press_at(note, TYPED_VELOCITY);
+    }
+
+    /// A key pressed by the pointer at `velocity` (by how far down the key: decisions.md
+    /// R-VELOCITY).
+    pub fn press_at(&mut self, note: u8, velocity: u8) {
         self.sync();
         self.pointer_down = true;
-        self.pointer(Some(note));
+        self.pointer(Some(note), velocity);
     }
 
     pub fn drag(&mut self, note: Option<u8>) {
+        self.drag_at(note, TYPED_VELOCITY);
+    }
+
+    /// The pointer dragged onto `note` (or off the keys), a key it reaches struck at `velocity`.
+    pub fn drag_at(&mut self, note: Option<u8>, velocity: u8) {
         self.sync();
         if self.pointer_down {
-            self.pointer(note);
+            self.pointer(note, velocity);
         }
     }
 
     pub fn release_pointer(&mut self) {
         self.sync();
-        self.pointer(None);
+        self.pointer(None, 0);
         self.pointer_down = false;
     }
 
     /// A key an agent presses (`on`) or lets go, owned as the pointer's and the typed keys
     /// are: it sounds until its last owner lets go.
     pub fn agent(&mut self, note: u8, on: bool) {
+        self.agent_at(note, on, TYPED_VELOCITY);
+    }
+
+    /// [`Playing::agent`] at velocity `velocity` (MIDI's 0 to 127: decisions.md R-VELOCITY).
+    pub fn agent_at(&mut self, note: u8, on: bool, velocity: u8) {
         self.sync();
         if note > 127 || self.agent[usize::from(note)] == on {
             return;
         }
-        if self.own(note, on) || !on {
+        if self.own(note, on, velocity) || !on {
             self.agent[usize::from(note)] = on;
         }
     }
@@ -228,7 +247,7 @@ impl Playing {
             if event.state == KeyState::Up {
                 let held = self.typed[index].take().expect("matched held key");
                 if held.sounding {
-                    self.own(held.note, false);
+                    self.own(held.note, false, 0);
                 }
                 return true;
             }
@@ -272,7 +291,7 @@ impl Playing {
             }) {
                 let held = self.typed[index].take().expect("character fallback");
                 if held.sounding {
-                    self.own(held.note, false);
+                    self.own(held.note, false, 0);
                 }
                 return true;
             }
@@ -291,7 +310,7 @@ impl Playing {
             sounding: note <= 127,
         });
         if note <= 127 {
-            self.own(note, true);
+            self.own(note, true, TYPED_VELOCITY);
         }
         true
     }

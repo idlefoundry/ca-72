@@ -251,7 +251,7 @@ const fn mpe_knob(param: &'static str, label: &'static str, at: usize, dial: Dia
         label,
         place: Place::Mpe,
         x: crate::strip::mpe::UNITS[at] + crate::strip::UNIT_KNOB,
-        y: crate::strip::mpe::ROW,
+        y: crate::strip::mpe::unit_row(at),
         kind: Kind::Knob { dial, big: false },
     }
 }
@@ -580,7 +580,7 @@ pub const KEY_BELOW_RANGE: f64 = 84.0;
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 114] = [
+pub const CONTROLS: [Control; 116] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -1022,6 +1022,10 @@ pub const CONTROLS: [Control; 114] = [
     LFO_COLUMNS[1][9],
     LFO_COLUMNS[2][9],
     LFO_COLUMNS[3][9],
+    // The velocity's CURVE and FLOOR, the expression drawer's second row (decisions.md
+    // R-VELOCITY), after every other, so that no control moves.
+    mpe_knob("velocity_curve", "VELOCITY CURVE", 4, Dial::Reach),
+    mpe_knob("velocity_floor", "VELOCITY FLOOR", 5, Dial::Ten),
 ];
 
 /// The panel's controls' history (decisions.md R-SKIN-PACKS), so that a skin pack's layout made

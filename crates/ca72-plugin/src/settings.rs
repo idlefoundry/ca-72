@@ -80,6 +80,10 @@ pub struct Settings {
     /// switches (the rail's MACRO key; R-MACROS): the wheels unless set. Kept as `left_area`,
     /// "macros" or "wheels".
     pub macros_shown: bool,
+    /// Whether the pointer on a modulation source's jack shows cords to every knob it moves
+    /// (decisions.md R-VELOCITY; SETTINGS: HOVER CABLES): on unless set. Kept as `hover_cables`,
+    /// true or false.
+    pub hover_cables: bool,
 }
 
 /// A skin pack's id, as its manifest gives it (lower-case letters, digits, `-` and `.`, at
@@ -143,6 +147,8 @@ pub enum Change {
     MacroColor(usize, crate::lfo::MacroColor),
     /// The left area's macros shown (else the wheels).
     Macros(bool),
+    /// The cords from a hovered jack shown.
+    HoverCables(bool),
 }
 
 impl Change {
@@ -203,6 +209,7 @@ impl Change {
                 ("macro_colors", toml::Value::Array(words.collect()))
             }
             Change::Macros(shown) => ("left_area", if shown { "macros" } else { "wheels" }.into()),
+            Change::HoverCables(on) => ("hover_cables", on.into()),
         };
         t.insert(key.into(), value);
     }
@@ -228,6 +235,7 @@ impl Default for Settings {
             lfo_colors: crate::lfo::COLORS,
             macro_colors: crate::lfo::MACRO_COLORS,
             macros_shown: false,
+            hover_cables: true,
         }
     }
 }
@@ -342,6 +350,10 @@ impl Settings {
             lfo_colors: lfo_colors(&t),
             macro_colors: macro_colors(&t),
             macros_shown: t.get("left_area").and_then(toml::Value::as_str) == Some("macros"),
+            hover_cables: t
+                .get("hover_cables")
+                .and_then(toml::Value::as_bool)
+                .unwrap_or(true),
             mod_wheel_source: match t.get("mod_wheel_source").and_then(toml::Value::as_str) {
                 Some("channel_aftertouch") => Source::ChannelPressure,
                 Some("poly_aftertouch") => Source::PolyPressure,
@@ -389,6 +401,7 @@ impl Settings {
                 }
             }
             Change::Macros(shown) => self.macros_shown = shown,
+            Change::HoverCables(on) => self.hover_cables = on,
         }
     }
 
@@ -1272,6 +1285,7 @@ mod tests {
             Change::Lettering(Lettering::Large),
             Change::Frequency(Law::Hardware),
             Change::Agents(true),
+            Change::HoverCables(false),
         ] {
             Settings::keep(&path, c).expect("kept");
         }
@@ -1293,6 +1307,7 @@ mod tests {
             lfo_colors: crate::lfo::COLORS,
             macro_colors: crate::lfo::MACRO_COLORS,
             macros_shown: false,
+            hover_cables: false,
         };
         assert_eq!(Settings::read(&path), s);
         assert!(
@@ -1391,6 +1406,7 @@ mod tests {
                 lfo_colors: crate::lfo::COLORS,
                 macro_colors: crate::lfo::MACRO_COLORS,
                 macros_shown: false,
+                hover_cables: true,
             }
         );
         let left: Vec<_> = std::fs::read_dir(path.parent().expect("its folder"))

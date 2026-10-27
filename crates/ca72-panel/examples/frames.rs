@@ -454,8 +454,9 @@ fn mpe(s: f64, panel: &mut Renderer) {
     let r = |t: &str| (t.to_owned(), true);
     let mut scene = MpeScene {
         input: Input::Mpe,
-        readouts: [r("50"), r("1.0"), r("-30"), r("2.5")],
-        knobs: [0.75, 0.625, 0.35, 0.8125],
+        readouts: [r("50"), r("1.0"), r("-30"), r("2.5"), r("-35"), r("15")],
+        knobs: [0.75, 0.625, 0.35, 0.8125, 0.325, 0.15],
+        ..MpeScene::default()
     };
     let mut composed = panel.frame().clone();
     let put = |d: &MpeRenderer, c: &mut Pixmap| {
