@@ -257,11 +257,20 @@ impl Ca72 {
                 .params
                 .midi_map
                 .incoming_note(channel, note, on && !was);
+            let mut set = false;
             let used = match incoming {
                 Incoming::Caught => true,
                 Incoming::Assigned(i) => {
                     if on && !was {
                         self.step_preset(i);
+                        // A switch's note turns it over (R-MIDI-MAP).
+                        if learn::action(i).is_none() {
+                            let timing = match e {
+                                NoteEvent::NoteOn { timing, .. } => timing,
+                                _ => 0,
+                            };
+                            set = self.turn_over(i, timing, context);
+                        }
                     }
                     true
                 }
@@ -282,7 +291,7 @@ impl Ca72 {
                     }
                 }
                 // A preset pad is not a held key: its pressure never moves the wheel.
-                return false;
+                return set;
             }
         }
         // A note's own expression (decisions.md R-MPE), to the engine before the note; a member
@@ -544,6 +553,21 @@ impl Ca72 {
             self.smooth.learned(k, &self.params);
         }
         true
+    }
+
+    /// Switch `i` turned over by its learned note (R-MIDI-MAP): off if it is on, else on, as a
+    /// controller's 0 or 127 sets it. Whether it set it.
+    fn turn_over(
+        &mut self,
+        i: usize,
+        timing: u32,
+        context: &mut impl ProcessContext<Self>,
+    ) -> bool {
+        let Some(target) = learn::target(&self.params, i) else {
+            return false;
+        };
+        let on = target.at(learn::normalized_for(&self.params, i, target, 127));
+        self.learned(i, if on { 0.0 } else { 1.0 }, timing, context)
     }
 
     /// The engine's controls: the parameters, each continuous knob where the voices have it.
@@ -3023,6 +3047,62 @@ mod tests {
         assert!(!p.params.osc2_on.value());
         assert_eq!(p.params.osc1_range.value(), params::Footage::R2);
         assert_eq!(p.params.voices.value(), 2);
+    }
+
+    /// A switch learns a note from the MIDI map mode (decisions.md R-MIDI-MAP): the note that
+    /// teaches it changes nothing and is not played; each note-on after it turns the switch over
+    /// (its note-off nothing), and none of them plays. Armed as MIDI Learn's menu arms it, a
+    /// switch lets a note through to the keys as before; a knob never takes one.
+    #[test]
+    fn a_switchs_learned_note_turns_it_over_and_is_not_played() {
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        let map = Arc::clone(&p.params.midi_map);
+        let arp = learnable("arp_on");
+        assert!(!p.params.arp_on.value());
+        map.arm(arp);
+        p.midi(note(0, 0, 60, true), &mut c);
+        assert_eq!(map.armed(), Some(arp), "the menu's learning takes no note");
+        assert_eq!(p.note_sources.held(), [1 << 60, 0], "played as ever");
+        p.midi(note(0, 0, 60, false), &mut c);
+        map.arm(learnable("cutoff"));
+        map.cancel();
+        map.arm_with_notes(learnable("cutoff"));
+        p.midi(note(0, 0, 61, true), &mut c);
+        assert_eq!(
+            map.armed(),
+            Some(learnable("cutoff")),
+            "a knob takes no note"
+        );
+        p.midi(note(0, 0, 61, false), &mut c);
+        map.arm_with_notes(arp);
+        p.midi(note(0, 3, 36, true), &mut c);
+        assert_eq!(map.armed(), None, "caught");
+        assert_eq!(
+            p.note_sources.held(),
+            [0, 0],
+            "the teaching note is not played"
+        );
+        assert!(!p.params.arp_on.value(), "nor does it change anything");
+        let a = map.poll().expect("assigned");
+        assert_eq!(
+            a.cc,
+            learn::Binding::Note {
+                channel: 3,
+                note: 36
+            }
+        );
+        p.midi(note(0, 3, 36, false), &mut c);
+        for want in [true, false, true] {
+            assert!(p.midi(note(0, 3, 36, true), &mut c), "a parameter set");
+            assert_eq!(p.params.arp_on.value(), want);
+            assert_eq!(p.note_sources.held(), [0, 0]);
+            assert!(!p.midi(note(0, 3, 36, false), &mut c));
+            assert_eq!(p.params.arp_on.value(), want, "its note-off nothing");
+        }
+        // (Another channel's is a key again.)
+        p.midi(note(0, 2, 36, true), &mut c);
+        assert_ne!(p.note_sources.held(), [0, 0]);
     }
 
     /// A knob a learned controller moves is at its new value at once (the host's, the editor's,

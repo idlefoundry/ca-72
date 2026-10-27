@@ -65,6 +65,7 @@ mod entry;
 mod fx_pins;
 mod lfo_page;
 mod macros;
+mod mapping;
 use entry::Entry;
 
 /// The share of the usable screen the editor opens at until it is resized.
@@ -1408,10 +1409,12 @@ struct Editing {
     /// double click), and a trackpad's travel over it not yet a beat a minute.
     tempo_drag: Option<(f64, f64, bool, u16)>,
     last_tempo_press: Option<Instant>,
-    /// The standalone's TYPING or PANIC key under the pointer, and PANIC held down (lit while it
-    /// is: decisions.md R-TEMPO-CORNER).
+    /// The standalone's TYPING, PANIC or MIDI key under the pointer, and PANIC held down (lit
+    /// while it is: decisions.md R-TEMPO-CORNER).
     tempo_hover: Option<art::TempoKey>,
     panic_held: bool,
+    /// The standalone's MIDI map mode (decisions.md R-MIDI-MAP).
+    mapping: mapping::Mapping,
     /// The screens' controls as the engine plays them, modulated ([`Meters::publish_live`]),
     /// and the moving tempo, read at most 30 times a second while a source moves one of them
     /// (decisions.md R-LFO), and when they are next due.
@@ -1804,6 +1807,7 @@ impl Editing {
             last_tempo_press: None,
             tempo_hover: None,
             panic_held: false,
+            mapping: mapping::Mapping::default(),
             live: [None; LIVE.len()],
             live_tempo: None,
             live_due: None,
@@ -2155,6 +2159,7 @@ impl Editing {
     fn holds_keys(&self) -> bool {
         self.browser.open
             || self.learning.holds_keys(&self.params.midi_map)
+            || self.mapping_on()
             || self.typing.is_some()
             || self.macro_view.typing.is_some()
             || self.knob_entry.is_some()
@@ -3517,6 +3522,11 @@ impl Editing {
             self.fx_view.close_list();
             return;
         }
+        // The MIDI map mode: a click chooses a control and operates nothing (decisions.md
+        // R-MIDI-MAP); its MIDI key, TYPING, PANIC, the rail's keys and the drawer as ever.
+        if self.mapping_on() && self.map_press((x, y)) {
+            return;
+        }
         // The standalone's TEMPO screen, on the wood above the panel (R-ARP): Alt/Option, the
         // last touched source's depth on it, as a knob's (R-LFO).
         if self.playing.standalone && art::tempo_hit(self.renderer.arrangement(), x, y) {
@@ -3539,6 +3549,7 @@ impl Editing {
                     self.panic();
                     self.panic_held = true;
                 }
+                art::TempoKey::Midi => self.toggle_mapping(),
             }
             return;
         }
@@ -4207,6 +4218,11 @@ impl Editing {
             return;
         }
         let (x, y) = self.in_drawing(self.pointer);
+        // The MIDI map mode turns nothing (decisions.md R-MIDI-MAP): the presets' drawer and the
+        // effects' list scroll as ever.
+        if self.mapping_on() && self.in_drawer((x, y)).is_none() && !self.fx_view.list_open() {
+            return;
+        }
         // The TEMPO screen: a beat a minute a notch (up faster), or a trackpad's travel.
         if self.playing.standalone && art::tempo_hit(self.renderer.arrangement(), x, y) {
             let beats = match delta {
@@ -4505,6 +4521,7 @@ impl Editing {
         self.scene.tempo_keys = self.playing.standalone.then_some(TempoKeys {
             typing: self.playing.typing,
             panic: self.panic_held,
+            midi: self.mapping_on(),
             hover: self.tempo_hover,
         });
         let live = self.live_shown();
@@ -4655,16 +4672,23 @@ impl Editing {
                 self.depths_tip(lfo_page::TEMPO_CONTROL)
             );
             let b = art::tip_bounds(self.renderer.fonts(), &text, self.renderer.text_size());
-            // (After its TYPING and PANIC keys: decisions.md R-TEMPO-CORNER.)
-            let (px, _) = art::tempo_key_at(self.renderer.arrangement(), art::TempoKey::Panic);
+            // (After its TYPING, PANIC and MIDI keys: decisions.md R-TEMPO-CORNER.)
+            let (px, _) = art::tempo_key_at(self.renderer.arrangement(), art::TempoKey::LAST);
             let left = px + art::TEMPO_KEY.0 / 2.0 + 12.0;
             return Some((text, left - b[0], y + h / 2.0 - (b[1] + b[3]) / 2.0));
         }
-        // TYPING's key is a picture: its tip says what it does, after the keys, as TEMPO's.
-        if self.drag.is_none() && self.tempo_hover == Some(art::TempoKey::Typing) {
-            let text = "TYPING: PLAY FROM THE COMPUTER KEYBOARD";
+        // TYPING's key is a picture: its tip says what it does, after the keys, as TEMPO's; and
+        // MIDI's what its mode is (decisions.md R-MIDI-MAP).
+        let tempo_tip = match self.tempo_hover {
+            Some(art::TempoKey::Typing) => Some("TYPING: PLAY FROM THE COMPUTER KEYBOARD"),
+            Some(art::TempoKey::Midi) => Some(mapping::KEY_TIP),
+            _ => None,
+        };
+        if self.drag.is_none()
+            && let Some(text) = tempo_tip
+        {
             let b = art::tip_bounds(self.renderer.fonts(), text, self.renderer.text_size());
-            let (px, py) = art::tempo_key_at(self.renderer.arrangement(), art::TempoKey::Panic);
+            let (px, py) = art::tempo_key_at(self.renderer.arrangement(), art::TempoKey::LAST);
             let left = px + art::TEMPO_KEY.0 / 2.0 + 12.0;
             return Some((text.into(), left - b[0], py - (b[1] + b[3]) / 2.0));
         }
@@ -4864,9 +4888,13 @@ impl Editing {
         );
         let (note, ring, strip_ring, menu) = self.learning.scene(map, self.renderer.text_size());
         let note = note.or_else(|| self.ultra_note.then(|| self.ultra_note()));
-        let ring = ring.filter(|&i| !self.off_panel(i));
+        // (The MIDI map mode's marks ring the control waiting themselves: R-MIDI-MAP.)
+        let mapping = self.mapping_on();
+        let ring = ring.filter(|&i| !self.off_panel(i) && !mapping);
         (self.scene.note, self.scene.learning, self.scene.menu) = (note, ring, menu);
-        self.strip_scene.learning = strip_ring.filter(|_| self.strip_scene.extension());
+        // The MIDI map mode's marks, over everything the controls are on (R-MIDI-MAP).
+        self.scene.marks = self.map_marks();
+        self.strip_scene.learning = strip_ring.filter(|_| self.strip_scene.extension() && !mapping);
         if self.scene.note.is_some() || self.scene.menu.is_some() {
             self.scene.tip = None;
         }
@@ -5725,6 +5753,9 @@ impl Editing {
                 self.follow_drawer();
             }
             return taken;
+        }
+        if self.map_key(k) {
+            return true;
         }
         if down && k.key == Key::Escape && map.armed().is_some() {
             self.learning.cancel(&map);
@@ -7853,6 +7884,390 @@ mod tests {
         );
         p.update_scene();
         assert_eq!(p.scene.tempo_keys, None);
+    }
+
+    /// Where control `param` is in this editor's arrangement, in the window.
+    fn control_at(e: &Editing, param: &str) -> Point {
+        let i = ca72_panel::controls::index(param).expect("a control");
+        at(e, e.renderer.arrangement().control(i).centre())
+    }
+
+    /// Control `param` clicked where this editor has it.
+    fn click_on(e: &mut Editing, param: &str) {
+        let p = control_at(e, param);
+        click(e, p);
+    }
+
+    /// The learnable controls the MIDI map mode marks now.
+    fn marked(e: &Editing) -> Vec<usize> {
+        e.map_places().into_iter().map(|(k, _)| k).collect()
+    }
+
+    /// The standalone's MIDI map mode (decisions.md R-MIDI-MAP): MIDI between TYPING and PANIC turns it on
+    /// (lit, its tip) and off; every learnable control in view is marked, its controller in small
+    /// print; a click chooses a control without operating it (no value, no gesture, no drag, no
+    /// wheel), MIDI Learn waits on it, the next controller is its own and the mode stays on;
+    /// another click moves the waiting; Delete takes the chosen control's controller away;
+    /// Escape stops the waiting, then ends the mode. The rail's page keys work in it, and their
+    /// pages' controls are marked. A plug-in has no MIDI key.
+    #[test]
+    fn midi_map_mode_chooses_a_control_learns_it_and_stays_on() {
+        let (mut e, host, params) = editing_standalone();
+        let map = Arc::clone(&params.midi_map);
+        let page = |e: &mut Editing, t: BarTarget| {
+            let p = at(e, strip::centre(e.rail, StripTarget::Bar(t)));
+            click(e, p);
+            e.draw();
+        };
+        page(&mut e, BarTarget::Global);
+        assert!(e.scene.marks.is_empty(), "off: no marks");
+        assert_eq!(e.scene.tempo_keys.map(|k| k.midi), Some(false));
+        // MIDI between TYPING and PANIC, the rail's gap either side (the owner: "keyboard-midi-
+        // panic"); its tip after PANIC.
+        let (tx, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Typing);
+        let (mx, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Midi);
+        let (px, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Panic);
+        assert_eq!(mx - tx, art::TEMPO_KEY.0 + 14.0);
+        assert_eq!(px - mx, art::TEMPO_KEY.0 + 14.0);
+        assert_eq!(art::TempoKey::LAST, art::TempoKey::Panic);
+        let midi = at(
+            &e,
+            art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Midi),
+        );
+        go(&mut e, midi);
+        e.update_scene();
+        assert_eq!(
+            e.scene.tip.as_ref().map(|t| t.0.as_str()),
+            Some(mapping::KEY_TIP)
+        );
+        click(&mut e, midi);
+        assert!(e.mapping_on() && e.holds_keys());
+        e.draw();
+        assert_eq!(e.scene.tempo_keys.map(|k| k.midi), Some(true));
+        // GLOBAL's knobs and tabs, the panel's, the preset arrows; not the wheels.
+        let m = marked(&e);
+        for id in [
+            "cutoff",
+            "osc1_on",
+            "glide_on",
+            "entropy",
+            "poly",
+            "unison",
+            "doubled",
+            "auto_gain",
+            "previous_preset",
+            "next_preset",
+        ] {
+            assert!(m.contains(&learnable(id)), "{id} marked");
+        }
+        assert!(!m.contains(&crate::learn::MOD_WHEEL));
+        assert!(
+            !m.contains(&learnable("lfo1_rate")),
+            "the LFO page is not shown"
+        );
+        assert_eq!(e.scene.marks.len(), m.len());
+        assert!(e.scene.marks.iter().all(|m| m.label.is_none()));
+        assert!(e.renderer.floating(), "the marks float over everything");
+        // Every mark is found where it is drawn.
+        for (k, r) in e.map_places() {
+            assert_eq!(
+                e.map_at(((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0))
+                    .map(|f| f.0),
+                Some(k),
+                "{}",
+                crate::learn::LEARNABLE[k].id
+            );
+        }
+        // A click on CUTOFF chooses it: it waits; nothing set, no gesture.
+        let cutoff = learnable("cutoff");
+        let before = params.cutoff.unmodulated_normalized_value();
+        click_on(&mut e, "cutoff");
+        assert_eq!(map.armed(), Some(cutoff));
+        e.draw();
+        assert_eq!(note_lines(&e)[0], "MIDI LEARN: CUTOFF FREQUENCY");
+        assert_eq!(e.scene.marks.iter().filter(|m| m.waiting).count(), 1);
+        // The next controller is its own; the mode stays on, CUTOFF chosen.
+        assert_eq!(map.incoming(0, 74), crate::learn::Incoming::Caught);
+        e.draw();
+        assert_eq!(
+            map.assignment(cutoff),
+            Some(crate::learn::Cc { channel: 0, cc: 74 })
+        );
+        assert!(e.mapping_on() && map.armed().is_none());
+        assert!(
+            e.scene
+                .marks
+                .iter()
+                .any(|m| m.chosen && m.label.as_deref() == Some("CC 74"))
+        );
+        // Another control, then another: the waiting moves. A drag and the wheel turn nothing.
+        click_on(&mut e, "emphasis");
+        assert_eq!(map.armed(), Some(learnable("emphasis")));
+        let glide = control_at(&e, "glide");
+        let glide_was = params.glide.unmodulated_normalized_value();
+        go(&mut e, glide);
+        press(&mut e);
+        go(&mut e, below(glide, -120.0));
+        release(&mut e);
+        wheel(&mut e, 4.0);
+        assert_eq!(map.armed(), Some(learnable("glide")));
+        assert_eq!(params.glide.unmodulated_normalized_value(), glide_was);
+        // A switch and a tab are chosen, not flipped.
+        let poly = params.poly.value();
+        let tab = at(&e, strip::centre(e.rail, StripTarget::Tab(Bank::Mode, 1)));
+        click(&mut e, tab);
+        assert_eq!(map.armed(), Some(learnable("poly")));
+        assert_eq!(params.poly.value(), poly);
+        let osc1 = params.osc1_on.value();
+        click_on(&mut e, "osc1_on");
+        assert_eq!(params.osc1_on.value(), osc1);
+        // A switch waiting takes a note (not played: lib.rs), shown by its number.
+        assert_eq!(
+            map.incoming_note(0, 36, true),
+            crate::learn::Incoming::Caught
+        );
+        e.draw();
+        assert_eq!(
+            map.binding(learnable("osc1_on")),
+            Some(crate::learn::Binding::Note {
+                channel: 0,
+                note: 36
+            })
+        );
+        assert!(
+            e.scene
+                .marks
+                .iter()
+                .any(|m| m.label.as_deref() == Some("NOTE 36"))
+        );
+        assert_eq!(params.cutoff.unmodulated_normalized_value(), before);
+        assert!(host.take().is_empty(), "no gesture");
+        // Delete: CUTOFF chosen again (waiting), its controller taken away.
+        click_on(&mut e, "cutoff");
+        assert!(keyed(&mut e, Key::Delete));
+        assert_eq!(map.assignment(cutoff), None);
+        // The LFO page by its key, in the mode: its knobs marked and chosen.
+        page(&mut e, BarTarget::Lfo);
+        assert!(e.page_shows() && e.mapping_on());
+        assert!(marked(&e).contains(&learnable("lfo1_rate")));
+        assert!(!marked(&e).contains(&learnable("entropy")));
+        click_on(&mut e, "lfo2_rate");
+        assert_eq!(map.armed(), Some(learnable("lfo2_rate")));
+        // The macros by MACRO.
+        page(&mut e, BarTarget::Macro);
+        assert!(e.macros_show());
+        assert!(marked(&e).contains(&learnable("macro1")));
+        click_on(&mut e, "macro3");
+        assert_eq!(map.armed(), Some(learnable("macro3")));
+        // Escape: the waiting stops, the mode stays; Escape again: off.
+        assert!(keyed(&mut e, Key::Escape));
+        assert_eq!(map.armed(), None);
+        assert!(e.mapping_on());
+        assert!(keyed(&mut e, Key::Escape));
+        assert!(!e.mapping_on());
+        e.draw();
+        assert!(e.scene.marks.is_empty());
+        assert_eq!(e.scene.tempo_keys.map(|k| k.midi), Some(false));
+        // MIDI on, a control waiting, MIDI off: the waiting stops too. Off, a click operates.
+        click(&mut e, midi);
+        click_on(&mut e, "lfo1_rate");
+        assert!(map.armed().is_some());
+        click(&mut e, midi);
+        assert!(!e.mapping_on() && map.armed().is_none());
+        assert_eq!(
+            map.assignment(learnable("osc1_on")),
+            None,
+            "a note, not a CC"
+        );
+        assert!(map.binding(learnable("osc1_on")).is_some(), "kept");
+        // A plug-in's walnut is bare: no MIDI key, no mode.
+        let (mut p, _, _) = editing();
+        let at_key = at(
+            &p,
+            art::tempo_key_at(p.renderer.arrangement(), art::TempoKey::Midi),
+        );
+        click(&mut p, at_key);
+        p.draw();
+        assert!(!p.mapping_on());
+        assert!(p.scene.tempo_keys.is_none() && p.scene.marks.is_empty());
+    }
+
+    /// The arpeggiator's drawer in the mode: its knobs and its ON, HOLD and DIRECTION (until
+    /// now learned only from the list) are marked and chosen, ON's note over its tab; the
+    /// controls under the drawer are not marked, those below it are.
+    #[test]
+    fn midi_map_mode_reaches_the_arpeggiators_drawer() {
+        let (mut e, _host, params) = editing_standalone();
+        let map = Arc::clone(&params.midi_map);
+        let page = at(
+            &e,
+            strip::centre(e.rail, StripTarget::Bar(BarTarget::Global)),
+        );
+        click(&mut e, page);
+        e.toggle_mapping();
+        e.draw();
+        assert!(marked(&e).contains(&learnable("poly")));
+        let arp = at(&e, strip::centre(e.rail, StripTarget::Bar(BarTarget::Arp)));
+        click(&mut e, arp);
+        assert!(e.lower.open, "the ARP key works in the mode");
+        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        e.draw();
+        let m = marked(&e);
+        for id in [
+            "arp_on",
+            "arp_latch",
+            "arp_direction",
+            "arp_rate",
+            "arp_gate",
+        ] {
+            assert!(m.contains(&learnable(id)), "{id}");
+        }
+        assert!(
+            !m.contains(&learnable("poly")),
+            "MODE's tabs under the drawer"
+        );
+        assert!(m.contains(&learnable("entropy")), "ENTROPY below it");
+        let on = at(&e, ArpBank::Arp.tab(0));
+        click(&mut e, on);
+        assert_eq!(map.armed(), Some(learnable("arp_on")));
+        assert!(!params.arp_on.value());
+        e.draw();
+        let n = e.scene.note.as_ref().expect("a note over ON");
+        assert_eq!(n.lines[0].0, "MIDI LEARN: ARP ON");
+        assert!(n.lines[1].0.contains("PRESS A NOTE"));
+        assert!((n.x - ArpBank::Arp.tab(0).0).abs() < 1.0);
+    }
+
+    /// The MIDI map mode for looking at (decisions.md R-MIDI-MAP), written to
+    /// `$CA72_MIDI_MAP_PNG`, the folder, at `$CA72_MIDI_MAP_DPR` (2 by default) the window's
+    /// 1720 logical pixels: the standalone with the mode off (`1-off.png`), on over GLOBAL's page
+    /// with some controls learned (`2-on-global.png`), a control waiting (`3-waiting.png`), the
+    /// LFO page and the macros (`4-lfo-macros.png`), the arpeggiator's drawer
+    /// (`4b-arp.png`), and a plug-in's bare walnut (`5-plugin.png`); and the walnut's keys close
+    /// up, off and on (`0-keys-off.png`, `0-keys-on.png`).
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_midi_map_pngs() {
+        let Some(out) = std::env::var_os("CA72_MIDI_MAP_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        let dpr: f64 = std::env::var("CA72_MIDI_MAP_DPR")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2.0);
+        let width = 1720;
+        let sized = |e: &mut Editing| {
+            e.fit(dpr, width, (f64::from(width) * dpr).round() as u32);
+            e.draw();
+        };
+        let away = |e: &mut Editing| {
+            go(e, Point { x: 2.0, y: 2.0 });
+        };
+        let save = |e: &mut Editing, name: &str| {
+            e.composed = None;
+            window_frame(e).save_png(out.join(name)).unwrap();
+        };
+        // The walnut's keys close up: the TEMPO screen to past MIDI's tip.
+        let keys = |e: &mut Editing, name: &str| {
+            e.composed = None;
+            let s = e.renderer.scale();
+            let top = e.renderer.top();
+            let (x, y, _, h) = art::tempo_window(e.renderer.arrangement().plate_at());
+            let (mx, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Midi);
+            let f = window_frame(e);
+            let x0 = ((x - 40.0) * s) as u32;
+            let x1 = (((mx + 900.0) * s) as u32).min(f.width());
+            let y0 = ((y - 60.0 - top) * s).max(0.0) as u32;
+            let y1 = (((y + h + 60.0 - top) * s) as u32).min(f.height());
+            let (w, hh) = (x1 - x0, y1 - y0);
+            let mut c = ca72_panel::Pixmap::new(w, hh).unwrap();
+            for row in 0..hh {
+                let from = ((y0 + row) * f.width() + x0) as usize * 4;
+                let to = (row * w) as usize * 4;
+                c.data_mut()[to..to + w as usize * 4]
+                    .copy_from_slice(&f.data()[from..from + w as usize * 4]);
+            }
+            c.save_png(out.join(name)).unwrap();
+        };
+        let (mut e, _, params) = editing_standalone();
+        let map = Arc::clone(&params.midi_map);
+        sized(&mut e);
+        let global = at(
+            &e,
+            strip::centre(e.rail, StripTarget::Bar(BarTarget::Global)),
+        );
+        click(&mut e, global);
+        away(&mut e);
+        save(&mut e, "1-off.png");
+        keys(&mut e, "0-keys-off.png");
+        // On, some controls learned: knobs' controllers, a switch's note, a tab's.
+        let cc = |channel, cc| crate::learn::Cc { channel, cc };
+        map.assign(learnable("cutoff"), cc(0, 74));
+        map.assign(learnable("emphasis"), cc(0, 71));
+        map.assign(learnable("loudness_decay"), cc(0, 75));
+        map.assign(learnable("entropy"), cc(1, 20));
+        map.assign(
+            learnable("osc3_on"),
+            crate::learn::Binding::Note {
+                channel: 0,
+                note: 36,
+            },
+        );
+        map.assign(learnable("poly"), cc(0, 80));
+        map.assign(learnable("next_preset"), cc(0, 91));
+        let midi = at(
+            &e,
+            art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Midi),
+        );
+        go(&mut e, midi);
+        e.update_scene();
+        keys(&mut e, "0-keys-on-hover.png");
+        click(&mut e, midi);
+        away(&mut e);
+        save(&mut e, "2-on-global.png");
+        keys(&mut e, "0-keys-on.png");
+        // A control waiting.
+        click_on(&mut e, "contour_amount");
+        away(&mut e);
+        save(&mut e, "3-waiting.png");
+        // The LFO page and the macros, some learned; LFO 2's RATE waiting.
+        map.assign(learnable("lfo1_rate"), cc(0, 21));
+        map.assign(learnable("lfo1_phase"), cc(0, 22));
+        map.assign(learnable("macro1"), cc(0, 16));
+        map.assign(learnable("macro2"), cc(0, 17));
+        for t in [BarTarget::Lfo, BarTarget::Macro] {
+            let p = at(&e, strip::centre(e.rail, StripTarget::Bar(t)));
+            click(&mut e, p);
+        }
+        click_on(&mut e, "lfo2_rate");
+        away(&mut e);
+        save(&mut e, "4-lfo-macros.png");
+        // The arpeggiator's drawer over GLOBAL's page, its ON waiting for a note.
+        for t in [BarTarget::Macro, BarTarget::Global, BarTarget::Arp] {
+            let p = at(&e, strip::centre(e.rail, StripTarget::Bar(t)));
+            click(&mut e, p);
+        }
+        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        map.assign(
+            learnable("arp_latch"),
+            crate::learn::Binding::Note {
+                channel: 0,
+                note: 37,
+            },
+        );
+        let on = at(&e, ArpBank::Arp.tab(0));
+        click(&mut e, on);
+        away(&mut e);
+        save(&mut e, "4b-arp.png");
+        // A plug-in's walnut: bare.
+        let (mut p, _, _) = editing();
+        sized(&mut p);
+        away(&mut p);
+        save(&mut p, "5-plugin.png");
+        keys(&mut p, "0-keys-plugin.png");
     }
 
     fn editing_for_api(

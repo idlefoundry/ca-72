@@ -1,7 +1,9 @@
 //! MIDI Learn (decisions.md R34): a hardware controller's absolute 7-bit control change, on its
 //! own MIDI channel, assigned to one of the plug-in's sound parameters; each instance its own
 //! table, saved with the host's project, not with the sound presets. PREVIOUS PRESET and NEXT
-//! PRESET also learn notes and are kept on this computer instead (R-PRESET-KEYS).
+//! PRESET also learn notes and are kept on this computer instead (R-PRESET-KEYS). A switch learns
+//! a note too while the standalone's MIDI map mode has it waiting (R-MIDI-MAP): each note-on
+//! turns it over, and the note is not played.
 //!
 //! - **What may be learned** ([`LEARNABLE`]): the panel's knobs, selectors and switches, the
 //!   strip's POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD), INNER, SCATTER's placement, DETUNE
@@ -320,6 +322,12 @@ pub fn is_fx_pin(i: usize) -> bool {
     LEARNABLE.get(i).is_some_and(|l| fx_pin(l.id).is_some())
 }
 
+/// Whether learnable `i` may learn a note: a preset action (R-PRESET-KEYS), or a switch, which
+/// a learned note turns over at each note-on (R-MIDI-MAP).
+pub fn takes_note(i: usize) -> bool {
+    action(i).is_some() || LEARNABLE.get(i).is_some_and(|l| l.kind == Kind::Switch)
+}
+
 pub fn action(i: usize) -> Option<i32> {
     match LEARNABLE.get(i)?.id {
         "previous_preset" => Some(-1),
@@ -386,8 +394,9 @@ impl Cc {
     }
 }
 
-/// A learned input. Notes are available for actions alone; parameter assignments keep their
-/// existing CC format in projects.
+/// A learned input. Notes are available for actions and switches alone ([`takes_note`]); a
+/// switch's note is saved with the project beside the controllers (`"note"` in place of
+/// `"cc"`), which an older CA-72 leaves out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Binding {
     Cc(Cc),
@@ -483,6 +492,9 @@ pub struct MidiMap {
     pub(crate) preset_list: Mutex<Option<Vec<String>>>,
     /// The parameter being learned and the arming's number ([`TARGET_BITS`]).
     armed: AtomicU32,
+    /// Whether the arming takes a note for a switch (the MIDI map mode's: R-MIDI-MAP); set
+    /// before `armed`, so the audio thread reads it with the arming it belongs to.
+    notes: std::sync::atomic::AtomicBool,
     /// What the audio thread caught for the arming ([`CAUGHT`]), for [`MidiMap::poll`].
     caught: AtomicU64,
     /// The last reserved control change seen while learning, for the editor to explain: the
@@ -503,6 +515,7 @@ impl Default for MidiMap {
             writer: Mutex::new(()),
             preset_list: Mutex::new(None),
             armed: AtomicU32::new(0),
+            notes: std::sync::atomic::AtomicBool::new(false),
             caught: AtomicU64::new(0),
             refused: AtomicU32::new(0),
             version: AtomicU32::new(0),
@@ -635,9 +648,7 @@ impl MidiMap {
         for _ in 0..2 {
             let a = self.armed.load(Ordering::Acquire);
             let target = a & ((1 << TARGET_BITS) - 1);
-            if target == 0
-                || !capture
-                || (matches!(c, Binding::Note { .. }) && action(target as usize - 1).is_none())
+            if target == 0 || !capture || (matches!(c, Binding::Note { .. }) && !self.notes_for(a))
             {
                 break;
             }
@@ -667,6 +678,15 @@ impl MidiMap {
             NONE => Incoming::Unassigned,
             k => Incoming::Assigned(usize::from(k) - 1),
         }
+    }
+
+    /// Whether the arming `a` takes a note: a preset action's always, a switch's while the map
+    /// mode arms it ([`MidiMap::arm_with_notes`]).
+    fn notes_for(&self, a: u32) -> bool {
+        let Some(i) = ((a & ((1 << TARGET_BITS) - 1)) as usize).checked_sub(1) else {
+            return false;
+        };
+        action(i).is_some() || (self.notes.load(Ordering::Acquire) && takes_note(i))
     }
 
     /// A reserved control change (the wheel's chosen CC among them); a note never is.
@@ -776,9 +796,7 @@ impl MidiMap {
                 displaced: None,
             });
         }
-        if param >= LEARNABLE.len()
-            || (matches!(cc, Binding::Note { .. }) && action(param).is_none())
-        {
+        if param >= LEARNABLE.len() || (matches!(cc, Binding::Note { .. }) && !takes_note(param)) {
             return None;
         }
         let _w = self.lock();
@@ -812,7 +830,7 @@ impl MidiMap {
     pub fn saved(&self) -> Saved {
         let _w = self.lock();
         Saved(
-            self.assignments()
+            self.bindings()
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| action(*i).is_none())
@@ -834,8 +852,9 @@ impl MidiMap {
             if i < LEARNABLE.len()
                 && action(i).is_none()
                 && c.learnable()
-                && self.reserved(c.cc).is_none()
-                && self.binding_target(c.into()).is_none()
+                && (takes_note(i) || matches!(c, Binding::Cc(_)))
+                && !self.reserved_input(c)
+                && self.binding_target(c).is_none()
             {
                 self.routes[c.slot()].store(i as u8 + 1, Ordering::Release);
             }
@@ -849,6 +868,17 @@ impl MidiMap {
         if param > MOD_WHEEL {
             return;
         }
+        self.notes.store(false, Ordering::Release);
+        self.rearm(param as u32 + 1);
+    }
+
+    /// The same, a note-on taken as well if `param` is a switch (the standalone's MIDI map mode:
+    /// R-MIDI-MAP). A knob's arming is [`MidiMap::arm`]'s.
+    pub fn arm_with_notes(&self, param: usize) {
+        if param > MOD_WHEEL {
+            return;
+        }
+        self.notes.store(takes_note(param), Ordering::Release);
         self.rearm(param as u32 + 1);
     }
 
@@ -868,6 +898,12 @@ impl MidiMap {
     pub fn armed(&self) -> Option<usize> {
         let target = self.armed.load(Ordering::Acquire) & ((1 << TARGET_BITS) - 1);
         (target as usize).checked_sub(1)
+    }
+
+    /// Whether the parameter being learned takes a note: a preset action, or a switch armed by
+    /// the MIDI map mode ([`MidiMap::arm_with_notes`]).
+    pub fn notes_armed(&self) -> bool {
+        self.notes_for(self.armed.load(Ordering::Acquire))
     }
 
     /// The arming's number.
@@ -900,9 +936,11 @@ impl MidiMap {
 /// The assignments as the plug-in's state holds them (`midi_map`): learnable index and controller,
 /// in [`LEARNABLE`]'s order, at most one a parameter and one a controller. As JSON:
 /// `{"version":1,"assignments":[{"param":"cutoff","channel":1,"cc":74}]}`, the channel 1 to 16 as
-/// shown. Read leniently ([`Saved::from_json`]); an armed learning is never part of it.
+/// shown; a switch's note `{"param":"arp_on","channel":1,"note":36}` (R-MIDI-MAP), which a CA-72
+/// before it leaves out. Read leniently ([`Saved::from_json`]); an armed learning is never part
+/// of it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Saved(pub Vec<(usize, Cc)>);
+pub struct Saved(pub Vec<(usize, Binding)>);
 
 /// The table's format.
 pub const VERSION: u64 = 1;
@@ -913,7 +951,7 @@ impl Saved {
     /// outside 0 to 127 or reserved, or of a parameter or a controller already assigned above it,
     /// is left out.
     pub fn from_json(v: &serde_json::Value) -> Saved {
-        let mut out: Vec<(usize, Cc)> = Vec::new();
+        let mut out: Vec<(usize, Binding)> = Vec::new();
         if v.get("version").and_then(serde_json::Value::as_u64) != Some(VERSION) {
             return Saved(out);
         }
@@ -927,13 +965,23 @@ impl Saved {
                 .and_then(index);
             let channel = a.get("channel").and_then(serde_json::Value::as_u64);
             let cc = a.get("cc").and_then(serde_json::Value::as_u64);
-            let (Some(param), Some(channel @ 1..=16), Some(cc @ 0..=127)) = (param, channel, cc)
-            else {
+            // (A switch's note, R-MIDI-MAP: an entry with a controller as well is a controller's.)
+            let note = a.get("note").and_then(serde_json::Value::as_u64);
+            let (Some(param), Some(channel @ 1..=16)) = (param, channel) else {
                 continue;
             };
-            let c = Cc {
-                channel: (channel - 1) as u8,
-                cc: cc as u8,
+            let channel = (channel - 1) as u8;
+            let c: Binding = match (cc, note) {
+                (Some(cc @ 0..=127), _) => Cc {
+                    channel,
+                    cc: cc as u8,
+                }
+                .into(),
+                (None, Some(note @ 0..=127)) if takes_note(param) => Binding::Note {
+                    channel,
+                    note: note as u8,
+                },
+                _ => continue,
             };
             if action(param).is_none()
                 && c.learnable()
@@ -956,17 +1004,25 @@ impl Saved {
 
 impl Serialize for Saved {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        struct Entry(usize, Cc);
+        struct Entry(usize, Binding);
         impl Serialize for Entry {
             fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
                 let mut m = s.serialize_map(Some(3))?;
                 m.serialize_entry("param", LEARNABLE[self.0].id)?;
-                m.serialize_entry("channel", &(u32::from(self.1.channel) + 1))?;
-                m.serialize_entry("cc", &self.1.cc)?;
+                match self.1 {
+                    Binding::Cc(c) => {
+                        m.serialize_entry("channel", &(u32::from(c.channel) + 1))?;
+                        m.serialize_entry("cc", &c.cc)?;
+                    }
+                    Binding::Note { channel, note } => {
+                        m.serialize_entry("channel", &(u32::from(channel) + 1))?;
+                        m.serialize_entry("note", &note)?;
+                    }
+                }
                 m.end()
             }
         }
-        struct List<'a>(&'a [(usize, Cc)]);
+        struct List<'a>(&'a [(usize, Binding)]);
         impl Serialize for List<'_> {
             fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
                 let mut seq = s.serialize_seq(Some(self.0.len()))?;
@@ -1576,7 +1632,7 @@ mod tests {
         assert_eq!(m.incoming(0, 72), Incoming::Caught);
         m.cancel();
         assert_eq!(m.poll(), None, "caught, then cancelled: not assigned");
-        assert_eq!(m.saved(), Saved(vec![(emphasis, cc(0, 71))]));
+        assert_eq!(m.saved(), Saved(vec![(emphasis, cc(0, 71).into())]));
     }
 
     /// Arming another control moves the learning to it.
@@ -1655,6 +1711,48 @@ mod tests {
         );
     }
 
+    /// A switch's note (the MIDI map mode's: decisions.md R-MIDI-MAP): taken only while the mode
+    /// arms the switch, never by a knob nor by MIDI Learn's menu's arming; saved with the
+    /// controllers as `"note"` and read back; a note for a knob in a table is left out.
+    #[test]
+    fn a_switch_learns_a_note_from_the_map_mode_alone_and_keeps_it() {
+        let m = MidiMap::default();
+        let (arp, cutoff) = (at("arp_on"), at("cutoff"));
+        assert!(takes_note(arp) && takes_note(at("next_preset")));
+        assert!(!takes_note(cutoff) && !takes_note(at("arp_direction")));
+        m.arm(arp);
+        assert!(!m.notes_armed());
+        assert_eq!(m.incoming_note(0, 36, true), Incoming::Unassigned);
+        m.arm_with_notes(cutoff);
+        assert!(!m.notes_armed());
+        assert_eq!(m.incoming_note(0, 36, true), Incoming::Unassigned);
+        m.arm_with_notes(arp);
+        assert!(m.notes_armed());
+        assert_eq!(m.incoming_note(4, 36, true), Incoming::Caught);
+        let note = Binding::Note {
+            channel: 4,
+            note: 36,
+        };
+        assert_eq!(m.poll().map(|a| a.cc), Some(note));
+        assert_eq!(m.incoming_note(4, 36, true), Incoming::Assigned(arp));
+        assert!(m.assign(cutoff, note).is_none(), "a knob takes no note");
+        m.assign(cutoff, cc(0, 74));
+        let text = serde_json::to_string(&m.saved()).expect("JSON");
+        assert_eq!(
+            text,
+            r#"{"version":1,"assignments":[{"param":"cutoff","channel":1,"cc":74},{"param":"arp_on","channel":5,"note":36}]}"#
+        );
+        let back = MidiMap::default();
+        back.load(&Saved::from_text(&text));
+        assert_eq!(back.bindings(), m.bindings());
+        assert_eq!(
+            Saved::from_text(
+                r#"{"version":1,"assignments":[{"param":"cutoff","channel":1,"note":36},{"param":"arp_on","channel":1,"note":128}]}"#
+            ),
+            Saved::default()
+        );
+    }
+
     /// A table read leniently: another version or no object is an empty table; an entry of an
     /// unknown or unlearnable parameter, a channel or controller out of range or reserved, a
     /// value of the wrong type, or a parameter or controller already assigned above it, is left
@@ -1697,9 +1795,9 @@ mod tests {
         assert_eq!(
             Saved::from_text(text),
             Saved(vec![
-                (at("tune"), cc(15, 119)),
-                (at("cutoff"), cc(0, 74)),
-                (at("emphasis"), cc(1, 74)),
+                (at("tune"), cc(15, 119).into()),
+                (at("cutoff"), cc(0, 74).into()),
+                (at("emphasis"), cc(1, 74).into()),
             ])
         );
     }
@@ -1712,10 +1810,10 @@ mod tests {
         m.assign(at("cutoff"), cc(0, 74));
         m.arm(at("glide"));
         let saved = m.saved();
-        assert_eq!(saved, Saved(vec![(at("cutoff"), cc(0, 74))]));
+        assert_eq!(saved, Saved(vec![(at("cutoff"), cc(0, 74).into())]));
         let text = serde_json::to_string(&saved).expect("JSON");
         assert!(!text.contains("glide"), "{text}");
-        m.load(&Saved(vec![(at("emphasis"), cc(2, 3))]));
+        m.load(&Saved(vec![(at("emphasis"), cc(2, 3).into())]));
         assert_eq!(m.assignment(at("cutoff")), None);
         assert_eq!(m.assignment(at("emphasis")), Some(cc(2, 3)));
         m.load(&Saved::default());

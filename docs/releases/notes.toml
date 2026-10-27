@@ -106,6 +106,7 @@ features = [
   "Standalone: SETTINGS > AGENTS > ALLOW lets an AI agent play and set up the CA-72 through MCP, on this computer only.",
   "Standalone: SETTINGS > AGENTS copies the setup for Claude Code or another MCP app to your clipboard.",
   "The Left and Right arrow keys, or MIDI pads you assign, choose the previous and next preset.",
+  "Standalone: press MIDI, click a control, then move a knob or press a key on your controller to map it.",
   "Settings > MOD WHEEL SOURCE chooses the CC or aftertouch that moves the MOD wheel.",
   "Command-click (Ctrl-click on Windows and Linux) a knob to type an exact value.",
   "Skin packs: the editor's looks are now packs in one open format.",
