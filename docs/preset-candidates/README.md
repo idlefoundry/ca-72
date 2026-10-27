@@ -1,25 +1,26 @@
-# Preset candidates for 0.3
+# The 0.3 presets (were candidates)
 
-Seventeen presets proposed for the factory set: none is in the plug-in yet. Two aims, the
-owner's (2026-10-26):
+**Shipped in 0.3.0** (decisions.md R-PRESETS-0.3.0): the seventeen presets proposed here, and the
+four LFO LOOP presets, are factory presets, forty in all, at the end of
+`crates/ca72-plugin/sounds/presets.toml`. Two aims, the owner's (2026-10-26):
 
 1. **Sounds the 0.2.8 set leaves out.** Its nineteen are five basses, two horn leads, a brass
    section, a flute, a xylophone, bowed strings, a five-piece drum kit, a riser, a pad and a
-   gliding unison. Nothing plays as an organ or keys, a chord stab, a bell, an acid or sub bass,
-   a tom, a zap or an ambient texture, and nothing is rhythmic.
-2. **The 0.3 features in use.** No factory preset sets the arpeggiator, an LFO, a macro, a
-   CONTINUOUS waveform or its MOD, a timed oscillator, or pressure and timbre.
+   gliding unison. Nothing played as an organ or keys, a chord stab, a bell, an acid or sub bass,
+   a tom, a zap or an ambient texture, and nothing was rhythmic.
+2. **The 0.3 features in use.** No factory preset set the arpeggiator, an LFO, a macro, velocity,
+   a CONTINUOUS waveform or its MOD, a timed oscillator, or pressure and timbre.
 
 | Preset | Kind | What it shows |
 |---|---|---|
 | Acid Squelch | bass | the acid bass; NOTE PRIORITY LAST and glide; macros SQUELCH, DECAY |
 | Tonewheel Drift | organ, POLY | three LFOs as a rotating speaker; macro ROTOR moving the LFOs' RATEs; PERC |
-| Glass Bell | bell, POLY | OSCILLATOR MODULATION as FM from oscillator 3 at 2'; macro CLANG |
+| Glass Bell | bell, POLY | OSCILLATOR MODULATION as FM from oscillator 3 at 2'; velocity on CUTOFF; macro CLANG |
 | Night Surf | ambient FX | four slow LFOs on the filter, level, emphasis and width of pink noise |
 | Ray Gun | zap FX | an LFO in ENV mode as a pitch envelope (the panel has none); macro SWEEP on its RATE |
 | Pitch Tom | drum | the first tom: the same pitch envelope, gentler |
 | Deep Boom | sub bass | pitch drop, DRIVE and glide; macro GROWL on DRIVE |
-| Club Stab | chord stab, POLY | macros OPEN and WIDE |
+| Club Stab | chord stab, POLY | velocity on CUTOFF; macros OPEN and WIDE |
 | Octave Runner | arp bass | ARP UP, two octaves, sixteenths; a timed LFO over two bars; macro BITE |
 | Random Glass | arp, HOLD | ARP RANDOM, three octaves, triplets, HOLD; a timed LFO on a CONTINUOUS pulse's width |
 | Swing Keys | arp keys, POLY | ARP UP/DOWN with SWING; tremolo LFO; macro TINE |
@@ -29,77 +30,82 @@ owner's (2026-10-26):
 | Pressure Solo | lead | PRESSURE to the filter, TIMBRE to the mod wheel; delayed vibrato by RISE |
 | Morph Bloom | pad, POLY | per-voice LFOs (MONO off) on CONTINUOUS shapes; four named macros |
 | Bubble Computer | FX | four timed LFOs, one moving another's LEVEL; SHARP edges |
+| LFO LOOP Coupled Rates | pad, POLY | two LFOs setting each other's RATE |
+| LFO LOOP Phase Chase | lead | two LFOs pushing each other's PHASE |
+| LFO LOOP Level Pump | pad, POLY | an LFO fading another's LEVEL, which dents its own |
+| LFO LOOP Self Rate | lead | an LFO on its own RATE |
 
 Every macro starts at 0 (Tempo Wobble's WOB 8 at 80), so each sounds as described before a
-macro is touched.
+macro is touched. Changed on the way in: Club Stab and Glass Bell brighten with velocity
+(R-VELOCITY arrived the same day); Gated Chords' filter sits lower (CUTOFF -5, EMPHASIS 3.5,
+AMOUNT OF CONTOUR 1, the mod wheel at 0.8), as at -2.5 the gate did not close (1.4 dB between
+its steps, the same as with oscillator 3 off; 24 dB now); "pluck" became the factory's
+"plucked"; the LFO LOOP presets have tags of their own in place of "LFO Loops".
 
 ## The files
 
-- `candidates.toml`: all seventeen in the factory file's format, ready to move into
-  `crates/ca72-plugin/sounds/presets.toml`.
-- `load/`: each as a preset file of its own. To play them, copy them into the CA-72's presets
-  folder (on a Mac `~/Library/Application Support/Idle Foundry/CA-72/presets`) and they appear
-  under MINE.
+- `scripts/presets_0_3.py` makes all twenty-one, every panel value named, and writes them into
+  `presets.toml` after its marker line (`# ---- 0.3.0's presets`); edit them there, not in the
+  file. It keeps the AUTO GAIN curves already in the file.
+- `scripts/presets_0_3_levels.json`: their MAIN OUTPUT VOLUME and LEVEL, written by
+  `scripts/level_presets.py`.
+- `crates/ca72-plugin/tests/factory_curves.rs` writes every preset's curves
+  (`CA72_WRITE_CURVES=<presets.toml>`, its ignored test).
 
-Both are generated from one script; the levels in them come from the measurement below.
+The candidates' own files (`candidates.toml`, `load/`, `levels.json`), the candidates' test and
+`docs/lfo-loops/presets` are gone: the factory file holds them now.
 
 ## Checked, and how
 
-`crates/ca72-plugin/tests/preset_candidates.rs` plays each through the plug-in's own `process`
-as a host renders offline, the transport at 120 BPM (the arpeggiator and the timed LFOs follow
-it), the phrase chosen by its tags as `preset_levels.rs` chooses:
+The factory measurements play every preset as the plug-in loads it: `tests/common`'s
+`controls_of` loads it into the plug-in's own parameters as the preset drawer does (values,
+defaults, what the LFOs, macros and velocity move, the macros' names) and takes the plug-in's
+own `Ca72Params::controls`; `tests/common/host.rs` plays it through `process` as a host renders
+offline, the transport at 120 BPM, with the preset's AUTO GAIN curve in force.
 
-- by `cargo test`: every value names a parameter, every assignment a source and a target; each
-  sounds, finite, not silent, not clipped;
-- by hand (`-- --ignored --nocapture`): the loudness (momentary maximum, the factory set's
-  -18 LUFS), the peak, and the first note's pitch against its key in cents where it has one;
-  `CA72_CANDIDATES_OUT=<dir>` writes each render as a WAV at the level it plays, and Pressure
-  Solo's again with a pressure swell.
+- `tests/factory_presets.rs` (by `cargo test`): every value names a parameter, every assignment a
+  source and a target; each preset using 0.3's features sounds, finite, not silent, not clipped;
+  each that keeps time (the arpeggiator, a timed oscillator or LFO) plays in the standalone at
+  its TEMPO, 120, as at a host's 120, and at a host's 90 otherwise, as the standalone at 90.
+  By hand, each held note's pitch against its key.
+- `tests/preset_levels.rs` (by hand): the loudness at LO, HI and ULTRA; `scripts/level_presets.py`
+  levels from it.
+- `tests/lfo_loops.rs`: the LFO LOOP presets move an LFO's own knob, and sound.
 
-What the measurement cannot say is how they sound: nobody has listened to them yet.
+### The levels (2026-10-27, the Linux desktop, on `int/calibration`)
 
-### The results (2026-10-26, the Mac)
+Momentary maximum on each preset's phrase, LUFS. Each new preset is levelled to -18 midway
+between LO and HI; every preset is within -18 ± 1.5 at LO, HI and ULTRA but Feedback Funk at
+ULTRA (-20.3; its ULTRA reads 3.5 dB under its HI). One seed and the phrase from the first
+sample, as the factory set was levelled: a render repeats to the bit, where a new instance's
+own parts and phases moved a reading by up to a decibel.
 
-The harness agrees with the factory set's own levelling: measured this way, the nineteen
-factory presets read -18 ± 1.5 LUFS (Split Snare -20.9) and their held notes' pitch is within
-12 cents of their keys. Each candidate is levelled to -18 LUFS between its LO and HI readings,
-MAIN OUTPUT VOLUME bringing a loud one down and LEVEL a quiet one up (VOLUME at 10), the
-factory set's rule:
-
-| Preset | LO | HI | Pitch (cents) |
+| Preset | LO | HI | ULTRA |
 |---|---|---|---|
-| Acid Squelch | -18.3 | -17.7 | -6 |
-| Tonewheel Drift | -16.9 | -16.9 | 0 |
-| Glass Bell | -17.8 | -18.5 | +6 (TUNE -0.1; +13 without the trim) |
-| Night Surf | -19.5 | -18.3 | |
-| Ray Gun | -18.3 | -17.7 | |
-| Pitch Tom | -18.2 | -17.8 | +1 |
-| Deep Boom | -19.1 | -16.8 | -3 |
-| Club Stab | -18.0 | -18.3 | +2 |
-| Octave Runner | -18.5 | -18.0 | |
-| Random Glass | -18.4 | -17.7 | +1 |
-| Swing Keys | -18.0 | -18.0 | +6 |
-| Tempo Wobble | -16.5 | -17.0 | -5 (WOB 8 at 0) |
-| Pulse Strings | -17.8 | -18.1 | -6 |
-| Gated Chords | -18.1 | -18.2 | +7 |
-| Pressure Solo | -18.2 | -18.3 | +8 |
-| Morph Bloom | -16.1 | -17.6 | -1 |
-| Bubble Computer | -17.7 | -18.3 | |
+| Acid Squelch | -18.28 | -17.72 | -17.72 |
+| Tonewheel Drift | -17.85 | -18.13 | -18.10 |
+| Glass Bell | -17.91 | -17.96 | -18.06 |
+| Night Surf | -18.81 | -17.18 | -16.98 |
+| Ray Gun | -18.30 | -17.70 | -17.69 |
+| Pitch Tom | -18.32 | -17.83 | -17.84 |
+| Deep Boom | -18.20 | -17.79 | -17.79 |
+| Club Stab | -18.07 | -17.93 | -17.86 |
+| Octave Runner | -18.10 | -17.90 | -17.92 |
+| Random Glass | -18.19 | -17.75 | -17.76 |
+| Swing Keys | -18.06 | -18.04 | -18.04 |
+| Tempo Wobble | -18.16 | -17.84 | -17.85 |
+| Pulse Strings | -18.10 | -17.90 | -17.89 |
+| Gated Chords | -18.77 | -17.24 | -17.20 |
+| Pressure Solo | -18.23 | -17.76 | -17.76 |
+| Morph Bloom | -18.03 | -17.96 | -17.94 |
+| Bubble Computer | -17.72 | -18.42 | -18.41 |
+| LFO LOOP Coupled Rates | -17.87 | -18.13 | -18.13 |
+| LFO LOOP Phase Chase | -18.14 | -17.86 | -17.85 |
+| LFO LOOP Level Pump | -18.21 | -17.89 | -17.91 |
+| LFO LOOP Self Rate | -18.17 | -17.84 | -17.84 |
 
-Loudness is the momentary maximum in LUFS. A run differs from the next by up to about 1 dB, each
-new instance having its own parts (ENTROPY). Pitch is a held middle C (`CA72_ONE_NOTE`, the
-arpeggiator off, the loudness held for the plucked ones), or the phrase's first held note for
-the mono presets. A run's pitch differs from the next by up to about 5 cents. Two things the
-numbers taught:
+Every preset's, before and after, and renders for listening:
+`/mnt/lab/artifacts/ca-72/presets-0.3.0/` (`levels/`, `audition/`).
 
-- Acid Squelch's EMPHASIS stops at 7: at 7.6 the filter rang a few cents flat of the note.
-- Pressure Solo's pressure reaches the filter (a full press doubles the zero-crossing rate
-  mid-note), but loudness barely moves with it: the momentary maximum is the attack's.
-
-## Before any goes into the factory set
-
-`preset_levels.rs`, `factory_curves.rs` and the other factory measurements build the engine's
-controls from a preset by `tests/common/mod.rs`'s `controls_of`, which stops at any parameter
-it does not know: every 0.3 parameter. A factory preset that uses the arpeggiator, an LFO or a
-macro fails them until they play presets through `process`, as this test does. That is the
-change to make with the first candidate kept.
+Nobody had listened to these when they shipped to the release branch: the audition pack is for
+the owner's ears.

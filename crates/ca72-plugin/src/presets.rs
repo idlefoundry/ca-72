@@ -260,7 +260,8 @@ pub(crate) fn targets(p: &Ca72Params, e: &Entry) -> Vec<(&'static str, f32)> {
     targets_for_sound(p, &e.sound)
 }
 
-pub(crate) fn targets_for_sound(
+/// `targets` for a sound (the factory measurements load presets by it: `tests/common`).
+pub fn targets_for_sound(
     p: &Ca72Params,
     sound: &crate::library::Sound,
 ) -> Vec<(&'static str, f32)> {

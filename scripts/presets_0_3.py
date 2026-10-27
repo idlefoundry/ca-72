@@ -1,16 +1,19 @@
-"""The candidate presets for 0.3 (docs/preset-candidates/README.md): writes
-docs/preset-candidates/candidates.toml (the factory file's format) and one preset file of each
-in docs/preset-candidates/load/, every panel value named as the factory presets name them.
-MAIN OUTPUT VOLUME and LEVEL come from docs/preset-candidates/levels.json, as measured by
-crates/ca72-plugin/tests/preset_candidates.rs.
+"""0.3.0's factory presets (decisions.md R-PRESETS-0.3.0; docs/preset-candidates/README.md):
+the seventeen made for 0.3 and the four LFO LOOP presets, written into
+crates/ca72-plugin/sounds/presets.toml after its marker line (everything after it is this
+script's), in the file's format, every panel value named as the factory presets name them. The
+AUTO GAIN curves already there for a preset of the same name are kept (they depend on neither
+VOLUME nor LEVEL; tests/factory_curves.rs writes them). MAIN OUTPUT VOLUME and LEVEL come from
+scripts/presets_0_3_levels.json, which scripts/level_presets.py writes from the measurement
+(tests/preset_levels.rs).
 
-    python3 scripts/preset_candidates.py [repository root] [levels.json]
+    python3 scripts/presets_0_3.py [repository root] [levels.json]
 """
-import json, pathlib, sys
+import json, pathlib, re, sys
 
 ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else pathlib.Path(__file__).parent.parent)
 LEVELS_FILE = (pathlib.Path(sys.argv[2]) if len(sys.argv) > 2
-               else ROOT / "docs/preset-candidates/levels.json")
+               else ROOT / "scripts/presets_0_3_levels.json")
 LEVELS = json.loads(LEVELS_FILE.read_text()) if LEVELS_FILE.exists() else {}
 
 # Indices. Footage: LO 32 16 8 4 2. Wave: tri shark saw square wide narrow.
@@ -64,6 +67,10 @@ def macro(n, to, value=0):
 
 def arp(**kw):
     return {**ARP, **kw}
+
+def velocity(to):
+    """What a note's velocity moves (decisions.md R-VELOCITY), percent of each knob's travel."""
+    return {f"velocity_to_{target}": depth for target, depth in to.items()}
 
 def preset(name, description, tags, *parts, names=(), **values):
     v = dict(PANEL)
@@ -121,10 +128,11 @@ P.append(preset(
     "A triangle at 8' and a quieter one at 4', both frequency-modulated by oscillator 3 at 2' "
     "(OSCILLATOR MODULATION, the mod wheel a third forward) a little over three octaves above, "
     "struck and left to ring: an inharmonic glass bell, POLY's eight voices across the field, "
-    "TUNE a little down to take back the pitch the modulation adds. "
-    "MACRO 1 (CLANG) retunes oscillator 3 for a harsher strike.",
-    ["bell", "metallic", "poly", "macros"],
+    "TUNE a little down to take back the pitch the modulation adds; struck harder, it rings "
+    "brighter (velocity on CUTOFF). MACRO 1 (CLANG) retunes oscillator 3 for a harsher strike.",
+    ["bell", "poly", "velocity", "macros"],
     macro(1, {"osc3_frequency": 12}),
+    velocity({"cutoff": 12}),
     names=["CLANG"],
     osc1_range=F8, osc1_waveform=TRI, osc1_volume=9,
     osc2_on=1, osc2_range=F4, osc2_waveform=TRI, osc2_volume=4,
@@ -204,11 +212,13 @@ P.append(preset(
 P.append(preset(
     "Club Stab",
     "Two sawtooths and a square at 4', a quick filter blip and no sustain, POLY's eight voices "
-    "spread wide: a chord stab for house and garage. MACRO 1 (OPEN) opens the filter and "
-    "lengthens it; MACRO 2 (WIDE) spreads the voices and DOUBLE further.",
-    ["poly", "stab", "keys", "macros"],
+    "spread wide: a chord stab for house and garage, brighter the harder it is struck "
+    "(velocity on CUTOFF). MACRO 1 (OPEN) opens the filter and lengthens it; MACRO 2 (WIDE) "
+    "spreads the voices and DOUBLE further.",
+    ["stab", "keys", "poly", "velocity", "macros"],
     macro(1, {"cutoff": 25, "filter_decay": 20}),
     macro(2, {"spread": 50, "double": 20}),
+    velocity({"cutoff": 15}),
     names=["OPEN", "WIDE"],
     osc1_volume=10, osc2_on=1, osc2_volume=9, osc2_frequency=0.08,
     osc3_on=1, osc3_range=F4, osc3_waveform=SQUARE, osc3_volume=5,
@@ -241,7 +251,7 @@ P.append(preset(
     "a chord, let go, and it goes on. A triangle and a CONTINUOUS pulse whose width a four-bar "
     "LFO turns, through a filter that follows the keys and a one-bar sweep. Glassy, generative "
     "plucks.",
-    ["arp", "hold", "ambient", "pluck", "lfo"],
+    ["arp", "hold", "ambient", "plucked", "lfo"],
     arp(arp_latch=1, arp_direction=ARP_DIR["random"], arp_rate=ARP_RATE["1/16t"],
         arp_octaves=3, arp_gate=25),
     lfo(1, {"cutoff": 12}, timed=1, division=DIV["1bar"]),
@@ -321,8 +331,8 @@ P.append(preset(
     lfo(1, {"cutoff": 12}, timed=1, division=DIV["2bars"]),
     osc1_volume=9, osc2_on=1, osc2_volume=9, osc2_frequency=0.1,
     osc3_range=LO, osc3_waveform=SQUARE, osc3_timed=1, osc3_division=DIV["1/16"],
-    osc3_control=0, filter_mod=1, mod_mix=0, mod_wheel=0.75,
-    cutoff=-2.5, emphasis=3, contour_amount=2, filter_attack=2, filter_decay=6,
+    osc3_control=0, filter_mod=1, mod_mix=0, mod_wheel=0.8,
+    cutoff=-5, emphasis=3.5, contour_amount=1, filter_attack=2, filter_decay=6,
     filter_sustain=6, loudness_attack=1, loudness_decay=5, loudness_sustain=10,
     poly=1, voices=8, entropy=15, spread=55, double=9,
 ))
@@ -371,7 +381,7 @@ P.append(preset(
     "A square into a ringing filter that four timed LFOs step about: sixteenths, chopped by "
     "dotted eighths, against quarter-note triplets, under a two-bar swell of emphasis. A 1970s "
     "film computer thinking aloud, in time with the host. Hold one key.",
-    ["fx", "sequence", "tempo", "lfo"],
+    ["fx", "tempo", "lfo"],
     lfo(1, {"cutoff": 30}, waveform=SQUARE, timed=1, division=DIV["1/16"], edges=True),
     lfo(2, {"lfo1_level": -70}, timed=1, division=DIV["1/8d"]),
     lfo(3, {"cutoff": 15}, waveform=SAW, timed=1, division=DIV["1/4t"]),
@@ -380,6 +390,100 @@ P.append(preset(
     cutoff=-2, emphasis=8.4, contour_amount=0, keyboard_control_2=1,
     loudness_sustain=10,
 ))
+
+
+# ---- The LFO LOOP presets (decisions.md R-LFO's addendum): the LFOs moving each other's knobs
+# and their own. Every value named, as they were made (docs/lfo-loops until 0.3.0).
+
+LOOP_VALUES, LOOP_DESCRIPTIONS = {}, {}
+LOOP_TAGS = {
+    "LFO LOOP Coupled Rates": ["pad", "poly", "lfo", "loop"],
+    "LFO LOOP Phase Chase": ["lead", "lfo", "loop"],
+    "LFO LOOP Level Pump": ["pad", "poly", "lfo", "loop"],
+    "LFO LOOP Self Rate": ["lead", "lfo", "loop"],
+}
+
+LOOP_VALUES['LFO LOOP Coupled Rates'] = {
+    'a440': 0, 'auto_gain': 0, 'contour_amount': 3, 'cutoff': 0.5, 'decay_on': 1, 'double': 0,
+    'doubled': 0, 'drive': 0, 'emphasis': 3, 'entropy': 5, 'ext_on': 0, 'feedback': 0,
+    'filter_attack': 0, 'filter_decay': 4, 'filter_mod': 0, 'filter_mode': 0, 'filter_sustain': 6,
+    'glide': 0, 'glide_on': 0, 'inner': 0, 'keyboard_control_1': 1, 'keyboard_control_2': 0,
+    'level': 7, 'lfo1_level': 100, 'lfo1_mode': 0, 'lfo1_mono': 1, 'lfo1_phase': 0,
+    'lfo1_rate': 1.2, 'lfo1_rise': 0.0, 'lfo1_timed': 0, 'lfo1_to_cutoff': 30,
+    'lfo1_to_lfo2_rate': -30, 'lfo1_waveform': 0, 'lfo2_level': 100, 'lfo2_mode': 0,
+    'lfo2_mono': 1, 'lfo2_phase': 0, 'lfo2_rate': 0.3, 'lfo2_rise': 0.0, 'lfo2_timed': 0,
+    'lfo2_to_lfo1_rate': 35, 'lfo2_to_osc2_frequency': 2, 'lfo2_waveform': 0, 'lock': 0,
+    'loudness_attack': 1, 'loudness_decay': 5, 'loudness_sustain': 10, 'main_output': 1,
+    'mod_mix': 0, 'mod_wheel': 0, 'noise_on': 0, 'note_priority': 0, 'osc1_on': 1,
+    'osc1_range': 3, 'osc1_volume': 6, 'osc1_waveform': 2, 'osc2_frequency': 0.08, 'osc2_on': 1,
+    'osc2_range': 3, 'osc2_volume': 6, 'osc2_waveform': 2, 'osc3_frequency': 0, 'osc3_on': 0,
+    'osc3_range': 3, 'osc3_volume': 6, 'osc3_waveform': 2, 'osc_mod': 0, 'poly': 1,
+    'retrigger': 0, 'spread': 0, 'unison': 0, 'voices': 6, 'volume': 7,
+}
+LOOP_DESCRIPTIONS['LFO LOOP Coupled Rates'] = "Two LFOs each setting the other's speed, a loop: LFO 1 (TRIANGLE, 1.2 Hz) sweeps CUTOFF; LFO 2 (TRIANGLE, 0.3 Hz) pushes LFO 1's RATE up and down (+35 %) while LFO 1 pulls LFO 2's (-30 %), so the sweep speeds up, slows down and never quite repeats. Hold a chord."
+
+LOOP_VALUES['LFO LOOP Phase Chase'] = {
+    'a440': 0, 'auto_gain': 0, 'contour_amount': 3, 'cutoff': 1.5, 'decay_on': 1, 'double': 0,
+    'doubled': 0, 'drive': 0, 'emphasis': 3, 'entropy': 5, 'ext_on': 0, 'feedback': 0,
+    'filter_attack': 0, 'filter_decay': 4, 'filter_mod': 0, 'filter_mode': 0, 'filter_sustain': 6,
+    'glide': 0, 'glide_on': 0, 'inner': 0, 'keyboard_control_1': 1, 'keyboard_control_2': 0,
+    'level': 12, 'lfo1_level': 100, 'lfo1_mode': 0, 'lfo1_mono': 1, 'lfo1_phase': 0,
+    'lfo1_rate': 2.0, 'lfo1_rise': 0.0, 'lfo1_timed': 0, 'lfo1_to_cutoff': 25,
+    'lfo1_to_lfo3_phase': 40, 'lfo1_waveform': 2, 'lfo3_level': 100, 'lfo3_mode': 0,
+    'lfo3_mono': 1, 'lfo3_phase': 90, 'lfo3_rate': 2.0, 'lfo3_rise': 0.0, 'lfo3_timed': 0,
+    'lfo3_to_lfo1_phase': 40, 'lfo3_to_osc1_volume': -25, 'lfo3_waveform': 0, 'lock': 0,
+    'loudness_attack': 1, 'loudness_decay': 5, 'loudness_sustain': 10, 'main_output': 1,
+    'mod_mix': 0, 'mod_wheel': 0, 'noise_on': 0, 'note_priority': 0, 'osc1_on': 1,
+    'osc1_range': 3, 'osc1_volume': 6, 'osc1_waveform': 2, 'osc2_frequency': 0.08, 'osc2_on': 1,
+    'osc2_range': 3, 'osc2_volume': 6, 'osc2_waveform': 2, 'osc3_frequency': 0, 'osc3_on': 0,
+    'osc3_range': 3, 'osc3_volume': 6, 'osc3_waveform': 2, 'osc_mod': 0, 'poly': 0,
+    'retrigger': 0, 'spread': 0, 'unison': 0, 'voices': 4, 'volume': 7,
+}
+LOOP_DESCRIPTIONS['LFO LOOP Phase Chase'] = "Two LFOs at the same speed pushing each other's PHASE, a loop: LFO 1 (SAWTOOTH, 2 Hz) on CUTOFF, LFO 3 (TRIANGLE, 2 Hz) on OSCILLATOR 1's VOLUME, each moving the other's PHASE by +40 %. The rhythm leans, stumbles and catches itself. Hold one note."
+
+LOOP_VALUES['LFO LOOP Level Pump'] = {
+    'a440': 0, 'auto_gain': 0, 'contour_amount': 3, 'cutoff': 0.5, 'decay_on': 1, 'double': 0,
+    'doubled': 0, 'drive': 0, 'emphasis': 3, 'entropy': 5, 'ext_on': 0, 'feedback': 0,
+    'filter_attack': 0, 'filter_decay': 4, 'filter_mod': 0, 'filter_mode': 0, 'filter_sustain': 6,
+    'glide': 0, 'glide_on': 0, 'inner': 0, 'keyboard_control_1': 1, 'keyboard_control_2': 0,
+    'level': -2, 'lfo1_level': 100, 'lfo1_mode': 0, 'lfo1_mono': 1, 'lfo1_phase': 0,
+    'lfo1_rate': 4.0, 'lfo1_rise': 0.0, 'lfo1_timed': 0, 'lfo1_to_cutoff': 15,
+    'lfo1_to_lfo2_level': -20, 'lfo1_to_volume': -45, 'lfo1_waveform': 3, 'lfo2_level': 100,
+    'lfo2_mode': 0, 'lfo2_mono': 1, 'lfo2_phase': 0, 'lfo2_rate': 0.15, 'lfo2_rise': 0.0,
+    'lfo2_timed': 0, 'lfo2_to_lfo1_level': -100, 'lfo2_waveform': 0, 'lock': 0,
+    'loudness_attack': 1, 'loudness_decay': 5, 'loudness_sustain': 10, 'main_output': 1,
+    'mod_mix': 0, 'mod_wheel': 0, 'noise_on': 0, 'note_priority': 0, 'osc1_on': 1,
+    'osc1_range': 3, 'osc1_volume': 6, 'osc1_waveform': 2, 'osc2_frequency': 0.08, 'osc2_on': 1,
+    'osc2_range': 3, 'osc2_volume': 6, 'osc2_waveform': 2, 'osc3_frequency': 0, 'osc3_on': 0,
+    'osc3_range': 3, 'osc3_volume': 6, 'osc3_waveform': 2, 'osc_mod': 0, 'poly': 1,
+    'retrigger': 0, 'spread': 0, 'unison': 0, 'voices': 6, 'volume': 7,
+}
+LOOP_DESCRIPTIONS['LFO LOOP Level Pump'] = "An LFO fading another in and out by its LEVEL: LFO 1 (SQUARE, 4 Hz, SOFT) pumps MAIN OUTPUT VOLUME (-45 %) and CUTOFF; LFO 2 (TRIANGLE, 0.15 Hz) takes LFO 1's LEVEL down (-100 %) and back, and LFO 1 dents LFO 2's own LEVEL (-20 %), a loop. The pumping swells in and dies away. Hold a chord."
+
+LOOP_VALUES['LFO LOOP Self Rate'] = {
+    'a440': 0, 'auto_gain': 0, 'contour_amount': 3, 'cutoff': 1.5, 'decay_on': 1, 'double': 0,
+    'doubled': 0, 'drive': 0, 'emphasis': 3, 'entropy': 5, 'ext_on': 0, 'feedback': 0,
+    'filter_attack': 0, 'filter_decay': 4, 'filter_mod': 0, 'filter_mode': 0, 'filter_sustain': 6,
+    'glide': 0, 'glide_on': 0, 'inner': 0, 'keyboard_control_1': 1, 'keyboard_control_2': 0,
+    'level': 12, 'lfo1_level': 100, 'lfo1_mode': 1, 'lfo1_mono': 1, 'lfo1_phase': 0,
+    'lfo1_rate': 0.8, 'lfo1_rise': 0.0, 'lfo1_timed': 0, 'lfo1_to_cutoff': 35,
+    'lfo1_to_lfo1_rate': 60, 'lfo1_to_osc2_frequency': 3, 'lfo1_waveform': 1, 'lock': 0,
+    'loudness_attack': 1, 'loudness_decay': 5, 'loudness_sustain': 10, 'main_output': 1,
+    'mod_mix': 0, 'mod_wheel': 0, 'noise_on': 0, 'note_priority': 0, 'osc1_on': 1,
+    'osc1_range': 3, 'osc1_volume': 6, 'osc1_waveform': 2, 'osc2_frequency': 0.08, 'osc2_on': 1,
+    'osc2_range': 3, 'osc2_volume': 6, 'osc2_waveform': 2, 'osc3_frequency': 0, 'osc3_on': 0,
+    'osc3_range': 3, 'osc3_volume': 6, 'osc3_waveform': 2, 'osc_mod': 0, 'poly': 0,
+    'retrigger': 1, 'spread': 0, 'unison': 0, 'voices': 4, 'volume': 7,
+}
+LOOP_DESCRIPTIONS['LFO LOOP Self Rate'] = "An LFO on its own RATE: LFO 1 (the shark tooth, 0.8 Hz, RETRIG) on CUTOFF and OSCILLATOR 2's FREQUENCY, and on its own RATE (+60 %), so it races up its rise and drags down its fall; RETRIGGER on, each note starts it again the same. Play notes."
+
+for name, tags in LOOP_TAGS.items():
+    v = dict(LOOP_VALUES[name])
+    if name in LEVELS:
+        v.update(LEVELS[name])
+    P.append(dict(name=name, description=LOOP_DESCRIPTIONS[name], tags=tags, macro_names=[],
+                  values=v))
+
 
 
 def fmt(x):
@@ -391,32 +495,40 @@ def fmt(x):
 def q(s):
     return json.dumps(s, ensure_ascii=False)
 
-HEAD = """# Candidate factory presets for 0.3 (not yet in the plug-in): the sounds the 0.2.8 set leaves
-# out, and the arpeggiator, the LFOs, the macros, the timed and CONTINUOUS oscillators and each
-# note's pressure in use. The factory file's format (`crates/ca72-plugin/sounds/presets.toml`):
-# a candidate the owner keeps moves there as it is. Generated; levelled to about -18 LUFS
-# (momentary maximum) and checked by `crates/ca72-plugin/tests/preset_candidates.rs`.
-format = 1
-version = "0.3.0"
-"""
-
-def table(p, factory):
-    lines = []
-    if factory:
-        lines += ["", "[[preset]]"]
-    else:
-        lines += ["format = 1"]
+def table(p, curves):
+    lines = ["", "[[preset]]"]
     lines += [f"name = {q(p['name'])}", f"description = {q(p['description'])}",
               "tags = [" + ", ".join(q(t) for t in p["tags"]) + "]"]
+    lines += curves
     if p["macro_names"]:
         lines.append("macro_names = [" + ", ".join(q(n) for n in p["macro_names"]) + "]")
-    lines += ["", "[preset.values]" if factory else "[values]"]
+    lines += ["", "[preset.values]"]
     lines += [f"{k} = {fmt(v)}" for k, v in p["values"].items()]
     return "\n".join(lines) + "\n"
 
-out = ROOT / "docs/preset-candidates"
-(out / "load").mkdir(parents=True, exist_ok=True)
-(out / "candidates.toml").write_text(HEAD + "".join(table(p, True) for p in P))
-for p in P:
-    (out / "load" / f"{p['name']}.toml").write_text(table(p, False))
-print(len(P), "presets")
+FILE = ROOT / "crates/ca72-plugin/sounds/presets.toml"
+MARKER = "# ---- 0.3.0's presets"
+HEAD = MARKER + """: generated from here to the end by scripts/presets_0_3.py (edit them there).
+# The seventeen made for 0.3 (sounds the 0.2.8 set left out, and the arpeggiator, the LFOs, the
+# macros, velocity, the timed and CONTINUOUS oscillators and pressure in use), then the four LFO
+# LOOP presets (the LFOs moving each other's knobs and their own). Levelled as the rest, -18 LUFS
+# midway between LO and HI (scripts/level_presets.py; decisions.md R-PRESETS-0.3.0).
+"""
+
+text = FILE.read_text()
+at = text.find("\n" + MARKER)
+before, after = (text, "") if at < 0 else (text[:at + 1], text[at + 1:])
+# The curves already measured for each, by name.
+curves, name = {}, None
+for line in after.splitlines():
+    if line.startswith("name = "):
+        name = json.loads(line[len("name = "):])
+    elif line.startswith("drive_curve") and name:
+        curves.setdefault(name, []).append(line)
+names = [p["name"] for p in P]
+assert len(set(n.lower() for n in names)) == len(names), "a name twice"
+taken = set(n.lower() for n in re.findall(r'^name = "(.*)"$', before, re.M))
+assert not taken & set(n.lower() for n in names), "a factory preset's name taken"
+FILE.write_text(before.rstrip("\n") + "\n\n" + HEAD
+                + "".join(table(p, curves.get(p["name"], [])) for p in P))
+print(len(P), "presets written into", FILE.relative_to(ROOT))

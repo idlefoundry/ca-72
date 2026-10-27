@@ -1143,7 +1143,7 @@ mod tests {
     #[test]
     fn the_factory_file_is_read_whole() {
         let f = factory();
-        assert_eq!(f.len(), 19);
+        assert_eq!(f.len(), 40);
         assert_eq!(f[0].name, "Felt Bass");
         assert!(f.iter().all(|s| !s.values.is_empty()));
         assert!(
