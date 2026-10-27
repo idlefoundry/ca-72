@@ -16007,20 +16007,33 @@ The merge keeps them all. Each one meets the glide as follows:
 - **The effects' pins** are unchanged: a point at each step. The MPE expression's glide
   (`Expressed`) is its own and untouched.
 
-**Evidence after the merge (Linux desktop, 16 threads, Rust 1.97.1, 2026-10-27; the code at
-3548140):**
-- `preset_render`, the 19 factory presets (none has an LFO or macro assigned), ten voices,
-  four seconds, against references rendered at ee9cec7: HI, LO and ULTRA each the same to the
-  bit. The engine's `nothing_assigned_plays_as_before_to_the_bit` passes.
-- `zipper` (`--features lfo-lab`, HI, all sixteen `LFO TEST` presets): no non-finite or
-  clipped samples. Pulse excess 01 -1.9, 02 -1.7, 03 +7.4, 04 +1.1, 08 -0.2, 12 +8.7,
-  15 +10.2 dB, the glide's figures above to their rounding.
-- CI's commands: `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets
-  --all-features -- -D warnings` pass. `CA72_REQUIRE_NGSPICE=1 cargo test --workspace --features
-  ca72-plugin/standalone-production`: 1201 passed, 1 failed, 98 ignored. The failure was
-  `a_centred_timbre_rests_at_64_and_half_brightness`, a POLY bit-equality test with no LFO,
-  under another workspace test run's load. It passes five times alone, and the ca72-plugin
-  library's 600 pass again on a rerun.
+**Evidence after the merges (omarchy, Linux, 16 threads, Rust 1.97.1, 2026-10-27):**
+- `preset_render` of the nineteen presets that carry no LFO, macro or velocity assignment (ten
+  voices, four seconds), against references rendered at `release-0.3.0`: HI, LO and ULTRA each
+  the same to the bit, against ee9cec7 (the code at 3548140) and against 8409338 (dec2df1). The
+  engine's `nothing_assigned_plays_as_before_to_the_bit` passes.
+- The forty factory presets on 41e1ae0 merged (7bd57a9). Seventeen move a pitch, CUTOFF or VOLUME
+  with an LFO, so their sound changes by design. Seven of them do it on the ticks (an LFO or
+  macro on an LFO's knob). `factory_curves` with its by-hand test measures all forty AUTO GAIN
+  curves afresh and finds each the one it carries, to the bit: the curves don't see the glide.
+  `scripts/level_presets.py --check` finds every preset within -18 ± 1.5 LUFS at LO, HI and
+  ULTRA, except Feedback Funk at ULTRA (-20.29, as R-PRESETS-0.3.0 leaves it). Against the same
+  check at 41e1ae0, the seventeen move by at most 0.06 dB (Bubble Computer, LO -17.72 to -17.66,
+  HI -18.42 to -18.46); the rest by 0.01 dB or less. That is within the script's 0.1 dB, so
+  nothing was levelled again or regenerated. `factory_presets` with its ignored tests and
+  `lfo_loops` pass.
+- `zipper` (`--features lfo-lab`, the sixteen `LFO TEST` presets, dec2df1, after the
+  calibration), HI and LO: no non-finite or clipped samples. The calibration moved the
+  per-sample reference, and with it these figures: 01 +4.8, 03 +4.6, 08 +3.0 dB pulse excess
+  at HI, against 32-step (`CA72_LFO_GLIDE=0`) -0.7, +14.7 and +4.2. The glide still wins
+  clearly at 03 and a little at 08; at 01 it now reads worse, where the grid is marked `?`
+  (the reference depends on block layout) and so not a valid comparison. Not listened to.
+- CI's commands on dec2df1: `cargo fmt --all -- --check`; `cargo clippy --workspace
+  --all-targets --all-features -- -D warnings`; `PATH=$HOME/.local/opt/ngspice-47/bin:$PATH
+  CA72_REQUIRE_NGSPICE=1 cargo test --workspace --features ca72-plugin/standalone-production`:
+  1243 passed, 0 failed, 105 ignored. Earlier runs, under another workspace run's load, twice
+  failed `a_centred_timbre_rests_at_64_and_half_brightness`, a POLY bit-equality test in
+  realtime mode with no LFO. It passed five times alone and in each unloaded run.
 
-Not tried: listening, the standalone with TEMPO moved live, `paced` and `cost` after the merge,
+Not tried: listening, the standalone with TEMPO moved live, `paced` and `cost` after the merges,
 macOS and Windows.
