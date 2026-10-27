@@ -15356,3 +15356,47 @@ more knobs (the mixer's VOLUMEs, EMPHASIS) the same way, each measured.
 
 Not tried: human listening, the Mac's live build, other hosts, sample rates or block sizes, a
 slow CPU.
+
+**Into 0.3.0, 2026-10-27 (`int/lfo-stress`, merged onto `release-0.3.0` at ee9cec7; agent
+decisions, not separately approved):** this branch began before the macros (R-MACROS), the
+LFOs moving LFOs and TEMPO (R-LFO's addendum), and the effects' pins (R-FX-PARAMS). The merge
+keeps them all. Each one meets the glide as follows:
+- **On the ticks** (`Lfos::cross`: a source on an LFO's own knob or on TEMPO), the generators
+  move by `Bank::cross_to` and `Bank::peek`, not `step` and `advance`, so `Bank::ahead` would
+  miss the ticks' moves. There the glide's end, and its halfway point for the SHARP-edge hold,
+  are read from a copy of the bank. The copy runs the same ticks and reading to that sample, as
+  the next step will. The copy (`Ahead::bank`) lives in the boxed `Ahead`, so a step allocates
+  nothing and the engine's own size is unchanged (R-HOST-STACK-ENGINE). It costs two copies of
+  the bank a step, only while an LFO moves a pitch or CUTOFF on the ticks. A new test,
+  `the_glide_ends_where_the_next_step_puts_the_knob` (an LFO moving another's RATE, at HI and
+  LO, 60 steps), finds the glide's end within 1e-12 of the next step's CUTOFF. With
+  `Bank::ahead` in its place (a mutation, not kept), it is 3.4e-11 off at the first step.
+- **TEMPO moved** (the standalone's): the plug-in ends a run at each tick and retimes there
+  (`next_tempo_tick`), so a step never spans a change of tempo, and the copy's clock is the
+  step's own.
+- **Macros** are in both of the glide's ends (`Lfos::source_values`). `Lfos::fast` and
+  `Lfos::sharp_on` now count only the LFOs. A macro holds still from one step to the next: its
+  knob's glide reaches the engine through `set` and lands at once, as any knob's does
+  (R-KNOB-GLIDE). So a macro alone on CUTOFF works out no glide, and a macro beside a SHARP LFO
+  on VOLUME leaves SHARP's steps abrupt. A macro being turned still steps every 32 samples, as a
+  turned CUTOFF always has.
+- **The effects' pins** are unchanged: a point at each step. The MPE expression's glide
+  (`Expressed`) is its own and untouched.
+
+**Evidence after the merge (Linux desktop, 16 threads, Rust 1.97.1, 2026-10-27; the code at
+3548140):**
+- `preset_render`, the 19 factory presets (none has an LFO or macro assigned), ten voices,
+  four seconds, against references rendered at ee9cec7: HI, LO and ULTRA each the same to the
+  bit. The engine's `nothing_assigned_plays_as_before_to_the_bit` passes.
+- `zipper` (`--features lfo-lab`, HI, all sixteen `LFO TEST` presets): no non-finite or
+  clipped samples. Pulse excess 01 -1.9, 02 -1.7, 03 +7.4, 04 +1.1, 08 -0.2, 12 +8.7,
+  15 +10.2 dB, the glide's figures above to their rounding.
+- CI's commands: `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets
+  --all-features -- -D warnings` pass. `CA72_REQUIRE_NGSPICE=1 cargo test --workspace --features
+  ca72-plugin/standalone-production`: 1201 passed, 1 failed, 98 ignored. The failure was
+  `a_centred_timbre_rests_at_64_and_half_brightness`, a POLY bit-equality test with no LFO,
+  under another workspace test run's load. It passes five times alone, and the ca72-plugin
+  library's 600 pass again on a rerun.
+
+Not tried: listening, the standalone with TEMPO moved live, `paced` and `cost` after the merge,
+macOS and Windows.
