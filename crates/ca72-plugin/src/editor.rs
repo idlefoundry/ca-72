@@ -7890,7 +7890,7 @@ mod tests {
         e.map_places().into_iter().map(|(k, _)| k).collect()
     }
 
-    /// The standalone's MIDI map mode (decisions.md R-MIDI-MAP): MIDI after PANIC turns it on
+    /// The standalone's MIDI map mode (decisions.md R-MIDI-MAP): MIDI between TYPING and PANIC turns it on
     /// (lit, its tip) and off; every learnable control in view is marked, its controller in small
     /// print; a click chooses a control without operating it (no value, no gesture, no drag, no
     /// wheel), MIDI Learn waits on it, the next controller is its own and the mode stays on;
@@ -7909,10 +7909,14 @@ mod tests {
         page(&mut e, BarTarget::Global);
         assert!(e.scene.marks.is_empty(), "off: no marks");
         assert_eq!(e.scene.tempo_keys.map(|k| k.midi), Some(false));
-        // MIDI after PANIC, the rail's gap between them; its tip.
+        // MIDI between TYPING and PANIC, the rail's gap either side (the owner: "keyboard-midi-
+        // panic"); its tip after PANIC.
+        let (tx, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Typing);
         let (mx, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Midi);
         let (px, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Panic);
-        assert_eq!(mx - px, art::TEMPO_KEY.0 + 14.0);
+        assert_eq!(mx - tx, art::TEMPO_KEY.0 + 14.0);
+        assert_eq!(px - mx, art::TEMPO_KEY.0 + 14.0);
+        assert_eq!(art::TempoKey::LAST, art::TempoKey::Panic);
         let midi = at(
             &e,
             art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Midi),

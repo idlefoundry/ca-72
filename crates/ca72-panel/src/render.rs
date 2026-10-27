@@ -2667,17 +2667,17 @@ mod tests {
         assert_eq!((ty, py, my), (y + h / 2.0, y + h / 2.0, y + h / 2.0));
         let half = art::TEMPO_KEY.0 / 2.0;
         assert_eq!(tx - half - (x + w + art::TEMPO_SURROUND), 14.0);
-        assert_eq!(px - half - (tx + half), 14.0);
-        // (MIDI after PANIC, the same gap: R-MIDI-MAP.)
-        assert_eq!(mx - half - (px + half), 14.0);
+        // (MIDI between TYPING and PANIC, the same gaps: R-MIDI-MAP.)
+        assert_eq!(mx - half - (tx + half), 14.0);
+        assert_eq!(px - half - (mx + half), 14.0);
         let hit = |x, y| art::tempo_key_hit(&official, x, y);
         assert_eq!(hit(tx, ty), Some(art::TempoKey::Typing));
         assert_eq!(hit(px, py), Some(art::TempoKey::Panic));
         assert_eq!(hit(mx, my), Some(art::TempoKey::Midi));
-        assert_eq!(hit((tx + px) / 2.0, ty), None, "the gap between them");
-        assert_eq!(hit((px + mx) / 2.0, py), None, "the gap before MIDI");
+        assert_eq!(hit((tx + mx) / 2.0, ty), None, "the gap before MIDI");
+        assert_eq!(hit((mx + px) / 2.0, py), None, "the gap after it");
         assert_eq!(hit(x + w / 2.0, y + h / 2.0), None, "the screen");
-        assert_eq!(hit(mx + half + 5.0, my), None);
+        assert_eq!(hit(px + half + 5.0, py), None);
         assert!(
             !art::tempo_hit(&official, tx, ty),
             "the screen's own hit stops short"

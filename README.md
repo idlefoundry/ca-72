@@ -640,7 +640,7 @@ to the next one beginning with it), Enter learns it or stops waiting, Delete or 
 removes its controller, Escape stops waiting and then closes the drawer. It is the only way to
 learn **LOCK**, which has no control on the panel.
 
-**The MIDI map mode (standalone).** Press **MIDI** on the walnut, after TYPING and PANIC. Every
+**The MIDI map mode (standalone).** Press **MIDI** on the walnut, between TYPING and PANIC. Every
 control that can be learned is outlined, and each that has a controller shows it in small print
 (`CC 74`; on another channel `CH 2 CC 74`). Click a control: it is chosen, not moved, and waits
 as with MIDI LEARN. Move a knob, fader or button on your controller and it is assigned; the mode

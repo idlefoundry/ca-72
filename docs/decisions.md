@@ -15080,7 +15080,9 @@ height" (https://claude.ai/artifact/WQk1Wbo6Smef7P6tFmBkRy), then "Go with 62 un
 the rail keys)."
 
 **Built:** on the standalone's top walnut, after the TEMPO screen: TYPING as a computer
-keyboard (its case, two rows of six keys, the space bar), then PANIC as the word.
+keyboard (its case, two rows of six keys, the space bar), then PANIC as the word. **Since
+R-MIDI-MAP (2026-10-27):** MIDI between them (TYPING, MIDI, PANIC), the same size and gaps;
+PANIC is the last key, after which the tips go.
 - **Size and place:** both are the rail's keys, 86 by 62 units, centred on the screen's height.
   They sit 14 units after its surround and 14 units apart, the rail's own gap. They follow the
   screen wherever a pack's layout puts the name plate (`art::tempo_key_at`).
@@ -15167,7 +15169,8 @@ On plug-ins: "when it's hosted in a DAW, let's just leave people to use the MIDI
 inside of the preset drawer, but when it's standalone, we will add the button at the top that
 ... basically has the same sort of functionality ... as Bitwig or Ableton."
 
-**Agreed then:** a MIDI word key after PANIC, built as TYPING and PANIC are (R-TEMPO-CORNER),
+**Agreed then:** a MIDI word key after PANIC (since moved: below), built as TYPING and PANIC
+are (R-TEMPO-CORNER),
 the standalone's alone. While it is on, every learnable control in view is marked, each mapped
 one's controller in small print; a click chooses a control instead of operating it and MIDI
 Learn (R34) waits on it; the next controller is its own and the mode stays on, as Ableton's and
@@ -15179,11 +15182,13 @@ MIDI ASSIGNMENTS… and the drawer's list are unchanged, and what can be learned
 **Built** (`crates/ca72-plugin/src/editor/mapping.rs`, a layer over `learning.rs` and
 `learn.rs`):
 - **The key:** MIDI, the word, as PANIC's (`art::TempoKey::Midi`): the rail's charcoal cap
-  (`Part::RailKey` or a pack's `key`) and print, 86 by 62 units, 14 after PANIC, following the
-  name plate where a pack's layout puts it. Lit while the mode is on, lightened under the
-  pointer; its tip, after the keys where TYPING's goes: "MIDI MAP: CLICK A CONTROL, THEN MOVE A
-  CONTROLLER" (TEMPO's tip moves after MIDI too). A plug-in's walnut stays bare: the key is a
-  layer always present, empty in a plug-in, so the panel's fixed layers (`FIXED`) are 13.
+  (`Part::RailKey` or a pack's `key`) and print, 86 by 62 units, between TYPING and PANIC with
+  the rail's 14 units either side (the owner's order, below), following the name plate where a
+  pack's layout puts it (`art::tempo_key_at`, in `TempoKey::ALL`'s order). Lit while the mode is
+  on, lightened under the pointer; its tip after the keys (after PANIC, `TempoKey::LAST`), where
+  TYPING's and TEMPO's go: "MIDI MAP: CLICK A CONTROL, THEN MOVE A CONTROLLER". A plug-in's
+  walnut stays bare: the key is a layer always present, empty in a plug-in, so the panel's
+  fixed layers (`FIXED`) are 13.
 - **The marks** (`learn::MapMark`, `learn::map_mark`): MIDI Learn's own accent (`ACCENT`, the
   strip's and the drawer's amber), no new colour. Each learnable control in view is tinted with
   it (7 %, 16 % with a controller) and outlined (3 units, 75 %), rounded as the learn ring; the
@@ -15258,8 +15263,15 @@ selector by a note. No installed build or standalone was run and no MIDI device 
 behaviour is the editor's tests', the pictures the editor's own frames. The effects' pins' marks
 are not in the pictures (the tests' editor has no effects host).
 
-**Tests:** `midi_map_mode_chooses_a_control_learns_it_and_stays_on` (the key after PANIC, its
-light and tip; what is marked on GLOBAL's page, each mark found where it is drawn; a click on a
+**The order, 2026-10-27** (the owner's review of the mode, approved as built): "one minor
+note: I would change the order of the three buttons up top to be keyboard-midi-panic". So the
+walnut reads the TEMPO screen, TYPING (the keyboard), MIDI, PANIC, with the same sizes and
+14-unit gaps; PANIC, last, is where the tips begin after. Only `TempoKey::ALL`'s order (and
+`LAST`) changed: the hit test, the drawing, a pack's placement and the tips follow it, and the
+three layers stay, always present.
+
+**Tests:** `midi_map_mode_chooses_a_control_learns_it_and_stays_on` (the key between TYPING and
+PANIC, its light and tip; what is marked on GLOBAL's page, each mark found where it is drawn; a click on a
 knob, a switch and a tab choosing without a value, a gesture, a drag or the wheel; a controller
 and a switch's note learned with the mode staying on; the waiting moved; Delete; the LFO page
 and the macros reached by their keys; Escape twice; MIDI off stopping a control waiting; none in

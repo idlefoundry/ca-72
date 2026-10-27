@@ -1,6 +1,6 @@
 //! The standalone's MIDI map mode (decisions.md R-MIDI-MAP; the owner, 2026-10-27: "click on
 //! whatever control they're interested in mapping and then touch a key or wiggle a knob on their
-//! MIDI controller and map it like that"). MIDI, after TYPING and PANIC on the walnut, turns it
+//! MIDI controller and map it like that"). MIDI, between TYPING and PANIC on the walnut, turns it
 //! on and off. While it is on, every learnable control in view is marked, its controller in
 //! small print; a click chooses a control instead of operating it, and MIDI Learn waits on it
 //! (its ring and note: R34); the next controller moved is its own (a switch's, a note played

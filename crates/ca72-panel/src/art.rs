@@ -2326,19 +2326,20 @@ pub fn tempo_screen(text: &str, arrangement: &Arrangement) -> Layer {
 /// The standalone's TYPING and PANIC keys on the walnut after the TEMPO screen (decisions.md
 /// R-TEMPO-CORNER; the owner, 2026-10-26: "typing should be a computer keyboard icon", then "Go
 /// with 62 units (as tall as the rail keys)"): moved up from the KEYS page so that they work from
-/// every page. MIDI after them, the MIDI map mode's (R-MIDI-MAP). The standalone's alone, as the
-/// screen is; a plug-in's wood stays bare.
+/// every page. MIDI, the MIDI map mode's, between them (R-MIDI-MAP; the owner, 2026-10-27:
+/// "keyboard-midi-panic"). The standalone's alone, as the screen is; a plug-in's wood stays bare.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TempoKey {
     Typing,
-    Panic,
     Midi,
+    Panic,
 }
 
 impl TempoKey {
-    pub const ALL: [TempoKey; 3] = [TempoKey::Typing, TempoKey::Panic, TempoKey::Midi];
+    /// In their order after the screen.
+    pub const ALL: [TempoKey; 3] = [TempoKey::Typing, TempoKey::Midi, TempoKey::Panic];
     /// The last, after which a tip beside the keys goes.
-    pub const LAST: TempoKey = TempoKey::Midi;
+    pub const LAST: TempoKey = TempoKey::Panic;
 }
 
 /// A TEMPO key's size: the rail's keys'.
