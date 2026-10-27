@@ -931,3 +931,255 @@ fn an_effects_pin_gets_a_point_every_step() {
         assert_eq!(a.fx_points().n, 0, "nothing moves a pin: no point");
     }
 }
+
+/// Every knob steps every `lfo::STEP` samples at every QUALITY (decisions.md R-LFO-STRESS):
+/// after 32 samples from a SAWTOOTH's start, the knob is where the LFO was at the step's first
+/// sample. A pitch or CUTOFF the voice glides across the step, in what the circuit (HI, ULTRA)
+/// or the light voice (LO) reads after the knob's law, to where the LFO is at the next step's
+/// first sample; any other knob it holds.
+#[test]
+fn a_pitch_or_cutoff_glides_across_each_step() {
+    const HZ: f64 = 40.0;
+    for (potato, ultra, target, glides) in [
+        (false, false, Target::Cutoff, true),
+        (false, true, Target::Cutoff, true),
+        (false, false, Target::Tune, true),
+        (false, false, Target::Osc2Frequency, true),
+        (false, true, Target::Osc3Frequency, true),
+        (true, false, Target::Cutoff, true),
+        (true, false, Target::Tune, true),
+        (false, false, Target::Volume, false),
+        (false, false, Target::Emphasis, false),
+    ] {
+        let c = with(
+            Controls {
+                potato,
+                ultra,
+                ..controls()
+            },
+            0,
+            sharp(Mode::Free, 2.0, HZ),
+            target,
+            0.4,
+            0.5,
+        );
+        let mut e = engine(&c);
+        key(&mut e, 60, true);
+        let (mut l, mut r) = ([0.0f32; lfo::STEP], [0.0f32; lfo::STEP]);
+        e.render(&[], &mut l, &mut r);
+        let at = |i: usize| {
+            let value = lfo::wave(2.0, i as f64 * HZ / RATE);
+            c.lfo
+                .modulated(&c, &c.lfo.source_values(&[value, 0.0, 0.0, 0.0], 1.0))
+        };
+        let (now, next) = (at(0), at(lfo::STEP));
+        let what = format!("{target:?}, potato {potato}, ultra {ultra}");
+        assert_eq!(
+            (e.controls.panel, e.controls.volume),
+            (now.panel, now.volume),
+            "{what}"
+        );
+        let sweep = e.slots[0].play.try_lock().expect("free").sweep;
+        assert_eq!(sweep.on, glides, "{what}");
+        if !glides {
+            continue;
+        }
+        assert_eq!(sweep.at, lfo::STEP as f64, "{what}");
+        let end = |x: f64, step: f64| x + step * lfo::STEP as f64;
+        let close = |a: f64, b: f64| assert!((a - b).abs() < 1e-12, "{what}: {a} against {b}");
+        let (a, b) = (&now.panel, &next.panel);
+        if potato {
+            let ((pa, ca), (pb, cb)) = (ca72::light::swept_laws(a), ca72::light::swept_laws(b));
+            for o in 0..3 {
+                close(end(pa[o] * 100.0, sweep.cents[o]), pb[o] * 100.0);
+            }
+            close(end(ca, sweep.current), cb);
+        } else {
+            let s = sweep.circuit;
+            close(
+                end(cutoff_track(a.cutoff), s.cutoff),
+                cutoff_track(b.cutoff),
+            );
+            close(end(a.tune, s.tune), b.tune);
+            close(end(a.osc[1].freq, s.freq[0]), b.osc[1].freq);
+            close(end(a.osc[2].freq, s.freq[1]), b.osc[2].freq);
+        }
+    }
+}
+
+/// A step a SHARP edge falls in is held, not glided through (decisions.md R-LFO-STRESS): a
+/// SAWTOOTH on CUTOFF holds the steps its cycles restart in, and glides across every other.
+#[test]
+fn a_sharp_edge_holds_its_step() {
+    // (Its edges never on a step's first sample, which rounding could put either side.)
+    const HZ: f64 = 37.0;
+    for potato in [false, true] {
+        let c = with(
+            Controls {
+                potato,
+                ..controls()
+            },
+            0,
+            sharp(Mode::Free, 2.0, HZ),
+            Target::Cutoff,
+            0.4,
+            0.5,
+        );
+        let mut e = engine(&c);
+        key(&mut e, 60, true);
+        let (mut l, mut r) = ([0.0f32; lfo::STEP], [0.0f32; lfo::STEP]);
+        let mut held = 0;
+        for step in 0..240 {
+            e.render(&[], &mut l, &mut r);
+            let at = |i: usize| lfo::wave(2.0, i as f64 * HZ / RATE);
+            let edge = (at(step * lfo::STEP) - at((step + 1) * lfo::STEP)).abs() > 0.5;
+            let on = e.slots[0].play.try_lock().expect("free").sweep.on;
+            assert_eq!(on, !edge, "step {step}, potato {potato}");
+            held += usize::from(edge);
+        }
+        assert!(held >= 5, "{held} edges");
+    }
+}
+
+/// VOLUME moved by an LFO reaches the output a sample at a time across each step, in a straight
+/// line from where the gain was to where the step puts it (decisions.md R-LFO-STRESS): EDGES
+/// SOFT's slew is then smooth, not a few clicks. Moved by SHARP LFOs alone, or not moved (an LFO
+/// on CUTOFF), the gain is the step's at once, as before.
+#[test]
+fn volume_moved_by_an_lfo_ramps_a_sample_at_a_time() {
+    for (target, edges, ramps) in [
+        (Target::Volume, Edges::Soft, true),
+        (Target::Volume, Edges::Sharp, false),
+        (Target::Cutoff, Edges::Soft, false),
+    ] {
+        let s = Settings {
+            edges,
+            ..sharp(Mode::Free, 3.0, 6.0)
+        };
+        let c = with(controls(), 0, s, target, -0.3, 0.4);
+        let mut e = engine(&c);
+        key(&mut e, 60, true);
+        e.fade = 1.0;
+        // (A step first: SOFT's slew has had no time at the first, SHARP's none to take.)
+        e.modulate(lfo::STEP);
+        for _ in 0..lfo::STEP {
+            e.faded(1.0, 1.0);
+        }
+        let was = e.gain;
+        e.modulate(lfo::STEP);
+        let now = e.gain;
+        let out: Vec<f64> = (0..lfo::STEP)
+            .map(|_| f64::from(e.faded(1.0, 1.0).0))
+            .collect();
+        let name = format!("{target:?} {edges:?}");
+        if !ramps {
+            assert!(out.iter().all(|g| *g == f64::from(now as f32)), "{name}");
+            continue;
+        }
+        assert!(now < was, "the SQUARE's first half turns VOLUME down");
+        let per = (now - was) / lfo::STEP as f64;
+        for (k, g) in out.iter().enumerate() {
+            let want = was + per * (k + 1) as f64;
+            assert!((g - want).abs() < 1e-6, "sample {k}: {g} against {want}");
+        }
+        assert_eq!(*out.last().unwrap(), f64::from(now as f32));
+        // (The next step's samples: the gain where the step left it.)
+        assert_eq!(f64::from(e.faded(1.0, 1.0).0), f64::from(now as f32));
+    }
+}
+
+/// The glide's end is where the next step puts the knob, to the last bit or two
+/// (decisions.md R-LFO-STRESS), on either of the LFOs' paths: where one LFO moves another's
+/// RATE (the generators on their ticks, R-LFO's addendum), with a macro on the same knob, whose
+/// part is in both ends, and with the note's velocity on it (each voice's own, R-VELOCITY). A
+/// macro alone on CUTOFF holds still between steps: no glide.
+#[test]
+fn the_glide_ends_where_the_next_step_puts_the_knob() {
+    use crate::lfo::{LfoKnob, Source};
+    for potato in [false, true] {
+        let base = Controls {
+            potato,
+            ..controls()
+        };
+        // LFO 1, a TRIANGLE at 3 Hz on CUTOFF; LFO 2 at 0.5 Hz moving LFO 1's RATE.
+        let tri = |hz| Settings {
+            edges: Edges::Soft,
+            ..sharp(Mode::Free, 0.0, hz)
+        };
+        let mut cross = with(base, 0, tri(3.0), Target::Cutoff, 0.4, 0.5);
+        cross = with(
+            cross,
+            1,
+            tri(0.5),
+            Target::of_lfo(0, LfoKnob::Rate),
+            0.3,
+            0.0,
+        );
+        cross.lfo.base[Target::of_lfo(0, LfoKnob::Rate).index()] = lfo::RATE_RANGE.normalize(3.0);
+        let mut macro_too = cross;
+        macro_too.lfo.to[Source::Macro(0).index()][0] = Some(Assignment {
+            target: Target::Cutoff,
+            depth: 0.2,
+        });
+        macro_too.lfo.macros[0] = 0.5;
+        let mut macro_alone = base;
+        macro_alone.lfo.to[Source::Macro(0).index()][0] =
+            macro_too.lfo.to[Source::Macro(0).index()][0];
+        macro_alone.lfo.base[Target::Cutoff.index()] = 0.5;
+        macro_alone.lfo.macros[0] = 0.5;
+        let mut velocity_too = cross;
+        velocity_too.lfo.to[Source::Velocity.index()][0] = Some(Assignment {
+            target: Target::Cutoff,
+            depth: 0.3,
+        });
+        for (what, c, glides) in [
+            ("an LFO moving an LFO", cross, true),
+            ("and a macro", macro_too, true),
+            ("and the velocity", velocity_too, true),
+            ("a macro alone", macro_alone, false),
+        ] {
+            let what = format!("{what}, potato {potato}");
+            let mut e = engine(&c);
+            e.event(Event::NoteVelocity {
+                key: 60,
+                velocity: 0.3,
+            });
+            key(&mut e, 60, true);
+            let (mut l, mut r) = ([0.0f32; lfo::STEP], [0.0f32; lfo::STEP]);
+            e.render(&[], &mut l, &mut r);
+            assert_eq!(e.lfo_cross().on, glides, "{what}: on the ticks");
+            for step in 0..60 {
+                let (now, sweep) = (
+                    panel(&e, 0),
+                    e.slots[0].play.try_lock().expect("free").sweep,
+                );
+                e.render(&[], &mut l, &mut r);
+                assert_eq!(sweep.on, glides, "{what}, step {step}");
+                if !glides {
+                    continue;
+                }
+                let next = panel(&e, 0);
+                assert_ne!(now.cutoff, next.cutoff, "{what}, step {step}: it moves");
+                let end = |x: f64, d: f64| x + d * lfo::STEP as f64;
+                let close = |a: f64, b: f64| {
+                    assert!(
+                        (a - b).abs() < 1e-12,
+                        "{what}, step {step}: {a} against {b}"
+                    )
+                };
+                if potato {
+                    let (ca, cb) = (
+                        ca72::light::swept_laws(&now).1,
+                        ca72::light::swept_laws(&next).1,
+                    );
+                    close(end(ca, sweep.current), cb);
+                } else {
+                    close(
+                        end(cutoff_track(now.cutoff), sweep.circuit.cutoff),
+                        cutoff_track(next.cutoff),
+                    );
+                }
+            }
+        }
+    }
+}

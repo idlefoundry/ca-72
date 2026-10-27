@@ -1339,6 +1339,9 @@ pub struct Light {
     /// ENTROPY's offsets: each oscillator's cents and the cutoff's octaves.
     detune: [f64; 3],
     cutoff_offset: f64,
+    /// The plug-in's LFOs' glide of CUTOFF's current since their step, A (decisions.md
+    /// R-LFO-STRESS; 0: none).
+    cutoff_swept: f64,
     /// CUTOFF's currents at its table's points ([`node_log2`]), and the control node's log2
     /// pitch at the last control step.
     cutoff_at: [f64; 21],
@@ -1368,6 +1371,54 @@ pub struct Light {
     drive: f32,
     drive_top: f32,
     limit: (f32, f32, f32),
+}
+
+/// Oscillator `o`'s pitch offset from its key on panel `p`, semitones: its RANGE, its
+/// FREQUENCY's law and TUNE's (none for oscillator 3 free of the keys).
+fn pitch_offset(p: &Panel, o: usize) -> f64 {
+    let cubic = |c: [f64; 4], x: f64| c[0] + x * (c[1] + x * (c[2] + x * c[3]));
+    let range = (2.0 - p.osc[o].range.octaves_below_2()) * 12.0;
+    let x = p.osc[o].freq.clamp(0.0, 1.0);
+    let free = o == 2 && !p.osc3_control;
+    let freq = match o {
+        0 => 0.0,
+        1 => {
+            let at = |x: f64| cubic(laws::OSC2_CENTS, x);
+            (at(x) - at(FREQ_CENTRE)) / 100.0
+        }
+        _ if free => {
+            let quintic = |x: f64| {
+                laws::OSC3_FREE_CENTS
+                    .iter()
+                    .rev()
+                    .fold(0.0, |a, c| a * x + c)
+            };
+            (quintic(x) - quintic(FREQ_CENTRE)) / 100.0
+        }
+        _ => {
+            let at = |x: f64| cubic(laws::OSC3_CENTS, x);
+            (at(x) - at(FREQ_CENTRE)) / 100.0
+        }
+    };
+    let tune = if free {
+        0.0
+    } else {
+        p.tune * laws::TUNE_CENTS / 100.0
+    };
+    range + freq + tune
+}
+
+/// What the light voice reads of panel `p`'s pitches and CUTOFF, after their knobs' laws:
+/// each oscillator's offset from its key, semitones, and CUTOFF's current into the filter's
+/// control node, A ([`knob_current`], before the ladder's law with the contour's,
+/// [`node_log2`]). The plug-in's LFOs glide these across their steps (decisions.md
+/// R-LFO-STRESS): the pitches as ENTROPY's offsets ([`Light::set_offsets`]), the current by
+/// [`Light::set_cutoff_swept`].
+pub fn swept_laws(p: &Panel) -> ([f64; 3], f64) {
+    (
+        std::array::from_fn(|o| pitch_offset(p, o)),
+        knob_current(p.cutoff.clamp(0.0, 1.0)),
+    )
 }
 
 impl Light {
@@ -1472,6 +1523,7 @@ impl Light {
             count: 0,
             detune: [0.0; 3],
             cutoff_offset: 0.0,
+            cutoff_swept: 0.0,
             cutoff_at: core::array::from_fn(|i| knob_current(i as f64 / 20.0)),
             node_log2: f64::from(laws::CUTOFF_LOG2[20]),
             timed: [None; 3],
@@ -1603,33 +1655,9 @@ impl Light {
         }
         self.set_for_panel = true;
         self.panel = *p;
-        let cubic = |c: [f64; 4], x: f64| c[0] + x * (c[1] + x * (c[2] + x * c[3]));
         // (MOD moves a CONTINUOUS shape only with the wheel forward: R-CONTINUOUS-WAVE.)
         let depth = light_depth(p.mod_wheel);
         for o in 0..3 {
-            let range = (2.0 - p.osc[o].range.octaves_below_2()) * 12.0;
-            let x = p.osc[o].freq.clamp(0.0, 1.0);
-            let free = o == 2 && !p.osc3_control;
-            let freq = match o {
-                0 => 0.0,
-                1 => {
-                    let at = |x: f64| cubic(laws::OSC2_CENTS, x);
-                    (at(x) - at(FREQ_CENTRE)) / 100.0
-                }
-                _ if free => {
-                    let quintic = |x: f64| {
-                        laws::OSC3_FREE_CENTS
-                            .iter()
-                            .rev()
-                            .fold(0.0, |a, c| a * x + c)
-                    };
-                    (quintic(x) - quintic(FREQ_CENTRE)) / 100.0
-                }
-                _ => {
-                    let at = |x: f64| cubic(laws::OSC3_CENTS, x);
-                    (at(x) - at(FREQ_CENTRE)) / 100.0
-                }
-            };
             let (wave, shape) = light_shape(o, p, depth);
             self.shape_now[o] = p.shape[o]
                 .continuous
@@ -1645,12 +1673,7 @@ impl Light {
                 )),
             };
             (self.osc[o].duty, self.osc[o].level) = rect_law(bias);
-            let tune = if free {
-                0.0
-            } else {
-                p.tune * laws::TUNE_CENTS / 100.0
-            };
-            self.set.offset[o] = range + freq + tune;
+            self.set.offset[o] = pitch_offset(p, o);
             let source = match wave {
                 Waveform::Triangle => laws::SOURCE_OHMS[0],
                 Waveform::Sawtooth | Waveform::ReverseSawtooth => laws::SOURCE_OHMS[1],
@@ -1791,6 +1814,13 @@ impl Light {
     pub fn set_offsets(&mut self, detune: [f64; 3], cutoff: f64) {
         self.detune = detune;
         self.cutoff_offset = cutoff;
+    }
+
+    /// The plug-in's LFOs' glide of CUTOFF for the samples that follow (decisions.md
+    /// R-LFO-STRESS): its current into the control node since their step, A, added to the
+    /// panel's before the ladder's law, as the contour's is. 0: the panel's, to the bit.
+    pub fn set_cutoff_swept(&mut self, current: f64) {
+        self.cutoff_swept = current;
     }
 
     /// The oscillators timed, for the samples that follow (decisions.md R-OSC-TIMED): where
@@ -1980,10 +2010,12 @@ impl Light {
             self.dt_step[o] = (to - self.dt[o]) / CONTROL_EVERY as f32;
             self.inv[o] = 1.0 / to.max(1e-9);
         }
-        self.node_log2 = node_log2(
-            &self.cutoff_at,
-            self.set.cutoff + self.set.contour * self.filter_volts,
-        );
+        let knob = if self.cutoff_swept != 0.0 {
+            self.set.cutoff + self.cutoff_swept
+        } else {
+            self.set.cutoff
+        };
+        self.node_log2 = node_log2(&self.cutoff_at, knob + self.set.contour * self.filter_volts);
         let (g, k) = self.coefficients(0.0);
         self.g_step = (g - self.g) / CONTROL_EVERY as f32;
         self.k = k;

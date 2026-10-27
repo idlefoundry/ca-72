@@ -21,6 +21,10 @@ standalone-production = ["nih_plug/standalone-production", "dep:plugin-kit-stand
 # Third-party effects after the synth, in helper processes (docs/fx-host.md): the standalone
 # application's only, never the plug-ins'.
 fx-host = ["dep:ca72-fx"]
+# A measurement's switch (`tests/lfo_stress.rs`): the LFOs' step set by
+# `engine::set_modulation_step_for_measurement`, a sample for the reference the 32-sample step is
+# measured against (decisions.md R-LFO-STRESS). Never in a plug-in or release build.
+lfo-lab = []
 
 [[bin]]
 name = "ca72-standalone"
