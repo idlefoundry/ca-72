@@ -107,7 +107,7 @@ spread = 0
 name = "Feedback Funk"
 description = "Narrow pulses with a high pulse on top, a squelchy resonant filter and the output fed back into the mixer: a late-night funk bass."
 tags = ["bass", "funk", "feedback"]
-drive_curve = [-2.485436, -4.2883325, -4.634703, -4.496414]
+drive_curve = [-2.5947185, -4.304359, -4.6300845, -4.48794]
 drive_curve_lo = [-2.6334403, -5.174985, -6.093984, -6.1316147]
 
 [preset.values]
