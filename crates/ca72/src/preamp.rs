@@ -402,7 +402,13 @@ impl Preamp {
         let mut c = Circuit::new(NODES, HELD);
         c.set(P10, V_POS);
         c.set(N10, -10.0);
-        for (n, v) in [(TAIL, -0.6), (C27, V_POS - 0.7), (N64, V_POS - 0.7), (AMP, 0.0), (B32, 0.0)] {
+        for (n, v) in [
+            (TAIL, -0.6),
+            (C27, V_POS - 0.7),
+            (N64, V_POS - 0.7),
+            (AMP, 0.0),
+            (B32, 0.0),
+        ] {
             c.set(n, v);
         }
         let r = |c: &mut Circuit, a, b, r: f64| c.add(Part::Resistor { a, b, r });

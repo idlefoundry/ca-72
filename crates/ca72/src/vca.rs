@@ -1295,7 +1295,12 @@ impl OversampledVca {
     /// Step `k` of the sample (from 0) on `x`, the filter's output then, on the bias
     /// [`OversampledVca::start`] gave: the VCA's output at this rate, and the decimator's
     /// output sample when it gives one.
-    pub fn step(&mut self, ramp: &[[f64; VcaDrive::LEN]; 2], k: usize, x: f64) -> (f64, Option<f64>) {
+    pub fn step(
+        &mut self,
+        ramp: &[[f64; VcaDrive::LEN]; 2],
+        k: usize,
+        x: f64,
+    ) -> (f64, Option<f64>) {
         let [from, to] = ramp;
         let t = (k + 1) as f64 / self.factor as f64;
         let dk = VcaDrive::from_array(&std::array::from_fn(|i| from[i] + t * (to[i] - from[i])));

@@ -1851,7 +1851,8 @@ impl Voice {
         self.last_ctl = (ctl.env_f, ctl.env_l);
         let d = self.bias.tick(ctl.env_l, j.loudness, p.quality);
         if loops(&p, self.feedback) {
-            self.audio.tick_looped(&p, j, v_kbd, &ctl, &d, self.feedback)
+            self.audio
+                .tick_looped(&p, j, v_kbd, &ctl, &d, self.feedback)
         } else {
             self.audio.tick(&p, j, v_kbd, &ctl, &d)
         }
