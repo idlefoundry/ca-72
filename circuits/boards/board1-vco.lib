@@ -36,6 +36,7 @@
 *   cint C1, the timing capacitor ("0.01uf polystyrene +-2%")
 .subckt mm_vco sum pos trim ramp buf saw tri rect width vp vn m5 m4
 + params: r11=500 a8=0.5 tc20=3.5e-3 cint=0.01u
++ pr1=43k pr40=43k pr44=390k pr39=100k pr35=100k pr2=910k pr13=6.2k pr22=4.7k
 
 * --- control summer IC1 (741, supplied from GND and -10 V) ----------------------------
 xic1  pos sum 0 vn ic1o ua741       ; IC1: + = pin 3, - = pin 2 (sum), V+ = GND, V- = -10 V
@@ -107,7 +108,7 @@ r34   buf saw 4.3k                  ; R34 4300
 r33   saw 0 4.7k                    ; R33 4700
 
 * --- triangle: Q2 folds the sawtooth, Q1 buffers it --------------------------------------
-q2    tric buf e2t Q2N3392          ; Q2 2N3392
+q2    tric buf e2t Q2N3392_TRI_REFERENCE          ; Q2 2N3392
 r3    vp tric 10.7k                 ; R3 10.7K 1%
 r29   e2t vn 10k                    ; R29 10K 1%
 r14   tric vn 150k                  ; R14 150K
@@ -116,14 +117,14 @@ r28   e1 tri 750                    ; R28 750
 r23   tri vn 8.2k                   ; R23 8200
 
 * --- rectangular: comparator Q11/Q12 on the sawtooth plus the width bias ---------------
-r1    width b11 43k                 ; R1 43K
-r40   buf b11 43k                   ; R40 43K
-r44   b11 vn 390k                   ; R44 390K
+r1    width b11 {pr1}                 ; R1 43K
+r40   buf b11 {pr40}                   ; R40 43K
+r44   b11 vn {pr44}                   ; R44 390K
 q11   c11 b11 0 Q2N4058             ; Q11 2N4058: emitter at GND
-r39   c11 b12 100k                  ; R39 100K
-r35   b12 vn 100k                   ; R35 100K
+r39   c11 b12 {pr39}                  ; R39 100K
+r35   b12 vn {pr35}                   ; R35 100K
 q12   c12 b12 vn Q2N3392            ; Q12 2N3392: emitter at -10 V
-r2    c12 b11 910k                  ; R2 910K: hysteresis
-r13   c12 rect 6.2k                 ; R13 6200
-r22   0 rect 4.7k                   ; R22 4700
+r2    c12 b11 {pr2}                  ; R2 910K: hysteresis
+r13   c12 rect {pr13}                 ; R13 6200
+r22   0 rect {pr22}                   ; R22 4700
 .ends mm_vco

@@ -43,6 +43,16 @@
 + BR=4 RB=10 RE=0.5 RC=1 CJE=4.5p VJE=0.75 MJE=0.33 CJC=3.5p VJC=0.75 MJC=0.33
 + TF=0.4n TR=60n EG=1.11 XTI=3 XTB=1.5)
 
+
+* Triangle shaper Q2-only reference calibration                                      FIT
+* BR is an equivalent inferred device parameter, not a measured transistor value.
+* Selected from reference MIX at84.29Hz, H2--24; no oscillator resistor change.
+* docs/calibration/waveform-fold-reference.md records scope and validation. All other
+* parameters and Q2N3392 above remain the drawing/datasheet/generic baseline.
+.model Q2N3392_TRI_REFERENCE NPN (TNOM=25 IS=5e-15 NF=1 BF=212 ISE=1e-14 NE=1.5 VAF=100 IKF=0.1
++ BR=0.35 RB=10 RE=0.5 RC=1 CJE=4.5p VJE=0.75 MJE=0.33 CJC=3.5p VJC=0.75 MJC=0.33
++ TF=0.4n TR=60n EG=1.11 XTI=3 XTB=1.5)
+
 * ---------------------------------------------------------------------------------------
 * 2N4058 PNP (Fairchild; low noise, high gain)                                         GS
 * Source for the specified points: Central Semiconductor 2N4058-2N4062 data sheet R1

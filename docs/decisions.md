@@ -15157,3 +15157,38 @@ Mac's load was about 44 from other jobs; it passes twice when run alone, and thi
 touches no audio. The editor's parts-against-whole tests (`whole`, `preset`, `rail`) pass
 with and without the standalone, and Clippy passes on the panel crate with all targets.
 No installed build or host was used. The owner has the pictures to review.
+
+## R-WAVEFORM-CALIBRATION. Preserve the comparison build and calibrate fixed sources
+
+**The owner, 2026-10-22.** After the knob-only comparison, preserve the current build and
+focus on matching the waveforms while following the project's circuit-calibration rules.
+This authorizes a separate source-model experiment; it does not replace the prepared app
+or accept a blind match.
+
+The prepared `d9d1204` executables and exact source are independently preserved on the Mac
+and NAS. Original captures, presets, snapshots, earlier fits and blind assignments remain
+associated with that build. Work proceeds in an isolated branch with independent review.
+
+Calibration follows physical source mechanisms through ngspice, the circuit voice and LO.
+Fixed waveform positions remain fixed. No output EQ, added filtering, empirical harmonic
+correction or phase/seed fitting is used. Identified local auditions may use documented
+constant gains and timing alignment. Noise parity and listening acceptance remain separate
+requirements before any final blind trial. Equivalent component inferences are not claims
+about the installed reference parts.
+
+Selection, primary component evidence, original versus candidate renders, preset effects
+and unresolved differences are recorded in [the waveform stage](calibration/waveforms-2026-10-22.md).
+No release, installation, public deployment or merge is performed by this stage.
+
+## R-LO-SHAPE-REFERENCE. Shape MOD follows the calibrated triangle's extrema
+
+The calibrated finite-knee triangle is asymmetric about its period mean. CONTINUOUS MOD's
+existing whole-travel convention remains: oscillator3's triangle with the wheel fully
+forward reaches both ends. LO derives this reference's midpoint and half-swing from its
+current source polynomial at compile time, as the circuit voice measures its current
+triangle table. The source samples and the physical pitch/filter modulation laws are not
+adjusted for this correction. See [the source calibration](calibration/waveform-fold-reference.md).
+
+The original greater-than0.97 travel assertion is unchanged. A regression links the
+normalizer to independently sampled source extrema; the eight continuous-waveform and two
+core allocation tests pass. These are functional checks, not hardware or listening acceptance.

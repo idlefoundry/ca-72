@@ -780,11 +780,17 @@ fn outputs_of(w: Waveform, n: usize) -> [bool; 3] {
     }
 }
 
-/// An oscillator's selected output as a Thevenin source (board 1's output dividers:
+/// Front-panel R030 on drawing1448, retained at its drawn47K value.
+pub const SHARK_SAW_OHMS: f64 = 47e3;
+/// Reference-equivalent R031; the drawing/BOM is10K±5% (Table7-2).
+/// 9.53K is an inferred E96 equivalent, not a measured installed component.
+pub const SHARK_TRIANGLE_OHMS: f64 = 9.53e3;
+
+/// An oscillator's selected output as a Thevenin source (board1's output dividers:
 /// sawtooth R34/R33, triangle R28/R23 behind Q1, rectangle R22 against R13 as Q12
-/// switches), the shark tooth through R030 and R031. For oscillator 3, `rev` is its reverse
-/// sawtooth stage's (the second position, and the sawtooth as R171 loads it).
-fn waveform_source(w: Waveform, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f64) {
+/// switches), the hybrid through front-panel R030/R031. For oscillator3, `rev` is its
+/// reverse-sawtooth stage. Public so the circuit lab can check the actual source model.
+pub fn waveform_source(w: Waveform, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f64) {
     let r_saw = 4300.0 * 4700.0 / 9000.0;
     let saw = match rev {
         Some(r) => (r.saw, r_saw * 33e3 / (r_saw + 33e3)),
@@ -799,7 +805,10 @@ fn waveform_source(w: Waveform, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f6
         (Waveform::Sawtooth, _) => saw,
         (Waveform::SharkTooth | Waveform::ReverseSawtooth, Some(r)) => (r.rev, r.r_rev),
         (Waveform::SharkTooth | Waveform::ReverseSawtooth, None) => {
-            let (ga, gb) = (1.0 / (saw.1 + 47e3), 1.0 / (tri.1 + 10e3));
+            let (ga, gb) = (
+                1.0 / (saw.1 + SHARK_SAW_OHMS),
+                1.0 / (tri.1 + SHARK_TRIANGLE_OHMS),
+            );
             ((saw.0 * ga + tri.0 * gb) / (ga + gb), 1.0 / (ga + gb))
         }
         _ => rect,
@@ -833,8 +842,9 @@ fn shape_outputs(n: usize, at: f64, modulated: bool) -> [bool; 3] {
 /// source exactly (the switch's own position's, [`waveform_source`]); between two, the two
 /// mixed in turn, as a pot between them would (decisions.md R-CONTINUOUS-WAVE); past SQUARE
 /// the rectangle. Oscillator 3's second place is a reverse shark tooth, its triangle and its
-/// reverse sawtooth through the shark tooth's resistors (R031 10K and R030 47K), and its third
-/// its reverse sawtooth: `rev`, which CONTINUOUS runs while it is needed.
+/// reverse sawtooth through the same calibrated front-panel network
+/// ([`SHARK_TRIANGLE_OHMS`] and [`SHARK_SAW_OHMS`]); its third place is the reverse
+/// sawtooth: `rev`, which CONTINUOUS runs while it is needed.
 fn shape_source(n: usize, at: f64, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f64) {
     let place = |k: usize| match shape_place(n, k) {
         Some(Waveform::ReverseSawtooth) => waveform_source(Waveform::ReverseSawtooth, o, rev),
@@ -842,7 +852,10 @@ fn shape_source(n: usize, at: f64, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64,
         None => {
             let tri = waveform_source(Waveform::Triangle, o, None);
             let back = rev.map_or((0.0, 1e6), |r| (r.rev, r.r_rev));
-            let (ga, gb) = (1.0 / (back.1 + 47e3), 1.0 / (tri.1 + 10e3));
+            let (ga, gb) = (
+                1.0 / (back.1 + SHARK_SAW_OHMS),
+                1.0 / (tri.1 + SHARK_TRIANGLE_OHMS),
+            );
             ((back.0 * ga + tri.0 * gb) / (ga + gb), 1.0 / (ga + gb))
         }
     };
@@ -1557,6 +1570,16 @@ impl Voice {
         self.keys.gate
     }
 
+    /// Prepare a comparator component set during lab/setup, never on the audio thread.
+    pub fn prepare_pulse(
+        &mut self,
+        circuit: crate::pulse::PulseCircuit,
+    ) -> Result<(), crate::mna::NoConvergence> {
+        for v in &mut self.audio.front.vcos {
+            v.prepare_pulse(circuit)?;
+        }
+        Ok(())
+    }
     /// The last sample's keyboard voltage, V, the mixer bus's Norton current, A, and the
     /// filter's output, V.
     pub fn probe(&self) -> (f64, f64, f64) {
@@ -2404,6 +2427,7 @@ impl FrontPart {
                 Some(at) => shape_outputs(n, at, shape.modulated),
             });
             self.vcos[n].set_width_moves(shape.continuous);
+            self.vcos[n].use_width_network(true);
             let width = at.map_or(op.waveform.width(), shape_bias);
             let o = match j.timed[n] {
                 // An oscillator timed at LO (the plug-in's: decisions.md R-OSC-TIMED): its
@@ -2596,5 +2620,34 @@ impl BackPart {
         let out = self.vca.signal(y, d);
         self.last_out = out;
         out / 5.0
+    }
+}
+
+#[cfg(test)]
+mod waveform_source_tests {
+    use super::*;
+
+    #[test]
+    fn reverse_hybrid_obeys_the_calibrated_passive_network() {
+        for (tri, back, source_ohms) in [(1.2, -0.9, 3500.0), (-1.4, 1.1, 1200.0)] {
+            let o = VcoOut {
+                tri,
+                ..VcoOut::default()
+            };
+            let rev = RevSawOut {
+                rev: back,
+                r_rev: source_ohms,
+                ..RevSawOut::default()
+            };
+            let (volts, resistance) = shape_source(2, 1.0, &o, Some(&rev));
+            for load in [1000.0, 33000.0, 1e6] {
+                let at_load = volts * load / (load + resistance);
+                let triangle_current =
+                    (tri - at_load) / (750.0 * 8200.0 / 8950.0 + SHARK_TRIANGLE_OHMS);
+                let reverse_current = (back - at_load) / (source_ohms + SHARK_SAW_OHMS);
+                // Kirchhoff's current law at the loaded physical mix node.
+                assert!((triangle_current + reverse_current - at_load / load).abs() < 1e-12);
+            }
+        }
     }
 }

@@ -139,7 +139,8 @@ pub fn against(m: &Measure, reference: &[f64]) -> (f64, f64) {
 }
 
 /// Oscillator 1 of the circuit's model on 2' (key 4 is A-440), tuned the 1973 way at
-/// `rate`; its sawtooth, triangle and rectangle for a width bias (V) over `n` samples after
+/// `rate`, using the production physical width-source network; its sawtooth, triangle
+/// and rectangle for a width bias (V) over `n` samples after
 /// a quarter of a second, and its frequency from its resets.
 pub fn circuit(
     rate: f64,
@@ -148,7 +149,31 @@ pub fn circuit(
     width: f64,
     n: usize,
 ) -> ([Vec<f64>; 3], f64) {
+    circuit_with_source(rate, oversample, key, width, n, true)
+}
+
+/// Explicit legacy ideal-voltage shaper bench. Production uses [`circuit`], including
+/// the active component set and the prepared physical width-source network.
+pub fn circuit_ideal(
+    rate: f64,
+    oversample: usize,
+    key: f64,
+    width: f64,
+    n: usize,
+) -> ([Vec<f64>; 3], f64) {
+    circuit_with_source(rate, oversample, key, width, n, false)
+}
+
+fn circuit_with_source(
+    rate: f64,
+    oversample: usize,
+    key: f64,
+    width: f64,
+    n: usize,
+    physical_width_source: bool,
+) -> ([Vec<f64>; 3], f64) {
     let mut v = ca72::vco::Vco::new(rate, oversample);
+    v.use_width_network(physical_width_source);
     let t = tuned(rate);
     v.expo.r11 = t.r11;
     v.expo.a8 = t.a8;
@@ -210,18 +235,10 @@ fn light_naive(p: f64, wave: Waveform) -> f64 {
     let fall = 1.0 - 2.0 * p;
     let rect = |d: f64| (if p < d { 1.0 } else { -1.0 }) - (2.0 * d - 1.0);
     match wave {
-        Waveform::Triangle => {
-            let b = f64::from(laws::TRIANGLE_BOTTOM);
-            let t = if p < b {
-                1.0 - p * (2.0 / b)
-            } else {
-                (p - b) * (2.0 / (1.0 - b)) - 1.0
-            };
-            f64::from(laws::TRIANGLE) * t
-        }
+        Waveform::Triangle => f64::from(ca72::light::triangle_naive(p as f32)),
         Waveform::SharkTooth => {
-            let q = (p + f64::from(laws::SHARK_AHEAD)).fract();
-            f64::from(laws::SHARK_TRIANGLE) * (4.0 * (q - 0.5).abs() - 1.0)
+            f64::from(laws::SHARK_TRIANGLE_WEIGHT)
+                * f64::from(ca72::light::triangle_naive(p as f32))
                 + f64::from(laws::SHARK_SAWTOOTH) * fall
         }
         Waveform::Sawtooth => f64::from(laws::SAWTOOTH) * fall,
