@@ -72,7 +72,7 @@ offline, the transport at 120 BPM, with the preset's AUTO GAIN curve in force.
   levels from it.
 - `tests/lfo_loops.rs`: the LFO LOOP presets move an LFO's own knob, and sound.
 
-### The levels (2026-10-27, the Linux desktop, on `int/calibration`)
+### The levels (2026-10-27, the Linux desktop, the calibrated sound of `release-0.3.0`)
 
 Momentary maximum on each preset's phrase, LUFS. Each new preset is levelled to -18 midway
 between LO and HI; every preset is within -18 ± 1.5 at LO, HI and ULTRA but Feedback Funk at

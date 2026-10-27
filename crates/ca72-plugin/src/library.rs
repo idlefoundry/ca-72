@@ -1302,7 +1302,11 @@ mod tests {
             names(&lib.search("ROUND deep", &[], false, false)),
             Vec::<&str>::new()
         );
-        assert_eq!(names(&lib.search("deep", &[], false, false)), ["Deep Bass"]);
+        // (Deep Boom, a factory preset since 0.3.0.)
+        assert_eq!(
+            names(&lib.search("deep", &[], false, false)),
+            ["Deep Bass", "Deep Boom"]
+        );
         assert_eq!(
             names(&lib.search("", &["midnight".into()], false, false)),
             ["Deep Bass"]
