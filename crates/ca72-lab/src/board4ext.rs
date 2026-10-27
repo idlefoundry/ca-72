@@ -308,12 +308,14 @@ pub fn preamp_netlist(b: &PreampBench, source: &str, solver: Solver) -> String {
     format!(
         "minimoog board 4 external preamplifier\n.include {md}\n.include {lib}\n\
          .options temp={t} tnom=25 reltol={rt} abstol=1e-12 vntol=1e-7 method={me} maxord=2\n\
-         vp10 p10 0 10\nvn10 n10 0 -10\nvp15 p15 0 15\n{source}\n\
+         vp10 p10 0 {vpos}\nvn10 n10 0 -10\nvp15 p15 0 15\n{source}\n\
          rsrc src in {rs}\n\
          x1 in out amp lamp 0 p10 n10 p15 mm_preamp\n\
          rlamp p15 lamp {rl}\nr46 out 0 33k\n",
         md = dir.join("models/mm-devices.lib").display(),
         lib = dir.join("boards/board4-preamp.lib").display(),
+        // (The hardware reference's positive supply for the preamplifier: board4.md B4-11.)
+        vpos = ca72::preamp::V_POS,
         t = solver.temp,
         rt = solver.reltol,
         me = solver.method,

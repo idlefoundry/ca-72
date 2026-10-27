@@ -147,7 +147,7 @@ impl Default for ShaperParams {
             rect_rise_delay: 2.74e-6,
             rect_fall_delay: 3.75e-6,
             rect_fall_overdrive: 4.94e-3,
-            tri_glitch: -3.8e-7,
+            tri_glitch: -4.02e-7,
             buf_lag: -4.8e-7,
         }
     }
@@ -240,6 +240,8 @@ pub struct Vco {
     pub expo: ExpoCircuit,
     pub core: CoreParams,
     pub shaper: ShaperParams,
+    pulse: std::sync::Arc<crate::pulse::PulseModel>,
+    width_network: bool,
     /// Circuit temperature, C (the converter follows it; the core's constants are 25 C's).
     pub celsius: f64,
     oversample: usize,
@@ -312,6 +314,9 @@ impl Vco {
             expo: ExpoCircuit::default(),
             core: CoreParams::default(),
             shaper: ShaperParams::default(),
+            pulse: crate::pulse::PulseModel::shared(crate::pulse::PulseCircuit::instrument())
+                .expect("prepared pulse comparator"),
+            width_network: false,
             celsius: 25.0,
             oversample,
             dt: 1.0 / (sample_rate * oversample as f64),
@@ -406,6 +411,45 @@ impl Vco {
         self.dec[0].delay() + BLEP_DELAY as f64 / self.oversample as f64
     }
 
+    /// Prepare a physical comparator component set during setup, never in audio processing.
+    pub fn prepare_pulse(
+        &mut self,
+        circuit: crate::pulse::PulseCircuit,
+    ) -> Result<(), crate::mna::NoConvergence> {
+        self.pulse = crate::pulse::PulseModel::shared(circuit)?;
+        Ok(())
+    }
+    /// Use the drawn10K width source (fixed taps or its continuous wiper) instead of
+    /// an ideal bench voltage. All thresholds/delays are already prepared at construction.
+    pub fn use_width_network(&mut self, on: bool) {
+        self.width_network = on;
+    }
+    fn rect_thresholds(&self, width: f64) -> (f64, f64) {
+        if self.width_network {
+            let t = self.pulse.thresholds(width);
+            (t.fall_buf, t.rise_buf)
+        } else {
+            (
+                self.shaper.rect_fall0 + self.shaper.rect_per_width * width,
+                self.shaper.rect_rise0 + self.shaper.rect_per_width * width,
+            )
+        }
+    }
+    fn rect_falling_delay(&self, slope: f64, width: f64) -> f64 {
+        if self.width_network {
+            self.pulse
+                .falling_delay(width, self.shaper.buf_gain * slope)
+        } else {
+            self.shaper.rect_fall_delay
+        }
+    }
+    fn rect_rising_delay(&self, width: f64) -> f64 {
+        if self.width_network {
+            self.pulse.rising_delay(width)
+        } else {
+            self.shaper.rect_rise_delay
+        }
+    }
     /// Which outputs (sawtooth, triangle, rectangle) to correct from now on: the voice's
     /// selected waveform's ([`crate::voice`]); all of them unless set. An output left out is
     /// still made, uncorrected (it aliases): taken up again, its corrections start with the
@@ -620,7 +664,7 @@ impl Vco {
         if self.outputs[1] {
             self.tri.step(triangle(buf1) - triangle(buf0), 1.0);
         }
-        let fall_buf = sh.rect_fall0 + sh.rect_per_width * width;
+        let (fall_buf, _) = self.rect_thresholds(width);
         let low = v <= (fall_buf - sh.buf_offset) / sh.buf_gain;
         if low != self.rect_is_low && self.outputs[2] {
             let (from, to) = if low {
@@ -643,11 +687,15 @@ impl Vco {
     fn tick_net(&mut self, a: f64, b: f64, width: f64) -> VcoOut {
         let c = self.core.c1 + self.core.c_par;
         let sh = self.shaper;
-        let fall_buf = sh.rect_fall0 + sh.rect_per_width * width;
-        let rise_buf = sh.rect_rise0 + sh.rect_per_width * width;
-        let v_fall = (fall_buf - sh.buf_offset) / sh.buf_gain - sh.rect_fall_overdrive;
+        let (fall_buf, rise_buf) = self.rect_thresholds(width);
+        let overdrive = if self.width_network {
+            0.0
+        } else {
+            sh.rect_fall_overdrive
+        };
+        let v_fall = (fall_buf - sh.buf_offset) / sh.buf_gain - overdrive;
         if self.width_moves && width != self.last_width && !self.last_width.is_nan() {
-            self.follow_width(v_fall, rise_buf);
+            self.follow_width(v_fall, rise_buf, width, (a + b * self.v) / c);
         }
         self.last_width = width;
         let mut out = VcoOut::default();
@@ -796,7 +844,8 @@ impl Vco {
                 }
                 6 => {
                     self.v = v_fall;
-                    self.fall_in = Some(sh.rect_fall_delay);
+                    self.fall_in =
+                        Some(self.rect_falling_delay((a + b * self.v) / c, self.last_width));
                 }
                 _ => {}
             }
@@ -811,7 +860,7 @@ impl Vco {
     /// a crossing); the buffer above the new rising threshold while it is low, it rises. The
     /// thresholds otherwise only meet the ramp as it crosses them ([`Vco::step`]) and the
     /// reset ([`Vco::do_reset`]), which a fixed width needs alone.
-    fn follow_width(&mut self, v_fall: f64, rise_buf: f64) {
+    fn follow_width(&mut self, v_fall: f64, rise_buf: f64, width: f64, slope: f64) {
         if self.hold_left > 0.0 {
             return;
         }
@@ -822,9 +871,9 @@ impl Vco {
             && self.reset_in.is_none()
             && self.v <= v_fall
         {
-            self.fall_in = Some(sh.rect_fall_delay);
+            self.fall_in = Some(self.rect_falling_delay(slope, width));
         } else if self.rect_is_low && self.rise_in.is_none() && buf >= rise_buf {
-            self.rise_in = Some(sh.rect_rise_delay);
+            self.rise_in = Some(self.rect_rising_delay(width));
         }
     }
 
@@ -847,7 +896,7 @@ impl Vco {
             self.tri.impulse(sh.tri_glitch / self.dt, frac);
         }
         if self.rect_is_low && buf1 >= rise_buf {
-            self.rise_in = Some(sh.rect_rise_delay);
+            self.rise_in = Some(self.rect_rising_delay(self.last_width));
         }
         // A fall still pending when the ramp resets is overtaken by the reset.
         self.fall_in = None;

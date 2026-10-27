@@ -24,7 +24,8 @@ use crate::vco::Timed;
 use crate::voice::OscPanel;
 use crate::voice::{
     ContourKnobs, FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, Panel, Priority,
-    Waveform, emphasis_r14, ext_taper, glide_r, sustain_track, time_pot, volume_track,
+    Waveform, contour_amount_track, cutoff_track, emphasis_r14, ext_taper, glide_r, sustain_track,
+    time_pot, volume_track,
 };
 
 /// Samples between the control laws' updates.
@@ -61,24 +62,34 @@ pub mod laws {
     /// Each waveform's level against the sawtooth's (the bus's unit: a sawtooth at VOLUME 10
     /// is 1 at its peak), its channel's source resistance (ohm, for the pot's loading) and the
     /// rectangles' duty cycles.
-    pub const TRIANGLE: f32 = 0.857;
+    pub const TRIANGLE: f32 = 0.89530206;
     pub const SAWTOOTH: f32 = 1.0;
     pub const REVERSE_SAWTOOTH: f32 = 1.0;
-    pub const SQUARE: f32 = 1.032;
-    pub const WIDE: f32 = 1.046;
-    pub const NARROW: f32 = 1.059;
-    pub const DUTY: [f32; 3] = [0.484, 0.30, 0.179];
-    /// The triangle's lowest point, as a share of its period from its top (the sawtooth's
-    /// reset): a little before half way, as the circuit's, whose even harmonics stand 37 dB
-    /// (the second), 43 and 46 dB under its fundamental.
-    pub const TRIANGLE_BOTTOM: f32 = 0.4915;
-    /// The shark tooth: the triangle inverted (its peak at the sawtooth's reset, and this
-    /// share of a period ahead of it) and the falling sawtooth, as R030 and R031 mix them (its
-    /// odd harmonics so within 0.5 dB of the circuit's to the ninth).
-    pub const SHARK_TRIANGLE: f32 = 0.704;
-    pub const SHARK_SAWTOOTH: f32 = 0.189;
-    pub const SHARK_AHEAD: f32 = 0.0175;
-    pub const SOURCE_OHMS: [f64; 4] = [687.0, 2246.0, 3500.0, 8790.0];
+    // Reduced from the full voice MIX at220Hz, VOLUME8, with the same physical
+    // comparator component set. Frequency-dependent pulse-edge residuals remain (LO).
+    pub const SQUARE: f32 = 1.056762;
+    pub const WIDE: f32 = 1.056852;
+    pub const NARROW: f32 = 1.056932;
+    pub const DUTY: [f32; 3] = match crate::pulse::ACTIVE_PROFILE {
+        crate::pulse::PulseProfile::Factory => [0.48447033, 0.30409349, 0.18917401],
+        crate::pulse::PulseProfile::ReferenceStandard => [0.48181775, 0.29378574, 0.17421979],
+    };
+    /// Source mixing uses the same physical R030/R031 network as the circuit voice.
+    pub const SHARK_TRIANGLE: f32 = TRIANGLE * SHARK_TRIANGLE_WEIGHT;
+    pub const SHARK_SAWTOOTH: f32 = (1.0 - SHARK_TRIANGLE_WEIGHT) * SAWTOOTH;
+    pub const SHARK_TRIANGLE_WEIGHT: f32 = ((4300.0 * 4700.0 / 9000.0
+        + crate::voice::SHARK_SAW_OHMS)
+        / (4300.0 * 4700.0 / 9000.0
+            + crate::voice::SHARK_SAW_OHMS
+            + 750.0 * 8200.0 / 8950.0
+            + crate::voice::SHARK_TRIANGLE_OHMS)) as f32;
+    pub const SOURCE_OHMS: [f64; 4] = [
+        687.0,
+        2246.0,
+        3500.0,
+        1.0 / (1.0 / (4300.0 * 4700.0 / 9000.0 + crate::voice::SHARK_SAW_OHMS)
+            + 1.0 / (750.0 * 8200.0 / 8950.0 + crate::voice::SHARK_TRIANGLE_OHMS)),
+    ];
     /// Oscillator 3's channel against the others' (its sawtooth through the reverse
     /// sawtooth's stage).
     pub const OSC3_LEVEL: f32 = 0.914;
@@ -158,10 +169,6 @@ pub mod laws {
     /// (36, where the keyboard's voltage is 0).
     pub const KEYBOARD_CONTROL: [f64; 3] = [0.3276, 0.6486, 0.9555];
     pub const TRACKING_FROM: f64 = 36.0;
-    /// AMOUNT OF CONTOUR: octaves a volt of the filter contour above its rest at 10, and the
-    /// share at 0, 2.5, 5, 7.5 and 10.
-    pub const CONTOUR_OCTAVES_PER_VOLT: f64 = 2.10;
-    pub const AMOUNT: [f64; 5] = [0.0, 0.192, 0.487, 0.778, 1.0];
     /// EMPHASIS: the loop's gain (4 rings; times `LOOP_SCALE`) at these positions of the knob
     /// drawn with the generic taper (below), for cutoffs of 60, 87, 228, 912 and 3731 Hz (log2
     /// below; between them interpolated, beyond them held): fitted to the drawn circuit's
@@ -269,10 +276,15 @@ pub mod laws {
         [(1.114_91, 1.007_46, 0.0007), (1.115_32, 1.003_32, 0.0008)];
     pub const DECAY_TIME: [(f64, f64, f64); 2] =
         [(1.168, 1.000_67, 0.0003), (1.167, 1.000_55, 0.0003)];
-    /// DECAY from the peak faster the further it has to fall (the circuit's through its
-    /// diodes): its rate times 1 + this times the volts to go (filter, loudness); its 50, 90
-    /// and 99 % times so within 2 % of the circuit's (one exponential's 4 to 6 % apart).
-    pub const DECAY_FALL: [f64; 2] = [0.05, 0.035];
+    /// DECAY from the peak faster the further it has to fall: its rate times 1 + this times
+    /// the volts to go (filter, loudness). It stood in for the absorbed charge's sag after a
+    /// fast attack (0.05 and 0.035); with that charge modelled (`Contour::absorbed`) the
+    /// circuit's decay is one exponential again, within 0.03 V over 30 s at DECAY 7 to 10.
+    pub const DECAY_FALL: [f64; 2] = [0.0, 0.0];
+    /// The contour's capacitor's own share of [`ATTACK_TIME`], [`DECAY_TIME`] and
+    /// [`RELEASE_TIME`] (the rest its absorbed charge's: `Contour::absorbed`), fitted to the
+    /// circuit's slow attacks and decays (decisions.md R-LO-CONTOUR).
+    pub const ABSORB_TIME_SCALE: [f64; 3] = [0.885, 0.85, 0.8933];
     pub const RELEASE_TIME: [(f64, f64, f64); 2] =
         [(1.119_76, 1.002_92, 0.0003), (1.123_86, 1.004_29, 0.0003)];
     /// SUSTAIN's level, V: a cubic in the pot's track (voice.rs's `sustain_track`; filter,
@@ -540,6 +552,40 @@ fn channel(volume: f64, source: f64, series: f64) -> f32 {
     (law(volume, source) / law(1.0, laws::SOURCE_OHMS[1])) as f32
 }
 
+/// The filter's control node takes currents into its SCALE network (about 2.1K, against
+/// which the panel's 33K to 300K hardly load it): CUTOFF's, from its wiper (the hardware
+/// reference's track, `cutoff_track`) across +-10 V through R55 200K, A.
+fn knob_current(cutoff: f64) -> f64 {
+    let w = cutoff_track(cutoff);
+    (-10.0 + 20.0 * w) / (200e3 + 5e3 * w * (1.0 - w))
+}
+
+/// The filter contour's current into the control node, A a volt of contour: AMOUNT OF
+/// CONTOUR's wiper (the hardware reference's track, [`contour_amount_track`]) through R74
+/// with the pot's own resistance in series ([`crate::voice::contour_input`]).
+fn contour_current(amount: f64) -> f64 {
+    let t = contour_amount_track(amount);
+    t / (crate::vcf::R74 + 5e3 * t * (1.0 - t))
+}
+
+/// The ladder's log2 pitch for a current into the control node: [`laws::CUTOFF_LOG2`] at
+/// CUTOFF's own currents (`at`, [`knob_current`] at each of its points), straight between
+/// them, beyond its ends at their slopes. So the contour moves the filter as CUTOFF would by
+/// the same current, as in the circuit, where the converter's law is not exponential at the
+/// bottom.
+fn node_log2(at: &[f64; 21], current: f64) -> f64 {
+    let c = &laws::CUTOFF_LOG2;
+    let k = match at.iter().position(|&a| a > current) {
+        Some(0) => 0,
+        Some(k) => k - 1,
+        None => 19,
+    }
+    .min(19);
+    let (x0, x1) = (at[k], at[k + 1]);
+    let (y0, y1) = (f64::from(c[k]), f64::from(c[k + 1]));
+    y0 + (y1 - y0) * (current - x0) / (x1 - x0)
+}
+
 /// The keys as the engine plays them: which are held (a bit a MIDI note), lowest first.
 #[derive(Debug, Clone, Copy, Default)]
 struct Held(u128);
@@ -577,6 +623,151 @@ impl Held {
         }
         newest.map(|k| k as i32)
     }
+}
+
+/// LO's triangle source transfer, approximated from the ngspice-derived DC table.
+/// Two finite knees and the broad transistor curvature replace the ideal triangle.
+/// Coefficients are fitted to source voltage, never recorded audio or spectral targets.
+/// `docs/calibration/waveform-fold-reference.md` records the source and approximation.
+mod triangle_source {
+    pub const V0: f32 = 1.5566981;
+    pub const SLOPE: f32 = -7.3142695;
+    pub const CURVATURE: f32 = 0.020533603;
+    pub const MEAN: f32 = -0.19010404;
+    pub const SCALE: f32 = 2.116305;
+    pub const RESET_STEP: f32 = -0.14804143;
+    pub const RESET_SLOPE: f32 = -14.60845;
+    pub const KNEES: [(f32, f32, f32); 2] = [
+        (0.34542942, 0.13680515, 0.6440923),
+        (0.48223457, 0.020794975, 13.92329),
+    ];
+
+    const _: () = {
+        assert!(CURVATURE >= 0.0);
+        let mut i = 0;
+        while i < KNEES.len() {
+            let (_, width, gain) = KNEES[i];
+            assert!(width > 0.0 && gain > 0.0);
+            i += 1;
+        }
+    };
+
+    pub const fn value(p: f32) -> f32 {
+        let mut v = V0 + SLOPE * p + CURVATURE * p * p;
+        let mut i = 0;
+        while i < KNEES.len() {
+            let (at, width, gain) = KNEES[i];
+            let x = p - at;
+            let hinge = if x <= 0.0 {
+                0.0
+            } else if x < width {
+                x * x / (2.0 * width)
+            } else {
+                x - 0.5 * width
+            };
+            v += gain * hinge;
+            i += 1;
+        }
+        (v - MEAN) / SCALE
+    }
+
+    const fn slope(p: f32) -> f32 {
+        let mut v = SLOPE + 2.0 * CURVATURE * p;
+        let mut i = 0;
+        while i < KNEES.len() {
+            let (at, width, gain) = KNEES[i];
+            let x = p - at;
+            v += gain
+                * if x <= 0.0 {
+                    0.0
+                } else if x < width {
+                    x / width
+                } else {
+                    1.0
+                };
+            i += 1;
+        }
+        v
+    }
+
+    /// This convex source transfer's minimum is its zero slope, and its maximum an
+    /// endpoint. Evaluate at compile time: no first-use source scan on the audio thread.
+    const fn extrema() -> (f32, f32) {
+        let (mut lo, mut hi) = (0.0, 1.0);
+        let mut i = 0;
+        while i < 32 {
+            let p = 0.5 * (lo + hi);
+            if slope(p) < 0.0 {
+                lo = p;
+            } else {
+                hi = p;
+            }
+            i += 1;
+        }
+        let a = value(0.0);
+        let b = value(1.0);
+        (value(0.5 * (lo + hi)), if a > b { a } else { b })
+    }
+
+    pub const EXTREMA: (f32, f32) = extrema();
+}
+
+/// The light model's triangle source before band-limiting, for the circuit lab.
+#[doc(hidden)]
+pub fn triangle_naive(p: f32) -> f32 {
+    triangle_source::value(p)
+}
+
+/// CONTINUOUS MOD's reference is the current triangle's midpoint and half-swing, as in
+/// the circuit voice's `mod_reference`. The calibrated fold is not symmetric about its
+/// period mean. Keep the physical pitch/filter modulation laws separate from this share
+/// of the plug-in's shape travel.
+const SHAPE_MOD_REFERENCE: (f32, f32) = {
+    let (lo, hi) = triangle_source::EXTREMA;
+    let gain = laws::MOD_SWING[0] as f32 / laws::TRIANGLE;
+    (
+        0.5 * (lo + hi) * gain + laws::MOD_CENTRE[0] as f32,
+        -0.5 * (hi - lo) * gain,
+    )
+};
+
+#[inline(always)]
+fn shape_mod_swing(swing: f32) -> f64 {
+    f64::from((swing - SHAPE_MOD_REFERENCE.0) / SHAPE_MOD_REFERENCE.1)
+}
+
+/// A finite knee's periodic BLAMP correction, using the circuit voice's same kernel.
+#[inline(always)]
+fn around_fillet(t: &BlepTables, p: f32, at: f32, inv: f32, width: f32) -> f32 {
+    let w = width * inv;
+    if f64::from(w) > crate::resample::MAX_FILLET {
+        return 0.0;
+    }
+    let reach = crate::resample::BLEP_DELAY as f32;
+    let mut q = p - at;
+    if q < 0.0 {
+        q += 1.0;
+    }
+    let mut sum = 0.0;
+    let mut k = 0.0;
+    loop {
+        let x = (q + k) * inv;
+        if x >= reach + w {
+            break;
+        }
+        sum += t.fillet(f64::from(x), f64::from(w)) as f32;
+        k += 1.0;
+    }
+    let mut k = -1.0;
+    loop {
+        let x = (q + k) * inv;
+        if x <= -reach {
+            break;
+        }
+        sum += t.fillet(f64::from(x), f64::from(w)) as f32;
+        k -= 1.0;
+    }
+    sum
 }
 
 /// An oscillator: its phase (0..1) and waveform.
@@ -621,27 +812,18 @@ impl Osc {
             // (Centred: the rectangle's mean taken out, as the coupling does.)
             naive + 2.0 * (step(0.0) - step(d)) - (2.0 * d - 1.0)
         };
-        // (The triangle at its top as the sawtooth resets, as the circuit's is.)
+        // The Q2/Q1 source curve, its finite fold knees and its physical reset step.
         let triangle = || {
-            const B: f32 = laws::TRIANGLE_BOTTOM;
-            let t = if p < B {
-                1.0 - p * (2.0 / B)
-            } else {
-                (p - B) * (2.0 / (1.0 - B)) - 1.0
-            };
-            // Its corners: at the top as the sawtooth resets, at the bottom at B.
-            let g = 2.0 / B + 2.0 / (1.0 - B);
-            laws::TRIANGLE * (t + corner(0.0, -g) + corner(B, g))
+            use triangle_source::*;
+            let mut v = triangle_naive(p)
+                + RESET_STEP / SCALE * step(0.0)
+                + RESET_SLOPE / SCALE * corner(0.0, 1.0);
+            for (at, width, gain) in KNEES {
+                v += gain / SCALE * dt * around_fillet(t, p, at, inv, width);
+            }
+            v
         };
-        // The shark tooth's triangle: its corners, its bottom at q = 1/2, its top at q = 0.
-        let shark_triangle = || {
-            let q = p + laws::SHARK_AHEAD;
-            let q = if q >= 1.0 { q - 1.0 } else { q };
-            4.0 * (q - 0.5).abs() - 1.0
-                + corner(0.5 - laws::SHARK_AHEAD, 8.0)
-                + corner(1.0 - laws::SHARK_AHEAD, -8.0)
-        };
-        let shark = || laws::SHARK_TRIANGLE * shark_triangle() + laws::SHARK_SAWTOOTH * fall();
+        let shark = || laws::SHARK_TRIANGLE_WEIGHT * triangle() + laws::SHARK_SAWTOOTH * fall();
         let sawtooth = || laws::SAWTOOTH * fall();
         let reverse = || -laws::REVERSE_SAWTOOTH * fall();
         let rectangle = || self.level * rect(self.duty);
@@ -663,7 +845,7 @@ impl Osc {
             (0, _) => triangle(),
             (1, false) => shark(),
             (1, true) => {
-                laws::SHARK_TRIANGLE * shark_triangle()
+                laws::SHARK_TRIANGLE_WEIGHT * triangle()
                     + laws::SHARK_SAWTOOTH * (laws::REVERSE_SAWTOOTH / laws::SAWTOOTH) * -fall()
             }
             (2, false) => sawtooth(),
@@ -761,6 +943,13 @@ pub(crate) fn rect_law(bias: f64) -> (f32, f32) {
     let at = |a: f32, b: f32| ((1.0 - t) * f64::from(a) + t * f64::from(b)) as f32;
     (at(d0, d1), at(l0, l1))
 }
+
+/// The mixer's own noise on the bus in the bus's units, a uniform generator's scale at 48 kHz:
+/// the circuit's [`crate::voice::MIXER_HISS`] against its bus's 0.0319 mA RMS for a sawtooth at
+/// VOLUME 10 (both uniform and sawtooth 1/sqrt(3) of their peak RMS).
+const HISS: f64 = crate::voice::MIXER_HISS / 0.0319e-3;
+/// Its generator's seed, apart from the noise's.
+const HISS_SEED: u32 = 0x6869_7373;
 
 /// White noise (xorshift), and pink and red from it (filtered), with the white's band.
 #[derive(Debug, Clone, Copy)]
@@ -888,6 +1077,8 @@ impl Ladder {
 #[derive(Debug, Clone, Copy)]
 struct Contour {
     volts: f64,
+    /// The timing capacitor's absorbed charge: each of its three branches' voltage.
+    absorbed: [f64; 3],
     attacking: bool,
     /// Never yet started (it rests where power-on left it).
     fresh: bool,
@@ -904,8 +1095,11 @@ struct ContourLaw {
     stop: f64,
     sustain: f64,
     released: f64,
-    rest: f64,
     fall: f64,
+    /// The dielectric absorption's branches ([`crate::contour::C_ABSORPTION`] across the
+    /// timing capacitor's 10 uF): each one's share of a sample's settling toward the
+    /// capacitor, and the shares of what moves that the capacitor and the branch take.
+    absorb: [(f64, f64, f64); 3],
 }
 
 impl ContourLaw {
@@ -936,25 +1130,34 @@ impl ContourLaw {
             )
         };
         let per = |tau: f64| 1.0 - (-1.0 / (tau * rate)).exp();
+        // (The laws' times are the capacitor's with its absorbed charge; the branches below
+        // carry that, so the capacitor's own are this much shorter.)
+        let [ka, kd, kr] = laws::ABSORB_TIME_SCALE;
+        let c = crate::contour::FILTER_SECTION.c;
+        let absorb = crate::contour::C_ABSORPTION.map(|(ck, rk)| {
+            let tau = rk * c * ck / (c + ck);
+            (per(tau), ck / (c + ck), c / (c + ck))
+        });
         ContourLaw {
-            attack: per(tau_a),
-            decay: per(time(laws::DECAY_TIME[which], r_decay)),
-            release: per(tau_r),
+            attack: per(tau_a * ka),
+            decay: per(time(laws::DECAY_TIME[which], r_decay) * kd),
+            release: per(tau_r * kr),
             aim,
             stop: peak - (aim - peak) * laws::ATTACK_ESR[which] / tau_a,
             sustain: c0 + s * (c1 + s * (c2 + s * c3)),
             released,
-            rest,
             fall: laws::DECAY_FALL[which],
+            absorb,
         }
     }
 }
 
 impl Contour {
-    /// At rest: as the circuit's from power-on (a release leaves it a little higher).
+    /// At rest: where the circuit's rests with these settings (its DECAY and the switch).
     fn at_rest(law: &ContourLaw) -> Contour {
         Contour {
-            volts: law.rest,
+            volts: law.released,
+            absorbed: [law.released; 3],
             attacking: false,
             fresh: true,
         }
@@ -978,9 +1181,20 @@ impl Contour {
                 let to_go = self.volts - law.sustain;
                 self.volts -= to_go * law.decay * (1.0 + law.fall * to_go);
             }
-        } else if !self.fresh {
+        } else if self.fresh {
+            // (Never started: where the circuit rests with these settings.)
+            self.volts = law.released;
+            self.absorbed = [law.released; 3];
+            return self.volts;
+        } else {
             self.attacking = false;
             self.volts += (law.released - self.volts) * law.release;
+        }
+        // The absorbed charge catching up with the capacitor, or giving itself back.
+        for (u, &(a, to_c, to_u)) in self.absorbed.iter_mut().zip(&law.absorb) {
+            let e = (self.volts - *u) * a;
+            self.volts -= e * to_c;
+            *u += e * to_u;
         }
         self.volts
     }
@@ -997,8 +1211,9 @@ struct Setting {
     gain: [f32; 3],
     noise: f32,
     ext: f32,
-    /// The cutoff's log2 Hz from CUTOFF, the keys' share, AMOUNT OF CONTOUR's octaves a
-    /// volt, EMPHASIS's loop gain at each of [`laws::LOOP_AT_LOG2`]'s cutoffs.
+    /// CUTOFF's current into the control node (A), the keys' share (octaves an octave),
+    /// AMOUNT OF CONTOUR's current a volt of the filter contour (A), EMPHASIS's loop gain at
+    /// each of [`laws::LOOP_AT_LOG2`]'s cutoffs.
     cutoff: f64,
     tracking: f64,
     contour: f64,
@@ -1079,6 +1294,10 @@ pub struct Light {
     inv: [f32; 3],
     noise: Noise,
     noise_c: NoiseLaw,
+    /// The mixer's own noise on the bus (the circuit's [`crate::voice::MIXER_HISS`]): its
+    /// generator's state and its scale at the rate. The filter's self-oscillation starts
+    /// from it; without it, nothing on the bus, the ladder never sings.
+    hiss: (u32, f32),
     /// FEEDBACK's cable at the rate, samples.
     feedback_delay: f32,
     /// The output's high-passes (its droop): the filter's coupling and the one after the VCA,
@@ -1120,6 +1339,10 @@ pub struct Light {
     /// ENTROPY's offsets: each oscillator's cents and the cutoff's octaves.
     detune: [f64; 3],
     cutoff_offset: f64,
+    /// CUTOFF's currents at its table's points ([`node_log2`]), and the control node's log2
+    /// pitch at the last control step.
+    cutoff_at: [f64; 21],
+    node_log2: f64,
     /// Each oscillator timed: where its cycle stands on the host's clock (decisions.md
     /// R-OSC-TIMED), for the samples that follow; its latest reset while timed, in samples as
     /// [`Light::probe_resets`] counts them, and how many there have been.
@@ -1197,6 +1420,7 @@ impl Light {
                 pink_lp: 0.0,
             },
             noise_c: NoiseLaw::new(rate),
+            hiss: (HISS_SEED, (HISS * (rate / 48e3).sqrt()) as f32),
             feedback_delay: (interpolate(&laws::FEEDBACK_AT, &laws::FEEDBACK_DELAY, rate)
                 - filter_delay)
                 .max(1.0) as f32,
@@ -1248,6 +1472,8 @@ impl Light {
             count: 0,
             detune: [0.0; 3],
             cutoff_offset: 0.0,
+            cutoff_at: core::array::from_fn(|i| knob_current(i as f64 / 20.0)),
+            node_log2: f64::from(laws::CUTOFF_LOG2[20]),
             timed: [None; 3],
             timed_resets: [(0.0, 0); 3],
             osc3: 0.0,
@@ -1354,6 +1580,8 @@ impl Light {
     pub fn set_seed(&mut self, seed: u64) {
         let s = (seed ^ (seed >> 32)) as u32;
         self.noise.state = if s == 0 { 0x4D6F_6F67 } else { s };
+        let h = s ^ HISS_SEED;
+        self.hiss.0 = if h == 0 { HISS_SEED } else { h };
     }
 
     /// The last sample's MOD share of CONTINUOUS's travel (onward), 0..1 (decisions.md R-CONTINUOUS-WAVE).
@@ -1485,23 +1713,14 @@ impl Light {
         };
         let t = ext_taper(p.ext_volume);
         self.set.ext_gain = laws::EXT_GAIN * t / (1.0 + laws::EXT_LOAD * t * (1.0 - t));
-        let knob = p.cutoff.clamp(0.0, 1.0) * 20.0;
-        let i = (knob.floor() as usize).min(19);
-        let a = knob - i as f64;
-        let c = &laws::CUTOFF_LOG2;
-        self.set.cutoff = f64::from(c[i]) + (f64::from(c[i + 1]) - f64::from(c[i])) * a;
+        self.set.cutoff = knob_current(p.cutoff.clamp(0.0, 1.0));
         self.set.tracking = match (p.keyboard_control_1, p.keyboard_control_2) {
             (false, false) => 0.0,
             (true, false) => laws::KEYBOARD_CONTROL[0],
             (false, true) => laws::KEYBOARD_CONTROL[1],
             (true, true) => laws::KEYBOARD_CONTROL[2],
         };
-        self.set.contour = laws::CONTOUR_OCTAVES_PER_VOLT
-            * interpolate(
-                &[0.0, 0.25, 0.5, 0.75, 1.0],
-                &laws::AMOUNT,
-                p.contour_amount,
-            );
+        self.set.contour = contour_current(p.contour_amount);
         // (EMPHASIS as the knob drawn with its generic taper would set R14.)
         let emphasis = 1.0 - (1.0 + 80.0 * emphasis_r14(p.emphasis) / 50e3).ln() / 81f64.ln();
         self.set.corner = ((0.744 - emphasis) / 0.044).clamp(0.0, 1.0);
@@ -1761,12 +1980,15 @@ impl Light {
             self.dt_step[o] = (to - self.dt[o]) / CONTROL_EVERY as f32;
             self.inv[o] = 1.0 / to.max(1e-9);
         }
+        self.node_log2 = node_log2(
+            &self.cutoff_at,
+            self.set.cutoff + self.set.contour * self.filter_volts,
+        );
         let (g, k) = self.coefficients(0.0);
         self.g_step = (g - self.g) / CONTROL_EVERY as f32;
         self.k = k;
-        let log2 = self.set.cutoff
+        let log2 = self.node_log2
             + self.set.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0
-            + self.set.contour * (self.filter_volts - self.set.contours[0].rest)
             + self.cutoff_offset;
         // The passband at this cutoff.
         let pass = interpolate(&laws::PASS_AT_LOG2, &laws::PASS_DB, log2);
@@ -1789,10 +2011,8 @@ impl Light {
     #[inline(always)]
     fn coefficients(&self, extra: f64) -> (f32, f32) {
         let s = &self.set;
-        let rise = self.filter_volts - s.contours[0].rest;
-        let log2 = s.cutoff
+        let log2 = self.node_log2
             + s.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0
-            + s.contour * rise
             + self.cutoff_offset
             + extra;
         let corner = interpolate(&laws::CORNER_AT_LOG2, &laws::CORNER, log2) * s.corner
@@ -1928,7 +2148,7 @@ impl Light {
                     (1.0 - mix_k) * o + mix_k * n * (laws::NOISE_SEMITONES_RMS / rms) as f32;
                 let m = crate::voice::ModSwing {
                     depth: f64::from(depth / self.set.depth_full),
-                    swing: f64::from(swing / -(laws::MOD_SWING[0] as f32)),
+                    swing: shape_mod_swing(swing),
                 };
                 self.mod_u = m.share(crate::voice::ModDirection::Onward) as f32;
                 let p = &self.panel;
@@ -2043,7 +2263,16 @@ impl Light {
             self.pre_hp = (a, pre, y);
             pre = y;
         }
-        let bus = gain[0] * w0 + gain[1] * w1 + gain[2] * w2 + noise_gain * noise + ext_bus * pre;
+        let hiss = {
+            let mut x = self.hiss.0;
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            self.hiss.0 = x;
+            (x as i32 as f32) * (self.hiss.1 / 2_147_483_648.0)
+        };
+        let bus =
+            gain[0] * w0 + gain[1] * w1 + gain[2] * w2 + noise_gain * noise + ext_bus * pre + hiss;
         let mut inputs = [0.0; FILTER_OVERSAMPLE];
         self.filter_up.push(f64::from(bus), &mut inputs);
         let mut filtered = 0.0;
@@ -2124,6 +2353,27 @@ pub fn oscillator_alone(rate: f64, hz: f64, wave: Waveform, n: usize) -> Vec<f32
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reverse_hybrid_keeps_the_same_calibrated_network_in_lo() {
+        for dt in [0.003_f32, 0.071_f32] {
+            let mut tri = Osc::new(Waveform::Triangle);
+            let mut saw = Osc::new(Waveform::Sawtooth);
+            let mut hybrid = Osc::new(Waveform::Triangle);
+            hybrid.third = true;
+            hybrid.shape = Some(1.0);
+            for _ in 0..4096 {
+                let triangle = f64::from(tri.tick(dt, 1.0 / dt));
+                let reverse = -f64::from(saw.tick(dt, 1.0 / dt))
+                    * f64::from(laws::REVERSE_SAWTOOTH / laws::SAWTOOTH);
+                let mix = f64::from(hybrid.tick(dt, 1.0 / dt));
+                let current = (triangle - mix)
+                    / (750.0 * 8200.0 / 8950.0 + crate::voice::SHARK_TRIANGLE_OHMS)
+                    + (reverse - mix) / (4300.0 * 4700.0 / 9000.0 + crate::voice::SHARK_SAW_OHMS);
+                assert!(current.abs() < 1e-10, "LO reverse mix KCL {current}");
+            }
+        }
+    }
 
     /// The fast functions follow the true ones closely enough for the model.
     #[test]
@@ -2521,9 +2771,9 @@ mod tests {
     }
 
     /// The contours' times through the reference's laws (voice.rs's `time_pot`), as the
-    /// circuit's: ATTACK 6 takes the loudness contour to its plateau in 0.665 s (the circuit's
-    /// 0.6645), DECAY 6 the filter contour half way down from it in 0.36 to 0.38 s (0.363)
-    /// and nine tenths in 1.27 to 1.33 s (1.304; one exponential through both, 1.25),
+    /// circuit's: ATTACK 6 takes the loudness contour to its plateau in 0.661 s (the circuit's
+    /// 0.666), DECAY 6 the filter contour half way down from it in 0.345 to 0.365 s (0.355)
+    /// and nine tenths in 1.26 to 1.33 s (1.297; with the absorbed charge, R-LO-CONTOUR),
     /// SUSTAIN 5 holds the loudness contour at 1.675 V; and a fast attack stops short of the
     /// plateau, as the circuit's does (ATTACK 0: 4.685 V, against 4.792).
     #[test]
@@ -2563,14 +2813,17 @@ mod tests {
         }
         assert!((peak - 4.685).abs() < 0.01, "ATTACK 0's peak {peak} V");
         assert!(
-            (at - 0.6645).abs() < 0.01,
+            (at - 0.666).abs() < 0.01,
             "ATTACK 6 to its plateau in {at} s"
         );
         let half = half.expect("no decay") - 0.0086;
-        assert!((0.36..0.38).contains(&half), "DECAY 6 half way in {half} s");
+        assert!(
+            (0.345..0.365).contains(&half),
+            "DECAY 6 half way in {half} s"
+        );
         let ninety = ninety.expect("no decay") - 0.0086;
         assert!(
-            (1.27..1.33).contains(&ninety),
+            (1.26..1.33).contains(&ninety),
             "DECAY 6 nine tenths in {ninety} s"
         );
         p.loudness_contour.sustain = 0.5;
@@ -2580,31 +2833,71 @@ mod tests {
         assert!((held - 1.675).abs() < 0.01, "SUSTAIN 5 at {held} V");
     }
 
-    /// The shark tooth's odd harmonics as the circuit's: the fifth 27.6 dB under the
-    /// fundamental (its triangle ahead of the sawtooth's reset; in step, 24.7).
+    /// Shape MOD uses both source extrema, rather than assuming that the peak about
+    /// the period mean is also its negative trough. This is source voltage, not an
+    /// adjustment fitted to the shape-travel test or the hardware recording.
+    #[test]
+    fn shape_mod_uses_the_current_triangles_midpoint_and_half_swing() {
+        let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+        for i in 0..=65_536 {
+            let v = triangle_naive(i as f32 / 65_536.0);
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+        assert!((lo - triangle_source::EXTREMA.0).abs() < 2e-6);
+        assert!((hi - triangle_source::EXTREMA.1).abs() < 2e-6);
+        // The normalization must retain this asymmetry; its midpoint is not its mean.
+        assert!((lo + hi).abs() > 0.05);
+        let line =
+            |v: f32| v / laws::TRIANGLE * laws::MOD_SWING[0] as f32 + laws::MOD_CENTRE[0] as f32;
+        assert!((shape_mod_swing(line(lo)) - 1.0).abs() < 5e-6);
+        assert!((shape_mod_swing(line(hi)) + 1.0).abs() < 5e-6);
+        assert!(shape_mod_swing(line(0.5 * (lo + hi))).abs() < 5e-6);
+    }
+
+    /// The hybrid's fifth harmonic follows the current circuit reference at the original
+    /// measurement panel, within the same 1 dB budget. Measure it here rather than retaining
+    /// the old -27.6 dBc fixture: the Q2 fold and R031 reference calibration changed the
+    /// physical source (docs/calibration/waveform-fold-reference.md).
     #[test]
     fn the_shark_tooth_as_the_circuits() {
-        let mut l = Light::new(48_000.0);
         let mut p = measuring();
         p.osc[0].waveform = Waveform::SharkTooth;
         p.osc[0].volume = 0.2;
+        let mut l = Light::new(48_000.0);
         l.set_panel(&p);
         l.note(33, true);
         run(&mut l, 24_000);
-        let x = run(&mut l, 48_000);
-        let f0 = hz(&x);
-        let amp = |h: f64| {
-            let w = std::f64::consts::TAU * h * f0 / 48_000.0;
-            let (mut re, mut im) = (0.0, 0.0);
-            for (i, y) in x.iter().enumerate() {
-                let window = 0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / x.len() as f64).cos();
-                re += window * y * (w * i as f64).cos();
-                im += window * y * (w * i as f64).sin();
-            }
-            re.hypot(im)
+        let light = run(&mut l, 48_000);
+        // The original potato_reference.rs harness measures Voice at this quality too.
+        p.quality = crate::voice::Quality::Potato;
+        let mut reference = crate::voice::Voice::new(48_000.0, p);
+        reference.note(33, true);
+        for _ in 0..24_000 {
+            reference.tick();
+        }
+        let circuit: Vec<f64> = (0..48_000).map(|_| reference.tick()).collect();
+        let fifth = |x: &[f64]| {
+            let f0 = hz(x);
+            let amp = |h: f64| {
+                let w = std::f64::consts::TAU * h * f0 / 48_000.0;
+                let (mut re, mut im) = (0.0, 0.0);
+                for (i, y) in x.iter().enumerate() {
+                    let window =
+                        0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / x.len() as f64).cos();
+                    re += window * y * (w * i as f64).cos();
+                    im += window * y * (w * i as f64).sin();
+                }
+                re.hypot(im)
+            };
+            20.0 * (amp(5.0) / amp(1.0)).log10()
         };
-        let h5 = 20.0 * (amp(5.0) / amp(1.0)).log10();
-        assert!((h5 + 27.6).abs() < 1.0, "the fifth harmonic at {h5:.1} dB");
+        let light_h5 = fifth(&light);
+        let circuit_h5 = fifth(&circuit);
+        assert!(
+            (light_h5 - circuit_h5).abs() < 1.0,
+            "the fifth harmonic: light {light_h5:.3}, circuit {circuit_h5:.3} dBc"
+        );
     }
 
     /// The passband falls as the circuit's at the lowest cutoffs: a sawtooth at 55 Hz
@@ -2676,6 +2969,31 @@ mod tests {
                 "CUTOFF {cutoff}, EMPHASIS {emphasis}: HI {d:+.2} dB against LO"
             );
         }
+    }
+
+    /// With every source off, the filter at EMPHASIS 10 sings from the mixer's own noise as
+    /// the circuit's does (decisions.md R-LO-HISS): at CUTOFF's centre, near the circuit's
+    /// 1056 Hz and its level, where without the noise it stayed silent.
+    #[test]
+    fn the_filter_sings_alone_from_the_mixers_noise() {
+        let mut l = Light::new(48_000.0);
+        let mut p = measuring();
+        for o in &mut p.osc {
+            o.on = false;
+        }
+        p.cutoff = 0.5;
+        p.emphasis = 1.0;
+        l.set_panel(&p);
+        l.note(45, true);
+        run(&mut l, 48_000);
+        let x = run(&mut l, 48_000);
+        let rms = (x.iter().map(|y| y * y).sum::<f64>() / x.len() as f64).sqrt();
+        assert!(rms > 0.05, "the filter alone: RMS {rms:.2e}");
+        let f = hz(&x);
+        assert!(
+            (f / 1056.0).log2().abs() * 1200.0 < 50.0,
+            "the filter alone at {f:.0} Hz"
+        );
     }
 
     /// NOTE PRIORITY (decisions.md R50) as the circuit's voice has it: LOW the lowest

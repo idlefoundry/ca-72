@@ -9,7 +9,7 @@
 //! ca72-lab waves <range> <key> <out.csv>   two periods of every node, ngspice
 //! ca72-lab render <range> <key> <out.wav> [seconds] [oversample]
 //!                                        the real-time oscillator, tuned the 1973 way
-//! ca72-lab alias [--model circuit|light] [--os N] [--rates R,..] [--keys K,..]
+//! ca72-lab alias [--model circuit|circuit-ideal|light] [--os N] [--rates R,..] [--keys K,..]
 //!                                        the oscillators' aliasing (decisions.md R-BLEP)
 //! ca72-lab osccost [rounds]              one oscillator's time a sample, by outputs used
 //! ca72-lab filteralias [rates]           the voice's aliasing in ULTRA, the filter's own
@@ -332,7 +332,7 @@ fn render(rest: &[String]) -> Res {
 /// series.
 fn alias(rest: &[String]) -> Res {
     use ca72::voice::Waveform;
-    use ca72_lab::alias::{N, against, analyse, circuit, light, light_ideal};
+    use ca72_lab::alias::{N, against, analyse, circuit, circuit_ideal, light, light_ideal};
     let mut model = "circuit".to_owned();
     let mut os = 1usize;
     let mut rates = vec![44_100.0, 48_000.0, 96_000.0];
@@ -359,6 +359,13 @@ fn alias(rest: &[String]) -> Res {
             other => return Err(format!("ca72-lab alias: unknown {other}")),
         }
     }
+    // Both the measured render and its 8x reference must use the same source model.
+    // "circuit" is the production source; "circuit-ideal" retains the old bench.
+    let circuit = if model == "circuit-ideal" {
+        circuit_ideal
+    } else {
+        circuit
+    };
     let name = "built";
     let row = |rate: f64, wave: &str, key: f64, m: &ca72_lab::alias::Measure, r: &[f64]| {
         let (top, worst) = against(m, r);
@@ -381,7 +388,7 @@ fn alias(rest: &[String]) -> Res {
             }
             let f0 = reference[0].0.f0;
             match model.as_str() {
-                "circuit" => {
+                "circuit" | "circuit-ideal" => {
                     for (i, width) in [0.0, -1.5, -2.5].into_iter().enumerate() {
                         let (w, f) = circuit(rate, os, key, width, N);
                         if i == 0 {
