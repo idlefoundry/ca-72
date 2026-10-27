@@ -206,6 +206,10 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("pressure_filter", &p.pressure_filter),
         ("timbre_mod", &p.timbre_mod),
         ("timbre_filter", &p.timbre_filter),
+        // The velocity's CURVE and FLOOR (decisions.md R-VELOCITY): a preset that does not name
+        // them has a straight line from 0.
+        ("velocity_curve", &p.velocity_curve),
+        ("velocity_floor", &p.velocity_floor),
         // The oscillators timed (decisions.md R-OSC-TIMED): a preset that does not name them
         // plays them free.
         ("osc2_timed", &p.osc2_timed),

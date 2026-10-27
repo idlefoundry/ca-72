@@ -342,11 +342,20 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   The source follows any MIDI channel and stays on this computer, outside presets and
   projects. Changing it clears the old MIDI value. All sound off,
   reset all controllers and all notes off (CC 120, 121 and 123) are followed.
+- **Velocity:** how hard each note is struck can move knobs, as an LFO does. Drag a cord from
+  the **VELOCITY** jack under GLIDE and DECAY (shown with the wheels) onto a knob; each voice
+  then takes its own note's velocity, and the meter beside the jack lights to the latest note
+  while velocity moves something. Point at any jack (an LFO's OUT, a macro's, VELOCITY) to see
+  cords to every knob it moves (SETTINGS > HOVER CABLES turns this off). The **EXP** drawer's
+  second row shapes it: **CURVE** (SOFT to HARD), **FLOOR** (the least a soft note gives), a
+  **RESPONSE** screen drawing the curve with the latest note on it, **LAST NOTE** (0 to 127) and
+  **MODULATES**. The on-screen keyboard plays softer near a key's top and harder near its foot.
+  With nothing assigned, velocity changes nothing.
 - **Each note's own expression (MPE):** with an MPE controller, each note's pressure, timbre
   (CC 74, the slide) and its own pitch bend move only that note's voice. CLAP and VST3 note
   expressions (pressure, tuning, brightness) and polyphonic aftertouch are each note's own
   too; ordinary channel pressure and CC 74 move every voice alike. In mono and UNISON the
-  voice takes the expression of the note it plays. The rail's **MPE** key (after ARP; after
+  voice takes the expression of the note it plays. The rail's **EXP** key (after ARP; after
   FX in the standalone) drops a drawer with what they move: **INPUT** reads MPE while each
   note's own expression comes in, CHANNEL while only ordinary channel pressure or CC 74 does,
   and is dark otherwise; **PRESSURE** and **TIMBRE** each have **MODULATION** (-100 to

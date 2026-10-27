@@ -167,6 +167,10 @@ pub struct Popup {
 pub struct ModScene {
     pub knobs: Vec<KnobRings>,
     pub cord: Option<Cord>,
+    /// The pointer on a source's jack: a cord from it to each knob it moves, as a dragged one is
+    /// drawn over a knob (decisions.md R-VELOCITY: "when a user hovers over the velocity ...
+    /// they can see the cables going to the different knobs").
+    pub patched: Vec<Cord>,
     pub popup: Option<Popup>,
 }
 
@@ -359,6 +363,7 @@ pub struct ModRenderer {
     knobs: Vec<(KnobRings, Patch)>,
     targets: Option<(Targets, [u8; 3], Patch)>,
     cord: Option<(Cord, Patch)>,
+    patched: Vec<(Cord, Patch)>,
     popup: Option<(Popup, Patch)>,
     damages: Vec<[i32; 4]>,
     /// Where it showed before a rescale, to be drawn again under it.
@@ -387,6 +392,7 @@ impl ModRenderer {
             knobs: Vec::new(),
             targets: None,
             cord: None,
+            patched: Vec::new(),
             popup: None,
             damages: Vec::new(),
             pending: Vec::new(),
@@ -402,6 +408,7 @@ impl ModRenderer {
             self.knobs.clear();
             self.targets = None;
             self.cord = None;
+            self.patched.clear();
             self.popup = None;
         }
     }
@@ -410,6 +417,7 @@ impl ModRenderer {
         let mut out: Vec<[i32; 4]> = self.knobs.iter().map(|(_, p)| p.rect()).collect();
         out.extend(self.targets.as_ref().map(|t| t.2.rect()));
         out.extend(self.cord.as_ref().map(|c| c.1.rect()));
+        out.extend(self.patched.iter().map(|c| c.1.rect()));
         out.extend(self.popup.as_ref().map(|p| p.1.rect()));
         out
     }
@@ -424,6 +432,7 @@ impl ModRenderer {
         !self.knobs.is_empty()
             || self.targets.is_some()
             || self.cord.is_some()
+            || !self.patched.is_empty()
             || self.popup.is_some()
     }
 
@@ -475,6 +484,19 @@ impl ModRenderer {
                 self.cord = Some((c.clone(), p));
             }
         }
+        // The cords from a hovered jack, each kept while it is the same.
+        let mut kept: Vec<(Cord, Patch)> = Vec::new();
+        let mut old = std::mem::take(&mut self.patched);
+        for c in &scene.patched {
+            if let Some(i) = old.iter().position(|(o, _)| o == c) {
+                kept.push(old.swap_remove(i));
+            } else if let Some(p) = self.cord_patch(c) {
+                damage.push(p.rect());
+                kept.push((c.clone(), p));
+            }
+        }
+        damage.extend(old.iter().map(|(_, p)| p.rect()));
+        self.patched = kept;
         if scene.popup.as_ref() != self.popup.as_ref().map(|p| &p.0) {
             damage.extend(self.popup.take().map(|p| p.1.rect()));
             if let Some(pp) = &scene.popup
@@ -510,6 +532,9 @@ impl ModRenderer {
             glow::lay(c, &p.pixels, p.at, place);
         }
         if let Some((_, p)) = &self.cord {
+            glow::lay(c, &p.pixels, p.at, place);
+        }
+        for (_, p) in &self.patched {
             glow::lay(c, &p.pixels, p.at, place);
         }
         if let Some((_, p)) = &self.popup {

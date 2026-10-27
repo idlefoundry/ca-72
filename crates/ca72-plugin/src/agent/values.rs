@@ -490,6 +490,20 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
             &p.timbre_filter,
             Plain,
         ),
+        e(
+            "velocity_curve",
+            "VELOCITY CURVE (-100 SOFT, 100 HARD)",
+            X,
+            &p.velocity_curve,
+            Plain,
+        ),
+        e(
+            "velocity_floor",
+            "VELOCITY FLOOR",
+            X,
+            &p.velocity_floor,
+            Plain,
+        ),
         e("lock", "LOCK (oscillators identical)", H, &p.lock, Plain),
         e(
             "midi_bend_range",

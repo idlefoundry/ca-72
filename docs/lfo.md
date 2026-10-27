@@ -43,14 +43,14 @@ reads each at its default. They do not glide (they are not knobs on the audio pa
 
 ## Modulation sources: the LFOs and the macros
 
-Everything that moves a knob by a depth is a **source** (`lfo::Source`): `Source::Lfo(0..4)` and
-`Source::Macro(0..6)`. A source has a value; each knob assigned to it
+Everything that moves a knob by a depth is a **source** (`lfo::Source`): `Source::Lfo(0..4)`,
+`Source::Macro(0..6)` and `Source::Velocity` (decisions.md R-VELOCITY). A source has a value; each knob assigned to it
 moves by depth × value from its own travel (after its glide), clamped, through its law; the
 rings, the hover dials, the tip and the menu show every source on a knob alike.
 
-- `lfo::SOURCES` = `LFOS + MACROS` (4 + 6). Every array of the patch and of the engine's `Lfos`
+- `lfo::SOURCES` = `LFOS + MACROS + VELOCITIES` (4 + 6 + 1). Every array of the patch and of the engine's `Lfos`
   is sized by `SOURCES` and indexed by `Source::index()` (the LFOs first).
-- `Source::id()`: `lfo1` to `lfo4`, then `macro1` on: what presets (`<source>_to_<target>`) and
+- `Source::id()`: `lfo1` to `lfo4`, then `macro1` on, then `velocity`: what presets (`<source>_to_<target>`) and
   sessions (`SavedSource { source, to, sharp }`) save.
 - `Lfos::own(i)`: whether a source has a value of each voice's own (an LFO with MONO off). A
   macro never: it is shared, as a knob.
@@ -65,6 +65,13 @@ rings, the hover dials, the tip and the menu show every source on a knob alike.
   from `Lfos::macros`. A knob a macro moves is at its travel + depth × value, clamped: one way.
   Each macro has a typed **name** (`Patch::name`, `set_name`, `names`; 7 printable characters,
   capitals: `lfo::name_within`), patch state as the assignments are. EDGES is an LFO's only.
+- **The velocity** (R-VELOCITY): `Source::Velocity`, after the macros (`lfo::VELOCITY`), its ID
+  `velocity`. Unipolar as a macro, and each voice's own (`Lfos::own` true: its note's), its shared
+  copy the latest note's. `Lfos::source_values(lfos, velocity)` gives its value for a note's
+  velocity through `Lfos::velocity`, the drawer's CURVE and FLOOR (`lfo::Response`, from
+  `velocity_curve` and `velocity_floor`, filled only where it is assigned). A key's velocity
+  reaches the engine as `Event::NoteVelocity` before its note. It moves neither an LFO's own
+  knobs nor TEMPO (`Source::takes`).
 
 ## Patch state: assignments, depths and EDGES (not host parameters)
 

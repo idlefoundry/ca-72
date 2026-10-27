@@ -329,6 +329,7 @@ key_print = "#e6dcc4"        # the rail's keys' marks and lettering
 wheel = "#c4b08e"            # the PITCH and MOD wheels' colour (they are shaded by the plug-in)
 display = "#e6dcc4"          # the drawer's displays' lettering in the typeface, where not lit
 selection = "#12303a"        # the drawer's current row's band, in the typeface lettering
+velocity = "#ff7028"         # the left hand's VELOCITY: its meter's lamps and its cords (else `lamp`)
 
 [look.pictures]              # optional: realistic only; pictures replacing the built-in ones
 knob = "pictures/knob.png"
@@ -410,6 +411,11 @@ keeps its controls where they are, but a pack may dress it: its wood and face ar
 
 - **Colours** in `[look.colours]`: the lamps' (`lamp`), from which the plug-in makes their glow
   and the drops' light as it does its own orange's, and the tabs' and keys' print.
+- **The left hand's VELOCITY** (the jack under GLIDE and DECAY, and the meter of ten lamps
+  beside it): the jack is a jack as the left hand's others are (the pack's `jack`); its lamps,
+  the cords dragged from it and the rings they make on the knobs are drawn in `velocity`, else
+  in the pack's `lamp` (so that it lights as the screens do), else in the built-in orange
+  (`#ff7028`); the lit lamps glowing in it, the unlit ones faintly in it over their dark wells.
 
 **The keyboard view** (the keyboard shown in place of VOICES, STEREO and OUTPUT) is dressed too:
 its header keys are the pack's `key`, its range display the pack's `glass` and `lamp`, its

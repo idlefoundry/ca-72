@@ -163,11 +163,14 @@ const MAKER_Y: f64 = 64.0;
 /// (its controls are placed relative to it, now at `strip::LEFT_HAND`).
 pub const LH_X: f64 = 22.0;
 pub const LPW: f64 = 330.0 - 44.0;
-const LH_JACK: f64 = 46.0;
+pub(crate) const LH_JACK: f64 = 46.0;
 const LH_LABEL: f64 = 118.0;
 pub(crate) const LH_ROCKER: f64 = 214.0;
 const LH_SCREW_DX: f64 = 50.0;
 pub(crate) const LH_ROWS: [f64; 2] = [265.0, 345.0];
+/// VELOCITY's row, under DECAY's (decisions.md R-VELOCITY): its jack, legend and meter
+/// (`strip::velocity`).
+pub(crate) const LH_VELOCITY: f64 = 425.0;
 /// NOTE PRIORITY's toggle on its side and RETRIGGER's switch (decisions.md R50), each a
 /// row over GLIDE and DECAY in one column with theirs, where their switches are; their legends'
 /// centres, left of them as GLIDE's and DECAY's are (moved in, clear of the switch and of the
@@ -179,8 +182,9 @@ const LH_RETRIGGER_LABEL: f64 = 104.0;
 /// RETRIGGER's centre in the large lettering: its right end as clear of its switch.
 const LH_RETRIGGER_LABEL_LARGE: f64 = 96.0;
 pub(crate) const LH_WHEELS: [f64; 2] = [82.0, 204.0];
-/// The wheels' centre (25 lower than A6 had it, for NOTE PRIORITY's and RETRIGGER's rows).
-pub(crate) const WHEEL_Y: f64 = 540.0;
+/// The wheels' centre (80 lower than A6 had it, for NOTE PRIORITY's and RETRIGGER's rows and
+/// VELOCITY's: decisions.md R-VELOCITY).
+pub(crate) const WHEEL_Y: f64 = 595.0;
 /// The wheels are drawn larger in the column than the instrument's.
 pub const WHEEL_SCALE: f64 = 1.75;
 /// A wheel's slot.
@@ -1168,6 +1172,7 @@ pub fn jacks(arrangement: &Arrangement) -> Vec<(f64, f64, f64, bool)> {
     let (lx, ly) = crate::strip::LEFT_HAND;
     LH_ROWS
         .iter()
+        .chain([&LH_VELOCITY])
         .map(|y| (lx + LH_JACK, ly + y, 22.0, true))
         .chain(
             arrangement
@@ -1454,6 +1459,15 @@ fn column(s: &mut Svg, ink: Ink) {
             jack(s, 22.0, true);
             s.0.push_str("</g>");
         }
+        // VELOCITY's is the velocity source's (decisions.md R-VELOCITY): drawn whole.
+        put!(
+            s,
+            "<g transform='translate({} {})'>",
+            N(LH_JACK),
+            N(LH_VELOCITY)
+        );
+        jack(s, crate::strip::velocity::JACK_R, true);
+        s.0.push_str("</g>");
         // The switches' and the wheels' mounting screws.
         for (x, y, r) in mountings {
             screw(s, x, y, r);
@@ -1461,6 +1475,8 @@ fn column(s: &mut Svg, ink: Ink) {
     }
     legend(s, LH_LABEL, LH_ROWS[0], "GLIDE");
     legend(s, LH_LABEL, LH_ROWS[1], "DECAY");
+    let (vx, vy) = crate::strip::velocity::legend_at();
+    legend(s, vx, vy, "VELOCITY");
     let num = s.1.number();
     lettered(s, LH_ROCKER + 36.0, LH_ROWS[0] + 34.0, "ON", num);
     lettered(s, LH_ROCKER + 36.0, LH_ROWS[1] + 34.0, "ON", num);
