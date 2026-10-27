@@ -1,0 +1,9 @@
+run,version,configuration,unheard_voice_runs,late_blocks,mean_block_percent_period
+1,before,as set,1048,128,74
+1,before,nothing assigned,348,3,66
+1,after,as set,3368,873,113
+1,after,nothing assigned,416,7,66
+2,before,as set,968,84,72
+2,before,nothing assigned,383,5,66
+2,after,as set,2819,818,111
+2,after,nothing assigned,429,3,66

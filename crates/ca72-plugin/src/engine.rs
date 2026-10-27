@@ -23,7 +23,10 @@ use ca72::light::Light;
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::resample::{Decimator, Interpolator};
 use ca72::vco::Timed;
-use ca72::voice::{Jacks, LINE_UP, Panel, Priority, Quality, RETRIGGER_GAP, Voice, audio_taper};
+use ca72::voice::{
+    Jacks, LINE_UP, Panel, Priority, Quality, RETRIGGER_GAP, Swept, Voice, audio_taper,
+    cutoff_track,
+};
 
 use crate::character::{Character, Placement};
 use crate::drive::{AVERAGE, Calibration, Curve, HEARD, HELD, KEYS, KWeighted, STEPS};
@@ -658,6 +661,80 @@ pub struct Playing {
     split_runs: u64,
     /// Its note's expression as it plays it (decisions.md R-MPE).
     expressed: Expressed,
+    /// Its glide across the LFOs' step (decisions.md R-LFO-STRESS).
+    sweep: Sweep,
+}
+
+/// A voice's glide across an LFO step (decisions.md R-LFO-STRESS): each of its samples' move of
+/// what the circuit reads of a pitch or CUTOFF ([`Swept`]: CUTOFF's wiper, TUNE, the FREQUENCY
+/// wipers), or the light voice (each oscillator's cents and the cutoff's octaves, added as
+/// ENTROPY's are), and its samples since the step's start. None (the default): the jacks as
+/// they were, to the bit.
+#[derive(Debug, Clone, Copy, Default)]
+struct Sweep {
+    on: bool,
+    light: bool,
+    circuit: Swept,
+    cents: [f64; 3],
+    octaves: f64,
+    at: f64,
+}
+
+impl Sweep {
+    /// From panel `a`, the step's start, in a straight line to `b`, the next step's, over `len`
+    /// samples: in what the light voice reads with `light`, else the circuit. Each is after
+    /// its knob's law, so the line is a chord of the LFO's curve through it, exact at each step.
+    fn between(a: &Panel, b: &Panel, len: f64, light: bool) -> Sweep {
+        let mut s = Sweep {
+            light,
+            ..Sweep::default()
+        };
+        if light {
+            let ((pa, ca), (pb, cb)) = (ca72::light::swept_laws(a), ca72::light::swept_laws(b));
+            s.cents = std::array::from_fn(|o| (pb[o] - pa[o]) * 100.0 / len);
+            s.octaves = (cb - ca) / len;
+            s.on = s.cents != [0.0; 3] || s.octaves != 0.0;
+        } else {
+            let wiper = |x: f64| x.clamp(0.0, 1.0);
+            s.circuit = Swept {
+                cutoff: (cutoff_track(b.cutoff) - cutoff_track(a.cutoff)) / len,
+                tune: (b.tune.clamp(-1.0, 1.0) - a.tune.clamp(-1.0, 1.0)) / len,
+                freq: [1, 2].map(|o| (wiper(b.osc[o].freq) - wiper(a.osc[o].freq)) / len),
+            };
+            s.on = s.circuit != Swept::default();
+        }
+        s
+    }
+
+    /// The next sample's, and it a sample on: None while there is no glide.
+    #[inline]
+    fn step(&mut self) -> Option<Sweep> {
+        if !self.on {
+            return None;
+        }
+        let now = *self;
+        self.at += 1.0;
+        Some(now)
+    }
+
+    /// Its moves so far added to a sample's jacks `j`.
+    #[inline]
+    fn add(&self, j: &mut Jacks) {
+        let at = self.at;
+        if self.light {
+            for (d, c) in j.detune.iter_mut().zip(self.cents) {
+                *d += c * at;
+            }
+            j.cutoff += self.octaves * at;
+        } else {
+            let c = &self.circuit;
+            j.swept = Swept {
+                cutoff: c.cutoff * at,
+                tune: c.tune * at,
+                freq: c.freq.map(|f| f * at),
+            };
+        }
+    }
 }
 
 /// The most a note's own bend goes either way, semitones (an MPE member channel's bend range
@@ -877,7 +954,11 @@ impl Playing {
                 let voice = &mut self.voice;
                 self.key.step(gate, note, |k, on| voice.note(k, on));
                 let e = self.expressed.step(glide, &m.reach);
+                let sw = self.sweep.step();
                 let mut j = jacks(&mut self.character, x, rate, m, k);
+                if let Some(sw) = &sw {
+                    sw.add(&mut j);
+                }
                 if p.doubled {
                     j.detune = j.detune.map(|d| d - p.half);
                 }
@@ -887,6 +968,9 @@ impl Playing {
                 t.key
                     .step(gate && p.doubled, note, |k, on| twin.note(k, on));
                 let mut jt = jacks(&mut t.character, x, rate, m, k);
+                if let Some(sw) = &sw {
+                    sw.add(&mut jt);
+                }
                 if p.doubled {
                     jt.detune = jt.detune.map(|d| d + p.half);
                 }
@@ -918,7 +1002,11 @@ impl Playing {
             let voice = &mut self.voice;
             self.key.step(gate, note, |k, on| voice.note(k, on));
             let e = self.expressed.step(glide, &m.reach);
+            let sw = self.sweep.step();
             let mut j = jacks(&mut self.character, x, rate, m, k);
+            if let Some(sw) = &sw {
+                sw.add(&mut j);
+            }
             if p.doubled {
                 j.detune = j.detune.map(|d| d - p.half);
             }
@@ -937,6 +1025,9 @@ impl Playing {
                 t.key
                     .step(gate && p.doubled, note, |k, on| voice.note(k, on));
                 let mut j = jacks(&mut t.character, x, rate, m, k);
+                if let Some(sw) = &sw {
+                    sw.add(&mut j);
+                }
                 if p.doubled {
                     j.detune = j.detune.map(|d| d + p.half);
                 }
@@ -1059,7 +1150,11 @@ impl Playing {
         let voice = &mut self.voice;
         self.key.step(gate, l.note, |k, on| voice.note(k, on));
         let e = self.expressed.step(l.glide, &m.reach);
+        let sw = self.sweep.step();
         let mut j = jacks(&mut self.character, x, rate, m, k);
+        if let Some(sw) = &sw {
+            sw.add(&mut j);
+        }
         if l.p.doubled {
             j.detune = j.detune.map(|d| d - l.p.half);
         }
@@ -1134,7 +1229,11 @@ impl Playing {
                 }
             });
             let e = self.expressed.step(glide, &m.reach);
+            let sw = self.sweep.step();
             let mut j = jacks(&mut self.character, x, rate, m, k);
+            if let Some(sw) = &sw {
+                sw.add(&mut j);
+            }
             if p.doubled {
                 j.detune = j.detune.map(|d| d - p.half);
             }
@@ -1150,6 +1249,9 @@ impl Playing {
                     }
                 });
                 let mut j = jacks(&mut t.character, x, rate, m, k);
+                if let Some(sw) = &sw {
+                    sw.add(&mut j);
+                }
                 if p.doubled {
                     j.detune = j.detune.map(|d| d + p.half);
                 }
@@ -1272,7 +1374,11 @@ impl Playing {
             let light = &mut self.light;
             self.key.step(gate, note, |k, on| light.note(k, on));
             let e = self.expressed.step(glide, &m.reach);
+            let sw = self.sweep.step();
             let mut j = jacks(&mut self.character, x, rate, m, k);
+            if let Some(sw) = &sw {
+                sw.add(&mut j);
+            }
             if p.doubled {
                 j.detune = j.detune.map(|d| d - p.half);
             }
@@ -1292,6 +1398,9 @@ impl Playing {
                 t.key
                     .step(gate && p.doubled, note, |k, on| light.note(k, on));
                 let mut j = jacks(&mut t.character, x, rate, m, k);
+                if let Some(sw) = &sw {
+                    sw.add(&mut j);
+                }
                 if p.doubled {
                     j.detune = j.detune.map(|d| d + p.half);
                 }
@@ -1634,6 +1743,33 @@ pub struct Engine {
     /// present block began among them: the time the LFOs' ticks keep (R-LFO's addendum).
     played: u64,
     block_from: u64,
+    /// The output's gain on its way, a sample at a time, across a modulation's step from where
+    /// it was to `gain` (decisions.md R-LFO-STRESS): where it is, its change a sample and the
+    /// samples left. None left, `gain` itself.
+    gain_now: f64,
+    gain_ramp: f64,
+    gain_left: usize,
+    /// The step's end, where the voices glide a pitch or CUTOFF an LFO moves to
+    /// (decisions.md R-LFO-STRESS).
+    ahead: Box<Ahead>,
+}
+
+/// Where the LFOs will have the knobs at the next step (decisions.md R-LFO-STRESS): whether the
+/// voices glide to it, over how many of their samples, the engine's panel there and the LFOs'
+/// values there, shared and each voice's own; and whether the step jumps (a SHARP edge in it,
+/// [`crate::lfo::JUMP`]), the shared LFOs' and each voice's own, which then hold the step.
+#[derive(Debug, Clone, Default)]
+struct Ahead {
+    on: bool,
+    len: f64,
+    panel: Panel,
+    shared: [f64; crate::lfo::LFOS],
+    voices: [[f64; crate::lfo::LFOS]; crate::lfo::VOICES],
+    jumps: bool,
+    voice_jumps: [bool; crate::lfo::VOICES],
+    /// A copy of the generators to run the next step's ticks on, where the LFOs move each
+    /// other or TEMPO (R-LFO's addendum): kept here so that the step allocates nothing.
+    bank: crate::lfo::Bank,
 }
 
 impl Default for Engine {
@@ -1685,6 +1821,10 @@ impl Engine {
             fx: Box::default(),
             played: 0,
             block_from: 0,
+            gain_now: 0.0,
+            gain_ramp: 0.0,
+            gain_left: 0,
+            ahead: Box::default(),
             controls,
             held: [false; 128],
             counter: 0,
@@ -1866,6 +2006,7 @@ impl Engine {
                     scratch: Some(Scratch::new()),
                     split_runs: 0,
                     expressed: Expressed::default(),
+                    sweep: Sweep::default(),
                 })),
                 note: 0,
                 gate: false,
@@ -2139,6 +2280,8 @@ impl Engine {
         if *c != self.base {
             self.rest.wake();
             self.base = *c;
+            // (Set at once: no glide until the LFOs' next step.)
+            self.ahead.on = false;
             // (The knobs where the LFOs have them now: decisions.md R-LFO. None assigned, the
             // controls as given.)
             let m = if c.lfo.active() {
@@ -2177,6 +2320,8 @@ impl Engine {
                 * level_gain(c.level);
             self.follow_auto(auto_trim(c, &self.curve), false);
             if eager {
+                // (The controls set from outside: the gain at once, as ever.)
+                self.gain_left = 0;
                 self.apply();
             } else {
                 // (Each voice takes it as it next plays: those not playing, never.)
@@ -2193,6 +2338,12 @@ impl Engine {
         let rate = self.lfo_rate();
         let l = &self.base.lfo;
         let voices = if self.many() { self.slots.len() } else { 1 };
+        // (A pitch or CUTOFF an LFO moves: where the next step will have the knobs, which the
+        // voices glide to across this one's samples, unless a SHARP edge in it holds it: an
+        // LFO's value halfway across off the line between its ends, R-LFO-STRESS.)
+        let glides = n > 1 && l.fast() && modulation_glides() && !self.rest.asleep;
+        let mut mid = [0.0; crate::lfo::LFOS];
+        let mut mid_voices = [[0.0; crate::lfo::LFOS]; crate::lfo::VOICES];
         if l.cross() {
             // (A source moves an LFO's own knob: the generators on their ticks, fixed in time,
             // each value for the sound read between them: R-LFO's addendum.)
@@ -2200,10 +2351,34 @@ impl Engine {
             self.bank.cross_to(l, &clocks, self.played, rate, voices);
             self.bank
                 .peek(l, &clocks, self.played, rate, self.lfo_dt, voices);
+            if glides {
+                // (Halfway and at the step's end, on a copy of the generators: the ticks
+                // between run and read as the next step will, the knobs they move and TEMPO's
+                // timed LFOs with them.)
+                let a = &mut *self.ahead;
+                for k in [n / 2, n] {
+                    a.bank.clone_from(&self.bank);
+                    let at = self.played + k as u64;
+                    a.bank.cross_to(l, &clocks, at, rate, voices);
+                    a.bank.peek(l, &clocks, at, rate, k as f64 / rate, voices);
+                    if k == n {
+                        (a.shared, a.voices) = (a.bank.shared_values, a.bank.voice_values);
+                    } else {
+                        (mid, mid_voices) = (a.bank.shared_values, a.bank.voice_values);
+                    }
+                }
+            }
         } else {
             self.bank.cross.on = false;
             let (per, clock) = crate::lfo::Bank::clock(l, &self.position, self.since, rate);
             self.bank.step(l, &clock, self.lfo_dt, voices);
+            if glides {
+                use crate::lfo::Bank;
+                let at = |k: usize| Bank::clock(l, &self.position, self.since + k as f64, rate).1;
+                let (b, a) = (&self.bank, &mut *self.ahead);
+                mid = b.ahead(l, &per, &at(n / 2), n / 2, rate, voices, &mut mid_voices);
+                a.shared = b.ahead(l, &per, &at(n), n, rate, voices, &mut a.voices);
+            }
             self.bank.advance(l, &per, n, rate, voices);
         }
         self.lfo_dt = n as f64 / rate;
@@ -2215,16 +2390,45 @@ impl Engine {
             let at = self.played.saturating_sub(self.block_from) as u32;
             self.fx.push(moved, at, l.fx_offsets(&values));
         }
+        if glides {
+            use crate::lfo::{JUMP, LFOS};
+            let (b, a) = (&self.bank, &mut *self.ahead);
+            let off = |x: f64, m: f64, y: f64| (m - 0.5 * (x + y)).abs() > JUMP;
+            a.jumps = (0..LFOS).any(|k| off(b.shared_values[k], mid[k], a.shared[k]));
+            for (v, jumps) in a.voice_jumps.iter_mut().enumerate().take(voices) {
+                *jumps = (0..LFOS).any(|k| {
+                    !l.lfo[k].mono && off(b.voice_values[v][k], mid_voices[v][k], a.voices[v][k])
+                });
+            }
+            let next = l.modulated(&self.base, &l.source_values(&a.shared));
+            let panel = self.panel_of(&next);
+            let a = &mut *self.ahead;
+            a.panel = panel;
+            a.len = (n * self.over.as_ref().map_or(1, |o| o.factor)) as f64;
+        }
+        self.ahead.on = false;
         if self.rest.asleep {
             return;
         }
         let values = l.source_values(&self.bank.shared_values);
         let m = l.modulated(&self.base, &values);
         if m != self.controls {
+            let (was, sharp) = (self.gain_at(), l.sharp_on(crate::lfo::Target::Volume));
             self.take(&m, false);
-        } else if l.per_voice() {
+            // (A step of the output's gain made a ramp across the step's samples: EDGES SOFT's
+            // 2 ms slew on VOLUME is then smooth, not a few clicks; SHARP's alone stay steps,
+            // R-LFO-STRESS.)
+            if self.gain != was && n > 1 && !sharp && modulation_gain_ramps() {
+                (self.gain_now, self.gain_left) = (was, n);
+                self.gain_ramp = (self.gain - was) / n as f64;
+            } else {
+                self.gain_left = 0;
+            }
+        } else if l.per_voice() || glides {
             self.panel_gen = self.panel_gen.wrapping_add(1);
         }
+        // (Every voice takes its glide as it next plays: the panel's new generation.)
+        self.ahead.on = glides;
     }
 
     /// Each LFO's present reading, for the editor's scopes (decisions.md R-LFO).
@@ -2782,11 +2986,13 @@ impl Engine {
             self.bank.cross.on = false;
             return self.render_part(ext, left, right);
         }
-        // (The LFOs modulating: a step every `lfo::STEP` samples, decisions.md R-LFO.)
+        // (The LFOs modulating: a step every `lfo::STEP` samples, decisions.md R-LFO; a pitch
+        // or CUTOFF gliding across each, R-LFO-STRESS.)
         let len = left.len().min(right.len());
+        let step = modulation_step();
         let mut i = 0;
         while i < len {
-            let n = (len - i).min(crate::lfo::STEP);
+            let n = (len - i).min(step);
             self.modulate(n);
             let x = &ext[i.min(ext.len())..(i + n).min(ext.len())];
             self.render_part(x, &mut left[i..i + n], &mut right[i..i + n]);
@@ -3114,9 +3320,20 @@ impl Engine {
         // (As the one voice was: the gain, then the fade; AUTO GAIN's correction, gliding,
         // between them, 1 without DRIVE.)
         self.auto_now += (self.auto - self.auto_now) * self.auto_glide;
+        let gain = if self.gain_left > 0 {
+            self.gain_left -= 1;
+            self.gain_now += self.gain_ramp;
+            if self.gain_left == 0 {
+                self.gain
+            } else {
+                self.gain_now
+            }
+        } else {
+            self.gain
+        };
         let (l, r) = (
-            (l * self.gain * self.auto_now * self.fade) as f32,
-            (r * self.gain * self.auto_now * self.fade) as f32,
+            (l * gain * self.auto_now * self.fade) as f32,
+            (r * gain * self.auto_now * self.fade) as f32,
         );
         if l.is_finite() && r.is_finite() {
             return (l, r);
@@ -3127,6 +3344,16 @@ impl Engine {
             o.down.iter_mut().for_each(Decimator::reset);
         }
         (0.0, 0.0)
+    }
+
+    /// The output's gain at the next sample: on its way across a step ([`Engine::faded`]), else
+    /// `gain`.
+    fn gain_at(&self) -> f64 {
+        if self.gain_left > 0 {
+            self.gain_now
+        } else {
+            self.gain
+        }
     }
 
     /// The output's gain under POWER and All Sound Off a sample after `fade`: rising while
@@ -3374,7 +3601,11 @@ impl Engine {
     /// MODULATION up to where the hardware reference's MIDI puts it
     /// (`ca72::modulation::midi_wheel`).
     fn panel(&self) -> Panel {
-        let c = &self.controls;
+        self.panel_of(&self.controls)
+    }
+
+    /// [`Engine::panel`] for the controls `c`.
+    fn panel_of(&self, c: &Controls) -> Panel {
         let share = (c.bend_range / PITCH_WHEEL_SEMITONES).clamp(0.0, 1.0);
         let share = if share.is_finite() { share } else { 0.0 };
         let mut p = c.panel;
@@ -3455,10 +3686,106 @@ impl Engine {
                 light.set_panel(&voice.panel);
             }
         }
+        // (Its glide to the next step's knobs, R-LFO-STRESS: ENTROPY's tolerances leave the
+        // knobs that glide alone, so the twin's is the voice's.)
+        let a = &*self.ahead;
+        let jumps = a.jumps || (self.base.lfo.per_voice() && a.voice_jumps.get(k) == Some(&true));
+        v.sweep = if a.on && !jumps {
+            let mut next = a.panel;
+            if self.base.lfo.per_voice() && k < crate::lfo::VOICES {
+                let mut feedback = 0.0;
+                self.base.lfo.voice(
+                    &mut next,
+                    &mut feedback,
+                    &self.base.lfo.source_values(&a.shared),
+                    &self.base.lfo.source_values(&a.voices[k]),
+                );
+            }
+            Sweep::between(p, &next, a.len, v.potato)
+        } else {
+            Sweep::default()
+        };
         v.double = self.controls.double > 0.0;
         v.panel_gen = self.panel_gen;
         (v.expressed.wheel, v.expressed.midi) =
             (self.controls.panel.mod_wheel, f64::from(self.modulation));
+    }
+}
+
+/// How often the LFOs move their knobs, samples: [`crate::lfo::STEP`] (decisions.md R-LFO).
+#[cfg(not(feature = "lfo-lab"))]
+#[inline(always)]
+const fn modulation_step() -> usize {
+    crate::lfo::STEP
+}
+
+/// A measurement's own step for the LFOs (feature `lfo-lab` only; 0: as built).
+#[cfg(feature = "lfo-lab")]
+static MODULATION_STEP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(feature = "lfo-lab")]
+fn modulation_step() -> usize {
+    match MODULATION_STEP.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => crate::lfo::STEP,
+        n => n,
+    }
+}
+
+/// The LFOs moving their knobs every `samples` (a sample: the reference the 32-sample step is
+/// measured against, decisions.md R-LFO-STRESS), every instance in the process; 0 puts back
+/// the built steps. A measurement's only: the feature `lfo-lab`.
+#[cfg(feature = "lfo-lab")]
+pub fn set_modulation_step_for_measurement(samples: usize) {
+    MODULATION_STEP.store(samples, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The behaviour before R-LFO-STRESS: 32-sample steps, no output-gain ramp and no glide. An
+/// explicit step still wins, so that the per-sample reference is the same on either side.
+#[cfg(feature = "lfo-lab")]
+static MODULATION_LEGACY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Measure the behaviour at 1374b0f, before both LFO fixes. Process-wide, for serial
+/// measurements only; absent from a plug-in build.
+#[cfg(feature = "lfo-lab")]
+pub fn set_modulation_legacy_for_measurement(legacy: bool) {
+    MODULATION_LEGACY.store(legacy, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the voices glide a pitch or CUTOFF an LFO moves across each step (feature `lfo-lab`
+/// only; true: as built).
+#[cfg(feature = "lfo-lab")]
+static MODULATION_GLIDE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Measure the LFOs with the voices' glide across each step (as built) or without it (each step
+/// held, as before R-LFO-STRESS; the output-gain ramp kept). Process-wide, for serial
+/// measurements only; absent from a plug-in build.
+#[cfg(feature = "lfo-lab")]
+pub fn set_modulation_glide_for_measurement(glide: bool) {
+    MODULATION_GLIDE.store(glide, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[inline(always)]
+fn modulation_glides() -> bool {
+    #[cfg(feature = "lfo-lab")]
+    {
+        use std::sync::atomic::Ordering::Relaxed;
+        MODULATION_GLIDE.load(Relaxed) && !MODULATION_LEGACY.load(Relaxed)
+    }
+    #[cfg(not(feature = "lfo-lab"))]
+    {
+        true
+    }
+}
+
+#[inline(always)]
+fn modulation_gain_ramps() -> bool {
+    #[cfg(feature = "lfo-lab")]
+    {
+        !MODULATION_LEGACY.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    #[cfg(not(feature = "lfo-lab"))]
+    {
+        true
     }
 }
 
@@ -4213,6 +4540,7 @@ impl Probe {
                     scratch: None,
                     split_runs: 0,
                     expressed: Expressed::default(),
+                    sweep: Sweep::default(),
                 }
             })
             .collect();

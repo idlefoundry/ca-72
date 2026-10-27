@@ -15157,3 +15157,202 @@ Mac's load was about 44 from other jobs; it passes twice when run alone, and thi
 touches no audio. The editor's parts-against-whole tests (`whole`, `preset`, `rail`) pass
 with and without the standalone, and Clippy passes on the panel crate with all targets.
 No installed build or host was used. The owner has the pictures to review.
+
+## R-LFO-STRESS. The LFOs at their worst, with listening comparisons
+
+**Owner request (carried into this job, 2026-10-22):** "make some tests with presets that would
+be like the worst possible scenario that would be most likely to have the zippering ... or
+any other issues". The owner will judge the two proposed sound changes by ear.
+
+**Built, 2026-10-20:** sixteen `LFO TEST` presets in `docs/lfo-stress/presets`, the library's
+format 1 and tagged `LFO Tests`. Fast TRIANGLE and SAWTOOTH on oscillator FREQUENCY, TUNE and
+CUTOFF at strong EMPHASIS; SHARP against SOFT on VOLUME and CUTOFF; four sources clamping
+CUTOFF; independent POLY LFOs with RETRIG and stolen voices; RISE and ENV; timed at 200 BPM;
+CONTINUOUS WAVEFORM as PWM; FEEDBACK and DETUNE; ten doubled voices with 32 assignments; the
+slow control. Each has a phrase in `crates/ca72-plugin/tests/lfo_stress.rs`.
+
+Two separate, optional fixes remain for the owner's review:
+- `29ddf24`: while an LFO moves TUNE, oscillator 2 or 3 FREQUENCY, or CUTOFF, HI and ULTRA
+  update every 8 samples instead of 32. LO and the other targets retain 32. The first image
+  rate at 48 kHz moves from 1.5 to 6 kHz; this is not per-sample modulation of every target.
+- `1c85e11`: the main output's gain reaches each modulation step's target in a straight line
+  over its samples, unless only SHARP sources move VOLUME. SOFT's 2 ms edge then reaches the
+  output as a ramp instead of three or four gain steps. External changes land as before.
+  Mixer VOLUMEs and contour SUSTAINs still step. With no assignment the sound stays as before.
+
+**Measurement and listening material, 2026-10-22 (agent decisions, not separately approved):**
+- The ignored `zipper` test reads the actual presets and calls the plug-in's `process`, at
+  48 kHz in 256-frame offline blocks, eight seconds each. A per-sample evaluation of the same
+  LFOs is the reference, with seed 42 and the same events. This checks modulation artefacts,
+  not circuit fidelity against SPICE.
+- `lfo-lab` alone exposes the measurement switches. `CA72_LFO_LEGACY=1` reproduces the
+  behaviour at `1374b0f`: the default step is 32 and output-gain ramps are disabled. An
+  explicit step, especially 1 for the reference, still wins. Merely asking for 32 samples
+  would leave the gain fix enabled, so would not be a before comparison of both fixes.
+  Ordinary builds compile the legacy switch out and keep the gain ramp enabled.
+- `CA72_LFO_COMPARE=1` includes the other version's peak in each preset's WAV gain. Running
+  `zipper` once before and once after writes three versions with the same gain; their
+  loudest peak is -14 dBFS. The files are 24-bit stereo PCM. The README describes each
+  preset's intended edges and what to listen for. No amplified waveform differences are
+  supplied: stepped pitch makes oscillator phases drift, so their null overstates noise.
+- The high band's envelope pulse at 1.5, 3 and 4.5 kHz is compared with the per-sample
+  reference. The test also prints an aligned reference's floor, critical-band excess,
+  half-grid difference, edge prominence, adjacent 2 ms level jumps and processor time.
+  `measure-wavs.py` resolves the pulse into its three harmonics, checks the WAV formats and
+  shared gain, and checks that their sum agrees with the unquantised test's figure.
+- The grid's difference is an upper bound where pitch moves, and unusable where the
+  per-sample reference changes with block layout. An edge's prominence and a 2 ms jump are
+  proxies: intended waveform edges, notes and resonances can dominate either. In particular,
+  the jump is not a counter of clamp crossings or proof of a clamp discontinuity.
+- For listening priority only: over 1 dB excess pulse, edge prominence or critical-band
+  figure over its own reference floor is measurable; a valid non-pitch grid above -100 dBr
+  is also measurable. Over 6 dB pulse or edge excess, or a valid non-pitch grid above
+  -60 dBr, marks a likely audible candidate. These are deliberately conservative review
+  heuristics, not calibrated hearing thresholds; masking and intended modulation can
+  conceal or resemble the artefact. Below them means not demonstrated, not inaudible.
+- The original pending edit is retained: `paced` honours `CA72_LFO_STEP`, like the other
+  measurements. It also honours the legacy switch, so either fix can be isolated.
+- The Mac receives only files under Downloads. A separate library supplied beside the WAVs
+  can be used by launching the existing CA-72 V0.3 with `IDLE_FOUNDRY_SHARED` pointing there.
+  Neither the shared preset library used by 0.2.8 nor any installed binary is changed.
+
+**Evidence (Linux reference machine, Ryzen 7 7800X3D, Rust 1.97.1, 2026-10-22):**
+- The before and after `zipper` measurements each passed for all sixteen presets at HI;
+  each ran for about 264 s. No non-finite or clipped samples were found. All sixteen
+  per-sample reference WAVs were byte-identical across the two runs. Presets 05 (SHARP
+  VOLUME), 13 (WAVEFORM) and 14 (FEEDBACK/DETUNE) were also byte-identical before and after.
+- All 48 WAVs checked: 48 kHz, stereo, 24-bit PCM, eight seconds; the loudest in each triplet
+  at -14 dBFS and one gain across all three. The three harmonic powers summed from the WAVs
+  agree with the test's pulse excess within 0.0092 dB. The CSVs beside this record's README
+  retain every preset's numbers, including the floors and raw processor times.
+- 03's pulse excess over the per-sample reference falls from 13.23 to 1.07 dB; 06's from
+  34.74 to -0.79 dB. The latter's edge prominence falls from 28.73 to 3.44 dB, against the
+  reference's 5.60 dB. The SHARP control, 05, stays at 30.64 dB in all three versions.
+- 12's pulse excess falls from 8.78 to 4.31 dB, and 15's from 9.11 to 0.11 dB. 09's
+  half-grid difference falls from -13.74 to -18.08 dBr but remains measurable. Its largest
+  adjacent-window level jump is 20.40 / 23.01 / 22.22 dB (before / after / reference), which
+  does not establish a new click at a clamp boundary.
+- Mixed cases remain: 02's pulse excess rises from -1.40 to 6.76 dB; 08's critical-band
+  excess over its floor rises from 0.14 to 6.19 dB; 04's largest level jump rises from
+  24.16 to 31.20 dB against 21.85 dB in the reference. These statistics include intended
+  musical changes and phase or timing differences. They merit listening, not a blanket
+  claim that every preset improves. 13's PWM is unchanged and remains a listening candidate.
+- `lfo_stress` is gated by `lfo-lab`, since its measurement-only engine functions are absent
+  from a normal build. The ordinary test suite can compile without enabling the lab.
+- CPU, exclusive timing lock, one thread, no workers, 4 s, best of three: 03 is 107.8 /
+  109.9 ms a second of audio before / after; 06 is 310.4 / 308.7; 15 is 2920.0 / 3278.4
+  (+12.3 %). Holding the step at 32 with the ramp enabled gives 2945.7 on 15 against
+  3294.4 as built in the same run. The volume fix has no clear cost increase at this
+  resolution; the finer step has a measurable cost. The separate offline plug-in CPU
+  figure on 15 rises from 4.372 to 5.843 processor seconds a second of audio (+33.6 %),
+  including workers; it is not interchangeable with the single-thread wall-time figure.
+- Paced 15, HI, 48 kHz, 256 frames, four workers, two before/after alternations, no other
+  build or test running: before 1048 / 968 unheard voice-runs and 128 / 84 late blocks;
+  after 3368 / 2819 unheard runs and 873 / 818 late blocks. Mean block: before 74 / 72 %
+  of the period, after 113 / 111 %. Without assignments, 348 to 429 unheard runs and 3 to
+  7 late blocks, mean 66 %. The phrase is already over budget before; the finer step
+  makes it substantially worse. A zero-loss deadline criterion fails in both versions.
+  These measurements complete successfully but are not performance passes. The pieces are
+  shorter at 8 samples than at 32, so raw unheard-run counts are not a missing-audio duration
+  ratio. Late host blocks retain their 256-frame unit and independently show the regression.
+- The spectral, edge, jump and grid statistics use the mono average of the stereo output;
+  opposing stereo artefacts may be under-represented. The listening files preserve stereo.
+- `cargo test -p ca72-plugin -p ca72`: 672 passed, none failed, 76 ignored. Clippy for both
+  crates (`--all-targets -- -D warnings`), clippy for the workspace
+  (`--all-targets --all-features -- -D warnings`), and `cargo fmt --all -- --check` passed.
+  `CA72_REQUIRE_NGSPICE=1 TMPDIR=/var/tmp cargo test --workspace --no-fail-fast`: 1034 passed,
+  none failed, 89 ignored, ngspice 47 required. These checks do not include human listening.
+
+**Agent recommendation, not an owner decision:** keep the output-gain ramp (`1c85e11`),
+whose SOFT edge improves with no clear CPU penalty and whose SHARP control is unchanged.
+Revise the 8-sample change (`29ddf24`) before release: its spectral gains are clear in
+03, 12 and 15, but the deliberate worst case has a repeated deadline regression. The
+owner should audition the WAVs and decide whether to accept that trade-off. Both commits
+remain on the branch for review. No further production sound change was made here.
+
+Not tried: human listening, loading the supplied presets in the Mac's live V0.3, external
+DAWs, Windows, other sample rates or block sizes, multiple instances, a low-end CPU, or a
+LO/ULTRA listening matrix. The reference and offline renders do not demonstrate live
+playback without dropped voices. The legacy path was checked in source against 1374b0f,
+not against a separately compiled binary of that commit.
+
+**Owner decision, 2026-10-23:** "K, do it": in place of `29ddf24`'s 8-sample step, pitch and
+CUTOFF glide across each 32-sample step, then measure it.
+
+**Changed, 2026-10-23 (`e134f72` and its follow-up):**
+- The LFOs step every 32 samples again at every QUALITY and for every target (`lfo::FAST_STEP`
+  is gone). `1c85e11`'s output-gain ramp stays.
+- While an LFO moves TUNE, oscillator 2 or 3 FREQUENCY or CUTOFF, each voice ramps what it
+  reads of them in a straight line across the step, from the step's value to the next step's.
+  The next step's value comes from copies of the generators moved on (`Bank::ahead`), since
+  they are functions of their time, so the glide adds no delay. The ramp runs inside the
+  voice's run, a sample at a time in its jacks, so runs are not split.
+- The ramp is in the quantity after the knob's law, so the line is a chord of the LFO's curve
+  through it, exact at each step. In the circuit (HI, ULTRA) that is CUTOFF's wiper, TUNE and
+  the FREQUENCY wipers (`Jacks::swept`, added where the front reads them). In the light voice
+  (LO) it is each oscillator's semitones and the cutoff's log2 Hz (`light::swept_laws`), added
+  as ENTROPY's offsets are. GLIDE and clamping apply at the step points as before.
+- A chord across a jump is not a chord of the curve: it smeared preset 12's SHARP SQUARE edges
+  over 32 samples (edge prominence 6.5 dB against the reference's 2.9). So a step in which an
+  LFO's value halfway across stands more than `lfo::JUMP` (0.25 of its -1..1) off the line
+  between the step's ends is held, as before, and the edge stays abrupt. This matches the
+  output-gain ramp, which leaves SHARP alone. A TRIANGLE's corner trips this only above about
+  190 Hz.
+- With nothing assigned, or no pitch or CUTOFF moved, the sound is as before, to the bit. The
+  lab's `CA72_LFO_GLIDE=0` holds each step, for measuring.
+
+**Evidence (Linux reference machine, Ryzen 7 7800X3D, 2026-10-23):** HI, 48 kHz, 256-frame
+blocks, `zipper` on 01, 02, 03, 04, 08, 12 and 15. "32-step" is this build with
+`CA72_LFO_GLIDE=0`; "8-sample" is `5ace018` built separately. Pulse is the excess over its own
+floor. Where the voices glide, the aligned reference is the reference itself, so its floor is
+0 by construction.
+
+| Preset | Pulse dB: 32-step / 8-sample / glide | Grid dBr | Harmonics, glide (1.5, 3, 4.5 kHz) |
+|---|---|---|---|
+| 01 Tri OSC2 FREQ | -1.12 / +1.90 / -1.87 | -28.1 / -28.4 / -35.4 | -6.20, -2.08, -0.06 |
+| 02 Saw TUNE chord | -1.40 / +6.76 / -1.68 | -1.6 / -1.4 / -1.7 | -7.14, +3.75, -1.05 |
+| 03 Tri CUTOFF EMPH 10 | +13.23 / +1.07 / +7.45 | -1.7 / -2.4 / -1.9 | +17.04, +1.08, +7.54 |
+| 04 Saw CUTOFF EMPH 9 | -9.61 / +1.31 / +1.05 | -2.3 / -2.5 / -2.4 | +0.67, +3.35, -3.49 |
+| 08 Saw SOFT CUTOFF | +1.30 / -1.73 / -0.20 | -18.4 / -19.1 / -6.1 | +0.46, +1.10, -1.99 |
+| 12 Timed SHARP SQUARE | +8.78 / +4.31 / +8.72 | -2.2 / -2.1 / -2.2 | +8.08, +11.48, +8.32 |
+| 15 CPU worst | +9.11 / +0.11 / +10.21 | -8.1 / -9.4 / -8.2 | +9.28, +13.72, +6.50 |
+
+- Every grid above is the upper bound, marked `*` by the test, since these presets move a pitch
+  or whistle; 08's glide figure is one of them. All three versions have no non-finite or
+  clipped samples.
+- Below the whistle the glide is the clearest win: a copy of 03 at EMPHASIS 6 gives pulse +1.4
+  dB and grid -44.2 dBr against the 32-step's +11.1 dB excess and -27.1 dBr. Engine renders
+  with a TRIANGLE on CUTOFF at EMPHASIS 0 and 5 differ from the per-sample reference by -61
+  and -55 dB, against -30 and -24 at 8 samples and -16 and -12 held at 32, with nothing left
+  in step with the 32-sample grid. At EMPHASIS 8 to 10 the whistle's phase wanders in every
+  version, and 03's pulse figure varies by a few dB with the alignment.
+- 12's SQUARE has nothing to glide between its edges; they still land on the 32-sample grid,
+  which only a finer step or an edge placed at its own sample would mend. 15's pulse comes
+  mostly from its 24 other knobs (VOLUMEs, EMPHASIS, SUSTAINs, GLIDE, MOD MIX, SHAPE,
+  FEEDBACK), which this change leaves stepping. The 8-sample version stepped those too.
+- LO, 32-step / glide pulse excess: 01 +0.87 / -1.17, 03 -1.13 / -5.19, 04 +5.90 / +7.96,
+  08 -4.67 / -4.99, 12 +1.46 / +1.50, 15 +3.91 / +3.45; the light voice already interpolates
+  its controls every 16 samples.
+- Engine CPU, one thread, no workers, exclusive timing lock, best of three, alternated twice:
+  15 is 2968 / 2936 ms a second of audio at 32-step (+6.7 / +6.6 % over nothing assigned),
+  3304 / 3307 at 8 samples (+19.0 / +19.7 %), 2983 / 2979 with the glide (+7.1 / +7.4 %). 03
+  is 106.8 / 106.4, 111.3 / 110.5 and 110.3 / 110.2.
+- Paced 15, HI, 256 frames, four workers, alternated twice: 32-step 1459 / 1104 runs unheard,
+  145 / 87 blocks late, mean 76 / 73 % of the period; 8-sample 3494 / 3776 unheard, 976 / 1061
+  late, 116 / 121 %; glide 1143 / 1184 unheard, 102 / 125 late, 74 / 75 %. Nothing assigned:
+  364 to 456 unheard, 3 to 6 late. The glide plays as the 32-step version does; the phrase
+  still misses deadlines in every version.
+- `preset_render`, the 19 factory presets at HI, LO and ULTRA, against 393588a: each the same
+  to the bit. `cargo test -p ca72-plugin -p ca72` and the lab's tests, workspace clippy
+  (`--all-targets --all-features -D warnings`) and `cargo fmt --check` pass. The ULTRA split
+  and allocation tests (`threaded`, `rt_alloc`) now move the glide's jacks too.
+
+**Agent recommendation, not an owner decision:** keep the glide. It keeps the 32-step's cost
+and deadlines (8-sample: about ten times as many late blocks) and removes the zipper where
+pitch or CUTOFF moves smoothly (01, 02, 04, 08, and 03 below the whistle). It doesn't help a
+SHARP SQUARE's edge timing (12) or knobs other than pitch and CUTOFF (15). If those matter,
+the next steps would be placing a SHARP edge at its own sample within the step, and gliding
+more knobs (the mixer's VOLUMEs, EMPHASIS) the same way, each measured.
+
+Not tried: human listening, the Mac's live build, other hosts, sample rates or block sizes, a
+slow CPU.

@@ -64,6 +64,11 @@ pub const RISE_MOST: f32 = 10.0;
 pub const SOFT_EDGE: f64 = 0.002;
 /// How often the modulation reaches the voices, samples: the knobs' glide's step.
 pub const STEP: usize = crate::smooth::STEP;
+/// How far an LFO's value halfway across a step may stand off the straight line between the
+/// step's ends (its -1..1) before the step counts as jumping (decisions.md R-LFO-STRESS): a
+/// SHARP edge or a cycle's restart within it, which the voices then hold to the next step
+/// instead of gliding through. A TRIANGLE's corner stands off by its rate over 750 Hz.
+pub const JUMP: f64 = 0.25;
 /// The voices that can each have their own LFOs (POLY's most).
 pub const VOICES: usize = POLY_VOICES.2;
 
@@ -434,6 +439,15 @@ impl Target {
             Some((n, k)) => format!("LFO {} {}", n + 1, k.part().to_uppercase()),
             None => self.short().to_owned(),
         }
+    }
+
+    /// Whether its steps are heard at [`STEP`] (decisions.md R-LFO-STRESS): a pitch (TUNE, the
+    /// FREQUENCYs) or CUTOFF, which the voices glide across each step instead.
+    pub fn fast(self) -> bool {
+        matches!(
+            self,
+            Target::Tune | Target::Osc2Frequency | Target::Osc3Frequency | Target::Cutoff
+        )
     }
 
     /// Whether each voice has its own (it is on the voice's panel, or FEEDBACK, each voice's
@@ -2023,6 +2037,37 @@ impl Lfos {
         })
     }
 
+    /// Whether an LFO moves a knob whose steps are heard ([`Target::fast`]): the voices then
+    /// glide it across each step (decisions.md R-LFO-STRESS). Not the macros alone, which hold
+    /// still from one step to the next (their knobs' glide reaches the engine as its controls,
+    /// R-MACROS), though their part is in the glide's ends.
+    pub fn fast(&self) -> bool {
+        self.to.iter().enumerate().any(|(i, to)| {
+            matches!(Source::of_index(i), Some(Source::Lfo(_)))
+                && to
+                    .iter()
+                    .flatten()
+                    .any(|a| a.depth != 0.0 && a.target.fast())
+        })
+    }
+
+    /// Whether every LFO moving `t` has EDGES SHARP (none moving it: false). A macro on it
+    /// holds still across the steps, so does not count (R-LFO-STRESS, R-MACROS).
+    pub fn sharp_on(&self, t: Target) -> bool {
+        let mut any = false;
+        for (i, to) in self.to.iter().enumerate() {
+            if let Some(Source::Lfo(n)) = Source::of_index(i)
+                && to.iter().flatten().any(|a| a.depth != 0.0 && a.target == t)
+            {
+                if self.lfo[n].edges != Edges::Sharp {
+                    return false;
+                }
+                any = true;
+            }
+        }
+        any
+    }
+
     /// Whether any source modulates anything (an assignment of a depth other than 0).
     pub fn active(&self) -> bool {
         self.to.iter().flatten().flatten().any(|a| a.depth != 0.0)
@@ -2240,6 +2285,39 @@ impl Bank {
                 }
             }
         }
+    }
+
+    /// What each LFO's value will be `n` samples on (`per[k]` cycles a sample, at `rate` Hz, on
+    /// the clock `clock` there), without moving it: the generators are functions of their time,
+    /// EDGES' slew aside (decisions.md R-LFO-STRESS). The shared values, and in `voices` the
+    /// first `m` voices' own.
+    #[allow(clippy::too_many_arguments)]
+    pub fn ahead(
+        &self,
+        l: &Lfos,
+        per: &[f64; LFOS],
+        clock: &[Option<f64>; LFOS],
+        n: usize,
+        rate: f64,
+        m: usize,
+        voices: &mut [[f64; LFOS]; VOICES],
+    ) -> [f64; LFOS] {
+        let (dt, m) = (1.0 / rate, m.min(VOICES));
+        let at = |g: &Gen, s: &Settings, k: usize| {
+            let mut g = *g;
+            g.advance(s, per[k], n, dt);
+            g.value(s, clock[k], n as f64 * dt)
+        };
+        let mut shared = [0.0; LFOS];
+        for (k, s) in l.lfo.iter().enumerate() {
+            shared[k] = at(&self.shared[k], s, k);
+            if !s.mono {
+                for (values, gens) in voices[..m].iter_mut().zip(&self.voices[..m]) {
+                    values[k] = at(&gens[k], s, k);
+                }
+            }
+        }
+        shared
     }
 
     /// Moved on by `n` samples at `rate` Hz, each LFO at `per[k]` cycles a sample.
