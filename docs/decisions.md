@@ -10090,6 +10090,56 @@ the inventory, the design, the tools and what comes next.
   (`CA72_AGENTS_PNG`); in the application it sits below STANDALONE's AUDIO & MIDI….
 - Hosts and plug-ins.
 
+### Every computer, and set up from the menu (2026-10-27)
+
+**The owner, 2026-10-27,** asking whether agents were "plug and play essentially": "can you
+launch agents on the Mac and Windows computers? Just ... do a little test to see if these
+things work and implement the fixes that you recommend". (Agents are left out of 0.3.0's video
+for a short of their own.)
+
+**Built.**
+- **Windows.** The socket is AF_UNIX there too (Windows 10 1803 and later), through
+  `uds_windows`: `agent.rs`'s `Listener` and `Stream` are Unix's or its, and every path of the
+  server, the bridge and discovery is shared. The folder is `ca-72-<user>` in the user's own
+  temporary folder, whose access (the user, SYSTEM, Administrators) the socket takes.
+- **SETTINGS › AGENTS** says how agents stand under ALLOW and OFF (LISTENING with how many are
+  connected, or COULD NOT LISTEN, the reason logged) and copies a client's setup with the path
+  of the bridge beside the application: COPY SETUP: CLAUDE CODE (`claude mcp add --scope user
+  ca-72 -- "<path>"`) and COPY SETUP: JSON FOR OTHER APPS (`mcpServers`). The menu opens again
+  saying COPIED, or that it could not. The clipboard is the system's own tool (`clipboard.rs`:
+  `pbcopy`, `clip` given marked UTF-16 with no console, `wl-copy`, `xclip` or `xsel`), as the
+  window library's is a stub on Windows and Linux and the workspace denies unsafe code.
+- **macOS: App Nap.** A hidden standalone playing no audio was napped: requests took up to
+  11.2 s, past `TIMEOUT`. While the socket is open the application holds an NSProcessInfo
+  activity, user initiated with idle sleep allowed, and latency critical (`agent/awake.rs`).
+  Measured hidden, `--no-devices`, `ca72_get` over 8 to 10 minutes (minimum, median, maximum):
+  none 41 ms, 1.2 s, 11.2 s (priority 4); user initiated alone 14 ms, 104 ms, 345 ms; with
+  latency critical 4 ms, 13 ms, 17 ms (priority 46 throughout). Agents turned off, the
+  priority fell to 4 at once and the socket and record went.
+
+**Tried.**
+- **Windows 11 (26200), MSVC.** The agent, server, bridge, discovery and editor tests (36);
+  the standalone started with `--agents` on the desktop's session, and the bridge from another:
+  `ca72_instances`, `ca72_describe`, a CUTOFF set and read back, a preset stepped, a chord
+  played, the settings read, an offline render and its analysis. Claude Code (on the laptop,
+  starting the Windows bridge over SSH, `--strict-mcp-config` with the JSON the menu copies)
+  described the instrument, set EMPHASIS 6 and CUTOFF -1, read them back and played C3 and G3.
+  Claude Code on the Windows computer itself was not logged in.
+- **macOS 27 (Apple silicon).** Built, the agent tests and `mcp_audio`/`mcp_bridge` passing; the
+  folder 700, the socket 600, its path 85 bytes (of 104); every live call above, two instances
+  (AMBIGUOUS, then `ca72_select`), the application quit mid-session and killed (its record
+  removed by the bridge's next call). Audio running keeps a hidden application awake through
+  coreaudiod's assertion; without it, App Nap, above.
+
+**Found, not fixed:** a standalone left hidden and napped for minutes (no audio, agents off)
+does not finish quitting within plugin-kit-standalone's two seconds (`runtime.rs`) and shows
+its error window; one just hidden quits. Not agents': it wants the activity, or a longer wait,
+while the standalone shuts down.
+
+**Not tried.** Minimising on macOS (Accessibility is needed); requests while a native modal
+loop runs (baseview's frame timer is in the run loop's default mode only); the COPY SETUP items
+clicked in a running application on each system; Claude Desktop.
+
 ## R-FX-SAFETY. No effect can make the standalone dead or keep it from starting (issue 82)
 
 **The owner, 2026-10-19:** "I'm just wary of a situation in which a user loads up a VST [any
@@ -15080,7 +15130,9 @@ height" (https://claude.ai/artifact/WQk1Wbo6Smef7P6tFmBkRy), then "Go with 62 un
 the rail keys)."
 
 **Built:** on the standalone's top walnut, after the TEMPO screen: TYPING as a computer
-keyboard (its case, two rows of six keys, the space bar), then PANIC as the word.
+keyboard (its case, two rows of six keys, the space bar), then PANIC as the word. **Since
+R-MIDI-MAP (2026-10-27):** MIDI between them (TYPING, MIDI, PANIC), the same size and gaps;
+PANIC is the last key, after which the tips go.
 - **Size and place:** both are the rail's keys, 86 by 62 units, centred on the screen's height.
   They sit 14 units after its surround and 14 units apart, the rail's own gap. They follow the
   screen wherever a pack's layout puts the name plate (`art::tempo_key_at`).
@@ -15157,6 +15209,135 @@ Mac's load was about 44 from other jobs; it passes twice when run alone, and thi
 touches no audio. The editor's parts-against-whole tests (`whole`, `preset`, `rail`) pass
 with and without the standalone, and Clippy passes on the panel crate with all targets.
 No installed build or host was used. The owner has the pictures to review.
+
+## R-MIDI-MAP. A MIDI map mode in the standalone
+
+**The owner, 2026-10-27:** "I wonder if we should put another button up near the typing in
+panic buttons that just allows the user to click on whatever control they're interested in
+mapping and then touch a key or wiggle a knob on their MIDI controller and map it like that."
+On plug-ins: "when it's hosted in a DAW, let's just leave people to use the MIDI Learn menu
+inside of the preset drawer, but when it's standalone, we will add the button at the top that
+... basically has the same sort of functionality ... as Bitwig or Ableton."
+
+**Agreed then:** a MIDI word key after PANIC (since moved: below), built as TYPING and PANIC
+are (R-TEMPO-CORNER),
+the standalone's alone. While it is on, every learnable control in view is marked, each mapped
+one's controller in small print; a click chooses a control instead of operating it and MIDI
+Learn (R34) waits on it; the next controller is its own and the mode stays on, as Ableton's and
+Bitwig's mapping modes do. Delete or Backspace removes the chosen control's mapping; Escape stops
+the waiting, then leaves; the rail's, the pages' and the drawers' keys keep working. A switch
+may learn a note if that fits the bindings without disturbing the engine. MIDI Learn's menu,
+MIDI ASSIGNMENTS… and the drawer's list are unchanged, and what can be learned is not widened.
+
+**Built** (`crates/ca72-plugin/src/editor/mapping.rs`, a layer over `learning.rs` and
+`learn.rs`):
+- **The key:** MIDI, the word, as PANIC's (`art::TempoKey::Midi`): the rail's charcoal cap
+  (`Part::RailKey` or a pack's `key`) and print, 86 by 62 units, between TYPING and PANIC with
+  the rail's 14 units either side (the owner's order, below), following the name plate where a
+  pack's layout puts it (`art::tempo_key_at`, in `TempoKey::ALL`'s order). Lit while the mode is
+  on, lightened under the pointer; its tip after the keys (after PANIC, `TempoKey::LAST`), where
+  TYPING's and TEMPO's go: "MIDI MAP: CLICK A CONTROL, THEN MOVE A CONTROLLER". A plug-in's
+  walnut stays bare: the key is a layer always present, empty in a plug-in, so the panel's
+  fixed layers (`FIXED`) are 13.
+- **The marks** (`learn::MapMark`, `learn::map_mark`): MIDI Learn's own accent (`ACCENT`, the
+  strip's and the drawer's amber), no new colour. Each learnable control in view is tinted with
+  it (7 %, 16 % with a controller) and outlined (3 units, 75 %), rounded as the learn ring; the
+  chosen one 6 units solid; the one waiting the learn ring's dashes (in the mode the mark is the
+  ring: R34's own ring is not drawn twice). A mapped control's controller is printed on a tab in
+  the notes' colours across the outline's foot, at 0.8 of a tip's lettering (so LARGE grows it):
+  `CC 74`, `CH 2 CC 74` on another channel than the first, `NOTE 36`. A knob's outline is the
+  learn ring's 8 units out; a switch's, a key's or a jack's 3, clear of the legends printed
+  close round them. MONO and POLY's outline (POLY's) and UNISON's are drawn a little apart where
+  they met.
+- **Drawn as floating layers** of the panel's renderer, under the ring, a tip, a note and a
+  menu, so that one list of rectangles covers the panel, the strip, the pages and the drawers.
+  While the mode is on the frame is put together whole when anything changes, as it is while a
+  control waits under R34.
+- **What is marked** (`Editing::map_places`): the panel's and the left hand's controls; GLOBAL's
+  knobs and its POLY, UNISON, STEREO, PLACEMENT and AUTO GAIN tabs while GLOBAL shows; the LFO
+  page's controls while it shows; the six macros while they show; the arpeggiator's RATE,
+  OCTAVES, GATE and SWING and its ON, HOLD and DIRECTION while its drawer is open and still, the
+  expression drawer's four knobs likewise, and the effects' pins while their drawer shows them;
+  PREVIOUS and NEXT PRESET on the rail. Not marked: what is under the presets' drawer or under a
+  drawer dropped from the rail (MODE's tabs under ARP's; ENTROPY, below it, is), the lower part
+  in the compact view, the KEYS page, controls off the panel (TIMED keys away from LO, MOD keys
+  of a STEPPED waveform), and the MOD wheel, whose MIDI LEARN sets this computer's wheel source
+  rather than learning a controller (its menu does as before). LOCK has no control: the list
+  alone learns it.
+- **A click** finds the marks themselves (what is outlined is what is chosen; where two meet,
+  the nearest middle). It chooses: MIDI Learn waits on the control (`Learning::learn_with_notes`)
+  and its note says so; no value is set, no gesture begun, no drag, double click or
+  ⌘/Ctrl-click entry, and the mouse wheel turns nothing (the presets' drawer and the effects'
+  list still scroll). A click on anything else operates nothing, except TYPING, PANIC and MIDI,
+  the presets' drawer (its MIDI list too), the rail's keys (GLOBAL, KEYS, LFO, MACRO, PANEL,
+  ARP, MPE, FX, the settings, SAVE, the name) and the grip. Right-click menus are R34's.
+- **The ARP drawer's ON, HOLD and DIRECTION** were learned only from the list (their menus are
+  the presets' list's: R-ARP). The mode chooses them by a click, which widens no list; their
+  note goes over the tab (`Learning::found_at`).
+- **After a controller:** the message that teaches it changes nothing (R34), so the control moves
+  from the next one. The design said "moves it and binds"; R34's capture is kept (a knob being
+  turned sends many messages, so it moves at once). The mode stays on and the control stays
+  chosen (its stronger outline), no longer waiting: a click on it again waits again. A click on
+  another moves the waiting there.
+- **Keys:** Escape stops the waiting (none chosen then), then ends the mode; Delete or Backspace
+  removes the chosen control's controller (waiting or not). A menu's Escape, and the drawer's MIDI
+  list's keys while it shows, come first. The editor holds the keyboard while the mode is on.
+  TYPING plays on (its letters are not the mode's keys) except while a control waits, as under
+  R34.
+- **Ending:** MIDI again, Escape with nothing waiting, or closing the editor (the mode is the
+  editor's; R34's closing disarms).
+- **Agents:** `ca72_describe` gives `midi_learn.map_mode`. No tool was added; `ca72_midi_learn`
+  still takes a note for PREVIOUS and NEXT PRESET only (its refusal for a switch says so), left
+  as it is while `editor/agent.rs` is being changed elsewhere.
+
+**Notes for switches: built.** `learn::Binding` already had `Note` for the preset pads
+(R-PRESET-KEYS), whose path on the audio thread already keeps a learned note from playing.
+- `learn::takes_note`: a preset action, or a learnable of `Kind::Switch` (two positions: every
+  ON, POLY, UNISON, DOUBLE, AUTO GAIN, ARP ON, HOLD, the TIMED keys, the LFOs' switches...).
+  Knobs and selectors (RANGE, WAVEFORM, VOICES, NOTE PRIORITY, DIRECTION, PLACEMENT, an LFO's
+  MODE) take controllers only: a note would have to step through their positions, not tried.
+- Only the mode's waiting takes a note: `MidiMap::arm_with_notes` sets a flag (stored before the
+  arming word, read after it) that `MidiMap::arm`, MIDI Learn's menu's and list's, clears. So
+  MIDI LEARN from a switch's menu lets a note through to the keys as before, in the plug-ins too.
+- On the audio thread, a learned note's note-on turns its switch over (`Ca72::turn_over`: off if
+  on, else on, through the host as a controller's 0 or 127 would set it); its note-off nothing;
+  neither plays. The engine is untouched.
+- Saved with the project beside the controllers: `"note"` in an entry's `"cc"` place
+  (`{"param":"arp_on","channel":1,"note":36}`); `Saved` holds `Binding`s. The table's version is
+  still 1: a CA-72 before this reads such an entry as malformed and leaves it out, keeping the
+  rest. A note given to a knob in a state is left out too.
+
+**Not done:** the mode in the plug-ins (the owner's decision). A hover tip naming a control's
+controller in the mode (the small print shows it). Takeover other than R34's jump. Cycling a
+selector by a note. No installed build or standalone was run and no MIDI device was used: the
+behaviour is the editor's tests', the pictures the editor's own frames. The effects' pins' marks
+are not in the pictures (the tests' editor has no effects host).
+
+**The order, 2026-10-27** (the owner's review of the mode, approved as built): "one minor
+note: I would change the order of the three buttons up top to be keyboard-midi-panic". So the
+walnut reads the TEMPO screen, TYPING (the keyboard), MIDI, PANIC, with the same sizes and
+14-unit gaps; PANIC, last, is where the tips begin after. Only `TempoKey::ALL`'s order (and
+`LAST`) changed: the hit test, the drawing, a pack's placement and the tips follow it, and the
+three layers stay, always present.
+
+**Tests:** `midi_map_mode_chooses_a_control_learns_it_and_stays_on` (the key between TYPING and
+PANIC, its light and tip; what is marked on GLOBAL's page, each mark found where it is drawn; a click on a
+knob, a switch and a tab choosing without a value, a gesture, a drag or the wheel; a controller
+and a switch's note learned with the mode staying on; the waiting moved; Delete; the LFO page
+and the macros reached by their keys; Escape twice; MIDI off stopping a control waiting; none in
+a plug-in), `midi_map_mode_reaches_the_arpeggiators_drawer` (its knobs and tabs marked, MODE's
+tabs under it not, ON's note over its tab), `learn::tests::a_switch_learns_a_note_from_the_map_mode_alone_and_keeps_it`,
+`tests::a_switchs_learned_note_turns_it_over_and_is_not_played` (through `Ca72::midi`), and
+`the_tempo_keys_follow_the_screen_at_the_rails_size_and_gaps` and the frame-in-parts tests
+with MIDI lit and pointed at.
+
+**Evidence (omarchy, Linux, Rust 1.97.1):** `cargo test -p ca72-plugin -p ca72-panel --features
+ca72-plugin/standalone-production` passes: the panel's 116 library tests, the plug-in's 600, and
+every integration suite. Clippy (`--workspace --all-targets --all-features -D warnings`) and
+rustfmt pass. Pictures from `the_midi_map_pngs` (ignored; `CA72_MIDI_MAP_PNG`), the window at
+1720 logical pixels and twice that in pixels: the mode off, on over GLOBAL with controllers and a
+switch's note learned, a knob waiting, the LFO page and the macros, the ARP drawer, a plug-in,
+and the walnut's keys close up, in `/mnt/lab/artifacts/ca-72/midi-map/`.
 
 ## R-LFO-STRESS. The LFOs at their worst, with listening comparisons
 
