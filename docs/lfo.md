@@ -241,7 +241,8 @@ one a session brought there listed `inert`).
 - Between those steps (R-LFO-STRESS): where an LFO moves TUNE, oscillator 2's or 3's FREQUENCY
   or CUTOFF (`Target::fast`, `Lfos::fast`), each voice glides what it reads of them in a
   straight line from the step's value to the next step's, a sample at a time (`Sweep`; in the
-  circuit `Jacks::swept`, after the knob's law; in the light voice `light::swept_laws`). The
+  circuit `Jacks::swept`, after the knob's law; in the light voice `light::swept_laws`: the
+  pitches' semitones and CUTOFF's current into the control node, `Light::set_cutoff_swept`). The
   next step's values come from copies of the generators moved on (`Bank::ahead`; on the ticks,
   a copy of the bank run to the next step's ticks), so the glide adds no delay and is exact at
   each step. A step an LFO jumps in (halfway across, more than `lfo::JUMP` off the line between

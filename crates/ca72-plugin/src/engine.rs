@@ -715,8 +715,9 @@ pub struct Playing {
 
 /// A voice's glide across an LFO step (decisions.md R-LFO-STRESS): each of its samples' move of
 /// what the circuit reads of a pitch or CUTOFF ([`Swept`]: CUTOFF's wiper, TUNE, the FREQUENCY
-/// wipers), or the light voice (each oscillator's cents and the cutoff's octaves, added as
-/// ENTROPY's are), and its samples since the step's start. None (the default): the jacks as
+/// wipers), or the light voice (each oscillator's cents, added as ENTROPY's are, and CUTOFF's
+/// current into the control node, [`Light::set_cutoff_swept`]), and its samples since the
+/// step's start. None (the default): the jacks as
 /// they were, to the bit.
 #[derive(Debug, Clone, Copy, Default)]
 struct Sweep {
@@ -724,7 +725,7 @@ struct Sweep {
     light: bool,
     circuit: Swept,
     cents: [f64; 3],
-    octaves: f64,
+    current: f64,
     at: f64,
 }
 
@@ -740,8 +741,8 @@ impl Sweep {
         if light {
             let ((pa, ca), (pb, cb)) = (ca72::light::swept_laws(a), ca72::light::swept_laws(b));
             s.cents = std::array::from_fn(|o| (pb[o] - pa[o]) * 100.0 / len);
-            s.octaves = (cb - ca) / len;
-            s.on = s.cents != [0.0; 3] || s.octaves != 0.0;
+            s.current = (cb - ca) / len;
+            s.on = s.cents != [0.0; 3] || s.current != 0.0;
         } else {
             let wiper = |x: f64| x.clamp(0.0, 1.0);
             s.circuit = Swept {
@@ -765,7 +766,17 @@ impl Sweep {
         Some(now)
     }
 
-    /// Its moves so far added to a sample's jacks `j`.
+    /// The light voice's CUTOFF current moved so far, A.
+    #[inline]
+    fn light_current(&self) -> f64 {
+        if self.light {
+            self.current * self.at
+        } else {
+            0.0
+        }
+    }
+
+    /// Its pitches' and the circuit's CUTOFF's moves so far added to a sample's jacks `j`.
     #[inline]
     fn add(&self, j: &mut Jacks) {
         let at = self.at;
@@ -773,7 +784,6 @@ impl Sweep {
             for (d, c) in j.detune.iter_mut().zip(self.cents) {
                 *d += c * at;
             }
-            j.cutoff += self.octaves * at;
         } else {
             let c = &self.circuit;
             j.swept = Swept {
@@ -1432,6 +1442,8 @@ impl Playing {
             }
             express(&mut j, e, osc3);
             self.light.set_offsets(j.detune, j.cutoff);
+            self.light
+                .set_cutoff_swept(sw.as_ref().map_or(0.0, Sweep::light_current));
             self.light.set_timed(j.timed);
             let mut y = self.light.tick(x);
             if !y.is_finite() {
@@ -1454,6 +1466,8 @@ impl Playing {
                 }
                 express(&mut j, e, osc3);
                 t.light.set_offsets(j.detune, j.cutoff);
+                t.light
+                    .set_cutoff_swept(sw.as_ref().map_or(0.0, Sweep::light_current));
                 t.light.set_timed(j.timed);
                 let mut z = t.light.tick(x);
                 if !z.is_finite() {

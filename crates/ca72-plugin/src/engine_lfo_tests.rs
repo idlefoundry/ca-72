@@ -993,7 +993,7 @@ fn a_pitch_or_cutoff_glides_across_each_step() {
             for o in 0..3 {
                 close(end(pa[o] * 100.0, sweep.cents[o]), pb[o] * 100.0);
             }
-            close(end(ca, sweep.octaves), cb);
+            close(end(ca, sweep.current), cb);
         } else {
             let s = sweep.circuit;
             close(
@@ -1172,7 +1172,7 @@ fn the_glide_ends_where_the_next_step_puts_the_knob() {
                         ca72::light::swept_laws(&now).1,
                         ca72::light::swept_laws(&next).1,
                     );
-                    close(end(ca, sweep.octaves), cb);
+                    close(end(ca, sweep.current), cb);
                 } else {
                     close(
                         end(cutoff_track(now.cutoff), sweep.circuit.cutoff),

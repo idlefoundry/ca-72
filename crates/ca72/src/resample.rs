@@ -119,7 +119,7 @@ impl BlepTables {
 
     /// A rounded corner's correction at `x` for a slope that grows by one a sample evenly
     /// over `w` samples from `x` = 0: the ramp's correction averaged over the width.
-    fn fillet(&self, x: f64, w: f64) -> f64 {
+    pub(crate) fn fillet(&self, x: f64, w: f64) -> f64 {
         let sum = |x: f64| {
             if x <= -(BLEP_DELAY as f64) {
                 0.0

@@ -221,8 +221,8 @@ pub fn shape_names(n: usize) -> [&'static str; 4] {
 
 /// Oscillator `n`'s CONTINUOUS shape at `t` of its travel, as the host and the panel's tip show
 /// it: a place's name ("Sawtooth"); between two, both and how far ("Sawtooth to Square 40 %");
-/// past SQUARE the rectangle's duty cycle, named at the switch's own three ("Wide Rectangle
-/// 30 %", "Rectangle 24 %").
+/// past SQUARE the rectangle's duty cycle, named at the switch's own three ("Wide Rectangle"
+/// with its current circuit duty, or "Rectangle 24 %" between the places).
 pub fn shape_text(n: usize, t: f64) -> String {
     use ca72::voice::{SHAPE_PLACES, shape_at, shape_bias};
     let at = shape_at(
@@ -1812,10 +1812,13 @@ mod tests {
         assert_eq!(one.normalized_value_to_string(at(3.0), true), "Square 48 %");
         assert_eq!(
             one.normalized_value_to_string(at(4.0), true),
-            "Wide Rectangle 30 %"
+            "Wide Rectangle 29 %"
         );
+        // The calibrated circuit's 220 Hz MIX duty at the wide selector, not the old
+        // profile's rounded 30 %. Display rounding cannot preserve the exact selector
+        // position; typing the measured duty can (docs/calibration/pulse-source-20261022.md).
         let t = one
-            .string_to_normalized_value("30 %")
+            .string_to_normalized_value("29.378574 %")
             .expect("a duty cycle");
         assert!((f64::from(t) * SHAPE_PLACES - 4.0).abs() < 2e-2, "{t}");
         let t = three

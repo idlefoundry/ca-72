@@ -632,6 +632,40 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     (R42); their spectra within 2.4 dB, but Cruising Whistle's, whose self-oscillating
     filter's 2nd harmonic (the 6.35 kHz band) the VCA no longer adds to: 5.9 dB down.
 
+33. **The pink network's upper branch: C2 .033 uF to .022 uF, R13 220 to 510**
+    (`noise::C2`, `noise::R13`, `board3-noise.lib`, board3.md, 2026-10-23). The comparison
+    session of 2026-10-21 (rounds 008 and 009, the EVO4 interface: white and pink noise alone
+    at VOLUME 8, an 8 s gate, 6 s averaged) gives the reference's pink against its white,
+    which cancels the interface. Against the CA-72's, the drawn network left the pink 0.8 dB
+    short at 2 kHz, 1.2 at 3.2, 1.7 at 4, 2.4 at 6.3, 3.0 at 10 and 3.9 at 16, rising
+    smoothly from 1 kHz (the white within 0.3 dB to 10 kHz): its upper branch's zero, at 22
+    kHz, comes too late. In ngspice on the noise bench every single part leaves 0.9 dB RMS or
+    more from 150 Hz to 20 kHz; the branch's two together, at E-series values, .022 uF and
+    510 ohm (its zero at 14 kHz) leave 0.20 dB (.022 uF with 470 or 560: 0.23 and 0.24). Now
+    the pink stands within 0.45 dB of the reference's from 125 Hz to 12.7 kHz, and against
+    the white over the whole band -1.36 dB where the reference's is -1.10 (-2.34 before).
+    The netlist and the model change together; against ngspice the noise keeps its budgets
+    (`noise_realtime`: responses within 0.001 dB, discretised pink within 0.17 dB to 16 kHz).
+    One session's take: the pink of earlier sessions was never recorded. A departure from
+    Moog's schematic. Presets with pink noise (in the mixer, or as MODULATION MIX's noise at
+    WHITE) brighten above 2 kHz by up to 3 dB.
+
+34. **The preamplifier's FEEDBACK loop: C23 .1 uF to 82 nF, its positive supply +10 to +13 V**
+    (`preamp::C23`, `preamp::V_POS`, `board4-preamp.lib` and its bench, board4.md B4-11,
+    2026-10-23). After R-FEEDBACK-LOOP closed ULTRA's loop at one rate, one FEEDBACK (2.632)
+    matched the comparison's EXT. INPUT VOLUME 0, 5, 8 and 10 takes (rounds 049 to 052), but at
+    10 the loop's own oscillation, which carries the sound there, ran 150 cents low and with
+    too little even harmonic: EXT 10's 99 to 198 Hz bands 4 to 7 dB short. Round 053 recorded
+    the loop alone (the oscillators and noise off, A4 held 8 s three times; the three holds
+    alike within 0.1 Hz). Fitted to it, the rate by C23 and the even harmonics by the clip's
+    asymmetry (B4-11). Against the takes, ULTRA, FEEDBACK 2.632: EXT 0, 5 and 8 unchanged
+    (2.43, 2.42 and 3.14 dB at CUTOFF +2.679); EXT 10 2.83 at CUTOFF +2.15 (3.24 before at its
+    best, +2.30), its bands from 99 Hz to 16 kHz within 1 dB on the first two notes. HI's
+    preamplifier models (`preamp::Plain`, `Delayed`) take the same C23 and clip at +12.9 V.
+    LO's preamplifier (a symmetric clip in `light.rs`) is not changed. A departure from
+    Moog's schematic, for the reference's: only EXTERNAL INPUT's sound moves, and only where
+    its preamplifier clips or below 20 Hz.
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -650,6 +684,24 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   reference's -53.6 to -45.3 (at 0.01 to 0.1 of full scale), where with the filter open it
   is within 0.9 dB: the VCA's 3rd harmonic and the filter's meet at another phase, and the
   CA-72's peak stands 16 Hz under the reference's sine.
+- **FEEDBACK's lock on a high note** (change 34, 2026-10-23): at EXT. INPUT VOLUME 10 the
+  loop's own oscillation locks to a whole fraction of the note (A2 / 2, A3 / 4 and A4 / 8:
+  55.3 Hz, in both). On A4 the reference's slips about 0.65 s in to A4 / 7 (63.2 Hz, +231
+  cents) and stays there: every time (round 054, three passes) and through 5 s holds (round
+  055; A3 holds A3 / 4 throughout). The CA-72's holds A4 / 8. Ruled out: the note's pitch
+  (steady to 0.1 Hz through the slip), ENTROPY (0 to 10, four seeds: none slips), the return
+  path's response (at EXT 5 each harmonic of each note raised by the same as the reference's,
+  within 0.2 dB), the loop's slow drift (its 2nd harmonic rising over 1 to 2 s by the same as
+  the reference's). The circuit itself does not slip either: the loop closed in ngspice from
+  the netlists (the preamplifier, the filter and the VCA as calibrated, the voice's own mixer
+  bus and contour fed in sample by sample, the cable as FEEDBACK's share at EXT. INPUT) holds
+  A4 / 8 and agrees with the CA-72 within -35 dB of the signal (reltol 1e-4 and 1e-5 alike;
+  the bench, a recording test and a voice probe, kept at
+  `/mnt/lab/artifacts/ca-72/feedback-loop-bench-2026-10-23`). So the reference's loop differs
+  from the drawn circuit's where neither the loop alone nor EXT 0 to 8 shows it; in the CA-72
+  it slips only with less gain round the loop (FEEDBACK 2.4 to 2.5, or the filter's input
+  driven 1 to 1.5 dB less), which the loop alone does not allow. Left there by the owner's
+  decision (2026-10-23: close enough).
 - **EMPHASIS's peak against its passband:** at the same passband loss the CA-72's peak
   stands 1 to 1.5 dB higher than the reference's (+14.7 to +15.3 dB at 6 against +13.9 to
   +14.3; +21.1 to +22.3 at 7 against +19.4 to +21.3), and at 7.5, near regeneration, up to 5
@@ -687,6 +739,40 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   panel set by ear (+3.4 and -7 cents; Hollow Glider's oscillator 3 -16, as on its take). Presets keep their
   knobs' positions where a law changed: those between a law's ends sound as the reference
   would at those marks (Ladder Kick's sweep, for one, starts about 2 semitones lower).
+- **A slow filter sweep at EMPHASIS 10** (the comparison session's round 048, 2026-10-22: three
+  oscillators on A2, AMOUNT OF CONTOUR 10, filter ATTACK about 9.5, DECAY about 9.2): the
+  CA-72's resonance stands within 20 cents of the reference's below 2.5 kHz and falls behind
+  it above: -30 cents at 4 kHz, -50 to -70 at 7 to 12, -90 to -110 at 16, -140 to -155 at 20
+  to 23, rising and falling alike. HI and ULTRA agree within 25 cents; the oscillators'
+  level changes nothing (the same with them off); a fit of ATTACK, DECAY, SUSTAIN and CUTOFF
+  to the whole trajectory leaves 40 cents RMS. It is not the filter's tracking: session E's
+  self-oscillation under CUT CV stands -12 to -28 cents from 4 to 16 kHz (-77 at 22.9). Nor
+  the contours' shapes: replaying session F, the filter contour's attack fully clockwise
+  rises as the reference's at every fraction (14 % slower throughout: a time, which the knob
+  takes) and its slowest decay falls within 4 %. Open: the contour's path into the filter
+  at large contour voltages. The deciding take: FILT CONT recorded through this phrase, and
+  the filter self-oscillating at AMOUNT 10 with FILTER SUSTAIN stepped 0 to 10.
+- **The self-oscillation's waveform** (session E, EMPHASIS 10, CUT CV stepped, 0.95 to 8
+  kHz): the CA-72's 2nd harmonic -34 dBc against the reference's -38, its 3rd -44 to -46
+  against -43, its 7th 5 dB under; and its level 2.0 to 2.9 dB higher against the passband's
+  1 kHz tone. The comparison session's held resonances show the same (round 048: 2nd +2.7
+  dB, 3rd to 6th 3 to 4 dB under). The output stage's asymmetry or the loop's limiting: to
+  separate.
+- **The thump at a note's end** (the comparison session, 2026-10-22: every short note with
+  LOUDNESS DECAY at 0 left a 10 to 20 Hz transient 15 to 17 dB larger than the reference's
+  recording). Mostly that session's interface (EVO4): a second-order high-pass at 4 to 6 Hz
+  on the CA-72's renders brings its thump to the recording's in four takes (the mismatch from
+  4.6 to 27 times the reference's thump to 0.3 to 1.0). On the MOTU (its 0.94 Hz high-pass
+  measured, session B) the CA-72's release thump stands 0.76 of its onset's against the
+  reference's 0.42 in session B's bare gates, but 0.68 against 0.70 in session F's take 18,
+  and the VCA balance trims, which set the onset's, move the ratio only between 0.68 and 0.90:
+  no circuit change until a loopback measures the EVO4's own low end.
+- **The oscillators' tracking against each other** (the comparison session's detuned lead,
+  2026-10-23): the reference's oscillator 2 tracks about 2 cents an octave shallower than its
+  oscillator 1 (its beat 5.67 Hz at E4 for 4.00 at A3; session C's 1.0016, 0.9996 to 1.0003
+  and 0.9991 octaves a volt), where the CA-72's three track exactly. Not copied: the owner,
+  2026-10-23, keeps exact tracking at ENTROPY 0; a mild per-oscillator scale tolerance is
+  to join ENTROPY later (after 0.3).
 
 ## Reproducing
 
@@ -703,3 +789,10 @@ CA72_ONLY=<preset> CA72_PHRASE=<phrase.json> CA72_LEVELS_OUT=<dir> cargo test --
 # the render's fourth and sixth channels are the loudness and filter contours.
 python scripts/calibration/analyze.py <take.json> [--render <render.wav>]
 ```
+
+## Waveform source calibration candidate
+
+The triangle fold and hybrid switch network have a separate, provenance-preserving
+investigation: [waveform-fold-reference.md](waveform-fold-reference.md). It distinguishes the
+original drawing/model assumptions from inferred Q2 and R031 equivalents, keeps the
+rejected BR-only hybrid regression, and documents the circuit, LO and noise-qualified checks.
