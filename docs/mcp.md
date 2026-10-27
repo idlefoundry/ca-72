@@ -8,10 +8,9 @@ plays notes. Reference-sound matching (#77) uses the offline tools and workflow 
 for skins (#78) is separate.
 
 **Status.** The first version controls the **standalone application**. Plug-ins in a host
-come later (see [Next: plug-ins in a host](#next-plug-ins-in-a-host)). It is built and tested
-on Linux. macOS should work unchanged (Unix sockets), but it has not been tried. Windows needs
-a named pipe and is not built yet. Several choices below are the owner's to confirm; they are
-marked **owner's call**.
+come later (see [Next: plug-ins in a host](#next-plug-ins-in-a-host)). It runs on Linux, macOS
+and Windows (10 version 1803 or later), over the same local AF_UNIX socket on each. Several
+choices below are the owner's to confirm; they are marked **owner's call**.
 
 ## Using it
 
@@ -19,14 +18,17 @@ marked **owner's call**.
    **AGENTS › ALLOW**. Or start it with `ca72-standalone --agents`, which allows agents for that
    session only.
 2. Tell the agent's MCP client to start the bridge, `ca72-mcp`, over standard input and output.
-   In Claude Code, for example:
+   In the same AGENTS section, **COPY SETUP: CLAUDE CODE** puts Claude Code's command, with the
+   bridge's path filled in, on the clipboard; paste it into a terminal:
 
    ```sh
-   claude mcp add ca-72 -- /path/to/ca72-mcp
+   claude mcp add --scope user ca-72 -- "/path/to/ca72-mcp"
    ```
 
-   In a client configured with JSON, the entry is
-   `{"command": "/path/to/ca72-mcp", "args": []}`.
+   **COPY SETUP: JSON FOR OTHER APPS** copies the entry clients configured with JSON (Claude
+   Desktop's `claude_desktop_config.json`, Cursor and others) read:
+   `{"mcpServers": {"ca-72": {"command": "/path/to/ca72-mcp", "args": []}}}`. The line under
+   ALLOW and OFF says whether the application is listening and how many agents are connected.
 3. Ask the agent to start with `ca72_describe`.
 
 `ca72-mcp --instance ID` acts on one CA-72 when several are open; otherwise the agent chooses
@@ -45,7 +47,7 @@ CA-72 is a window the player opens, so it cannot be that child. Instead it is sp
 ```
 agent's MCP client ──stdio, MCP (JSON-RPC 2.0, a message a line)──▶ ca72-mcp (the bridge)
                                                                         │
-             Unix socket in the user's own runtime folder, JSON-RPC 2.0 a line
+         AF_UNIX socket in the user's own runtime folder, JSON-RPC 2.0 a line
                                                                         ▼
             CA-72 standalone: the socket's threads ──inbox──▶ the editor's window thread
 ```
@@ -62,7 +64,7 @@ agent's MCP client ──stdio, MCP (JSON-RPC 2.0, a message a line)──▶ ca
   parameters themselves (`agent/values.rs`), so it cannot fall out of step with them. As in
   DAW-v3's `daw rpc` relaying to a running `daw serve`, the bridge is a client of a
   long-running process.
-- **The application** (`agent/server.rs`) listens on a Unix socket while agents are allowed.
+- **The application** (`agent/server.rs`) listens on an AF_UNIX socket while agents are allowed.
   Each connection has a thread that reads requests, a line at a time. `hello` and `ping` are
   answered there. Every other request goes into an inbox, and the editor takes from the inbox
   at each frame (`PanelWindow::on_frame` → `Editing::serve_agents`, `editor/agent.rs`). The
@@ -78,10 +80,12 @@ agent's MCP client ──stdio, MCP (JSON-RPC 2.0, a message a line)──▶ ca
 - **Off by default.** Until the player chooses SETTINGS › AGENTS › ALLOW (kept in this
   computer's `settings.toml` as `agents = true`) or starts the application with `--agents`,
   no socket exists, so nothing can connect.
-- **Local and the user's alone.** Only a Unix socket is used, never a network port. It lives
-  in `$XDG_RUNTIME_DIR/ca-72/` (on macOS, the user's own temporary folder), and that folder is
-  made readable by its user alone (mode 700, the socket 600). So only the user's own programs
-  can reach it. `CA72_AGENT_DIR` moves it, which the tests use.
+- **Local and the user's alone.** Only a local AF_UNIX socket is used, never a network port.
+  It lives in `$XDG_RUNTIME_DIR/ca-72/` (on macOS, the user's own temporary folder), and that
+  folder is made readable by its user alone (mode 700, the socket 600). On Windows it is
+  `ca-72-<user>` in the user's own temporary folder (`%LOCALAPPDATA%\Temp`), whose access the
+  socket takes: the user, the system and administrators. So only the user's own programs can
+  reach it. `CA72_AGENT_DIR` moves it, which the tests use.
 - **An agent can turn agents off but not on.** `ca72_settings_set {"agents": false}` closes
   the socket after answering. Turning agents on again is the player's job.
 - **Everything is visible.** Every change shows on the panel at once, as if the player had
@@ -459,8 +463,8 @@ What is needed, in order:
 4. **Access in a host.** The same setting applies. A host's sandbox may refuse the runtime
    folder: Logic's AU runs in its own process (AUHostingService), and Bitwig's plug-in host is
    separate too. This needs testing in each host.
-5. **Windows.** A named pipe in place of the Unix socket, or AF_UNIX, which Windows 10 and 11
-   support but Rust's standard library does not.
+5. **Windows.** Done for 0.3: AF_UNIX, which Windows 10 1803 and later support but Rust's
+   standard library does not, through `uds_windows` (`agent.rs`'s `Listener` and `Stream`).
 6. **Shipping the bridge.** Added for 0.3 in `scripts/standalone.sh` and the installers.
 7. **For #77.** Implemented in the bridge: `ca72_snapshot`, `ca72_render`, `ca72_analyze`
    and `ca72_compare`, described below. Rendering never waits on a window or live audio thread.

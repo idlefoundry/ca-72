@@ -17,9 +17,11 @@ use serde_json::{Value, json};
 
 use super::{Change, Editing, Law, Lettering, ParamSetter, Skin};
 use crate::agent::server::Server;
+use crate::agent::setup;
 use crate::agent::values::{self, Entry};
 use crate::agent::{ApiError, Reply, arg, codes, flag_arg, text_arg};
 use crate::learn::{self, Binding, Cc, LEARNABLE};
+use crate::learning::{AgentsMenu, Setup};
 use crate::library::{self, Origin};
 use crate::presets::Browser;
 use ca72_panel::keyboard;
@@ -42,6 +44,8 @@ pub(super) struct Agents {
     pub timed: Vec<(u8, Instant)>,
     /// Agents turned off by an agent: the socket closed once its answer has gone.
     pub stop: bool,
+    /// The setup the settings' AGENTS last copied, and whether it reached the clipboard.
+    pub copied: Option<(Setup, bool)>,
     saves: Vec<(crate::agent::server::Job, crate::presets::Saving)>,
 }
 
@@ -52,6 +56,42 @@ impl Editing {
         self.playing.standalone && (self.settings.agents || crate::agent::forced())
     }
 
+    /// The settings' AGENTS (the standalone's alone): allowed or not, how they stand, and
+    /// whether their clients' setups can be copied.
+    pub(super) fn agents_menu(&self) -> Option<AgentsMenu> {
+        if !self.playing.standalone {
+            return None;
+        }
+        let allowed = self.agents_allowed();
+        let status = match (&self.agents.server, &self.agents.error) {
+            _ if !allowed => None,
+            (Some(s), _) => Some(match s.clients() {
+                0 => "LISTENING: NO AGENT CONNECTED".to_owned(),
+                1 => "LISTENING: 1 AGENT CONNECTED".to_owned(),
+                n => format!("LISTENING: {n} AGENTS CONNECTED"),
+            }),
+            (None, Some(_)) => Some("COULD NOT LISTEN: SEE THE LOG".to_owned()),
+            (None, None) => None,
+        };
+        Some(AgentsMenu {
+            allowed,
+            status,
+            bridge: setup::bridge().is_some(),
+            copied: self.agents.copied,
+        })
+    }
+
+    /// A client's setup for the bridge beside the application put on the clipboard.
+    pub(super) fn copy_setup(&mut self, which: Setup) {
+        let copied = setup::bridge().is_some_and(|b| {
+            crate::clipboard::copy(&match which {
+                Setup::ClaudeCode => setup::claude_code(&b),
+                Setup::Json => setup::json(&b),
+            })
+        });
+        self.agents.copied = Some((which, copied));
+    }
+
     /// The socket open while agents are allowed, closed when they are not (the tests' editors
     /// open none of their own in the user's folder: they are given one).
     pub(super) fn sync_agents(&mut self) {
@@ -60,7 +100,10 @@ impl Editing {
             (None, true) if self.agents.error.is_none() && !cfg!(test) => {
                 match Server::start("standalone") {
                     Ok(s) => self.agents.server = Some(s),
-                    Err(e) => self.agents.error = Some(e),
+                    Err(e) => {
+                        nih_plug::nih_log!("Agents could not listen: {e}");
+                        self.agents.error = Some(e);
+                    }
                 }
             }
             (Some(_), false) => {
@@ -1324,7 +1367,7 @@ fn timbre_rest_word(r: crate::expression::TimbreRest) -> &'static str {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, any(unix, windows)))]
 mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -2186,7 +2229,7 @@ mod tests {
                 .record()
                 .endpoint
                 .clone();
-            let mut c = std::os::unix::net::UnixStream::connect(path).expect("connect");
+            let mut c = crate::agent::Stream::connect(path).expect("connect");
             writeln!(
                 c,
                 r#"{{"jsonrpc":"2.0","id":1,"method":"parameters.set","params":{{"values":{{"cutoff":3}}}}}}"#

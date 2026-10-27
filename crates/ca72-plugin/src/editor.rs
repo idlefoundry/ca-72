@@ -1904,6 +1904,37 @@ impl Editing {
         self.composed = None;
     }
 
+    /// The settings' menu, dropping down from under the rail's settings key to its left.
+    fn open_settings(&mut self) {
+        let size = self.renderer.text_size() * MENU_TEXT;
+        // The packs installed now (one may have been added since the editor opened).
+        self.installed = installed();
+        let packs: Vec<(String, bool)> = self
+            .installed
+            .iter()
+            .map(|p| (p.name.clone(), p.look.is_some()))
+            .collect();
+        let shown = &self.renderer.look().id;
+        let pack = self
+            .installed
+            .iter()
+            .position(|p| p.look.as_ref().is_some_and(|l| &l.id == shown));
+        let agents = self.agents_menu();
+        self.learning.open_settings_menu(
+            self.renderer.fonts(),
+            settings_menu_corner(),
+            size,
+            (
+                self.settings.skin,
+                self.settings.lettering,
+                self.settings.frequency,
+                self.params.midi_map.wheel_source(),
+                agents,
+            ),
+            (&packs, pack),
+        );
+    }
+
     /// Listening for agents if they are allowed.
     fn listening(mut self) -> Self {
         self.sync_agents();
@@ -3267,32 +3298,8 @@ impl Editing {
             // The settings' key: its menu, dropping down from under it to its left.
             StripTarget::Bar(BarTarget::Settings) => {
                 self.playing.release();
-                let size = self.renderer.text_size() * MENU_TEXT;
-                // The packs installed now (one may have been added since the editor opened).
-                self.installed = installed();
-                let packs: Vec<(String, bool)> = self
-                    .installed
-                    .iter()
-                    .map(|p| (p.name.clone(), p.look.is_some()))
-                    .collect();
-                let shown = &self.renderer.look().id;
-                let pack = self
-                    .installed
-                    .iter()
-                    .position(|p| p.look.as_ref().is_some_and(|l| &l.id == shown));
-                self.learning.open_settings_menu(
-                    self.renderer.fonts(),
-                    settings_menu_corner(),
-                    size,
-                    (
-                        self.settings.skin,
-                        self.settings.lettering,
-                        self.settings.frequency,
-                        self.params.midi_map.wheel_source(),
-                        self.playing.standalone.then(|| self.agents_allowed()),
-                    ),
-                    (&packs, pack),
-                );
+                self.agents.copied = None;
+                self.open_settings();
             }
             StripTarget::Bar(b) => {
                 if matches!(
@@ -3467,6 +3474,12 @@ impl Editing {
             }
             Pressed::Agents(on) => {
                 self.set_agents(on);
+                return;
+            }
+            Pressed::Setup(setup) => {
+                self.copy_setup(setup);
+                // (Open again, to say it was copied.)
+                self.open_settings();
                 return;
             }
             Pressed::SizeMenu => {

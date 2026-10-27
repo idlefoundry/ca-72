@@ -10090,6 +10090,56 @@ the inventory, the design, the tools and what comes next.
   (`CA72_AGENTS_PNG`); in the application it sits below STANDALONE's AUDIO & MIDI….
 - Hosts and plug-ins.
 
+### Every computer, and set up from the menu (2026-10-27)
+
+**The owner, 2026-10-27,** asking whether agents were "plug and play essentially": "can you
+launch agents on the Mac and Windows computers? Just ... do a little test to see if these
+things work and implement the fixes that you recommend". (Agents are left out of 0.3.0's video
+for a short of their own.)
+
+**Built.**
+- **Windows.** The socket is AF_UNIX there too (Windows 10 1803 and later), through
+  `uds_windows`: `agent.rs`'s `Listener` and `Stream` are Unix's or its, and every path of the
+  server, the bridge and discovery is shared. The folder is `ca-72-<user>` in the user's own
+  temporary folder, whose access (the user, SYSTEM, Administrators) the socket takes.
+- **SETTINGS › AGENTS** says how agents stand under ALLOW and OFF (LISTENING with how many are
+  connected, or COULD NOT LISTEN, the reason logged) and copies a client's setup with the path
+  of the bridge beside the application: COPY SETUP: CLAUDE CODE (`claude mcp add --scope user
+  ca-72 -- "<path>"`) and COPY SETUP: JSON FOR OTHER APPS (`mcpServers`). The menu opens again
+  saying COPIED, or that it could not. The clipboard is the system's own tool (`clipboard.rs`:
+  `pbcopy`, `clip` given marked UTF-16 with no console, `wl-copy`, `xclip` or `xsel`), as the
+  window library's is a stub on Windows and Linux and the workspace denies unsafe code.
+- **macOS: App Nap.** A hidden standalone playing no audio was napped: requests took up to
+  11.2 s, past `TIMEOUT`. While the socket is open the application holds an NSProcessInfo
+  activity, user initiated with idle sleep allowed, and latency critical (`agent/awake.rs`).
+  Measured hidden, `--no-devices`, `ca72_get` over 8 to 10 minutes (minimum, median, maximum):
+  none 41 ms, 1.2 s, 11.2 s (priority 4); user initiated alone 14 ms, 104 ms, 345 ms; with
+  latency critical 4 ms, 13 ms, 17 ms (priority 46 throughout). Agents turned off, the
+  priority fell to 4 at once and the socket and record went.
+
+**Tried.**
+- **Windows 11 (26200), MSVC.** The agent, server, bridge, discovery and editor tests (36);
+  the standalone started with `--agents` on the desktop's session, and the bridge from another:
+  `ca72_instances`, `ca72_describe`, a CUTOFF set and read back, a preset stepped, a chord
+  played, the settings read, an offline render and its analysis. Claude Code (on the laptop,
+  starting the Windows bridge over SSH, `--strict-mcp-config` with the JSON the menu copies)
+  described the instrument, set EMPHASIS 6 and CUTOFF -1, read them back and played C3 and G3.
+  Claude Code on the Windows computer itself was not logged in.
+- **macOS 27 (Apple silicon).** Built, the agent tests and `mcp_audio`/`mcp_bridge` passing; the
+  folder 700, the socket 600, its path 85 bytes (of 104); every live call above, two instances
+  (AMBIGUOUS, then `ca72_select`), the application quit mid-session and killed (its record
+  removed by the bridge's next call). Audio running keeps a hidden application awake through
+  coreaudiod's assertion; without it, App Nap, above.
+
+**Found, not fixed:** a standalone left hidden and napped for minutes (no audio, agents off)
+does not finish quitting within plugin-kit-standalone's two seconds (`runtime.rs`) and shows
+its error window; one just hidden quits. Not agents': it wants the activity, or a longer wait,
+while the standalone shuts down.
+
+**Not tried.** Minimising on macOS (Accessibility is needed); requests while a native modal
+loop runs (baseview's frame timer is in the run loop's default mode only); the COPY SETUP items
+clicked in a running application on each system; Claude Desktop.
+
 ## R-FX-SAFETY. No effect can make the standalone dead or keep it from starting (issue 82)
 
 **The owner, 2026-10-19:** "I'm just wary of a situation in which a user loads up a VST [any
