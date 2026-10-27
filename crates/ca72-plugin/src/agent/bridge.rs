@@ -7,7 +7,7 @@
 //! the one then open, so that an agent's session outlives the application's restart.
 
 // (Sockets are Unix's in this version: elsewhere the bridge and the server say so.)
-#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+#![cfg_attr(not(any(unix, windows)), allow(dead_code, unused_imports))]
 
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -22,10 +22,10 @@ use super::{ApiError, PROTOCOL, Reply, codes, text_arg};
 /// What an agent is told when no CA-72 listens.
 pub const NONE_OPEN: &str = "No CA-72 allows agents on this computer. Open the CA-72 application and turn on SETTINGS > AGENTS: ALLOW (or start it with --agents), then try again.";
 
-#[cfg(unix)]
-type Stream = std::os::unix::net::UnixStream;
+#[cfg(any(unix, windows))]
+use super::Stream;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 struct Connection {
     record: Record,
     out: Stream,
@@ -39,7 +39,7 @@ pub struct Bridge {
     chosen: Option<String>,
     client: String,
     next: u64,
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     connection: Option<Connection>,
 }
 
@@ -66,7 +66,7 @@ impl Bridge {
             chosen: None,
             client: String::from("mcp-client"),
             next: 0,
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             connection: None,
         }
     }
@@ -104,7 +104,7 @@ impl Bridge {
     }
 
     fn current_id(&self) -> Option<String> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         if let Some(c) = &self.connection {
             return Some(c.record.id.clone());
         }
@@ -125,7 +125,7 @@ impl Bridge {
             ));
         };
         self.chosen = Some(r.id.clone());
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         if self
             .connection
             .as_ref()
@@ -158,7 +158,7 @@ impl Bridge {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn connect(&mut self) -> Result<(), ApiError> {
         if self.connection.is_some() {
             return Ok(());
@@ -203,7 +203,7 @@ impl Bridge {
     }
 
     /// One request and its answer over the connection; the connection dropped if it fails.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn exchange(&mut self, method: &str, params: &Value) -> Reply {
         use std::io::{BufRead, Write};
         self.next += 1;
@@ -259,7 +259,7 @@ impl Bridge {
         result
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn forward(&mut self, method: &str, args: &Value) -> Reply {
         let had = self.connection.is_some();
         self.connect()?;
@@ -274,7 +274,7 @@ impl Bridge {
         }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     fn forward(&mut self, _method: &str, _args: &Value) -> Reply {
         Err(ApiError::new(
             codes::NO_INSTANCE,
@@ -398,7 +398,7 @@ pub fn main() -> i32 {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, any(unix, windows)))]
 mod tests {
     use super::*;
     use crate::agent::server::Server;

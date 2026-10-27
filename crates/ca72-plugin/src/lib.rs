@@ -5,6 +5,7 @@
 pub mod agent;
 pub mod arp;
 pub mod character;
+pub mod clipboard;
 pub mod compat;
 pub mod drive;
 pub mod editor;

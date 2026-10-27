@@ -153,6 +153,8 @@ pub enum Item {
     /// The settings' AGENTS (the standalone's; decisions.md R-MCP): AI agents allowed to
     /// operate it through MCP, or not.
     Agents(bool),
+    /// The settings' AGENTS: a client's setup copied.
+    Setup(Setup),
     /// The settings' MPE: INPUT & TIMBRE…, the MPE menu wanted (decisions.md R-MPE); its MPE
     /// INPUT and TIMBRE REST.
     MpeMenu,
@@ -243,6 +245,8 @@ pub enum Pressed {
     Fx(crate::fx_view::FxAction),
     /// The settings' menu: agents allowed (true) or not.
     Agents(bool),
+    /// The settings' menu: a client's setup to be copied.
+    Setup(Setup),
     /// The settings' MPE: INPUT & TIMBRE…, the MPE menu wanted where the settings' was; its
     /// choices (decisions.md R-MPE).
     MpeMenu,
@@ -250,6 +254,28 @@ pub enum Pressed {
     TimbreRest(crate::expression::TimbreRest),
     /// Modulation's (decisions.md R-LFO).
     Mod(ModItem),
+}
+
+/// The settings' AGENTS as the menu shows them (the standalone's; decisions.md R-MCP).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AgentsMenu {
+    /// Whether they are allowed: ALLOW marked, else OFF.
+    pub allowed: bool,
+    /// How they stand, said under the choices (none while they are off).
+    pub status: Option<String>,
+    /// Whether the bridge is beside the application, so that its setups can be copied.
+    pub bridge: bool,
+    /// The setup last copied, and whether it reached the clipboard.
+    pub copied: Option<(Setup, bool)>,
+}
+
+/// A client's setup the settings' AGENTS copies (`crate::agent::setup`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Setup {
+    /// Claude Code's `claude mcp add` command.
+    ClaudeCode,
+    /// The `mcpServers` entry of a client's JSON settings (Claude Desktop's and others').
+    Json,
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -673,14 +699,14 @@ impl Learning {
     /// its name, and whether it can be used; `pack` the one the editor is drawn in, if any); under
     /// MOD WHEEL SOURCE, what moves the MOD wheel (`source`: R-MODWHEEL-SOURCE); in the
     /// standalone, under AGENTS, whether AI agents may operate it (`agents`, marked; none in a
-    /// host: decisions.md R-MCP). The title always names this build's version, independent of the
+    /// host: decisions.md R-MCP), how they stand, and the setups for their clients to copy. The title always names this build's version, independent of the
     /// update check; opening this menu does not start a check.
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
         (x, y): (f64, f64),
         size: f64,
-        (skin, lettering, law, source, agents): (Skin, Lettering, Law, Source, Option<bool>),
+        (skin, lettering, law, source, agents): (Skin, Lettering, Law, Source, Option<AgentsMenu>),
         (packs, pack): (&[(String, bool)], Option<usize>),
     ) {
         let mut items: Vec<(Item, String)> = vec![
@@ -725,10 +751,32 @@ impl Learning {
             items.push((Item::Head, "STANDALONE".into()));
             items.push((Item::StandaloneSettings, "AUDIO & MIDI…".into()));
         }
-        if agents.is_some() {
+        if let Some(a) = &agents {
             items.push((Item::Head, "AGENTS".into()));
             items.push((Item::Agents(true), "ALLOW".into()));
             items.push((Item::Agents(false), "OFF".into()));
+            if let Some(status) = &a.status {
+                items.push((Item::Not, status.clone()));
+            }
+            if a.bridge {
+                for (setup, what, paste) in [
+                    (Setup::ClaudeCode, "CLAUDE CODE", "PASTE IT IN A TERMINAL"),
+                    (
+                        Setup::Json,
+                        "JSON FOR OTHER APPS",
+                        "ADD IT TO THE APP'S MCP SERVERS",
+                    ),
+                ] {
+                    let text = match a.copied {
+                        Some((s, true)) if s == setup => format!("COPIED: {paste}"),
+                        Some((s, false)) if s == setup => "COULD NOT COPY TO THE CLIPBOARD".into(),
+                        _ => format!("COPY SETUP: {what}"),
+                    };
+                    items.push((Item::Setup(setup), text));
+                }
+            } else {
+                items.push((Item::Not, "SETUP: NO BRIDGE BESIDE THE APP".into()));
+            }
         }
         let current = |it: &Item| {
             let look = match pack {
@@ -737,7 +785,9 @@ impl Learning {
             };
             look || *it == Item::Lettering(lettering)
                 || *it == Item::Dials(law)
-                || agents.is_some_and(|a| *it == Item::Agents(a))
+                || agents
+                    .as_ref()
+                    .is_some_and(|a| *it == Item::Agents(a.allowed))
         };
         let mut menu = Menu {
             x,
@@ -755,6 +805,7 @@ impl Learning {
                             | Item::Lettering(_)
                             | Item::Dials(_)
                             | Item::Agents(_)
+                            | Item::Setup(_)
                             | Item::StandaloneSettings
                             | Item::SizeMenu
                             | Item::WhatsNew
@@ -1060,6 +1111,7 @@ impl Learning {
             (Some(Item::WheelSource(source)), _) => return Pressed::WheelSource(*source),
             (Some(Item::Fx(a)), _) => return Pressed::Fx(*a),
             (Some(Item::Agents(on)), _) => return Pressed::Agents(*on),
+            (Some(Item::Setup(s)), _) => return Pressed::Setup(*s),
             (Some(Item::MpeMenu), _) => return Pressed::MpeMenu,
             (Some(Item::MpeInput(m)), _) => return Pressed::MpeInput(*m),
             (Some(Item::TimbreRest(r)), _) => return Pressed::TimbreRest(*r),
@@ -1362,6 +1414,75 @@ impl Learning {
 mod tests {
     use super::*;
     use ca72_panel::strip::{StripTarget, centre};
+
+    /// The settings' AGENTS (decisions.md R-MCP): how agents stand under the choices while they
+    /// are allowed, the clients' setups to copy while the bridge is beside the application,
+    /// and the one copied said so.
+    #[test]
+    fn the_settings_agents_say_how_they_stand_and_copy_setups() {
+        let fonts = Fonts::new();
+        let rows = |agents: AgentsMenu| {
+            let mut l = Learning::default();
+            l.open_settings_menu(
+                &fonts,
+                (800.0, 40.0),
+                12.0,
+                (
+                    Skin::Worn,
+                    Lettering::Standard,
+                    Law::Semitones,
+                    Source::DEFAULT,
+                    Some(agents),
+                ),
+                (&[], None),
+            );
+            let items = l.menu().expect("menu").items.clone();
+            let at = items
+                .iter()
+                .position(|(t, _)| t == "AGENTS")
+                .expect("AGENTS");
+            items[at + 1..].to_vec()
+        };
+        let row = |t: &str, on: bool| (t.to_owned(), on);
+        let listening = AgentsMenu {
+            allowed: true,
+            status: Some("LISTENING: 1 AGENT CONNECTED".into()),
+            bridge: true,
+            copied: None,
+        };
+        assert_eq!(
+            rows(listening.clone()),
+            [
+                row("ALLOW", false),
+                row("OFF", true),
+                row("LISTENING: 1 AGENT CONNECTED", false),
+                row("COPY SETUP: CLAUDE CODE", true),
+                row("COPY SETUP: JSON FOR OTHER APPS", true),
+            ]
+        );
+        let copied = AgentsMenu {
+            copied: Some((Setup::ClaudeCode, true)),
+            ..listening.clone()
+        };
+        assert_eq!(rows(copied)[3], row("COPIED: PASTE IT IN A TERMINAL", true));
+        let failed = AgentsMenu {
+            copied: Some((Setup::Json, false)),
+            ..listening
+        };
+        assert_eq!(
+            rows(failed)[4],
+            row("COULD NOT COPY TO THE CLIPBOARD", true)
+        );
+        let off_alone = AgentsMenu::default();
+        assert_eq!(
+            rows(off_alone),
+            [
+                row("ALLOW", true),
+                row("OFF", false),
+                row("SETUP: NO BRIDGE BESIDE THE APP", false),
+            ]
+        );
+    }
 
     /// PREVIOUS and NEXT PRESET's notes go over their arrows on the rail the editor shows: the
     /// standalone's, with FX (R-FX-DRAWER), has NEXT a key further left (R-PRESET-KEYS).

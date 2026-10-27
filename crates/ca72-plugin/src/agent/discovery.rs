@@ -72,6 +72,7 @@ pub fn ensure(dir: &Path) -> Result<(), String> {
         }
         Ok(())
     }
+    // (On Windows the folder is in the user's own profile, which others may not enter.)
     #[cfg(not(unix))]
     {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))
@@ -132,17 +133,17 @@ pub fn live(dir: &Path) -> Vec<Record> {
         .collect()
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn reachable(path: &Path) -> bool {
-    std::os::unix::net::UnixStream::connect(path).is_ok()
+    super::Stream::connect(path).is_ok()
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn reachable(_path: &Path) -> bool {
     false
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, any(unix, windows)))]
 mod tests {
     use super::*;
 
@@ -161,14 +162,17 @@ mod tests {
     /// Records are read oldest first; one whose socket does not answer is removed.
     #[test]
     fn records_are_read_and_the_dead_removed() {
-        use std::os::unix::fs::PermissionsExt;
         let t = tempfile::tempdir().expect("tempdir");
         let dir = t.path().join("agents");
         ensure(&dir).expect("ensure");
-        let mode = std::fs::metadata(&dir).expect("meta").permissions().mode();
-        assert_eq!(mode & 0o777, 0o700);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&dir).expect("meta").permissions().mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
         let live_sock = socket_path(&dir, "standalone-2");
-        let _listener = std::os::unix::net::UnixListener::bind(&live_sock).expect("bind");
+        let _listener = crate::agent::Listener::bind(&live_sock).expect("bind");
         publish(&dir, &record("standalone-2", 20, &live_sock)).expect("publish");
         publish(
             &dir,
@@ -184,6 +188,7 @@ mod tests {
     }
 
     /// A folder others may enter is made the user's alone.
+    #[cfg(unix)]
     #[test]
     fn an_open_folder_is_made_private() {
         use std::os::unix::fs::PermissionsExt;

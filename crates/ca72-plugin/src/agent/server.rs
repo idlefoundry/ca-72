@@ -12,7 +12,7 @@
 //! closing, or agents turned off).
 
 // (Sockets are Unix's in this version: elsewhere the bridge and the server say so.)
-#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+#![cfg_attr(not(any(unix, windows)), allow(dead_code, unused_imports))]
 
 use serde_json::{Value, json};
 use std::collections::VecDeque;
@@ -193,17 +193,21 @@ impl Server {
     }
 
     /// Listening in `dir`, as `id`.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub fn start_in(dir: &Path, kind: &str, id: &str) -> Result<Server, String> {
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::net::UnixListener;
+        use super::Listener;
         discovery::ensure(dir)?;
         let path = discovery::socket_path(dir, id);
         // (One left by a CA-72 of this process's number that did not stop cleanly.)
         let _ = std::fs::remove_file(&path);
-        let listener = UnixListener::bind(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let listener = Listener::bind(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        // (On Windows the socket takes its folder's access, the user's alone.)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+        }
         listener
             .set_nonblocking(true)
             .map_err(|e| format!("{}: {e}", path.display()))?;
@@ -245,7 +249,7 @@ impl Server {
         Ok(server)
     }
 
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     pub fn start_in(_dir: &Path, _kind: &str, _id: &str) -> Result<Server, String> {
         Err("agents are not yet supported on this system".into())
     }
@@ -281,9 +285,9 @@ impl Drop for Server {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn listen(
-    listener: std::os::unix::net::UnixListener,
+    listener: super::Listener,
     inbox: &Arc<Inbox>,
     stop: &Arc<AtomicBool>,
     clients: &Arc<AtomicUsize>,
@@ -342,13 +346,8 @@ fn response(id: Value, r: Reply) -> Value {
 }
 
 /// One client's connection, until it closes or the server stops.
-#[cfg(unix)]
-fn connection(
-    stream: std::os::unix::net::UnixStream,
-    inbox: &Inbox,
-    stop: &AtomicBool,
-    record: &Record,
-) {
+#[cfg(any(unix, windows))]
+fn connection(stream: super::Stream, inbox: &Inbox, stop: &AtomicBool, record: &Record) {
     use std::io::{Read, Write};
     if stream.set_nonblocking(false).is_err()
         || stream
@@ -416,8 +415,8 @@ fn connection(
 
 /// Whether the client has closed its end, read without waiting; what it sent meanwhile (its
 /// next request) kept in `pending`.
-#[cfg(unix)]
-fn client_gone(s: &std::os::unix::net::UnixStream, pending: &mut Vec<u8>) -> bool {
+#[cfg(any(unix, windows))]
+fn client_gone(s: &super::Stream, pending: &mut Vec<u8>) -> bool {
     use std::io::Read;
     if s.set_nonblocking(true).is_err() {
         return false;
@@ -504,11 +503,11 @@ fn request(
     Some(response(id, r))
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, any(unix, windows)))]
 mod tests {
     use super::*;
+    use crate::agent::Stream;
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
 
     fn server() -> (tempfile::TempDir, Server) {
         let t = tempfile::tempdir().expect("tempdir");
@@ -517,13 +516,13 @@ mod tests {
         (t, s)
     }
 
-    fn connect(s: &Server) -> (UnixStream, BufReader<UnixStream>) {
-        let c = UnixStream::connect(&s.record().endpoint).expect("connect");
+    fn connect(s: &Server) -> (Stream, BufReader<Stream>) {
+        let c = Stream::connect(&s.record().endpoint).expect("connect");
         let r = BufReader::new(c.try_clone().expect("clone"));
         (c, r)
     }
 
-    fn line(r: &mut BufReader<UnixStream>) -> Value {
+    fn line(r: &mut BufReader<Stream>) -> Value {
         let mut l = String::new();
         r.read_line(&mut l).expect("read");
         serde_json::from_str(&l).expect("json")
@@ -549,13 +548,16 @@ mod tests {
     /// the socket and record are the user's alone and go with the server.
     #[test]
     fn requests_reach_the_editor_and_are_answered_in_order() {
-        use std::os::unix::fs::PermissionsExt;
         let (_t, s) = server();
-        let mode = std::fs::metadata(&s.record().endpoint)
-            .expect("socket")
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o077, 0, "{mode:o}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&s.record().endpoint)
+                .expect("socket")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o077, 0, "{mode:o}");
+        }
         let stop = Arc::new(AtomicBool::new(false));
         let ed = editor(Arc::clone(s.inbox()), Arc::clone(&stop));
         let (mut c, mut r) = connect(&s);

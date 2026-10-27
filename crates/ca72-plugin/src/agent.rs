@@ -12,8 +12,9 @@
 //! notes' queue).
 //!
 //! Off unless the player allows it (SETTINGS: AGENTS, or `--agents` for one session): until
-//! then no socket exists. Only the standalone application listens in this version; a
-//! plug-in in a host is the next step (docs/mcp.md).
+//! then no socket exists. The same socket serves Linux, macOS and Windows. Only the
+//! standalone application listens in this version; a plug-in in a host is the next step
+//! (docs/mcp.md).
 
 pub mod audio;
 pub mod bridge;
@@ -21,11 +22,19 @@ pub mod discovery;
 pub mod mcp;
 pub mod modulation;
 pub mod server;
+pub mod setup;
 pub mod tools;
 pub mod values;
 
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// The local socket a CA-72 listens on and a bridge reaches it by: Unix's, and on Windows the
+/// same AF_UNIX socket (Windows 10 1803 and later), so that one path serves both.
+#[cfg(unix)]
+pub(crate) use std::os::unix::net::{UnixListener as Listener, UnixStream as Stream};
+#[cfg(windows)]
+pub(crate) use uds_windows::{UnixListener as Listener, UnixStream as Stream};
 
 /// The version of the conversation between the bridge and a CA-72 (`hello`'s `protocol`): a
 /// bridge refuses an instance that speaks another.
