@@ -55,6 +55,7 @@ Source: "{#Stage}\CA-72.vst3\*"; DestDir: "{commoncf64}\VST3\CA-72.vst3"; Compon
 Source: "{#Stage}\CA-72.clap"; DestDir: "{commoncf64}\CLAP"; Components: clap; Flags: ignoreversion
 Source: "{#Stage}\CA-72.exe"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
 Source: "{#Stage}\ca72-mcp.exe"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
+Source: "{#Stage}\ca72-fx-helper.exe"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
 Source: "{#Stage}\CA-72.ico"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
 Source: "{#Stage}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Stage}\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion

@@ -63,7 +63,7 @@ if [ "$uninstall" = 1 ]; then
         $use_sudo rm -f "$clap/CA-72.clap"
     fi
     if [ "$application" = 1 ]; then
-        $use_sudo rm -f "$bin/ca72-standalone" "$bin/ca72-mcp" "$desktop" "$icon" \
+        $use_sudo rm -f "$bin/ca72-standalone" "$bin/ca72-mcp" "$bin/ca72-fx-helper" "$desktop" "$icon" \
             "$app_data/LICENSE.txt" "$app_data/THIRD-PARTY-NOTICES.txt"
     fi
     echo 'Removed selected CA-72 components. Presets and standalone session are kept.'
@@ -77,7 +77,7 @@ if [ "$plugins" = 1 ]; then
     done
 fi
 if [ "$application" = 1 ]; then
-    for f in ca72-standalone ca72-mcp CA-72.desktop com.idlefoundry.ca72.png LICENSE.txt THIRD-PARTY-NOTICES.txt; do
+    for f in ca72-standalone ca72-mcp ca72-fx-helper CA-72.desktop com.idlefoundry.ca72.png LICENSE.txt THIRD-PARTY-NOTICES.txt; do
         [ -f "$here/$f" ] || { echo "install.sh: $here/$f is missing; unpack the whole archive" >&2; exit 1; }
     done
 fi
@@ -105,6 +105,7 @@ if [ "$application" = 1 ]; then
     $use_sudo mkdir -p "$bin" "$(dirname "$desktop")" "$(dirname "$icon")" "$app_data"
     $use_sudo install -m 755 "$here/ca72-standalone" "$bin/ca72-standalone"
     $use_sudo install -m 755 "$here/ca72-mcp" "$bin/ca72-mcp"
+    $use_sudo install -m 755 "$here/ca72-fx-helper" "$bin/ca72-fx-helper"
     $use_sudo install -m 644 "$here/com.idlefoundry.ca72.png" "$icon"
     $use_sudo install -m 644 "$here/LICENSE.txt" "$app_data/LICENSE.txt"
     $use_sudo install -m 644 "$here/THIRD-PARTY-NOTICES.txt" "$app_data/THIRD-PARTY-NOTICES.txt"
