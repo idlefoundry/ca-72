@@ -17,6 +17,7 @@
 //! (docs/mcp.md).
 
 pub mod audio;
+pub mod awake;
 pub mod bridge;
 pub mod discovery;
 pub mod mcp;

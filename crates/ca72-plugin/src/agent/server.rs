@@ -184,6 +184,8 @@ pub struct Server {
     listener: Option<std::thread::JoinHandle<()>>,
     record: Record,
     dir: PathBuf,
+    /// The application kept from App Nap while it listens (macOS).
+    _awake: super::awake::Awake,
 }
 
 impl Server {
@@ -244,6 +246,7 @@ impl Server {
             listener: Some(handle),
             record,
             dir: dir.to_owned(),
+            _awake: super::awake::Awake::begin(),
         };
         discovery::publish(dir, &server.record)?;
         Ok(server)
