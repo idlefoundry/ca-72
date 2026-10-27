@@ -1,14 +1,17 @@
 //! What the factory presets' measurements share (`preset_cost.rs`, `preset_render.rs`,
-//! `preset_levels.rs`, `drive_auto.rs`): a preset's controls, its levelling phrase, notes
-//! played through the engine, and POLY's chords played into it a block at a time.
+//! `preset_levels.rs`, `drive_auto.rs`, `factory_curves.rs`, `factory_presets.rs`): a preset's
+//! controls, its levelling phrase, notes played through the engine, POLY's chords played into
+//! it a block at a time, and ([`host`]) a preset played through the plug-in's own `process`.
 
 #![allow(dead_code, clippy::unwrap_used)]
 
 use ca72_plugin::drive::{Curve, STEPS};
 use ca72_plugin::engine::{Controls, Engine, Event};
 use ca72_plugin::library::{Sound, factory, parse_factory};
-use ca72_plugin::params::{Ca72Params, Footage, NotePriority, Scatter, Wave, Wave3};
-use nih_plug::prelude::Enum;
+use ca72_plugin::params::Ca72Params;
+
+#[allow(unsafe_code)]
+pub mod host;
 
 /// The presets retired from the plug-in (`sounds/retired.toml`, decisions.md R55), which the
 /// measurements made on them keep.
@@ -50,96 +53,15 @@ pub fn switch(name: &str) -> bool {
     }
 }
 
-/// The engine's controls a preset sets (the plug-in's own mapping, `Ca72Params::controls`,
-/// from the preset's plain values; the rest at the parameters' defaults).
+/// The engine's controls a preset sets, as the plug-in plays it: the preset loaded into the
+/// plug-in's parameters as its drawer loads one ([`host::apply`]: every parameter its value,
+/// else its default; what its LFOs, macros and velocity modulate; its macros' names), then the
+/// plug-in's own mapping, `Ca72Params::controls`. POLY and VOICES are left at their defaults
+/// ([`played_as`] sets them); QUALITY too.
 pub fn controls_of(s: &Sound) -> Controls {
-    let mut c = Ca72Params::default().controls();
-    let on = |v: f64| v >= 0.5;
-    let mut doubled = None;
-    for (id, v) in &s.values {
-        let v = *v;
-        let p = &mut c.panel;
-        match id.as_str() {
-            "tune" => p.tune = v / 2.5,
-            "glide" => p.glide = v / 10.0,
-            "mod_mix" => p.mod_mix = v / 10.0,
-            "osc_mod" => p.osc_mod = on(v),
-            "osc3_control" => p.osc3_control = on(v),
-            "osc1_range" | "osc2_range" | "osc3_range" => {
-                let i = (id.as_bytes()[3] - b'1') as usize;
-                p.osc[i].range = Footage::from_index(v as usize).into();
-            }
-            "osc1_waveform" | "osc2_waveform" => {
-                let i = (id.as_bytes()[3] - b'1') as usize;
-                p.osc[i].waveform = Wave::from_index(v as usize).into();
-            }
-            "osc3_waveform" => p.osc[2].waveform = Wave3::from_index(v as usize).into(),
-            "osc2_frequency" => p.osc[1].freq = (v + 7.5) / 15.0,
-            "osc3_frequency" => p.osc[2].freq = (v + 7.5) / 15.0,
-            "osc1_on" => p.osc[0].on = on(v),
-            "osc2_on" => p.osc[1].on = on(v),
-            "osc3_on" => p.osc[2].on = on(v),
-            "osc1_volume" => p.osc[0].volume = v / 10.0,
-            "osc2_volume" => p.osc[1].volume = v / 10.0,
-            "osc3_volume" => p.osc[2].volume = v / 10.0,
-            "ext_on" => p.ext_on = on(v),
-            "ext_volume" => p.ext_volume = v / 10.0,
-            "noise_on" => p.noise_on = on(v),
-            "noise_volume" => p.noise_volume = v / 10.0,
-            "noise_type" => p.noise_pink = on(v),
-            "filter_mode" => p.filter_hi = on(v),
-            "filter_mod" => p.filter_mod = on(v),
-            "keyboard_control_1" => p.keyboard_control_1 = on(v),
-            "keyboard_control_2" => p.keyboard_control_2 = on(v),
-            "cutoff" => p.cutoff = (v + 5.0) / 10.0,
-            "emphasis" => p.emphasis = v / 10.0,
-            "contour_amount" => p.contour_amount = v / 10.0,
-            "filter_attack" => p.filter_contour.attack = v / 10.0,
-            "filter_decay" => p.filter_contour.decay = v / 10.0,
-            "filter_sustain" => p.filter_contour.sustain = v / 10.0,
-            "loudness_attack" => p.loudness_contour.attack = v / 10.0,
-            "loudness_decay" => p.loudness_contour.decay = v / 10.0,
-            "loudness_sustain" => p.loudness_contour.sustain = v / 10.0,
-            "glide_on" => p.glide_on = on(v),
-            "decay_on" => p.decay = on(v),
-            "a440" => p.a440 = on(v),
-            "note_priority" => {
-                let last = NotePriority::variants().len() - 1;
-                p.priority =
-                    NotePriority::from_index((v.round().max(0.0) as usize).min(last)).into();
-            }
-            "retrigger" => p.retrigger = on(v),
-            "mod_wheel" => p.mod_wheel = v,
-            "volume" => c.volume = v / 10.0,
-            "main_output" => c.main_output = on(v),
-            "midi_bend_range" => c.bend_range = v,
-            "entropy" => c.entropy = v / 100.0,
-            "spread" => c.spread = v / 100.0,
-            "inner" => c.inner = v / 100.0,
-            "unison" => c.unison = on(v),
-            "double" => c.double = v / 100.0,
-            "drive" => c.drive = v,
-            "level" => c.level = v,
-            "auto_gain" => c.auto_gain = on(v),
-            // By the plug-in's choices (0 EVEN, 1 CENTER), as `presets.rs` takes a preset's.
-            "placement" => {
-                let last = Scatter::variants().len() - 1;
-                c.placement = Scatter::from_index((v.round().max(0.0) as usize).min(last)).into();
-            }
-            "feedback" => c.feedback = ca72::voice::feedback_law(v / 10.0),
-            "lock" => c.lock = on(v),
-            // (DOUBLE, a switch of its own: its pair played at DETUNE's amount, at none a
-            // ten-thousandth of a cent; a preset without it, DOUBLE where DETUNE is above 0.)
-            "doubled" => doubled = Some(on(v)),
-            "poly" | "voices" => {}
-            other => panic!("{}: no parameter {other}", s.name),
-        }
-    }
-    match doubled {
-        Some(true) => c.double = c.double.max(ca72_plugin::params::DOUBLED_AT_NONE),
-        Some(false) => c.double = 0.0,
-        None => {}
-    }
+    let fresh = Ca72Params::default().controls();
+    let mut c = host::params_of(s).controls();
+    (c.poly, c.voices) = (fresh.poly, fresh.voices);
     c
 }
 
@@ -225,17 +147,54 @@ pub fn play_block(
     e.end_block(len)
 }
 
-/// A phrase: (start, length) in seconds and the keys held.
+/// When a phrase's first note starts, s: at once, as the factory set was levelled (with
+/// [`host::SEED`], the oscillators' phases at the note's start the same).
+pub const LEAD: f64 = 0.0;
+
+/// A preset's levelling phrase, by its tags: (start, length) in seconds and the keys held,
+/// from [`LEAD`] on. The arpeggiator's (`arp`) a key (a bass) or a four-note chord held 6 s
+/// (with HOLD, let go after a second, the arpeggiator playing on); drums four hits on their
+/// note (57; the snare 54; a tom's down the keys, 45 to 60); a percussive effect four hits from
+/// the top (72 to 60); another effect one note held 6 s; POLY presets three six-note chords;
+/// basses three notes from C2, the others three from C4, each held 1.5 s (3 s for the slow
+/// ones).
 pub fn phrase(s: &Sound) -> Vec<(f64, f64, Vec<u8>)> {
     let tag = |t: &str| s.tags.iter().any(|x| x == t);
-    let poly = s.values.iter().any(|(k, v)| k == "poly" && *v >= 0.5);
-    let held = if tag("slow") { 3.0 } else { 1.5 };
+    let value = |id: &str| s.values.iter().find(|(k, _)| k == id).map(|(_, v)| *v);
+    let poly = value("poly").is_some_and(|v| v >= 0.5);
+    if tag("arp") {
+        let keys = if tag("bass") {
+            vec![36]
+        } else {
+            vec![48, 52, 55, 59]
+        };
+        let held = if value("arp_latch").is_some_and(|v| v >= 0.5) {
+            1.0
+        } else {
+            6.0
+        };
+        return vec![(LEAD, held, keys)];
+    }
+    let hits = |keys: [u8; 4]| {
+        keys.iter()
+            .enumerate()
+            .map(|(k, &key)| (LEAD + 0.6 * k as f64, 0.25, vec![key]))
+            .collect()
+    };
     if tag("drums") {
-        let key = if tag("snare") { 54 } else { 57 };
-        return (0..4).map(|k| (0.6 * k as f64, 0.25, vec![key])).collect();
+        return hits(if tag("tom") {
+            [45, 50, 55, 60]
+        } else if tag("snare") {
+            [54; 4]
+        } else {
+            [57; 4]
+        });
+    }
+    if tag("fx") && tag("percussive") {
+        return hits([72, 67, 64, 60]);
     }
     if tag("fx") {
-        return vec![(0.0, 6.0, vec![48])];
+        return vec![(LEAD, 6.0, vec![48])];
     }
     if poly {
         return [48u8, 53, 55]
@@ -243,10 +202,11 @@ pub fn phrase(s: &Sound) -> Vec<(f64, f64, Vec<u8>)> {
             .enumerate()
             .map(|(k, &r)| {
                 let keys = [0u8, 4, 7, 12, 16, 19].iter().map(|d| r + d).collect();
-                (3.0 * k as f64, 2.5, keys)
+                (LEAD + 3.0 * k as f64, 2.5, keys)
             })
             .collect();
     }
+    let held = if tag("slow") { 3.0 } else { 1.5 };
     let roots: [u8; 3] = if tag("bass") {
         [36, 43, 40]
     } else {
@@ -255,7 +215,7 @@ pub fn phrase(s: &Sound) -> Vec<(f64, f64, Vec<u8>)> {
     roots
         .iter()
         .enumerate()
-        .map(|(k, &r)| ((held + 0.5) * k as f64, held, vec![r]))
+        .map(|(k, &r)| (LEAD + (held + 0.5) * k as f64, held, vec![r]))
         .collect()
 }
 

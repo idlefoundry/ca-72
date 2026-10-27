@@ -15673,3 +15673,94 @@ preset's phrase within 0.24 dB, Feedback Funk -0.41. Cost with ten voices on one
 (a shared machine): LO about 3 % more (the contours' absorption and the bus's noise), HI the same,
 ULTRA's Feedback Funk a few per cent less. Tables, logs, renders and scripts:
 `/mnt/lab/artifacts/ca-72/calibration-0.3.0/`.
+
+## R-PRESETS-0.3.0. Twenty-one new factory presets, levelled through the plug-in's `process`
+
+**The owner, 2026-10-27:** "Many people ask for more presets." 0.3.0's factory set was still
+0.2.8's nineteen, and none used the arpeggiator, the LFOs, the macros, velocity, CONTINUOUS
+waveforms, the timed oscillators or pressure. The seventeen candidates (`presets-expansion`,
+`b089ded`) and the four LFO LOOP presets (R-LFO's addendum; 0.3.0's notes said "Four presets
+show them off", true only if they ship) join the factory set, levelled against the release's
+final sound, the calibration (R-CALIBRATION-0.3.0), which the owner approved with the fitted
+pulse parts kept. Built as `int/presets`: `int/calibration`, then `release-0.3.0` (`f471e32`, with
+R-VELOCITY), then `presets-expansion`, then `release-0.3.0` again (`8409338`, the calibration
+merged: its code is this branch's to the byte, so the levels below are its).
+
+**Forty factory presets.** The twenty-one follow the nineteen in `sounds/presets.toml`, after a
+marker line; `scripts/presets_0_3.py` writes everything after it (the candidates' generator,
+moved, with the LFO LOOP presets' values as they were made) and keeps the AUTO GAIN curves there.
+Tags are the factory's kinds (bass, keys, organ, bell, pad, strings, lead, fx, drums, ...) and
+what each shows (arp, lfo, macros, tempo, velocity, expressive, pwm, loop), so FACTORY's tag list
+finds them. Changed on the way in: Club Stab and Glass Bell brighten with velocity (`velocity_to_cutoff`
+15 and 12 %); Gated Chords did not gate (its 16th steps 1.4 dB apart, as with oscillator 3 off,
+the filter already open at CUTOFF -2.5): CUTOFF -5, EMPHASIS 3.5, AMOUNT OF CONTOUR 1, the mod
+wheel 0.8 open and close it 24 dB, and the mod wheel at 0 leaves it ungated; "pluck" is the
+factory's "plucked"; the LFO LOOP presets' "LFO Loops" tag became pad or lead, lfo and loop.
+`docs/preset-candidates` keeps its README, saying they shipped; its TOML, the load files,
+`levels.json` (now `scripts/presets_0_3_levels.json`) and `docs/lfo-loops/presets` are gone.
+
+**The factory measurements play a preset as the plug-in does** (the candidates' commit named
+this the prerequisite):
+- `tests/common`'s `controls_of` no longer maps values by hand (it stopped at every 0.3
+  parameter): it loads the preset into the plug-in's parameters as the drawer does
+  (`presets::targets_for_sound`, now public: each value, else its default; the LFOs', macros' and
+  velocity's assignments; the macros' names), then takes `Ca72Params::controls`. The nineteen's
+  controls are the same but for each value's trip through its f32 parameter, as in the plug-in;
+  their AUTO GAIN curves, measured again from them, move by 1e-4 dB at most.
+- `tests/common/host.rs` plays a preset through a new instance's `process`, offline, the host's
+  transport at a tempo or none (the standalone's TEMPO), with the preset's own AUTO GAIN curve in
+  force and notes at velocity 100. Its seed is the engine measurements' (1) and the phrase starts
+  at the first sample, as the factory set was levelled: so a render repeats to the bit and the
+  nineteen read as they did (Felt Bass -17.69 LUFS both ways; a new instance's own seed or a
+  quarter-second lead moved it by a decibel). `initialize` reads this computer's settings
+  (FREQUENCY's law, the wheel's source, MPE, timbre's rest, TEMPO): a new computer's replace them.
+- `preset_levels.rs` plays each preset through it at LO, HI and ULTRA (`CA72_QUALITY`), and
+  writes JSON (`CA72_LEVELS_JSON`) and WAVs (`CA72_WAV_OUT`); `CA72_NEVER_SLEEP` keeps the engine
+  alone. The phrase (`common::phrase`) is the candidates': the arpeggiator's held key or chord,
+  a tom's hits down the keys, a zap's from the top; HOLD's renders run eight seconds.
+- `factory_curves.rs` measures every preset through the new `controls_of`, so CONTINUOUS
+  shapes and every 0.3 parameter are in its sound.
+- `factory_presets.rs` folds in the candidates' test: every value a parameter, every assignment
+  a source and target; each preset using 0.3 sounds at LO, finite, not silent, not clipped; each
+  that keeps time plays in the standalone at 120 as at a host's 120 (10 ms loudness within a
+  decibel), and at a host's 90 otherwise, as the standalone at 90. Bubble Computer's SHARP
+  timed LFOs land up to about 0.5 ms apart with and without the host's transport (its place
+  taken each block, against counted on): 0.3 dB, inaudible, no drift; the others 0.000 dB.
+  90 against 120: 1.9 to 10 dB.
+- `lfo_loops.rs` reads the LFO LOOP presets from the factory set. The library's count is 40.
+
+**Levelled, by a script** (`scripts/level_presets.py`, re-runnable on any sound): each preset's
+momentary maximum at LO, HI and ULTRA by `preset_levels`; each new preset sent to -18 LUFS midway
+between LO and HI; an older one left as it is when every quality is within -18 ± 1.5, else
+levelled so too; then, as far as LO and HI stay 0.25 dB inside the tolerance, toward bringing
+ULTRA in; MAIN OUTPUT VOLUME down, or LEVEL up with VOLUME at 10, measured again until within
+0.1 dB. The new presets' levels go to `scripts/presets_0_3_levels.json` and the generator runs;
+an older preset's VOLUME and LEVEL are written in place. Measured with each preset's own curve,
+four of the nineteen were outside:
+- **Driven Kick** read -9.6 at LO (peaking at 0 dBFS): it was levelled when AUTO GAIN used the
+  average curve (-12.4 dB at DRIVE 24) and its own takes 5.4. LEVEL 11.32 to 3.5: -17.4, -18.6
+  at HI.
+- **Smoke Flute** -20.8, its own curve taking 3 dB more than the average at its DRIVE: LEVEL 6.85
+  to 9.59, -18.1.
+- **Swarm Riser** -14.8 at LO (-16.8 at HI): LEVEL 4.65 to 2.46, -17.0 and -19.0.
+- **Feedback Funk** -19.6 at LO, -18.0 at HI and -21.6 at ULTRA, whose FEEDBACK loop the
+  calibration made the hardware's: VOLUME 8.711 to 9.021, -18.3, -16.75 and -20.3. Its ULTRA reads
+  3.5 dB under its HI, wider than the tolerance's 3 dB, so it stays 0.8 dB outside.
+The other fifteen are as they were. After a change to the sound, `factory_curves`' writing
+test and then the script level them again.
+
+**Left as it is:** AUTO GAIN's `AVERAGE` (`drive.rs`), the nineteen's mean curve, is not
+measured again over forty: a sound not yet measured plays as before. Nobody has listened to the
+twenty-one; renders for the owner are in the artifacts below.
+
+**Evidence (omarchy, Linux, Rust 1.97.1, 2026-10-27, on `8409338` merged):** rustfmt; clippy
+(`--workspace --all-targets --all-features -D warnings`); `CA72_REQUIRE_NGSPICE=1 cargo test
+--workspace --features ca72-plugin/standalone-production`: 1242 passed, 0 failed, 106 ignored (the
+library's and presets' tests that took every factory preset to name no arpeggiator, timed
+oscillator or expression, or a search for "pad" or "deep" to find no factory preset, now leave
+out those that do); the three third-party suites CI runs; `whats_new`; CI's Python checks. By
+hand: `factory_curves` and `factory_presets` with their ignored tests, and
+`scripts/level_presets.py --check` (every preset within -18 ± 1.5 at LO, HI and ULTRA but Feedback
+Funk at ULTRA). Levels before and after, the audition pack
+(each new preset at LO and HI, Feedback Funk at ULTRA and Driven Kick before and after) and logs:
+`/mnt/lab/artifacts/ca-72/presets-0.3.0/`.

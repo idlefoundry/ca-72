@@ -260,7 +260,8 @@ pub(crate) fn targets(p: &Ca72Params, e: &Entry) -> Vec<(&'static str, f32)> {
     targets_for_sound(p, &e.sound)
 }
 
-pub(crate) fn targets_for_sound(
+/// `targets` for a sound (the factory measurements load presets by it: `tests/common`).
+pub fn targets_for_sound(
     p: &Ca72Params,
     sound: &crate::library::Sound,
 ) -> Vec<(&'static str, f32)> {
@@ -2066,7 +2067,19 @@ mod tests {
         assert_eq!(b.drawer.editing, None);
         assert_eq!(b.drawer.hint, "Choose a preset first.");
         typed(&mut b, "pad", &p);
-        assert_eq!(rows(&b), ["Pad A", "Pad B", "Warp Field"]);
+        // (With the factory pads, R-PRESETS-0.3.0.)
+        let pads = [
+            "Gated Chords",
+            "LFO LOOP Coupled Rates",
+            "LFO LOOP Level Pump",
+            "Morph Bloom",
+        ];
+        let with_pads = |mine: &[&str]| {
+            let mut all: Vec<String> = pads.iter().chain(mine).map(|n| n.to_string()).collect();
+            all.sort_by_key(|n| n.to_lowercase());
+            all
+        };
+        assert_eq!(rows(&b), with_pads(&["Pad A", "Pad B", "Warp Field"]));
 
         // Renaming Pad B, FAVORITES leaves it out of the list: the rename stays with it.
         set(&mut b, "Pad B");
@@ -2088,7 +2101,10 @@ mod tests {
         b.drawer.edit = Field::new("soft");
         lib.save("Pad 0", vec![], None).unwrap();
         b.reread(&p);
-        assert_eq!(rows(&b), ["Pad 0", "Pad A", "Pad Renamed", "Warp Field"]);
+        assert_eq!(
+            rows(&b),
+            with_pads(&["Pad 0", "Pad A", "Pad Renamed", "Warp Field"])
+        );
         b.key(&down(Key::Enter), &p, &s);
         assert_eq!(lib.find("Pad Renamed").unwrap().sound.tags, ["soft"]);
         assert!(lib.find("Pad A").unwrap().sound.tags.is_empty());
@@ -2190,7 +2206,7 @@ mod tests {
 
     /// The oscillators timed (R-OSC-TIMED) are part of a preset: saved with the sound, set by a
     /// preset naming them, and off (DIVISION a quarter note) in one that does not, every
-    /// factory preset among them; FREQUENCY keeps its own place whichever.
+    /// factory preset that does not among them; FREQUENCY keeps its own place whichever.
     #[test]
     fn oscillator_3_timed_is_part_of_a_preset_and_off_in_one_that_does_not_name_it() {
         let dir = tempfile::tempdir().unwrap();
@@ -2207,9 +2223,13 @@ mod tests {
                 assert!(values_now(&p).iter().any(|(k, _)| *k == id), "{id}");
             }
         }
+        let names = |e: &Entry, id: &str| e.sound.values.iter().any(|(k, _)| k == id);
         for e in lib.entries().0 {
             for n in 2..=3 {
                 let (on, division) = (format!("osc{n}_timed"), format!("osc{n}_division"));
+                if names(&e, &on) || names(&e, &division) {
+                    continue;
+                }
                 assert_eq!(target(&e, &on), Some(0.0), "{}", e.sound.name);
                 assert_eq!(
                     target(&e, &division),
@@ -2272,7 +2292,11 @@ mod tests {
             assert!(values_now(&p).iter().any(|(k, _)| k == id), "{id}");
         }
         for e in lib.entries().0 {
-            for id in ids {
+            // (Those that name them, as Pressure Solo does, set them: below.)
+            for id in ids
+                .iter()
+                .filter(|id| !e.sound.values.iter().any(|(k, _)| k == *id))
+            {
                 assert_eq!(target(&e, id), Some(0.5), "{} {id}", e.sound.name);
             }
         }
@@ -2361,8 +2385,13 @@ mod tests {
         ] {
             assert!(values_now(&p).iter().any(|(k, _)| k == id), "{id}");
         }
-        // Every factory preset: off, its settings their defaults.
-        for e in lib.entries().0 {
+        // Every factory preset that does not name it: off, its settings their defaults.
+        for e in lib
+            .entries()
+            .0
+            .into_iter()
+            .filter(|e| !e.sound.values.iter().any(|(k, _)| k == "arp_on"))
+        {
             assert_eq!(target(&e, "arp_on"), Some(0.0), "{}", e.sound.name);
             assert_eq!(
                 target(&e, "arp_rate"),

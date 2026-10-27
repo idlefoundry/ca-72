@@ -602,11 +602,16 @@ the name and a drawer drops down over the strip, in three sections:
 
 The library is a folder of files, `Idle Foundry/CA-72/Presets` in your user data folder
 (`~/Library/Application Support` on macOS, `%APPDATA%` on Windows, `~/.local/share` on
-Linux). The nineteen factory
+Linux). The forty factory
 presets are built in, among them a drum kit and a riser made on the panel alone (Driven
 Kick, Split Snare, Tight Hat, Loose Hat, Wide Crash, Swarm Riser: one instance a drum), Warp
 Field, eight POLY voices drifting with ENTROPY, and White Lotus, a held bass whose filter
-rings an octave and a fifth above each note.
+rings an octave and a fifth above each note. The twenty-one from 0.3.0 show its features off:
+the arpeggiator (Octave Runner, Random Glass, Swing Keys), the LFOs and macros (Tonewheel
+Drift, Tempo Wobble, Morph Bloom, Ray Gun, Night Surf and more), velocity (Club Stab, Glass
+Bell), the timed and CONTINUOUS oscillators (Gated Chords, Pulse Strings), pressure (Pressure
+Solo), and four LFO LOOP presets whose LFOs move each other. Every factory preset plays at
+about the same loudness, -18 LUFS.
 
 **Projects saved with 0.1.** From 0.2.0 the circuit is calibrated against a hardware
 instrument ([docs/decisions.md](docs/decisions.md) R42), which changed the laws of a dozen
