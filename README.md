@@ -701,7 +701,9 @@ arrows, Enter and Delete reach the MIDI list either way.
 
 ## Agents and audio references
 
-The 0.3 MCP bridge lets an agent inspect the standalone, adjust controls and save presets.
+The 0.3 MCP bridge lets an agent inspect the standalone, adjust controls and save presets,
+on macOS, Windows and Linux. Turn on SETTINGS › AGENTS › ALLOW, then choose COPY SETUP:
+CLAUDE CODE (or JSON FOR OTHER APPS) there and paste it where it says.
 It also renders detached candidates and measures local WAV references: spectrograms, pitch,
 harmonics, modulation sidebands, envelopes and level-matched comparisons. It can export the
 selected snapshot as a preset file and reload that exact file without an open app. Use the
