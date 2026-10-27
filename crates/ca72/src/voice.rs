@@ -1170,6 +1170,9 @@ pub struct PreampPart {
     /// oscillates low and dark inside the loop where the circuit does not.
     pub accurate: bool,
     pub in_loop: InLoop,
+    /// FEEDBACK's loop at one rate ([`tick_looped`]): the preamplifier's current into the bus
+    /// at the filter's next step, A.
+    i_fed: f64,
 }
 
 /// The mixer's own noise as a Norton current on its bus, A RMS from 0 to 24 kHz (white):
@@ -1438,6 +1441,7 @@ impl Voice {
                     overload: 0.0,
                     overload_peak: 0.0,
                     ext_amp: 0.0,
+                    i_fed: 0.0,
                     volume: Memo::NEW,
                     accurate: false,
                     in_loop: InLoop::default(),
@@ -1752,7 +1756,9 @@ impl Voice {
     pub fn tick_jacks(&mut self, j: &Jacks) -> f64 {
         self.audio.pre.accurate = self.feedback > 0.0;
         self.audio.pre.in_loop = self.in_loop;
-        let y = if self.feedback > 0.0 {
+        // (At one rate the loop is closed inside the audio path: decisions.md
+        // R-FEEDBACK-LOOP.)
+        let y = if self.feedback > 0.0 && !loops(&self.panel, self.feedback) {
             self.tick_at(&Jacks {
                 ext: j.ext + self.feedback * self.fed_back,
                 ..*j
@@ -1844,7 +1850,11 @@ impl Voice {
         let ctl = self.ctl.tick_for(&pc, c, p.quality);
         self.last_ctl = (ctl.env_f, ctl.env_l);
         let d = self.bias.tick(ctl.env_l, j.loudness, p.quality);
-        self.audio.tick(&p, j, v_kbd, &ctl, &d)
+        if loops(&p, self.feedback) {
+            self.audio.tick_looped(&p, j, v_kbd, &ctl, &d, self.feedback)
+        } else {
+            self.audio.tick(&p, j, v_kbd, &ctl, &d)
+        }
     }
 }
 
@@ -2292,6 +2302,91 @@ impl AudioPart {
         self.last = (v_kbd, f.i_bus, y);
         out
     }
+
+    /// [`AudioPart::tick`] with FEEDBACK's loop closed inside it ([`tick_looped`]), where
+    /// [`loops`].
+    pub fn tick_looped(
+        &mut self,
+        p: &Panel,
+        j: &Jacks,
+        v_kbd: f64,
+        c: &ControlOut,
+        d: &VcaDrive,
+        feedback: f64,
+    ) -> f64 {
+        let (f, y, out) = tick_looped(
+            &mut self.pre,
+            &mut self.front,
+            &mut self.back,
+            (p, j, v_kbd, c, d),
+            feedback,
+        );
+        self.last = (v_kbd, f.i_bus, y);
+        out
+    }
+}
+
+/// Whether FEEDBACK's loop runs at one rate ([`tick_looped`]; decisions.md R-FEEDBACK-LOOP):
+/// in ULTRA, whose preamplifier and VCA already run at the filter's rate, FEEDBACK and the
+/// mixer's EXTERNAL INPUT on.
+pub(crate) fn loops(p: &Panel, feedback: f64) -> bool {
+    feedback > 0.0
+        && p.ext_on
+        && vca_oversampled(p.quality)
+        && oversampling(p.quality).1 == ULTRA_VCA_OVERSAMPLING
+}
+
+const _: () = assert!(crate::preamp::SUBSTEPS == ULTRA_VCA_OVERSAMPLING);
+
+/// One sample with FEEDBACK's loop closed at the filter's rate (decisions.md
+/// R-FEEDBACK-LOOP): the front without the preamplifier's current; then at each of the
+/// filter's steps the VCA on the filter's output, and the preamplifier a substep on the jack's
+/// voltage with the cable's share of the VCA's output added, its current into the bus at the
+/// filter's next step. Only that step (a quarter of a sample) lies between the output and the
+/// input, against the preamplifier's and the filter's resamplers (90 samples) when the output
+/// is fed back a sample at a time. `at` is the panel, the jacks, the keyboard's voltage, the
+/// contours and the VCA's bias, as [`AudioPart::tick`] takes them. The front's output, the
+/// filter's output (V) and the output sample.
+pub(crate) fn tick_looped(
+    pre: &mut PreampPart,
+    front: &mut FrontPart,
+    back: &mut BackPart,
+    at: (&Panel, &Jacks, f64, &ControlOut, &VcaDrive),
+    feedback: f64,
+) -> (FrontOut, f64, f64) {
+    let (p, j, v_kbd, c, d) = at;
+    let f = front.tick(p, j, v_kbd, c, 0.0);
+    let _fast = crate::ulp::FastScope::new(p.quality != Quality::NoCompromises);
+    pre.preamp.set_quality(p.quality);
+    pre.preamp.set_delayed(false);
+    let (t, r) = pre.volume.get(p.ext_volume, ext_volume);
+    pre.preamp.set_source_resistance(r);
+    let ext = pre.preamp.upsample(j.ext * INPUT_VOLTS * t);
+    back.set_filter(p);
+    let a440 = back.a440.tick(p.a440);
+    if !back.ultra {
+        back.vca_4x.take_over(&back.vca, back.last_out);
+        back.ultra = true;
+    }
+    back.vca_4x.set_a440(a440);
+    back.vca_4x.set_plain(p.quality != Quality::NoCompromises);
+    let ramp = back.vca_4x.start(d);
+    let mut out = 0.0;
+    let BackPart { vcf, vca_4x, .. } = back;
+    let preamp = &mut pre.preamp;
+    let y = vcf.tick_fed(f.i_bus, f.g_bus, f.i0, &mut pre.i_fed, |k, v| {
+        let (y, o) = vca_4x.step(&ramp, k, v);
+        if let Some(o) = o {
+            out = o;
+        }
+        preamp.fine(ext[k] + t * feedback * y)
+    });
+    let o = pre.preamp.fine_outputs();
+    pre.overload = o.lamp;
+    pre.overload_peak = pre.overload_peak.max(o.lamp);
+    pre.ext_amp = o.amp;
+    back.last_out = out;
+    (f, y, out / 5.0)
 }
 
 impl PreampPart {
@@ -2301,6 +2396,7 @@ impl PreampPart {
     pub fn tick(&mut self, p: &Panel, ext: f64) -> f64 {
         let _fast = crate::ulp::FastScope::new(p.quality != Quality::NoCompromises);
         let mut laps = crate::prof::Laps::start();
+        self.i_fed = 0.0;
         self.preamp
             .set_quality(match (self.accurate, p.quality, self.in_loop) {
                 (true, Quality::Potato, InLoop::Circuit) => Quality::HighFidelity,

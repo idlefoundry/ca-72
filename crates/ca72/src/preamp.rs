@@ -84,6 +84,16 @@ pub const SUBSTEPS: usize = 4;
 /// was a nodal solve a sample beside the preamplifier's four). The audio is not touched.
 const LAMP_EVERY: usize = 8;
 
+/// C23, the preamplifier's input coupling: .1 uF on Figure 9-11; 82 nF, where the hardware
+/// reference's FEEDBACK loop runs at its rate (board4.md B4-11: alone at EXT. INPUT VOLUME 10,
+/// 55.5 Hz against the drawing's 50.9).
+pub const C23: f64 = 82e-9;
+
+/// The preamplifier's positive supply (Q32's collector, Q33's emitter, R65 and C22): +10 V on
+/// Figure 9-11; +13 V, where the hardware reference's preamplifier swings as far positive
+/// against its negative clip (board4.md B4-11: its FEEDBACK loop's even harmonics).
+pub const V_POS: f64 = 13.0;
+
 /// R61, the preamplifier's feedback resistor against R62 1K: 200K on Figure 9-11; 232K, where
 /// the hardware reference's gain sits (board4.md B4-8: 0.97 dB above the drawing's).
 pub const R61: f64 = 232e3;
@@ -91,11 +101,11 @@ pub const R61: f64 = 232e3;
 /// Potato's preamplifier and lamp: the circuit's paths, not the circuit solved. The
 /// input's coupling (C23 against R78, R9's source resistance and R66 with the input pair's
 /// own input resistance, 96.6K together) divides and high-passes; the loop, an open-loop gain
-/// of 726 driving the feedback node (between R61 from the output and R62 to C26) towards the
-/// input (a gain of 176 above C26's corner with R61 at 232K, 157 with the drawing's 200K; 1 at
-/// DC: the open-loop gain fitted to the circuit's gain from 0, 100K, 250K and 500K sources,
-/// within 0.1 %), until the output
-/// clips at the circuit's -7.3 and +9.9 V (a quadratic knee of 0.3 V): C26 charges from the
+/// of 765 driving the feedback node (between R61 from the output and R62 to C26) towards the
+/// input (a gain of 179 above C26's corner with R61 at 232K and the +13 V supply; 1 at DC: the
+/// open-loop gain fitted to the circuit's gain from 0, 100K, 250K and 500K sources, within
+/// 0.04 dB; 726 with the drawing's +10 V), until the output
+/// clips at the circuit's -7.2 and +12.9 V (a quadratic knee of 0.3 V): C26 charges from the
 /// output as it is, clipped or not (its charge shifting with an asymmetric clip); C20 into R46
 /// high-passes it to the bus. The lamp as the circuit's: dark below about 1.4 V of output
 /// peak, lit from 1.8 V (a smoothstep between), the peak held and falling with a time
@@ -125,8 +135,10 @@ impl Plain {
     }
 
     fn clip(u: f64) -> f64 {
-        const LO: f64 = -7.3;
-        const HI: f64 = 9.9;
+        // (-7.3 and +9.9 V with the drawing's +10 V supply; -7.2 and +12.9 with the
+        // reference's: B4-11.)
+        const LO: f64 = -7.2;
+        const HI: f64 = 12.9;
         const K: f64 = 0.3;
         if u > HI + K {
             HI
@@ -143,9 +155,9 @@ impl Plain {
 
     fn tick(&mut self, v_in: f64, r_src: f64, on: bool, h: f64) -> PreampOut {
         const R_IN: f64 = 96.6e3;
-        const A: f64 = 725.6;
+        const A: f64 = 765.0;
         let rt = r_src + 1e3 + R_IN;
-        let vb = R_IN / rt * Self::high(v_in, &mut self.lp_in, 0.1e-6 * rt, h);
+        let vb = R_IN / rt * Self::high(v_in, &mut self.lp_in, C23 * rt, h);
         // The loop: the output A times the input less the feedback node, (R62 * output + R61
         // * C26's voltage) / (R61 + R62), then clipped; C26 charged through R62 from the node
         // as it is.
@@ -267,7 +279,7 @@ impl Delayed {
 
     fn tick(&mut self, v_in: f64, r_src: f64, on: bool, dt: f64) -> PreampOut {
         const R_IN: f64 = 96.6e3;
-        const A: f64 = 725.6;
+        const A: f64 = 765.0;
         const R62: f64 = 1e3;
         if self.key != (dt, r_src) {
             self.key = (dt, r_src);
@@ -276,7 +288,7 @@ impl Delayed {
                 let g = dt / (2.0 * tau);
                 g / (1.0 + g)
             };
-            self.k_in = (R_IN / rt, pole(0.1e-6 * rt));
+            self.k_in = (R_IN / rt, pole(C23 * rt));
             self.k_20 = pole(1e-6 * 33e3);
             self.k_26 = 0.5 * dt / 220e-6 / R62;
             self.fall = crate::ulp::exp(-dt / 0.122);
@@ -347,6 +359,9 @@ pub struct Preamp {
     /// Potato's model inside FEEDBACK's loop ([`Delayed`]), and whether it runs.
     delayed: Delayed,
     delayed_on: bool,
+    /// Whether the last sample ran inside FEEDBACK's loop a substep at a time
+    /// ([`Preamp::fine`]): its decimators then held nothing new.
+    looped: bool,
     /// Steps whose Newton iterations failed even at a sixteenth of the step (the outputs
     /// then hold): tests require none.
     pub failed: usize,
@@ -385,15 +400,15 @@ impl Preamp {
     pub fn new(circuit: PreampCircuit, rate: f64, r_src: f64) -> Result<Preamp, NoConvergence> {
         let k = &circuit;
         let mut c = Circuit::new(NODES, HELD);
-        c.set(P10, 10.0);
+        c.set(P10, V_POS);
         c.set(N10, -10.0);
-        for (n, v) in [(TAIL, -0.6), (C27, 9.3), (N64, 9.3), (AMP, 0.0), (B32, 0.0)] {
+        for (n, v) in [(TAIL, -0.6), (C27, V_POS - 0.7), (N64, V_POS - 0.7), (AMP, 0.0), (B32, 0.0)] {
             c.set(n, v);
         }
         let r = |c: &mut Circuit, a, b, r: f64| c.add(Part::Resistor { a, b, r });
         let cap = |c: &mut Circuit, a, b, v: f64| c.add(Part::Capacitor { a, b, c: v });
         let r_src_part = r(&mut c, SRC, N78, r_src + 1e3);
-        cap(&mut c, N78, B27, 0.1e-6);
+        cap(&mut c, N78, B27, C23);
         r(&mut c, B27, GND, 100e3);
         c.add_bjt(C27, B27, TAIL, &k.q27, 25.0, false);
         r(&mut c, P10, C27, 27e3);
@@ -465,6 +480,7 @@ impl Preamp {
             plain: None,
             delayed: Delayed::new(latency),
             delayed_on: false,
+            looped: false,
             failed: 0,
         })
     }
@@ -511,8 +527,47 @@ impl Preamp {
         }
     }
 
+    /// The jack's voltage after R9's divider (as [`Preamp::tick`] takes it) at the substeps'
+    /// rate, through its interpolator: for [`Preamp::fine`].
+    pub fn upsample(&mut self, v_in: f64) -> [f64; SUBSTEPS] {
+        let mut fine = [0.0; SUBSTEPS];
+        self.up.push(v_in, &mut fine);
+        fine
+    }
+
+    /// One substep of the circuit (a [`SUBSTEPS`]th of a sample) on `x`, the jack's voltage
+    /// after R9's divider then, no resampler between: FEEDBACK's loop (decisions.md
+    /// R-FEEDBACK-LOOP), which runs the preamplifier, the filter and the VCA at one rate. The
+    /// current SW10 and R46 put into the mixer's bus, A. [`Preamp::fine_outputs`] ends the
+    /// sample.
+    pub fn fine(&mut self, x: f64) -> f64 {
+        self.looped = true;
+        self.net.set(SRC, x);
+        if !Self::step(&mut self.net, self.dt / SUBSTEPS as f64) {
+            self.failed += 1;
+        }
+        self.last = (self.net.v(AMP), self.net.v(OUT));
+        if self.on { self.last.1 / 33e3 } else { 0.0 }
+    }
+
+    /// The sample's outputs after its [`Preamp::fine`] substeps (the lamp's driver as
+    /// [`Preamp::tick`] runs it).
+    pub fn fine_outputs(&mut self) -> PreampOut {
+        self.outputs()
+    }
+
     /// One sample: the jack's voltage after R9's divider (the Thevenin source's voltage).
     pub fn tick(&mut self, v_in: f64) -> PreampOut {
+        if self.looped {
+            // Out of FEEDBACK's loop: the decimators filled with the circuit's outputs as
+            // they are, so that its current carries on rather than starting from nothing.
+            self.looped = false;
+            let (a, o) = (self.net.v(AMP), self.net.v(OUT));
+            for _ in 0..SUBSTEPS * 128 {
+                self.down_amp.push(a);
+                self.down_out.push(o);
+            }
+        }
         if self.delayed_on {
             let o = self.delayed.tick(v_in, self.r_in, self.on, self.dt);
             self.last = (o.amp, o.i_bus * 33e3);

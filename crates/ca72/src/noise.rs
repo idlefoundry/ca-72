@@ -15,6 +15,13 @@ use crate::linear::{Discrete, SmallSignal};
 use crate::mna::{Circuit, GND, NoConvergence, Node, Part};
 use crate::resample::Decimator;
 
+/// The pink network's upper branch, C2 and R13: .033 uF and 220 on Figure 9-8, .022 uF and
+/// 510 (E24) where the hardware reference's pink stands against its white: the drawn values
+/// leave its pink 0.8 dB short at 2 kHz, 1.7 at 4, 3.0 at 10 and 3.9 at 16 (docs/calibration,
+/// change 33).
+pub const C2: f64 = 0.022e-6;
+pub const R13: f64 = 510.0;
+
 /// The circuit's trim and the noise source's stand-in.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NoiseCircuit {
@@ -151,8 +158,10 @@ fn circuit_with(k: &NoiseCircuit, loads: &NoiseLoads, q: &Bjt) -> Result<Circuit
     r(&mut c, E4, P1, 10e3);
     cap(&mut c, P1, N3, 0.12e-6);
     r(&mut c, N3, N10, 3.3e3);
-    cap(&mut c, P1, N2, 0.033e-6);
-    r(&mut c, N2, N10, 220.0);
+    // C2 .033 uF and R13 220 on Figure 9-8; .022 uF and 510 where the hardware reference's
+    // pink stands against its white (docs/calibration, change 33).
+    cap(&mut c, P1, N2, C2);
+    r(&mut c, N2, N10, R13);
     cap(&mut c, P1, B3, 2.5e-6);
     r(&mut c, B3, Y3, 560e3);
     r(&mut c, Y3, C3N, 560e3);

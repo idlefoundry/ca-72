@@ -15192,3 +15192,123 @@ adjusted for this correction. See [the source calibration](calibration/waveform-
 The original greater-than0.97 travel assertion is unchanged. A regression links the
 normalizer to independently sampled source extrema; the eight continuous-waveform and two
 core allocation tests pass. These are functional checks, not hardware or listening acceptance.
+
+## R-LO-HISS. LO's filter sings from the mixer's own noise, as the circuit's does
+
+**Found 2026-10-23** in the hardware comparison's EMPHASIS 10 sweep. The circuit voice puts
+the mixer's own noise on its bus (`voice::MIXER_HISS`, docs/circuit/assumptions.md A6):
+without it, with nothing on the bus, a self-oscillating filter never starts. LO's bus had
+no such term. With every source off at EMPHASIS 10, HI sang at -24 to -26 dBFS from CUTOFF
+-2 to +4 and LO stayed at its floor (-104 dBFS): a patch that plays the filter alone was
+silent in LO.
+
+LO now adds the same noise in its bus's units (a sawtooth at VOLUME 10 peaks at 1; the
+circuit's bus carries 0.0319 mA RMS for it), from an xorshift of its own seeded with the
+voice, so the noise generator's stream is unchanged: one generator step and one add a
+sample. At EMPHASIS 10 LO's self-oscillation now stands within 7 cents of HI's from 214 Hz
+to 5.3 kHz, and at its level within 0.2 dB (-99 cents at 20 kHz). Left as they were, LO's
+own approximations, measured against HI the same day: at EMPHASIS 8 it rings 2 to 4 dB
+louder and 70 to 80 cents flat; with the filter contour held (SUSTAIN 10, AMOUNT 2.5 to 10)
+it stands 15 to 105 cents sharp; through a slow attack (ATTACK 8 and 9.5) 60 to 110 cents
+behind. Through the comparison's slow sweep that adds up to 150 to 340 cents flat of HI.
+
+## R-CONTOUR-SETTLE. A model fault: the contours' rest at power-on with a long DECAY
+
+**Found 2026-10-23.** A voice's contours start where `Contours::settle` leaves them: the
+circuit run with no key for 2 s. With the DECAY switch on and DECAY past about 6, the timing
+capacitor rests through DECAY's pot over tens of seconds, and 2 s left it short: at DECAY 7 the
+filter contour started at -0.11 V, at 10 at -0.34 V, where the circuit's own release settles
+(+0.143 V at every DECAY; the hardware reference's FILT CONT jack reads 0.29 V at rest, its
+buffer 0.14 V over the circuit: docs/calibration change 21). A fresh voice with a long DECAY
+therefore began its first filter sweep up to 0.47 V low, about an octave at AMOUNT OF
+CONTOUR 10. Where a capacitor rests does not depend on its capacitance, so `settle` now runs
+2 s with the timing capacitors and their absorption a hundredth of their value, then 2 s as
+they are. Fresh contours now rest where the release settles at every DECAY and both switch
+positions (to 0.0001 V; with the switch off they had stood up to 0.1 V low past DECAY 7).
+Patches with DECAY under about 6, or the switch off below 7, are unchanged; the comparison's
+EMPHASIS sweeps (DECAY 9.2 to 9.4) start 20 to 50 cents higher.
+
+**Corrected 2026-10-23, later.** Three things the first version missed, found when the plug-in's
+`latency::the_engine_lines_hi_and_lo_up_with_ultra` failed (it had not been run):
+- **The engine's voices sleep sooner.** A voice at rest from the start is silent and still at
+  once, so the engine lets it sleep after its 50 ms window (R68) where before its contours
+  were still creeping to rest; a key pressed later finds its free-running oscillators where
+  they paused. The sound is the same but for that arbitrary phase. The test, which compares the
+  engine's output with a voice that ran on, now presses its key within the window (20 ms).
+- **The settle's length.** 4 s of contour steps doubled what a clean voice costs to make (the
+  plug-in makes them in the background). Now 0.5 s with the hundredths (50 s of the
+  capacitors' own) and 1.5 s as drawn: 2 s, as before; the rest within 1.6 mV of the 4 s
+  settle's at DECAY 10.
+- **The panel's setup** (`Contours::setup`) and the parts at rest are kept by the panel, not
+  the circuit: both are now worked out again when the settle changes the capacitors.
+
+## R-LO-CONTOUR. LO's filter contour as the circuit's: its rest, its absorbed charge, its current at the control node
+
+**2026-10-23**, after R-LO-HISS's measures. Through the comparison's slow EMPHASIS 10 sweep
+(ATTACK 9.5, DECAY 9.2, AMOUNT 10) LO stood 200 to 280 cents flat of HI. Three causes, each
+measured against HI (`crates/ca72/tests/lo_contour_probe.rs`, ignored diagnostics):
+
+- **Where the contour rests.** LO started every contour at one fixed level (`REST`, 0.074 V);
+  the circuit's rests where its release settles, which DECAY and the switch set (R-CONTOUR-
+  SETTLE). LO now starts, and waits, at its release level (`RELEASED`, `RELEASED_OFF`), the
+  circuit's to 0.01 V.
+- **The absorbed charge.** HI's timing capacitors carry three absorption branches
+  (`contour::C_ABSORPTION`, fitted to the hardware reference in session M): after a fast
+  attack they pull the contour down 0.25 V within 20 ms; after a slow one they are charged and
+  slow the decay. LO had none, and its decay's fall term (`DECAY_FALL`) stood in for the sag,
+  so after a slow attack it decayed too fast (0.06 to 0.09 V low through the sweep's fall).
+  LO now carries the same three branches (a multiply-add each a sample), its time constants
+  the capacitor's own (`ABSORB_TIME_SCALE`: ATTACK 0.885, DECAY 0.85, release 0.8933 of the
+  laws' times) and no fall term: its decay times from DECAY 6 to 10 within 1 % of HI's at 25,
+  50, 75 and 90 %, its attack's within 0.5 to 1.7 %, the sweep's contour within 0.04 V.
+  `the_contours_follow_the_references_laws` now holds the circuit's current numbers (half way
+  0.355 s and nine tenths 1.297 s at DECAY 6; plateau 0.666 s at ATTACK 6).
+- **The contour at the control node.** LO added the contour as octaves, a fixed 2.10 a volt
+  from its rest times a coarse AMOUNT table. The circuit's control node sums currents into its
+  SCALE network: CUTOFF's (±10 V through R55) and the contour's (through AMOUNT's wiper and
+  R74). LO now does the same: CUTOFF's current at each point of its table (`knob_current`),
+  the contour's added (`contour_current`, the circuit's AMOUNT law), the pitch read from the
+  same table at the sum (`node_log2`), so the contour bends where the converter does at the
+  bottom. With the contour held (SUSTAIN 0 to 10, AMOUNT 2.5 to 10) LO stands within 18 to 21
+  cents RMS of HI at CUTOFF -4 and -2 (81 and 94 before).
+
+Through the sweep LO now stands -65 to +51 cents from HI (-200 to -280 before).
+
+## R-FEEDBACK-LOOP. ULTRA's FEEDBACK loop closed at the filter's rate
+
+**2026-10-23**, the owner's go ("give it a try") after the comparison's feedback series
+(session-001, rounds 049 to 052: EXTERNAL INPUT VOLUME 0, 5, 8 and 10 with the Behringer's
+internal return) could not be matched by any knob position at 8 and 10. Agent decisions, not
+separately approved; HI unchanged, for the owner to decide (below).
+
+- **The fault.** FEEDBACK (R8) took the output a sample late, at the sample rate, into the
+  preamplifier, whose four substeps run between its own resamplers (44.5 samples), and the
+  preamplifier's current into the bus, which the filter resamples again (45.5): the loop was
+  some 91 samples (1.9 ms) long. The hardware's loop is in phase and lowpassed (at EXT 5 it
+  raises the note +1.7 dB at the bottom, +0.2 dB at 2.7 kHz; at 10 it oscillates near 55 Hz).
+  The model's turned phase every 530 Hz: at EXT 8 and 10 it fell into an oscillation near
+  500 Hz the hardware does not make.
+- **The change** (`voice::tick_looped`, `voice::loops`; `Vcf::tick_fed`, `Preamp::fine`,
+  `OversampledVca::start` and `step`). Where the VCA already runs at the filter's rate (ULTRA,
+  and the lab's High Fidelity) with FEEDBACK and EXTERNAL INPUT on, the preamplifier, the filter
+  and the VCA run together at 4x: at each of the filter's steps the VCA takes the filter's
+  output, the preamplifier a substep on the jack's voltage with the cable's share of the VCA's
+  output, and its current enters the bus at the filter's next step. A quarter of a sample lies
+  between output and input. The jack's own signal is upsampled by the preamplifier's
+  interpolator; the bus's other currents as before. Nothing else changes: FEEDBACK off, HI
+  and LO are the same samples to the bit.
+- **Against the hardware.** One setting for all four takes (FEEDBACK 2.632, CUTOFF +2.679,
+  ENTROPY 0, the photographed panel): the comparison's spectral distance 2.43, 2.42, 3.10 and
+  3.39 dB (EXT 0, 5, 8, 10), the takes' levels within 0.9 dB of one another. Before, in ULTRA
+  at its best FEEDBACK: 2.84, 2.84, 13.3 and 21.9; the published HI fits 2.50 and 2.70 for 0
+  and 5, none accepted for 8 and 10.
+- **Cost.** ULTRA renders faster with it, about 17 % (an 8 s render 5.9 s against 7.2 s on one
+  core of the Linux reference machine): the preamplifier's decimators and the bus's
+  resampling of its current are skipped.
+- **Tests.** `tests/feedback.rs`: in ULTRA and High Fidelity FEEDBACK at 25 % lights OVERLOAD
+  and makes the note at least twice as loud and no brighter (in HI, a sample late, it still
+  grows harmonics, as R8 had it for every mode); the ends within the rails in all three. The
+  threaded voice runs the same loop on the caller's thread (`threaded.rs`).
+- **HI.** HI's VCA runs at the sample rate; the same loop there needs it at 4x. An estimate
+  from the parts (another agent's, 2026-10-23) put that at 30 to 54 % more per FEEDBACK voice
+  in HI. Left as it was until the owner chooses.

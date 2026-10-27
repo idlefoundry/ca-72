@@ -1,5 +1,6 @@
 //! The plug-in's FEEDBACK (decisions.md R8): the voice's own output patched back into its
-//! EXTERNAL INPUT, a sample late, as players cable it. With the MIXER's EXTERNAL INPUT off nothing changes
+//! EXTERNAL INPUT, as players cable it (in ULTRA at the filter's rate, R-FEEDBACK-LOOP; in HI a
+//! sample late). With the MIXER's EXTERNAL INPUT off nothing changes
 //! (the cable is not heard); on, the preamplifier and the mixer are driven: OVERLOAD lights
 //! and the sound grows harmonics, in every quality mode, and at the controls' ends it stays
 //! finite and within the rails.
@@ -49,12 +50,14 @@ fn feedback_is_not_heard_with_the_external_input_off() {
     }
 }
 
-/// At 25 % (the loop driven hard, not yet running away) every mode grows harmonics and lights
-/// OVERLOAD, and Potato (its preamplifier then solved as High Fidelity's) sounds as High
-/// Fidelity does: level within 10 %, brightness within 20 %. Further up the loop runs into
-/// self-oscillation (near 58 Hz, dark), where the modes' small differences grow: Potato from
-/// 30 %, High Fidelity from 35 % (2026-10-09, the contours' capacitors as electrolytics; both
-/// above 30 % before).
+/// At 25 % (the loop driven hard, not yet running away) every mode lights OVERLOAD. In ULTRA
+/// (and the lab's High Fidelity) the loop is closed at the filter's rate (decisions.md
+/// R-FEEDBACK-LOOP) and, as the hardware reference's, in phase through the audio band: the
+/// note at least twice as loud, its low end raised more than its top (no brighter). In HI
+/// (Potato) the output still comes back a sample at a time through the preamplifier's and
+/// the filter's resamplers, some 90 samples late, and the loop grows harmonics instead (R8);
+/// its preamplifier's model in that loop is checked against the circuit's in
+/// `ca72-plugin/tests/feedback_models.rs`.
 #[test]
 fn feedback_overdrives_the_preamplifier_and_the_mixer() {
     // EXTERNAL INPUT's VOLUME at 0.7: R9 at about 16 % of its track (its law: voice.rs,
@@ -68,7 +71,6 @@ fn feedback_overdrives_the_preamplifier_and_the_mixer() {
         (y[y.len() / 3..].iter().map(|x| x * x).sum::<f64>() / (y.len() - y.len() / 3) as f64)
             .sqrt()
     };
-    let mut hf = (0.0, 0.0);
     for q in [
         Quality::NoCompromises,
         Quality::HighFidelity,
@@ -89,23 +91,11 @@ fn feedback_overdrives_the_preamplifier_and_the_mixer() {
             dry_lamp < 0.05 && wet_lamp > 0.5,
             "{q:?}: OVERLOAD {dry_lamp} -> {wet_lamp}"
         );
-        assert!(b1 > 2.0 * b0, "{q:?}: no brighter ({b0} -> {b1})");
-        match q {
-            Quality::HighFidelity => hf = (rms(&wet), b1),
-            Quality::Potato => {
-                assert!(
-                    (rms(&wet) / hf.0 - 1.0).abs() < 0.1,
-                    "Potato's level {} against {}",
-                    rms(&wet),
-                    hf.0
-                );
-                assert!(
-                    (b1 / hf.1 - 1.0).abs() < 0.2,
-                    "Potato's brightness {b1} against {}",
-                    hf.1
-                );
-            }
-            Quality::NoCompromises => {}
+        if q == Quality::Potato {
+            assert!(b1 > 2.0 * b0, "{q:?}: no brighter ({b0} -> {b1})");
+        } else {
+            assert!(rms(&wet) > 2.0 * rms(&dry), "{q:?}: no louder");
+            assert!(b1 < b0, "{q:?}: brighter ({b0} -> {b1})");
         }
     }
 }
@@ -115,7 +105,11 @@ fn feedback_overdrives_the_preamplifier_and_the_mixer() {
 /// rails, and the voice plays a note normally again once FEEDBACK is off.
 #[test]
 fn feedback_at_its_ends_stays_within_the_rails() {
-    for q in [Quality::HighFidelity, Quality::Potato] {
+    for q in [
+        Quality::NoCompromises,
+        Quality::HighFidelity,
+        Quality::Potato,
+    ] {
         let mut p = Panel {
             quality: q,
             ext_on: true,

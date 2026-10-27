@@ -1473,6 +1473,41 @@ impl Vcf {
         self.tick_into(i_bus, g_bus, i0, Some(xs))
     }
 
+    /// [`Vcf::tick`] with FEEDBACK's loop closed at the loop's rate (decisions.md
+    /// R-FEEDBACK-LOOP): `i_fed` (A) added to the bus at each step, and `fed(k, v)` given the
+    /// step's output, its index from 0, for the next step's current. No resampler is between
+    /// a step's output and the next step's input; the bus's own current `i_bus` is
+    /// upsampled as in [`Vcf::tick`].
+    pub fn tick_fed(
+        &mut self,
+        i_bus: f64,
+        g_bus: f64,
+        i0: f64,
+        i_fed: &mut f64,
+        mut fed: impl FnMut(usize, f64) -> f64,
+    ) -> f64 {
+        let mut laps = crate::prof::Laps::start();
+        let mut ns = [0.0f64; 8];
+        let mut gs = [0.0f64; 8];
+        self.up_n.push(i_bus, &mut ns);
+        self.conductance(g_bus, &mut gs);
+        laps.lap(Part::FilterResample);
+        let mut out = 0.0;
+        let mut iters = 0;
+        for k in 0..self.oversample {
+            let i_n = ns[k] + *i_fed;
+            let v = self.step(i_n, gs[k].max(0.0), i0, &mut iters, &mut laps);
+            let v = self.filter_mode(i_n, v);
+            if let Some(o) = self.down.push(v) {
+                out = o;
+            }
+            laps.lap(Part::FilterResample);
+            *i_fed = fed(k, v);
+        }
+        self.last_iterations = iters;
+        out
+    }
+
     /// The filter's oversampling.
     pub fn oversample(&self) -> usize {
         self.oversample
@@ -1483,18 +1518,7 @@ impl Vcf {
         let mut ns = [0.0f64; 8];
         let mut gs = [0.0f64; 8];
         self.up_n.push(i_bus, &mut ns);
-        let (g, n, held) = self.g_held;
-        if g_bus.to_bits() == g.to_bits() && n >= G_HOLD {
-            gs = held;
-        } else {
-            self.up_g.push(g_bus, &mut gs);
-            let n = if g_bus.to_bits() == g.to_bits() {
-                n + 1
-            } else {
-                0
-            };
-            self.g_held = (g_bus, n, gs);
-        }
+        self.conductance(g_bus, &mut gs);
         laps.lap(Part::FilterResample);
         let mut out = 0.0;
         let mut iters = 0;
@@ -1511,6 +1535,23 @@ impl Vcf {
         }
         self.last_iterations = iters;
         out
+    }
+
+    /// The bus's conductance `g_bus` at the loop's rate into `gs`: once its resampler's whole
+    /// line holds it, the same outputs again (decisions.md R11).
+    fn conductance(&mut self, g_bus: f64, gs: &mut [f64; 8]) {
+        let (g, n, held) = self.g_held;
+        if g_bus.to_bits() == g.to_bits() && n >= G_HOLD {
+            *gs = held;
+        } else {
+            self.up_g.push(g_bus, gs);
+            let n = if g_bus.to_bits() == g.to_bits() {
+                n + 1
+            } else {
+                0
+            };
+            self.g_held = (g_bus, n, *gs);
+        }
     }
 
     /// FILTER MODE over one step, at the loop's rate so that the two branches line up: the
