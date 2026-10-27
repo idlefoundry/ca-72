@@ -246,7 +246,9 @@ one a session brought there listed `inert`).
   a copy of the bank run to the next step's ticks), so the glide adds no delay and is exact at
   each step. A step an LFO jumps in (halfway across, more than `lfo::JUMP` off the line between
   its ends: a SHARP edge, a cycle's restart) is held, so the edge stays abrupt. A macro's part
-  is in both ends, but a macro alone glides nothing: it holds still between steps.
+  and the velocity's (each voice's own, where the next step's glide will have it:
+  `Velocity::ahead`) are in both ends. A macro or the velocity alone glides nothing: each
+  holds still between steps, apart from the velocity's 4 ms settling under a legato phrase.
 - MAIN OUTPUT's VOLUME moved by a source ramps a sample at a time across the step to the step's
   gain, unless only SHARP LFOs move it (`Lfos::sharp_on`); the controls set from outside land at
   once, as before. Every other knob still steps every 32 samples. With nothing assigned none of
