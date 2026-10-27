@@ -15312,3 +15312,74 @@ separately approved; HI unchanged, for the owner to decide (below).
 - **HI.** HI's VCA runs at the sample rate; the same loop there needs it at 4x. An estimate
   from the parts (another agent's, 2026-10-23) put that at 30 to 54 % more per FEEDBACK voice
   in HI. Left as it was until the owner chooses.
+
+## R-CALIBRATION-0.3.0. The sound-accuracy calibration in 0.3.0
+
+**The owner's decision, 2026-10-27:** the unmerged calibration goes into 0.3.0. The agent
+works out what is finished, integrates it on `release-0.3.0` (`ee9cec7`) as `int/calibration`,
+and leaves out what is unfinished or fails its own checks. The owner merges.
+
+**The branches** (all from `d9d1204`, 2026-10-21; mapped with `git log --graph`,
+`git merge-base` and `git cherry`). One stack, not two pieces of work:
+`09a716a`..`41b30fb` (the triangle fold and hybrid, the pulse selector as a finite source, the
+provisional standard pulse parts, production alias coverage) is
+`codex/combined-debug-validation-20261022`; four more commits to `853105f` (fixtures, the
+record, LO shape MOD normalised) are `codex/final-debug-validation-20261022`; `9135818` (the
+factory DRIVE curves regenerated) is `codex/final-curves-debug-validation-20261022` and
+`codex/feedback-cpu-evaluation-20261023` (no commit of its own). On `9135818` sit
+`codex/waveform-calibration-20261022` (`eb34a80`: the final candidate's validation record and
+remaining limits, docs only) and `cal/emphasis-fidelity` (`3f60ba7`..`8fb03b7`, seven commits:
+calibration changes 33 and 34, R-LO-HISS, R-CONTOUR-SETTLE, R-LO-CONTOUR, R-FEEDBACK-LOOP and
+the owner's decisions on oscillator tracking and FEEDBACK's A4 lock). The emphasis work is built
+on the waveform work and its curves were measured with it, so they do not conflict.
+`codex/pulse-divider-calibration-20261022`, `codex/triangle-fold-reference-20261022` and
+`codex/lo-mod-source-reference-20261022` are earlier copies of commits in the stack (patch-equal,
+`git cherry`; the pulse branch's first commit differs by eight diff lines, superseded).
+The Mac's `cal/emphasis-fidelity` (`fa2fa84`) is behind GitHub's.
+
+**Merged** (two merges, history kept): `codex/waveform-calibration-20261022` (`eb34a80`), then
+`cal/emphasis-fidelity` (`8fb03b7`). The only conflict was this file's end (both sides kept).
+The release's 0.3 code after `d9d1204` touches no engine source (`crates/ca72`, `ca72-lab`,
+the circuits), so the calibrated engine is the branches' to the byte, apart from rustfmt.
+- **The provisional pulse parts are merged:** `pulse::ACTIVE_PROFILE` is `ReferenceStandard`
+  (R1 41.2K, R44 374K, standard values for an equivalent mechanism inferred from oscillator 1's
+  recordings, not the installed parts). The final candidate, its checks, its regenerated curves
+  and everything after it were made with it; the drawn parts stay in the code as `Factory`.
+  Choosing them instead is one line and the curves measured again.
+- **CONTINUOUS and STEPPED.** The calibration changes the switch's own shapes (STEPPED is no
+  longer 0.2.8's to the bit), and CONTINUOUS follows the same physical source:
+  `at_the_switchs_positions_continuous_is_the_switch_to_the_bit` and
+  `the_travel_gives_the_switchs_widths_exactly` pass in every quality. The legends' places are
+  unchanged; the tip reads WIDE RECTANGLE 29 % (was 30 %), SQUARE 48 %, NARROW 17 %, and the
+  travel's end 6.1 %. The release's text round trip (R-HOST-PARAM-TEXT) lands on the places.
+
+**Fixed after the merge:** rustfmt on three of R-FEEDBACK-LOOP's places (no code change); and
+Feedback Funk's HI AUTO GAIN curve, which the emphasis branch measured before its preamplifier
+change (C23, +13 V, which HI's preamplifier takes too): `factory_curves`'
+`every_factory_presets_curves_are_its_measurement` failed on it. Written again by that test
+(`CA72_WRITE_CURVES`): -0.11 dB at DRIVE 6, under 0.02 dB above; every other curve the same to
+the bit. Presets are not re-levelled (the calibration's rule; the levelling pass for the new
+factory presets follows this merge).
+
+**Left out:** nothing finished. Not in any branch, and not claimed: HI's FEEDBACK loop at 4x (the
+owner's choice, R-FEEDBACK-LOOP), a per-oscillator tracking tolerance (after 0.3), FEEDBACK's A4
+lock (close enough, the owner), the calibration README's "Still differs", listening or blind
+acceptance, and hardware coverage of oscillators 2 and 3.
+
+**Evidence** (`int/calibration`, the Linux desktop, 2026-10-27): rustfmt; clippy `--workspace
+--all-targets --all-features -D warnings`; `cargo test --workspace --features
+ca72-plugin/standalone-production` with `CA72_REQUIRE_NGSPICE=1` (ngspice 47): 1210 passed, 0
+failed, 104 ignored; the three third-party suites CI runs; `whats_new`. The calibration's own
+release checks: `factory_curves` with the by-hand test (after the fix), `pulse_realtime`,
+`vco_realtime`, `aliasing` (production and legacy pulse benches), `noise_realtime`,
+`board4ext_realtime`, `continuous_wave`, `rt_alloc`, `feedback`. `test-linux-window-identity.py`
+fails here as on `ee9cec7` (its installer step, not the sound). Factory presets against
+`ee9cec7` (`preset_render`, ten voices, 4 s; `preset_levels` at the default QUALITY LO): HI and
+ULTRA levels within 0.15 dB and bands within about 1 dB, but Feedback Funk at ULTRA (-2.16 dB;
++10 dB at 160 to 200 Hz, -9 to -15 dB above 2 kHz: the loop as the hardware's); LO levels
+within 0.18 dB, bands within 2.4 dB, but Smoke Flute's 3.2 kHz band (-5.9 dB, 30 dB under the
+strongest) and Feedback Funk above 5 kHz (-1.1 to -2.7 dB to 10 kHz, more above); on each
+preset's phrase within 0.24 dB, Feedback Funk -0.41. Cost with ten voices on one thread
+(a shared machine): LO about 3 % more (the contours' absorption and the bus's noise), HI the same,
+ULTRA's Feedback Funk a few per cent less. Tables, logs, renders and scripts:
+`/mnt/lab/artifacts/ca-72/calibration-0.3.0/`.
