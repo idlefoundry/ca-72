@@ -7,11 +7,12 @@
 //! click on a legend picks it, a click on the knob steps toward the side clicked); a switch
 //! flips at a click anywhere on it; QUALITY's toggle goes to the position clicked (its lever's
 //! three places, or their legends); the wheels stay where they are left, the PITCH wheel
-//! settling into its centre detent when let go near it (it has no spring).
+//! settling into its centre detent when let go near it (it has no spring), as an LFO's FADE
+//! knob settles into its centre, off (decisions.md R-LFO-FADE).
 
 use crate::arrangement::Arrangement;
 use crate::art::{self, BIG, GRIP, Layout, POWER_BOUNDS, SIX, STD, WHEEL_SCALE};
-use crate::controls::{CONTROLS, Control, Kind, Place};
+use crate::controls::{CONTROLS, Control, Dial, Kind, Place};
 
 /// What is under the pointer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -279,10 +280,20 @@ pub fn click(kind: &Kind, v: f64, dx: f64, dy: f64) -> Option<f64> {
     }
 }
 
-/// Where a control settles when let go: the PITCH wheel's centre detent catches it near it.
+/// How near its centre (of its travel) an LFO's FADE knob let go settles there, off: under
+/// one notch of the mouse wheel (0.02), so that a notch from the centre steps out of it; the
+/// fades it takes, 0.27 ms or less either way, do nothing a fade could be heard to.
+pub const FADE_DETENT: f64 = 0.015;
+
+/// Where a control settles when let go: the PITCH wheel's centre detent catches it near it, and
+/// an LFO's FADE knob's catches it at off (decisions.md R-LFO-FADE).
 pub fn release(kind: &Kind, v: f64) -> f64 {
     match kind {
         Kind::Wheel { detent: true, .. } if (v - 0.5).abs() <= 0.04 => 0.5,
+        Kind::Knob {
+            dial: Dial::LfoFade,
+            ..
+        } if (v - 0.5).abs() <= FADE_DETENT => 0.5,
         _ => v,
     }
 }

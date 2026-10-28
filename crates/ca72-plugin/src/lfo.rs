@@ -14,9 +14,11 @@
 //!   place every block, never drifting.
 //! - **MODE**: FREE runs on; RETRIG starts again at PHASE at a new note; ENV runs one cycle
 //!   from PHASE and holds its last value (timed, one note value long). RETRIG starts phase and
-//!   RISE on every note-on, independently of the panel's main RETRIGGER. Shared ENV and FREE's
-//!   RISE follow that main switch: off, a key from silence; on, every key.
-//! - **RISE** fades the output in from a new note over 0 to 10 s.
+//!   FADE on every note-on, independently of the panel's main RETRIGGER. Shared ENV and FREE's
+//!   FADE follow that main switch: off, a key from silence; on, every key.
+//! - **FADE** (decisions.md R-LFO-FADE), one bipolar knob: off at its centre; to the right it
+//!   fades the output in from a new note over up to 10 s, to the left out from full to nothing
+//!   over up to 10 s.
 //! - **MONO** on: one LFO every voice shares. Off: one a voice for the targets each voice has
 //!   of its own (its panel); a target the voices share ([`Target::per_voice`] false: VOLUME,
 //!   the strip's) always takes the shared one (the owner's option C).
@@ -57,8 +59,8 @@ pub const DEFAULT_DEPTH: f32 = 0.25;
 /// RATE's range, Hz (the owner: "RATE 0.01–50 Hz"), and a new patch's.
 pub const RATE_HZ: (f32, f32) = (0.01, 50.0);
 pub const DEFAULT_RATE: f32 = 2.0;
-/// RISE's longest, s.
-pub const RISE_MOST: f32 = 10.0;
+/// FADE's longest, either way, s.
+pub const FADE_MOST: f32 = 10.0;
 /// EDGES SOFT: how long a jump of the output takes from 10 to 90 % of its way, s (a one-pole
 /// slew, its time constant this over ln 9).
 pub const SOFT_EDGE: f64 = 0.002;
@@ -76,7 +78,7 @@ pub const VOICES: usize = POLY_VOICES.2;
 
 /// A knob an LFO can modulate: the panel's continuous knobs and the strip's (27), each
 /// oscillator's WAVEFORM while it is CONTINUOUS (its shape's travel), and each LFO's own RATE,
-/// PHASE, RISE, CONTINUOUS shape and LEVEL (R-LFO's addendum). Its parameter's ID
+/// PHASE, FADE, CONTINUOUS shape and LEVEL (R-LFO's addendum). Its parameter's ID
 /// ([`Target::id`]) is what presets and sessions save.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Target {
@@ -115,12 +117,12 @@ pub enum Target {
     /// LFO `n`'s (0 to 3) own knobs, moved by the macros and by the LFOs, itself among them
     /// (decisions.md R-LFO's addendum; the owner, 2026-10-20: "it might be interesting to allow
     /// macros to control LFO parameters. And LFOs to control each other's parameters"): its
-    /// RATE (not while it is timed, as a FREQUENCY), its PHASE, its RISE, its WAVEFORM's shape
+    /// RATE (not while it is timed, as a FREQUENCY), its PHASE, its FADE, its WAVEFORM's shape
     /// while CONTINUOUS, and its LEVEL (`lfoN_level`, the OUT jack's: the share of every one of
     /// its assignments it gives). After the panel's, so that none of theirs moves.
     LfoRate(usize),
     LfoPhase(usize),
-    LfoRise(usize),
+    LfoFade(usize),
     LfoShape(usize),
     LfoLevel(usize),
     /// The standalone's TEMPO (decisions.md R-LFO; the owner, 2026-10-20: "in standalone mode,
@@ -146,7 +148,7 @@ pub enum Target {
 pub enum LfoKnob {
     Rate,
     Phase,
-    Rise,
+    Fade,
     Shape,
     Level,
 }
@@ -155,7 +157,7 @@ impl LfoKnob {
     pub const ALL: [LfoKnob; LFO_KNOBS] = [
         LfoKnob::Rate,
         LfoKnob::Phase,
-        LfoKnob::Rise,
+        LfoKnob::Fade,
         LfoKnob::Shape,
         LfoKnob::Level,
     ];
@@ -166,7 +168,7 @@ impl LfoKnob {
         match self {
             LfoKnob::Rate => "rate",
             LfoKnob::Phase => "phase",
-            LfoKnob::Rise => "rise",
+            LfoKnob::Fade => "fade",
             LfoKnob::Shape => "shape",
             LfoKnob::Level => "level",
         }
@@ -239,7 +241,7 @@ const fn all_targets() -> [Target; TARGETS] {
         let at = KNOB_TARGETS + LFO_KNOBS * n;
         all[at] = Target::LfoRate(n);
         all[at + 1] = Target::LfoPhase(n);
-        all[at + 2] = Target::LfoRise(n);
+        all[at + 2] = Target::LfoFade(n);
         all[at + 3] = Target::LfoShape(n);
         all[at + 4] = Target::LfoLevel(n);
         n += 1;
@@ -261,7 +263,7 @@ impl Target {
         match k {
             LfoKnob::Rate => Target::LfoRate(n),
             LfoKnob::Phase => Target::LfoPhase(n),
-            LfoKnob::Rise => Target::LfoRise(n),
+            LfoKnob::Fade => Target::LfoFade(n),
             LfoKnob::Shape => Target::LfoShape(n),
             LfoKnob::Level => Target::LfoLevel(n),
         }
@@ -272,7 +274,7 @@ impl Target {
         match self {
             Target::LfoRate(n) => Some((n, LfoKnob::Rate)),
             Target::LfoPhase(n) => Some((n, LfoKnob::Phase)),
-            Target::LfoRise(n) => Some((n, LfoKnob::Rise)),
+            Target::LfoFade(n) => Some((n, LfoKnob::Fade)),
             Target::LfoShape(n) => Some((n, LfoKnob::Shape)),
             Target::LfoLevel(n) => Some((n, LfoKnob::Level)),
             _ => None,
@@ -387,6 +389,20 @@ impl Target {
         Target::ALL.into_iter().find(|t| t.id() == id)
     }
 
+    /// The target a saved assignment names (a session's or a preset's), and what its depth is
+    /// taken at: its parameter's ID, or an LFO's RISE's as 0.3.0's beta saved it (`lfoN_rise`),
+    /// now its FADE's right half, which a source moves as far at half the depth
+    /// (decisions.md R-LFO-FADE).
+    pub fn of_saved(id: &str) -> Option<(Target, f32)> {
+        match Target::of_id(id) {
+            Some(t) => Some((t, 1.0)),
+            None => RISE_IDS
+                .iter()
+                .position(|r| *r == id)
+                .map(|n| (Target::LfoFade(n), 0.5)),
+        }
+    }
+
     /// A short name for MODULATES' screen (at most ten characters, the panel's words).
     pub fn short(self) -> &'static str {
         match self {
@@ -468,7 +484,7 @@ impl Target {
                 | Target::Inner
                 | Target::LfoRate(_)
                 | Target::LfoPhase(_)
-                | Target::LfoRise(_)
+                | Target::LfoFade(_)
                 | Target::LfoShape(_)
                 | Target::LfoLevel(_)
                 | Target::Tempo
@@ -517,7 +533,7 @@ impl Target {
             Target::Level => &p.level,
             Target::LfoRate(n) => &p.lfo(n).rate,
             Target::LfoPhase(n) => &p.lfo(n).phase,
-            Target::LfoRise(n) => &p.lfo(n).rise,
+            Target::LfoFade(n) => &p.lfo(n).fade,
             Target::LfoShape(n) => &p.lfo(n).shape,
             Target::LfoLevel(n) => &p.lfo_level(n).level,
             Target::Tempo => &p.tempo_knob,
@@ -585,7 +601,7 @@ impl Target {
             // an effects' pin, the effects' chain.)
             Target::LfoRate(_)
             | Target::LfoPhase(_)
-            | Target::LfoRise(_)
+            | Target::LfoFade(_)
             | Target::LfoShape(_)
             | Target::LfoLevel(_)
             | Target::Tempo
@@ -630,7 +646,7 @@ impl Target {
             | Target::Inner
             | Target::LfoRate(_)
             | Target::LfoPhase(_)
-            | Target::LfoRise(_)
+            | Target::LfoFade(_)
             | Target::LfoShape(_)
             | Target::LfoLevel(_)
             | Target::Tempo
@@ -682,60 +698,77 @@ const LFO_TARGET_IDS: [[&str; LFO_KNOBS]; LFOS] = [
     [
         "lfo1_rate",
         "lfo1_phase",
-        "lfo1_rise",
+        "lfo1_fade",
         "lfo1_shape",
         "lfo1_level",
     ],
     [
         "lfo2_rate",
         "lfo2_phase",
-        "lfo2_rise",
+        "lfo2_fade",
         "lfo2_shape",
         "lfo2_level",
     ],
     [
         "lfo3_rate",
         "lfo3_phase",
-        "lfo3_rise",
+        "lfo3_fade",
         "lfo3_shape",
         "lfo3_level",
     ],
     [
         "lfo4_rate",
         "lfo4_phase",
-        "lfo4_rise",
+        "lfo4_fade",
         "lfo4_shape",
         "lfo4_level",
     ],
 ];
+
+/// Each LFO's RISE's parameter's ID, as 0.3.0's beta saved it: its FADE's now, as a fade in
+/// (decisions.md R-LFO-FADE). A preset, a session, an assignment and a MIDI mapping that name it
+/// are read as FADE's.
+pub const RISE_IDS: [&str; LFOS] = ["lfo1_rise", "lfo2_rise", "lfo3_rise", "lfo4_rise"];
+
+/// The RISE ID (0.3.0's beta's) a FADE parameter's `id` had, if it is one: [`RISE_IDS`].
+pub fn rise_id(id: &str) -> Option<&'static str> {
+    let n = PARAM_IDS.iter().position(|row| row[FADE_PART] == id)?;
+    Some(RISE_IDS[n])
+}
+
+/// The FADE parameter's ID for a RISE one (0.3.0's beta's), if it is one: [`RISE_IDS`].
+pub fn fade_id(rise: &str) -> Option<&'static str> {
+    let n = RISE_IDS.iter().position(|r| *r == rise)?;
+    Some(PARAM_IDS[n][FADE_PART])
+}
 
 /// Their names on a MODULATES screen (ten characters at most).
 const LFO_TARGET_SHORT: [[&str; LFO_KNOBS]; LFOS] = [
     [
         "LFO1 RATE",
         "LFO1 PHASE",
-        "LFO1 RISE",
+        "LFO1 FADE",
         "LFO1 WAVE",
         "LFO1 LEVEL",
     ],
     [
         "LFO2 RATE",
         "LFO2 PHASE",
-        "LFO2 RISE",
+        "LFO2 FADE",
         "LFO2 WAVE",
         "LFO2 LEVEL",
     ],
     [
         "LFO3 RATE",
         "LFO3 PHASE",
-        "LFO3 RISE",
+        "LFO3 FADE",
         "LFO3 WAVE",
         "LFO3 LEVEL",
     ],
     [
         "LFO4 RATE",
         "LFO4 PHASE",
-        "LFO4 RISE",
+        "LFO4 FADE",
         "LFO4 WAVE",
         "LFO4 LEVEL",
     ],
@@ -756,7 +789,7 @@ pub fn takes_shared(p: &Ca72Params, s: Source, t: Target) -> bool {
 /// The target a panel control can take an LFO on now, by the control's parameter's ID: a
 /// continuous knob of the panel's or the strip's; a WAVEFORM switch only while CONTINUOUS
 /// (`oscN_waveform` gives its shape); a FREQUENCY knob not while its oscillator is timed (it is
-/// a DIVISION dial then, stepped); an LFO's RATE, PHASE, RISE and LEVEL (its OUT jack's), its
+/// a DIVISION dial then, stepped); an LFO's RATE, PHASE, FADE and LEVEL (its OUT jack's), its
 /// RATE not while it is timed, its WAVEFORM only while CONTINUOUS (`lfoN_waveform` gives its
 /// shape: R-LFO's addendum). None for anything else: switches, stepped selectors, VOICES, the
 /// timed dials, the wheels and the drawers' knobs. An assignment already made stays while its
@@ -1253,9 +1286,10 @@ impl Patch {
             }
             for (id, depth) in &s.to {
                 // (The effects' pins' are the chain's: R-FX-PARAMS.)
-                let Some(target) = Target::of_id(id).filter(|t| !t.is_fx()) else {
+                let Some((target, scale)) = Target::of_saved(id).filter(|(t, _)| !t.is_fx()) else {
                     continue;
                 };
+                let depth = depth * scale;
                 let n = counts[i];
                 let taken = words[i][..n]
                     .iter()
@@ -1265,7 +1299,7 @@ impl Patch {
                 }
                 words[i][n] = word(Some(Assignment {
                     target,
-                    depth: depth_within(*depth),
+                    depth: depth_within(depth),
                 }));
                 counts[i] += 1;
             }
@@ -1318,8 +1352,8 @@ impl Patch {
             let mut to: Vec<(Target, f32)> = values
                 .iter()
                 .filter_map(|(k, v)| {
-                    let t = Target::of_id(k.strip_prefix(&prefix)?)?;
-                    Some((t, (*v / 100.0) as f32))
+                    let (t, scale) = Target::of_saved(k.strip_prefix(&prefix)?)?;
+                    Some((t, (*v / 100.0) as f32 * scale))
                 })
                 .collect();
             to.sort_by_key(|(t, _)| *t);
@@ -1446,7 +1480,7 @@ pub struct Scope {
     value: [AtomicU32; LFOS],
     phase: [AtomicU32; LFOS],
     since: [AtomicU32; LFOS],
-    rise: [AtomicU32; LFOS],
+    fade: [AtomicU32; LFOS],
     moving: AtomicU8,
     shape: [AtomicU32; LFOS],
     offset: [AtomicU32; LFOS],
@@ -1454,10 +1488,10 @@ pub struct Scope {
     moved: AtomicU8,
 }
 
-/// An LFO as the audio thread last had it: its output (-1..1, after RISE and EDGES, as it
+/// An LFO as the audio thread last had it: its output (-1..1, after FADE and EDGES, as it
 /// moves its knobs: the latest voice's where MONO is off), where it is in its cycle (0..1,
 /// PHASE included: the scope's trace at `phase` is the waveform there), how long since the
-/// note that last started it (s; the scope's time base starts there), RISE's gain then (0..1),
+/// note that last started it (s; the scope's time base starts there), FADE's gain then (0..1),
 /// and whether it moves (assigned, running, not an ENV whose cycle is over); and the settings
 /// its trace is drawn from as they are in force (its WAVEFORM's place along the switch's
 /// travel, PHASE in cycles, LEVEL 0..1), whether a source moves them (R-LFO's corrections: the
@@ -1468,7 +1502,7 @@ pub struct Reading {
     pub value: f32,
     pub phase: f32,
     pub since: f32,
-    pub rise: f32,
+    pub fade: f32,
     pub moving: bool,
     pub shape: f32,
     pub offset: f32,
@@ -1484,7 +1518,7 @@ impl Scope {
             value: f(&self.value),
             phase: f(&self.phase),
             since: f(&self.since),
-            rise: f(&self.rise),
+            fade: f(&self.fade),
             moving: self.moving.load(Ordering::Relaxed) & (1 << lfo.min(7)) != 0,
             shape: f(&self.shape),
             offset: f(&self.offset),
@@ -1504,7 +1538,7 @@ impl Scope {
             self.value[k].store(r.value.to_bits(), Ordering::Relaxed);
             self.phase[k].store(r.phase.to_bits(), Ordering::Relaxed);
             self.since[k].store(r.since.to_bits(), Ordering::Relaxed);
-            self.rise[k].store(r.rise.to_bits(), Ordering::Relaxed);
+            self.fade[k].store(r.fade.to_bits(), Ordering::Relaxed);
             self.shape[k].store(r.shape.to_bits(), Ordering::Relaxed);
             self.offset[k].store(r.offset.to_bits(), Ordering::Relaxed);
             self.level[k].store(r.level.to_bits(), Ordering::Relaxed);
@@ -1810,8 +1844,8 @@ pub struct Settings {
     pub timed: Option<Length>,
     /// PHASE, cycles (0..1).
     pub phase: f64,
-    /// RISE, s.
-    pub rise: f64,
+    /// FADE, s: above 0 in, below 0 out, 0 off.
+    pub fade: f64,
     pub mode: Mode,
     pub mono: bool,
     pub edges: Edges,
@@ -1834,7 +1868,7 @@ impl Default for Settings {
             hz: f64::from(DEFAULT_RATE),
             timed: None,
             phase: 0.0,
-            rise: 0.0,
+            fade: 0.0,
             mode: Mode::Free,
             mono: true,
             edges: Edges::Soft,
@@ -1858,7 +1892,7 @@ impl Settings {
         }
     }
 
-    /// Its waveform `x` of the way (0..1) through one cycle from PHASE, before RISE and EDGES:
+    /// Its waveform `x` of the way (0..1) through one cycle from PHASE, before FADE and EDGES:
     /// the scope's trace, one cycle across its width whatever the rate (timed, one note value).
     /// At 1 it is the cycle's last value, just short of the next one's start, as ENV holds.
     pub fn cycle_at(&self, x: f64) -> f64 {
@@ -1872,9 +1906,18 @@ impl Settings {
         if self.uni { 0.5 * (x + 1.0) } else { x }
     }
 
-    fn rise_gain(&self, since: f64) -> f64 {
-        if self.rise > 0.0 {
-            (since / self.rise).clamp(0.0, 1.0)
+    /// FADE's gain `since` s after the note that started it (`started`; none yet, a fade in at
+    /// nothing and a fade out at full, which has not begun to fall: decisions.md R-LFO-FADE): in,
+    /// from nothing to full over FADE's seconds; out, from full to nothing over them; off, full.
+    fn fade_gain(&self, since: f64, started: bool) -> f64 {
+        if self.fade > 0.0 {
+            if started {
+                (since / self.fade).clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        } else if self.fade < 0.0 && started {
+            (1.0 + since / self.fade).clamp(0.0, 1.0)
         } else {
             1.0
         }
@@ -1906,7 +1949,7 @@ pub struct Gen {
 }
 
 impl Gen {
-    /// A new note starts it: RETRIG and ENV from PHASE, RISE from nothing.
+    /// A new note starts it: RETRIG and ENV from PHASE, FADE from its start.
     pub fn start(&mut self, s: &Settings) {
         if s.mode != Mode::Free {
             self.cycles = 0.0;
@@ -1925,11 +1968,7 @@ impl Gen {
             _ => self.cycles,
         };
         self.at = (s.phase + c).rem_euclid(1.0);
-        let gain = if s.rise > 0.0 && !self.started {
-            0.0
-        } else {
-            s.rise_gain(self.since)
-        };
+        let gain = s.fade_gain(self.since, self.started);
         let x = s.shaped(self.at) * gain;
         self.out = match s.edges {
             Edges::Sharp => x,
@@ -1976,11 +2015,7 @@ impl Gen {
             value: self.heard as f32,
             phase: self.at as f32,
             since: self.since as f32,
-            rise: if s.rise > 0.0 && !self.started {
-                0.0
-            } else {
-                s.rise_gain(self.since) as f32
-            },
+            fade: s.fade_gain(self.since, self.started) as f32,
             moving,
             shape: s.at as f32,
             offset: s.phase as f32,
@@ -2294,8 +2329,8 @@ pub struct Bank {
 }
 
 impl Bank {
-    /// Every key starts RETRIG's phase and RISE. `full` is the main contours' trigger:
-    /// from silence or RETRIGGER on, FREE's RISE and ENV start too (R-LFO-NOTE-RETRIG).
+    /// Every key starts RETRIG's phase and FADE. `full` is the main contours' trigger:
+    /// from silence or RETRIGGER on, FREE's FADE and ENV start too (R-LFO-NOTE-RETRIG).
     pub fn start_shared(&mut self, l: &Lfos, full: bool) {
         for (g, s) in self.shared.iter_mut().zip(&l.lfo) {
             if full || s.mode == Mode::Retrig {
@@ -2422,7 +2457,7 @@ impl Bank {
     }
 
     /// The scope's readings: the shared copies', or the latest voice's where MONO is off;
-    /// moving where assigned and running; at its LEVEL (its RISE's gain too), with the settings
+    /// moving where assigned and running; at its LEVEL (its FADE's gain too), with the settings
     /// in force (on the ticks, as the sources have moved them).
     pub fn readings(&self, l: &Lfos) -> [Reading; LFOS] {
         std::array::from_fn(|k| {
@@ -2440,7 +2475,7 @@ impl Bank {
             let assigned = l.lfo_active(k);
             let mut r = g.reading(s, assigned && g.moving(s));
             r.value *= s.level as f32;
-            r.rise *= s.level as f32;
+            r.fade *= s.level as f32;
             // (What its trace is drawn from, as in force; moved where a source moves them.)
             (r.shape, r.offset, r.level) = (s.at as f32, s.phase as f32, s.level as f32);
             r.moved = self.cross.on && l.trace_moved(k);
@@ -2596,7 +2631,7 @@ impl Clocks {
 /// The LFOs on their ticks: whether they run on them (a source moves an LFO's own knob), the
 /// next tick's number, each copy's settings in force since its latest tick (its knobs where
 /// the sources had them then), and each copy's value at its latest tick as the LFOs read it at
-/// the next: its waveform, RISE, POLARITY, ON's fade and LEVEL, not EDGES' slew (which smooths
+/// the next: its waveform, FADE, POLARITY, ON's fade and LEVEL, not EDGES' slew (which smooths
 /// what reaches the sound), so that a note that starts every LFO of a loop again starts the
 /// loop again exactly.
 #[derive(Clone, Debug, Default)]
@@ -2666,8 +2701,8 @@ fn moved(l: &Lfos, routes: &Routes, j: usize, value: impl Fn(usize) -> f64) -> S
             LfoKnob::Phase => {
                 s.phase = (f64::from(PHASE_RANGE.unnormalize(t)) / 360.0).rem_euclid(1.0);
             }
-            LfoKnob::Rise => {
-                s.rise = f64::from(RISE_RANGE.unnormalize(t)).clamp(0.0, f64::from(RISE_MOST));
+            LfoKnob::Fade => {
+                s.fade = fade_within(FADE_RANGE.unnormalize(t));
             }
             LfoKnob::Shape => {
                 if s.continuous {
@@ -2688,7 +2723,8 @@ impl Gen {
         } else {
             0.0
         };
-        let gain = if s.rise > 0.0 { 0.0 } else { 1.0 };
+        // (FADE at its start: in, at nothing; out or off, at full.)
+        let gain = if s.fade > 0.0 { 0.0 } else { 1.0 };
         let x = s.shaped((s.phase + c).rem_euclid(1.0)) * gain;
         let x = if self.muted == 0.0 {
             x
@@ -2720,11 +2756,7 @@ impl Gen {
     /// host's clock): as the LFOs read it ([`Cross`]).
     fn tick_value(&self, s: &Settings, clock: Option<f64>) -> f64 {
         let c = self.place(s, clock, 0.0, 0.0);
-        let gain = if s.rise > 0.0 && !self.started {
-            0.0
-        } else {
-            s.rise_gain(self.since)
-        };
+        let gain = s.fade_gain(self.since, self.started);
         let x = s.shaped((s.phase + c).rem_euclid(1.0)) * gain;
         let x = if self.muted == 0.0 {
             x
@@ -2745,16 +2777,12 @@ impl Gen {
     }
 
     /// Its value for the sound `ahead` s past its latest tick, with `s` in force since at `hz`
-    /// cycles a second (`clock`: a timed FREE one's place): its waveform there, RISE, EDGES'
+    /// cycles a second (`clock`: a timed FREE one's place): its waveform there, FADE, EDGES'
     /// slew moved on by `dt` s, ON's fade, at its LEVEL.
     fn peek(&mut self, s: &Settings, clock: Option<f64>, hz: f64, ahead: f64, dt: f64) -> f64 {
         let c = self.place(s, clock, hz, ahead);
         self.at = (s.phase + c).rem_euclid(1.0);
-        let gain = if s.rise > 0.0 && !self.started {
-            0.0
-        } else {
-            s.rise_gain(self.since + ahead)
-        };
+        let gain = s.fade_gain(self.since + ahead, self.started);
         let x = s.shaped(self.at) * gain;
         self.out = match s.edges {
             Edges::Sharp => x,
@@ -2930,7 +2958,7 @@ pub fn settings(p: &Ca72Params, n: usize, edges: Edges) -> Settings {
             .value()
             .then(|| crate::timed::DIVISIONS[q.division.value().to_index()].1),
         phase: (f64::from(q.phase.value()) / 360.0).rem_euclid(1.0),
-        rise: f64::from(q.rise.value()).clamp(0.0, f64::from(RISE_MOST)),
+        fade: fade_heard(q.fade.value()),
         mode: q.mode.value().into(),
         mono: q.mono.value(),
         edges,
@@ -3050,7 +3078,7 @@ impl std::fmt::Debug for LfoParams {
 
 /// One LFO's host parameters (IDs `lfoN_waveform` and so on, N 1 to 4): WAVEFORM (the six
 /// positions), its STEPPED or CONTINUOUS mode and CONTINUOUS's shape (0..1 of the travel),
-/// RATE (Hz), TIMED and DIVISION, PHASE (degrees), RISE (s), MODE and MONO (its POLARITY,
+/// RATE (Hz), TIMED and DIVISION, PHASE (degrees), FADE (s), MODE and MONO (its POLARITY,
 /// REVERSE and ON are [`LfoKeys`]').
 #[derive(Params)]
 pub struct LfoParams {
@@ -3068,8 +3096,8 @@ pub struct LfoParams {
     pub division: EnumParam<Division>,
     #[id = "phase"]
     pub phase: FloatParam,
-    #[id = "rise"]
-    pub rise: FloatParam,
+    #[id = "fade"]
+    pub fade: FloatParam,
     #[id = "mode"]
     pub mode: EnumParam<LfoMode>,
     #[id = "mono"]
@@ -3108,7 +3136,7 @@ impl LfoKeys {
 }
 
 impl LfoParams {
-    /// LFO `n`'s (1 to 4): TRIANGLE, STEPPED, 2 Hz free, PHASE 0, no RISE, FREE, MONO.
+    /// LFO `n`'s (1 to 4): TRIANGLE, STEPPED, 2 Hz free, PHASE 0, FADE off, FREE, MONO.
     pub fn new(n: usize) -> LfoParams {
         let name = |what: &str| format!("LFO {n} {what}");
         LfoParams {
@@ -3142,10 +3170,13 @@ impl LfoParams {
             phase: FloatParam::new(name("Phase"), 0.0, PHASE_RANGE)
                 .with_unit("\u{b0}")
                 .with_value_to_string(formatters::v2s_f32_rounded(0)),
-            // (A cube-root travel, so that short fades have room: 1 s near its middle.)
-            rise: FloatParam::new(name("Rise"), 0.0, RISE_RANGE)
-                .with_unit(" s")
-                .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            // (Off at its centre, in to the right, out to the left: a cube-root travel each
+            // way, so that short fades have room, 1 s about a quarter of the way out.)
+            fade: FloatParam::new(name("Fade"), 0.0, FADE_RANGE)
+                .with_value_to_string(Arc::new(|s| fade_text(f64::from(s))))
+                .with_string_to_value(Arc::new(|t| {
+                    fade_typed(t).map(|s| s.clamp(-FADE_MOST, FADE_MOST))
+                })),
             mode: EnumParam::new(name("Mode"), LfoMode::Free),
             mono: BoolParam::new(name("Mono"), true),
         }
@@ -3161,7 +3192,7 @@ impl LfoParams {
             ("timed", &self.timed),
             ("division", &self.division),
             ("phase", &self.phase),
-            ("rise", &self.rise),
+            ("fade", &self.fade),
             ("mode", &self.mode),
             ("mono", &self.mono),
         ]
@@ -3207,10 +3238,14 @@ pub const PHASE_RANGE: FloatRange = FloatRange::Linear {
     min: 0.0,
     max: 360.0,
 };
-pub const RISE_RANGE: FloatRange = FloatRange::Skewed {
-    min: 0.0,
-    max: RISE_MOST,
+/// FADE's: off at the centre, out to the left and in to the right, each way RISE's cube-root
+/// travel mirrored (a share `t` of the way from the centre is 10 t^3 s: decisions.md
+/// R-LFO-FADE).
+pub const FADE_RANGE: FloatRange = FloatRange::SymmetricalSkewed {
+    min: -FADE_MOST,
+    max: FADE_MOST,
     factor: 1.0 / 3.0,
+    center: 0.0,
 };
 pub const LEVEL_RANGE: FloatRange = FloatRange::Linear {
     min: 0.0,
@@ -3219,6 +3254,8 @@ pub const LEVEL_RANGE: FloatRange = FloatRange::Linear {
 
 /// How many parameters an LFO has: [`LfoParams`]' ten, [`LfoKeys`]' three and its LEVEL.
 pub const PARTS: usize = 14;
+/// FADE's place among them ([`PARAM_IDS`]' row).
+pub const FADE_PART: usize = 7;
 
 /// LFO `n`'s (0 to 3) parameters as a preset sets them, [`PARAM_IDS`]' order: its
 /// [`LfoParams`]', then its POLARITY, REVERSE and ON, then its LEVEL.
@@ -3241,6 +3278,63 @@ pub fn sound_params(p: &Ca72Params, n: usize) -> [&dyn crate::presets::SoundPara
         &k.on,
         &p.lfo_level(n).level,
     ]
+}
+
+/// FADE in seconds as the engine takes it from a source's move of its knob (`s`, its
+/// parameter's plain value there), within its range.
+pub fn fade_within(s: f32) -> f64 {
+    f64::from(s.clamp(-FADE_MOST, FADE_MOST))
+}
+
+/// FADE in seconds as the engine takes it from its parameter (`s`, its plain value): to a tenth
+/// of a millisecond, the places a preset keeps, within its range. A preset names 0.9 s; the
+/// knob's centred travel can hold it only as 0.8999996 s (a value reaches the parameter through
+/// its travel), which a fade could never be heard to differ by, but which would leave the
+/// factory's RISE presets no longer the same to the bit (decisions.md R-LFO-FADE). Each block,
+/// four multiplications, roundings and divisions.
+pub fn fade_heard(s: f32) -> f64 {
+    f64::from(((s * 1e4).round() / 1e4).clamp(-FADE_MOST, FADE_MOST))
+}
+
+/// FADE as its knob, the host and the agents print it: `Off` at the centre, else which way and
+/// how long, `In 1.20 s` or `Out 0.35 s` (DETUNE's `Off`, RISE's hundredths of a second).
+pub fn fade_text(s: f64) -> String {
+    // (Rounded first, so that a fade too short to print is not printed as `In 0.00 s`.)
+    let r = (s.abs() * 100.0).round() / 100.0;
+    if r == 0.0 {
+        "Off".into()
+    } else if s > 0.0 {
+        format!("In {r:.2} s")
+    } else {
+        format!("Out {r:.2} s")
+    }
+}
+
+/// FADE typed (its knob's field, the host, the agents): `Off`, `In 1.2`, `Out 1.2`, or seconds
+/// signed as the knob turns (`1.2` in, `-1.2` out), `s` or `sec` after them or not; none for
+/// anything else. Not clamped to its range (the agents refuse a value past it).
+pub fn fade_typed(text: &str) -> Option<f32> {
+    let t = text.trim().to_ascii_lowercase();
+    if t == "off" {
+        return Some(0.0);
+    }
+    let (way, t) = if let Some(r) = t.strip_prefix("in") {
+        (Some(1.0), r)
+    } else if let Some(r) = t.strip_prefix("out") {
+        (Some(-1.0), r)
+    } else {
+        (None, t.as_str())
+    };
+    let t = t.trim();
+    let t = (t.strip_suffix("sec").or_else(|| t.strip_suffix('s'))).unwrap_or(t);
+    let v: f32 = t.trim().parse().ok()?;
+    let v = match way {
+        // (IN or OUT and a sign as well is not a fade.)
+        Some(_) if v < 0.0 => return None,
+        Some(w) => w * v,
+        None => v,
+    };
+    v.is_finite().then_some(v)
 }
 
 /// RATE before the host appends its Hz unit: two figures under 1 Hz, else a tenth or whole.
@@ -3266,7 +3360,7 @@ pub const PARAM_IDS: [[&str; PARTS]; LFOS] = [
         "lfo1_timed",
         "lfo1_division",
         "lfo1_phase",
-        "lfo1_rise",
+        "lfo1_fade",
         "lfo1_mode",
         "lfo1_mono",
         "lfo1_polarity",
@@ -3282,7 +3376,7 @@ pub const PARAM_IDS: [[&str; PARTS]; LFOS] = [
         "lfo2_timed",
         "lfo2_division",
         "lfo2_phase",
-        "lfo2_rise",
+        "lfo2_fade",
         "lfo2_mode",
         "lfo2_mono",
         "lfo2_polarity",
@@ -3298,7 +3392,7 @@ pub const PARAM_IDS: [[&str; PARTS]; LFOS] = [
         "lfo3_timed",
         "lfo3_division",
         "lfo3_phase",
-        "lfo3_rise",
+        "lfo3_fade",
         "lfo3_mode",
         "lfo3_mono",
         "lfo3_polarity",
@@ -3314,7 +3408,7 @@ pub const PARAM_IDS: [[&str; PARTS]; LFOS] = [
         "lfo4_timed",
         "lfo4_division",
         "lfo4_phase",
-        "lfo4_rise",
+        "lfo4_fade",
         "lfo4_mode",
         "lfo4_mono",
         "lfo4_polarity",
@@ -3335,7 +3429,7 @@ pub const PARAM_LABELS: [[&str; PARTS]; LFOS] = [
         "LFO 1 TIMED",
         "LFO 1 DIVISION",
         "LFO 1 PHASE",
-        "LFO 1 RISE",
+        "LFO 1 FADE",
         "LFO 1 MODE",
         "LFO 1 MONO",
         "LFO 1 POLARITY",
@@ -3351,7 +3445,7 @@ pub const PARAM_LABELS: [[&str; PARTS]; LFOS] = [
         "LFO 2 TIMED",
         "LFO 2 DIVISION",
         "LFO 2 PHASE",
-        "LFO 2 RISE",
+        "LFO 2 FADE",
         "LFO 2 MODE",
         "LFO 2 MONO",
         "LFO 2 POLARITY",
@@ -3367,7 +3461,7 @@ pub const PARAM_LABELS: [[&str; PARTS]; LFOS] = [
         "LFO 3 TIMED",
         "LFO 3 DIVISION",
         "LFO 3 PHASE",
-        "LFO 3 RISE",
+        "LFO 3 FADE",
         "LFO 3 MODE",
         "LFO 3 MONO",
         "LFO 3 POLARITY",
@@ -3383,7 +3477,7 @@ pub const PARAM_LABELS: [[&str; PARTS]; LFOS] = [
         "LFO 4 TIMED",
         "LFO 4 DIVISION",
         "LFO 4 PHASE",
-        "LFO 4 RISE",
+        "LFO 4 FADE",
         "LFO 4 MODE",
         "LFO 4 MONO",
         "LFO 4 POLARITY",
@@ -3415,7 +3509,7 @@ pub fn learn_target<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn crate::le
         4 => &q.timed,
         5 => &q.division,
         6 => &q.phase,
-        7 => &q.rise,
+        7 => &q.fade,
         8 => &q.mode,
         9 => &q.mono,
         10 => &keys.polarity,
@@ -3425,7 +3519,7 @@ pub fn learn_target<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn crate::le
     })
 }
 
-/// An LFO's knob of `id` (SHAPE, RATE, PHASE, RISE, LEVEL), if it is one (`learn::knob_param`).
+/// An LFO's knob of `id` (SHAPE, RATE, PHASE, FADE, LEVEL), if it is one (`learn::knob_param`).
 /// They do not glide: none is on the audio path (R-LFO; EDGES smooths what they step).
 pub fn knob<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a FloatParam> {
     let (n, k) = param_place(id)?;
@@ -3434,7 +3528,7 @@ pub fn knob<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a FloatParam> {
         2 => Some(&q.shape),
         3 => Some(&q.rate),
         6 => Some(&q.phase),
-        7 => Some(&q.rise),
+        7 => Some(&q.fade),
         13 => Some(&p.lfo_level(n).level),
         _ => None,
     }
@@ -3760,7 +3854,7 @@ mod tests {
         let params = Arc::new(Ca72Params::default());
         assert_eq!(target_of(&params, "lfo1_rate"), Some(Target::LfoRate(0)));
         assert_eq!(target_of(&params, "lfo2_level"), Some(Target::LfoLevel(1)));
-        assert_eq!(target_of(&params, "lfo3_rise"), Some(Target::LfoRise(2)));
+        assert_eq!(target_of(&params, "lfo3_fade"), Some(Target::LfoFade(2)));
         assert_eq!(target_of(&params, "lfo4_phase"), Some(Target::LfoPhase(3)));
         assert_eq!(target_of(&params, "lfo1_waveform"), None, "STEPPED");
         assert_eq!(target_of(&params, "lfo1_shape"), None);
@@ -3827,7 +3921,7 @@ mod tests {
             // tempo_tests); an effects' pin, the chain's.)
             Target::LfoRate(_)
             | Target::LfoPhase(_)
-            | Target::LfoRise(_)
+            | Target::LfoFade(_)
             | Target::LfoShape(_)
             | Target::LfoLevel(_)
             | Target::Tempo
@@ -3955,5 +4049,191 @@ mod tests {
         // They move no control of the synth's.
         let c = Controls::default();
         assert_eq!(l.modulated(&c, &v), c);
+    }
+
+    /// FADE's gain (decisions.md R-LFO-FADE): to the right of its centre, RISE's ramp from
+    /// nothing to full over its seconds, to the bit; to the left, from full to nothing; at the
+    /// centre, full. Before any note, however long the LFO has run, a fade in is at nothing and
+    /// a fade out at full (it has not begun to fall); a generator reads so.
+    #[test]
+    fn fade_fades_in_to_the_right_and_out_to_the_left() {
+        let s = |fade: f64| Settings {
+            fade,
+            ..Settings::default()
+        };
+        assert_eq!(s(2.0).fade_gain(0.0, true), 0.0);
+        assert_eq!(s(2.0).fade_gain(0.5, true), 0.25);
+        assert_eq!(s(2.0).fade_gain(2.0, true), 1.0);
+        assert_eq!(s(2.0).fade_gain(9.0, true), 1.0);
+        assert_eq!(s(-2.0).fade_gain(0.0, true), 1.0);
+        assert_eq!(s(-2.0).fade_gain(0.5, true), 0.75);
+        assert_eq!(s(-2.0).fade_gain(2.0, true), 0.0);
+        assert_eq!(s(-2.0).fade_gain(9.0, true), 0.0);
+        for since in [0.0, 0.5, 9.0] {
+            assert_eq!(s(0.0).fade_gain(since, true), 1.0, "off");
+            assert_eq!(s(0.0).fade_gain(since, false), 1.0, "off, no note yet");
+            assert_eq!(s(2.0).fade_gain(since, false), 0.0, "in, no note yet");
+            assert_eq!(s(-2.0).fade_gain(since, false), 1.0, "out, no note yet");
+        }
+        // RISE's own arithmetic, to the bit.
+        let rise = f64::from(0.9f32);
+        for since in [0.0, 0.1, 1.0 / 3.0, 0.45, 0.899, 0.9, 1.7] {
+            assert_eq!(
+                s(rise).fade_gain(since, true).to_bits(),
+                (since / rise).clamp(0.0, 1.0).to_bits()
+            );
+        }
+        // A generator: SHARP, a sawtooth held at 0.25 (-0.5 there).
+        let gen_at = |fade: f64, start: bool, after: f64| {
+            let set = Settings {
+                at: 2.0,
+                hz: 1.0,
+                phase: 0.25,
+                fade,
+                edges: Edges::Sharp,
+                ..Settings::default()
+            };
+            let mut g = Gen::default();
+            if start {
+                g.start(&set);
+            }
+            g.advance(&set, 0.0, (after * 1000.0) as usize, 0.001);
+            g.value(&set, None, 0.001)
+        };
+        let full = wave(2.0, 0.25);
+        assert_eq!(gen_at(1.0, false, 0.3), 0.0);
+        assert_eq!(gen_at(-1.0, false, 0.3), full);
+        assert_eq!(gen_at(0.0, false, 0.3), full);
+        assert!((gen_at(1.0, true, 0.25) - 0.25 * full).abs() < 1e-9);
+        assert!((gen_at(-1.0, true, 0.25) - 0.75 * full).abs() < 1e-9);
+        assert_eq!(gen_at(-1.0, true, 1.5), 0.0);
+        assert_eq!(gen_at(1.0, true, 1.5), full);
+        // At a note's start, as the LFOs read each other (`Cross`): in nothing, out full.
+        let at_start = |fade: f64| {
+            let set = Settings {
+                at: 2.0,
+                phase: 0.25,
+                mode: Mode::Retrig,
+                fade,
+                ..Settings::default()
+            };
+            Gen::default().fresh(&set)
+        };
+        assert_eq!(at_start(1.0), 0.0);
+        assert_eq!(at_start(-1.0), full);
+        assert_eq!(at_start(0.0), full);
+    }
+
+    /// FADE's travel is RISE's mirrored about its centre (cube-root each way: 1 s about a
+    /// quarter of the way from the centre to either end), off at the centre exactly; its text
+    /// `Off`, `In 1.20 s`, `Out 0.35 s`; typed as that, or as seconds signed. The engine hears a
+    /// preset's FADE as the preset names it ([`fade_heard`]).
+    #[test]
+    fn fades_travel_is_rises_mirrored_and_reads_in_and_out() {
+        let rise = FloatRange::Skewed {
+            min: 0.0,
+            max: FADE_MOST,
+            factor: 1.0 / 3.0,
+        };
+        for v in [0.01f32, 0.1, 0.9, 1.0, 5.0714, 10.0] {
+            let t = rise.normalize(v);
+            assert!(
+                (FADE_RANGE.normalize(v) - (0.5 + 0.5 * t)).abs() < 1e-6,
+                "{v}"
+            );
+            assert!(
+                (FADE_RANGE.normalize(-v) - (0.5 - 0.5 * t)).abs() < 1e-6,
+                "-{v}"
+            );
+        }
+        assert_eq!(FADE_RANGE.normalize(0.0), 0.5);
+        assert_eq!(FADE_RANGE.unnormalize(0.5), 0.0);
+        assert_eq!(FADE_RANGE.unnormalize(0.0), -FADE_MOST);
+        assert_eq!(FADE_RANGE.unnormalize(1.0), FADE_MOST);
+        assert!((FADE_RANGE.normalize(1.0) - 0.732).abs() < 0.001);
+        // Its text.
+        assert_eq!(fade_text(0.0), "Off");
+        assert_eq!(fade_text(0.004), "Off", "too short to print");
+        assert_eq!(fade_text(-0.004), "Off");
+        assert_eq!(fade_text(1.2), "In 1.20 s");
+        assert_eq!(fade_text(-0.35), "Out 0.35 s");
+        assert_eq!(fade_text(-10.0), "Out 10.00 s");
+        // Typed.
+        for (t, v) in [
+            ("Off", Some(0.0)),
+            ("off", Some(0.0)),
+            ("0", Some(0.0)),
+            ("In 1.2", Some(1.2)),
+            ("in 1.2 s", Some(1.2)),
+            ("OUT 1.2", Some(-1.2)),
+            ("Out 0.35 sec", Some(-0.35)),
+            ("-1.2", Some(-1.2)),
+            ("-1.2 s", Some(-1.2)),
+            ("+0.5", Some(0.5)),
+            ("20", Some(20.0)),
+            ("out -1", None),
+            ("in -1", None),
+            ("soon", None),
+            ("", None),
+        ] {
+            assert_eq!(fade_typed(t), v, "{t:?}");
+        }
+        // The parameter, as the host and the knob's tip print and take it (clamped).
+        let q = &LfoParams::new(1).fade;
+        let n = |v: f32| q.preview_normalized(v);
+        assert_eq!(q.normalized_value_to_string(n(0.0), true), "Off");
+        assert_eq!(q.normalized_value_to_string(n(1.2), true), "In 1.20 s");
+        assert_eq!(q.normalized_value_to_string(n(-1.2), true), "Out 1.20 s");
+        let back = |t: &str| q.string_to_normalized_value(t).map(|v| q.preview_plain(v));
+        assert!((back("Out 1.2").unwrap() + 1.2).abs() < 1e-5);
+        assert_eq!(back("Out 20"), Some(-FADE_MOST));
+        assert_eq!(back("Off"), Some(0.0));
+        assert_eq!(q.default_plain_value(), 0.0);
+        // Heard to the presets' places: 0.9 s as RISE heard it, though the travel holds less.
+        let held = FADE_RANGE.unnormalize(FADE_RANGE.normalize(0.9));
+        assert_ne!(held, 0.9);
+        assert_eq!(fade_heard(held), f64::from(0.9f32));
+        assert_eq!(fade_heard(-held), -f64::from(0.9f32));
+        assert_eq!(fade_heard(0.0), 0.0);
+        assert_eq!(fade_heard(11.0), f64::from(FADE_MOST));
+    }
+
+    /// RISE's IDs (0.3.0's beta's) are FADE's: an assignment saved to one is FADE's at half the
+    /// depth, which moves its right half as far as the depth moved RISE (decisions.md
+    /// R-LFO-FADE).
+    #[test]
+    fn rises_ids_are_fades() {
+        assert_eq!(Target::of_id("lfo2_rise"), None);
+        assert_eq!(
+            Target::of_saved("lfo2_rise"),
+            Some((Target::LfoFade(1), 0.5))
+        );
+        assert_eq!(
+            Target::of_saved("lfo2_fade"),
+            Some((Target::LfoFade(1), 1.0))
+        );
+        assert_eq!(Target::of_saved("cutoff"), Some((Target::Cutoff, 1.0)));
+        assert_eq!(Target::of_saved("lfo5_rise"), None);
+        assert_eq!(Target::LfoFade(3).id(), "lfo4_fade");
+        assert_eq!(Target::LfoFade(3).short(), "LFO4 FADE");
+        assert_eq!(Target::LfoFade(3).name(), "LFO 4 FADE");
+        for n in 0..LFOS {
+            assert_eq!(rise_id(PARAM_IDS[n][FADE_PART]), Some(RISE_IDS[n]));
+            assert_eq!(fade_id(RISE_IDS[n]), Some(PARAM_IDS[n][FADE_PART]));
+            assert_eq!(PARAM_LABELS[n][FADE_PART], format!("LFO {} FADE", n + 1));
+        }
+        assert_eq!(rise_id("lfo1_rate"), None);
+        assert_eq!(fade_id("lfo1_fade"), None);
+        // RISE at travel 0.4 with a depth of 0.3, FADE at half its depth: the same seconds.
+        let rise = FloatRange::Skewed {
+            min: 0.0,
+            max: FADE_MOST,
+            factor: 1.0 / 3.0,
+        };
+        let (base, d) = (0.4f32, 0.3f32);
+        let was = rise.unnormalize(base + d);
+        let base = FADE_RANGE.normalize(rise.unnormalize(base));
+        let now = FADE_RANGE.unnormalize(base + 0.5 * d);
+        assert!((was - now).abs() < 1e-4, "{was} {now}");
     }
 }

@@ -804,6 +804,12 @@ impl Plugin for Ca72 {
             .params
             .entry("glide_range".to_owned())
             .or_insert(ParamValue::I32(0));
+        // A state 0.3.0's beta saved: each LFO's RISE its FADE, a fade in (R-LFO-FADE).
+        for rise in crate::lfo::RISE_IDS {
+            if let (Some(v), Some(fade)) = (state.params.remove(rise), crate::lfo::fade_id(rise)) {
+                state.params.entry(fade.to_owned()).or_insert(v);
+            }
+        }
         // And before the macros: each at 0, whatever the instance had (decisions.md R-MACROS).
         for id in crate::lfo::MACRO_IDS {
             state
@@ -908,9 +914,9 @@ impl Plugin for Ca72 {
         // the audio thread waiting: running threads are kept then (R18).
         let period = std::time::Duration::from_secs_f64(block as f64 / rate);
         // The standalone's own audio thread, an audio thread as the workers are, from its next
-        // block (decisions.md R-DROPOUTS): a plug-in's host's thread is the host's. Before the
-        // workers start, so that in the standalone they too are asked of RTKit where the system
-        // refuses them (R-RTKIT).
+        // block (decisions.md R-DROPOUTS): a plug-in's host's thread is the host's. RTKit, where
+        // the system refuses it and the workers, is asked only in the standalone application,
+        // whose `main` turned it on before any stream (R-RTKIT); never by this library.
         self.audio_thread
             .prepare(context.plugin_api() == PluginApi::Standalone, period);
         self.engine.start_workers(crate::engine::AUTO, Some(period));
@@ -1706,6 +1712,71 @@ mod tests {
                 eprintln!("legacy {old:.17} %, new {new:.17} %, recovered {recovered:.17} %");
             }
         }
+    }
+
+    /// A session 0.3.0's beta saved, its LFOs' RISE (`lfoN_rise`), opens with FADE in so many
+    /// seconds, a fade in; one saved since keeps its FADE, whatever a RISE beside it says; the
+    /// RISE goes (decisions.md R-LFO-FADE). And what an LFO modulated on RISE, and a MIDI
+    /// mapping of it, are FADE's.
+    #[test]
+    fn a_beta_session_s_rise_opens_as_a_fade_in() {
+        let filtered = |params: Vec<(&str, f32)>| {
+            let mut s = PluginState {
+                version: "0.3.0-beta.1".to_owned(),
+                params: params
+                    .into_iter()
+                    .map(|(k, v)| (k.to_owned(), ParamValue::F32(v)))
+                    .collect(),
+                fields: Default::default(),
+            };
+            Ca72::filter_state(&mut s);
+            s
+        };
+        let fade = |s: &PluginState, id: &str| match s.params.get(id) {
+            Some(ParamValue::F32(v)) => Some(*v),
+            _ => None,
+        };
+        let s = filtered(vec![("lfo2_rise", 0.9), ("lfo4_rise", 5.0714)]);
+        assert_eq!(fade(&s, "lfo2_fade"), Some(0.9));
+        assert_eq!(fade(&s, "lfo4_fade"), Some(5.0714));
+        assert_eq!(
+            fade(&s, "lfo1_fade"),
+            None,
+            "none named: the parameter's default"
+        );
+        assert!(lfo::RISE_IDS.iter().all(|r| !s.params.contains_key(*r)));
+        let s = filtered(vec![("lfo1_fade", -1.5), ("lfo1_rise", 0.9)]);
+        assert_eq!(fade(&s, "lfo1_fade"), Some(-1.5));
+        // The parameter at it (as the host sets it, through its travel): a fade in, heard as
+        // so many seconds.
+        let p = Ca72::default();
+        let q = &p.params.lfo(1).fade;
+        let v = fade(&filtered(vec![("lfo2_rise", 0.9)]), "lfo2_fade").unwrap();
+        assert!(hostless(&p).automate(q.as_ptr(), q.preview_normalized(v)));
+        assert!((q.value() - 0.9).abs() < 1e-5);
+        let set = lfo::settings(&p.params, 1, lfo::Edges::Soft);
+        assert_eq!(set.fade, f64::from(0.9f32));
+        // An assignment on RISE, as the patch's state saved it: FADE's, at half the depth.
+        p.params.lfo_patch.load(&lfo::Saved {
+            sources: vec![lfo::SavedSource {
+                source: "macro1".into(),
+                to: vec![("lfo3_rise".into(), 0.4)],
+                sharp: false,
+            }],
+            names: vec![],
+        });
+        assert_eq!(
+            p.params
+                .lfo_patch
+                .depth(lfo::Source::Macro(0), lfo::Target::LfoFade(2)),
+            Some(0.2)
+        );
+        // A MIDI mapping of RISE: FADE's.
+        let saved = learn::Saved::from_text(
+            r#"{"version":1,"assignments":[{"param":"lfo4_rise","channel":1,"cc":21}]}"#,
+        );
+        let fade4 = learn::index("lfo4_fade").expect("learnable");
+        assert_eq!(saved.0.first().map(|(i, _)| *i), Some(fade4));
     }
 
     /// A session saved before each note's own expression opens with none of it.

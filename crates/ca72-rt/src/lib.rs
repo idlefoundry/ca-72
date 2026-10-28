@@ -23,7 +23,8 @@
 //! Never the host's own audio threads or another plug-in's: only threads promoted here.
 //! With none alive, the watchdog's threads sleep until one is.
 //!
-//! The standalone application alone ([`use_rtkit`]; decisions.md R-RTKIT): where Linux refuses
+//! The standalone application alone, turned on by its `main` ([`use_rtkit`]; off until then;
+//! decisions.md R-RTKIT): where Linux refuses
 //! `SCHED_FIFO` (no rtprio allowance), a thread promoted through [`promote_in`] is asked of
 //! RTKit (`org.freedesktop.RealtimeKit1`, on the system bus), by a thread of this crate's: never
 //! by the thread itself, as a D-Bus call blocks. What became of each [`Group`]'s threads is kept
@@ -66,23 +67,52 @@ pub enum Promoted {
     Asked,
 }
 
+/// Why [`promote_in`] left the calling thread as it was. On Linux made without allocating (the
+/// standalone's audio thread at its first block, whether RTKit is asked or not): explained only
+/// when it is said (`Display`), off the audio thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    /// Too many real-time threads for the watchdog to watch.
+    Full,
+    /// Linux refused `SCHED_FIFO` (no rtprio allowance): the system's error number.
+    #[cfg(target_os = "linux")]
+    Fifo(i32),
+    /// The system refused, and why (macOS, Windows).
+    #[cfg(not(target_os = "linux"))]
+    System(String),
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Refusal::Full => f.write_str("too many real-time threads to watch"),
+            #[cfg(target_os = "linux")]
+            Refusal::Fifo(errno) => {
+                f.write_str(&sys::explain(&std::io::Error::from_raw_os_error(*errno)))
+            }
+            #[cfg(not(target_os = "linux"))]
+            Refusal::System(why) => f.write_str(why),
+        }
+    }
+}
+
 /// As [`promote`], the calling thread one of `group`'s, whose [`Group::standing`] counts it.
 /// Where the system refuses and [`use_rtkit`] was called (Linux), the thread is asked of RTKit
 /// instead of left ordinary: by this crate's RTKit thread, never the calling one, as a D-Bus
-/// call blocks. Allocates nothing but what [`promote`] does; on Linux, not even the refusal's
-/// explanation when RTKit is asked instead (the standalone's audio thread, at its first block).
+/// call blocks. Allocates nothing but what [`promote`] does; on Linux, not even a refusal's
+/// explanation, whether RTKit is asked instead or not ([`Refusal`]).
 pub fn promote_in(
     group: &'static Group,
     period: Duration,
     computation: Duration,
-) -> Result<Promoted, String> {
+) -> Result<Promoted, Refusal> {
     #[cfg(target_os = "linux")]
     let Some(new) = watchdog::register() else {
         group.left(Why::Full);
-        return Err("too many real-time threads to watch".into());
+        return Err(Refusal::Full);
     };
-    // (On Linux the refusal is explained only where it is returned: the explanation is a String,
-    // and RTKit asked instead returns none.)
+    // (On Linux the refusal is the system's error number, explained only when said: the
+    // explanation is a String.)
     #[cfg(target_os = "linux")]
     let r = sys::fifo(period, computation);
     #[cfg(not(target_os = "linux"))]
@@ -111,21 +141,35 @@ pub fn promote_in(
                     watchdog::unregister();
                 }
                 group.left(why);
-                sys::explain(&e)
+                Refusal::Fifo(e.raw_os_error().unwrap_or(0))
             };
             #[cfg(not(target_os = "linux"))]
-            group.left(Why::Refused);
+            let e = {
+                group.left(Why::Refused);
+                Refusal::System(e)
+            };
             Err(e)
         }
     }
 }
 
-/// The standalone application's alone (decisions.md R-RTKIT): from now on, on Linux, a thread
-/// [`promote_in`] the system refuses is asked of RTKit. Starts the thread that asks (once per
-/// process). Off the audio thread; a plug-in in a host never calls this.
+/// The standalone application's alone, from its `main` (decisions.md R-RTKIT): from now on, on
+/// Linux, a thread [`promote_in`] the system refuses is asked of RTKit, and this process's
+/// RLIMIT_RTTIME is set and SIGXCPU handled for it when RTKit is first asked. Starts the thread
+/// that asks (once per process). Off the audio thread. Off until called: no library code calls
+/// it, so a plug-in in a host and the tests (unit and integration alike) never ask RTKit nor
+/// set the limit, unless a test turns it on deliberately (`rtkit`'s ignored tests).
 pub fn use_rtkit() {
     #[cfg(target_os = "linux")]
     rtkit::enable();
+}
+
+/// Whether [`use_rtkit`] was called in this process (never off Linux).
+pub fn uses_rtkit() -> bool {
+    #[cfg(target_os = "linux")]
+    return rtkit::enabled();
+    #[cfg(not(target_os = "linux"))]
+    false
 }
 
 /// Why a [`Group`]'s thread was left at ordinary priority.

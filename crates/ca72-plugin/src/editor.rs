@@ -15592,7 +15592,7 @@ mod tests {
             value: (k * 2.3).sin(),
             phase: (k * 0.37) % 1.0,
             since: 0.4 + k,
-            rise: 1.0,
+            fade: 1.0,
             moving: true,
             ..Reading::default()
         };
@@ -15664,7 +15664,7 @@ mod tests {
     // ---- The LFO page and modulation (decisions.md R-LFO).
 
     /// The LFO page's knobs take exact values typed at them (R-KNOB-ENTRY), in their dials'
-    /// units: RATE in Hz, PHASE in degrees, RISE in seconds.
+    /// units: RATE in Hz, PHASE in degrees, FADE in seconds (signed, or IN and OUT).
     #[test]
     fn the_lfo_knobs_take_values_typed_in_their_units() {
         let (mut e, host, params) = editing();
@@ -15673,7 +15673,12 @@ mod tests {
         let q = params.lfo(0);
         for (k, text, p, want) in [
             (3, "90", &q.phase, 90.0),
-            (4, "1", &q.rise, 1.0),
+            (4, "1", &q.fade, 1.0),
+            // (FADE signed, or IN and OUT: decisions.md R-LFO-FADE.)
+            (4, "-1.2", &q.fade, -1.2),
+            (4, "Out 0.5 s", &q.fade, -0.5),
+            (4, "in 2", &q.fade, 2.0),
+            (4, "-20", &q.fade, -10.0),
             (1, "5 Hz", &q.rate, 5.0),
         ] {
             let id = format!("lfo1_{}", ca72_panel::controls::LFO_PARTS[k]);
@@ -15689,6 +15694,61 @@ mod tests {
             let got = p.preview_plain(set.unwrap_or_else(|| panic!("{id}: {calls:?}")));
             assert!((got - want).abs() < 0.01 * want.max(1.0), "{id}: {got}");
         }
+    }
+
+    /// An LFO's FADE knob (decisions.md R-LFO-FADE): its tip reads Off at its centre, In and Out
+    /// to either side; let go within its detent of the centre it settles there, off, but let go
+    /// further it stays, and a notch of the mouse wheel from the centre steps out of the detent.
+    #[test]
+    fn the_fade_knob_reads_in_and_out_and_settles_at_off() {
+        use ca72_panel::controls::LFO_PARTS;
+        use ca72_panel::interact::FADE_DETENT;
+        let (mut e, host, params) = editing();
+        lfo_open(&mut e);
+        host.take();
+        let k = LFO_PARTS.iter().position(|p| *p == "fade").expect("FADE");
+        let f = params.lfo(0).fade.as_ptr();
+        let p = at(&e, lfo_centre(0, k));
+        go(&mut e, p);
+        e.draw();
+        let tip = |e: &Editing| e.tip().expect("FADE's tip").0;
+        assert!(tip(&e).starts_with("LFO 1 FADE: Off"), "{}", tip(&e));
+        let last_set = |calls: &[Call]| {
+            calls.iter().rev().find_map(|c| match c {
+                Call::Set(ptr, v) if *ptr == f => Some(*v),
+                _ => None,
+            })
+        };
+        // Dragged up, in; down, out; let go within the detent, off.
+        press(&mut e);
+        go(&mut e, below(p, -60.0));
+        e.draw();
+        assert!(last_set(&host.take()).is_some_and(|v| v > 0.6));
+        assert!(tip(&e).starts_with("LFO 1 FADE: In "), "{}", tip(&e));
+        go(&mut e, below(p, 60.0));
+        e.draw();
+        assert!(last_set(&host.take()).is_some_and(|v| v < 0.4));
+        assert!(tip(&e).starts_with("LFO 1 FADE: Out "), "{}", tip(&e));
+        go(&mut e, below(p, -1.0));
+        let near = last_set(&host.take()).expect("moved");
+        assert!(near > 0.5 && f64::from(near) - 0.5 <= FADE_DETENT, "{near}");
+        release(&mut e);
+        assert_eq!(host.take(), vec![Call::Set(f, 0.5), Call::End(f)]);
+        // Let go further: where it was let go. (Not a double click, which puts it back.)
+        e.last_press = None;
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, 12.0));
+        let out = last_set(&host.take()).expect("moved");
+        assert!(0.5 - f64::from(out) > FADE_DETENT, "{out}");
+        release(&mut e);
+        assert_eq!(host.take(), vec![Call::End(f)]);
+        // A notch of the wheel from the centre: out of the detent, and kept.
+        e.draw();
+        wheel(&mut e, 1.0);
+        assert_eq!(host.take(), vec![Call::Begin(f), Call::Set(f, 0.52)]);
+        e.end_scroll();
+        assert_eq!(host.take(), vec![Call::End(f)]);
     }
 
     /// The LFO page opened by the rail's LFO key (`lfo_page::Modulating::open`).
@@ -15707,8 +15767,8 @@ mod tests {
     /// Each scope shows one cycle of its LFO's waveform across its width, from PHASE (the owner,
     /// 2026-10-20: "why does every waveform show two cycles? it should be 1"), stepped and
     /// CONTINUOUS alike, and timed the same cycle (one note value) whatever the tempo; RATE,
-    /// RISE and MODE leave it as it is. The orb is where the LFO is in that cycle, at its
-    /// output, its wake at RISE's gain.
+    /// FADE and MODE leave it as it is. The orb is where the LFO is in that cycle, at its
+    /// output, its wake at FADE's gain.
     #[test]
     fn each_scope_shows_one_cycle_from_its_phase() {
         use crate::lfo::{LfoMode, LfoParams, Reading, Source, Target as T, wave};
@@ -15740,13 +15800,10 @@ mod tests {
                     },
                 ),
                 timed: BoolParam::new(format!("LFO {n} Timed"), timed && n == 3),
-                rise: FloatParam::new(
-                    format!("LFO {n} Rise"),
+                fade: FloatParam::new(
+                    format!("LFO {n} Fade"),
                     if n == 2 { 2.0 } else { 0.0 },
-                    FloatRange::Linear {
-                        min: 0.0,
-                        max: 10.0,
-                    },
+                    crate::lfo::FADE_RANGE,
                 ),
                 mode: EnumParam::new(
                     format!("LFO {n} Mode"),
@@ -15785,7 +15842,7 @@ mod tests {
                 assert_eq!(falls(t90), 1, "LFO {}: a quarter on", n + 1);
             }
         }
-        // (ENV with RISE, LFO 2's, and timed, LFO 3's: the same cycle as LFO 1's.)
+        // (ENV with FADE, LFO 2's, and timed, LFO 3's: the same cycle as LFO 1's.)
         assert_eq!(at90.columns[1].trace, at90.columns[0].trace);
         assert_eq!(at90.columns[2].trace, at90.columns[0].trace);
         assert_ne!(at90.columns[3].trace, at90.columns[0].trace);
@@ -15798,11 +15855,11 @@ mod tests {
             .lfo_patch
             .assign(Source::Lfo(1), T::Cutoff, 0.4)
             .unwrap();
-        let r = |phase: f32, value: f32, rise: f32, moving: bool| Reading {
+        let r = |phase: f32, value: f32, fade: f32, moving: bool| Reading {
             value,
             phase,
             since: 0.3,
-            rise,
+            fade,
             moving,
             ..Reading::default()
         };
@@ -15817,14 +15874,14 @@ mod tests {
         let s = e.lfo_scene_now();
         let set = |n| crate::lfo::settings(&params, n, crate::lfo::Edges::Soft);
         assert_eq!(s.columns[0].orb, Some((0.5, f64::from(0.3f32))));
-        assert_eq!(s.columns[0].orb_rise, 1.0);
+        assert_eq!(s.columns[0].orb_fade, 1.0);
         // (ENV assigned, its cycle over: held at the cycle's end, on the trace.)
         assert_eq!(s.columns[1].orb, Some((1.0, set(1).cycle_at(1.0))));
-        assert_eq!(s.columns[1].orb_rise, 1.0);
+        assert_eq!(s.columns[1].orb_fade, 1.0);
         assert_eq!(s.columns[2].orb, Some((0.25, f64::from(0.1f32))));
         assert_eq!(
-            s.columns[2].orb_rise, 0.5,
-            "RISE fading in: its wake so high"
+            s.columns[2].orb_fade, 0.5,
+            "FADE fading in: its wake so high"
         );
     }
 
@@ -16870,7 +16927,7 @@ mod tests {
 
     /// The LFOs' own knobs take sources (decisions.md R-LFO's addendum; the owner, 2026-10-20:
     /// "LFOs to control each other's parameters", "Let's try B"): with the page open, LFO 2's cord
-    /// lands on LFO 1's RATE, PHASE and RISE, on its own RATE, on LFO 1's WAVEFORM only while it
+    /// lands on LFO 1's RATE, PHASE and FADE, on its own RATE, on LFO 1's WAVEFORM only while it
     /// is CONTINUOUS, on LFO 1's OUT jack as its LEVEL; LFO 1's cord let go on its own jack without
     /// leaving it gives nothing, drawn away and back its own LEVEL; a timed RATE takes none; a
     /// macro's cord lands on an LFO's RATE. The page's knobs then show rings (on their own
@@ -16901,7 +16958,7 @@ mod tests {
             e.draw();
         };
         let depth = |s, t| params.lfo_patch.depth(s, t);
-        for (k, t) in [(1, T::LfoRate(0)), (3, T::LfoPhase(0)), (4, T::LfoRise(0))] {
+        for (k, t) in [(1, T::LfoRate(0)), (3, T::LfoPhase(0)), (4, T::LfoFade(0))] {
             drag(&mut e, places(1).jack, lfo_centre(0, k));
             assert_eq!(depth(Source::Lfo(1), t), Some(0.25), "{t:?}");
         }
@@ -17680,7 +17737,7 @@ mod tests {
                 value: (i as f32 * 0.3).sin(),
                 phase: (i as f32 * 0.1) % 1.0,
                 since: i as f32 * 0.05,
-                rise: 1.0,
+                fade: 1.0,
                 moving: true,
                 ..Reading::default()
             };

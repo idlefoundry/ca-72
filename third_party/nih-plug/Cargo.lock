@@ -502,7 +502,7 @@ dependencies = [
 [[package]]
 name = "cpal"
 version = "0.15.3"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=f7aaa2b01655db5ec7432bd7b71733b8553aa5dd#f7aaa2b01655db5ec7432bd7b71733b8553aa5dd"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=91faf69ae98045b9c1d3b4846c7831262353be98#91faf69ae98045b9c1d3b4846c7831262353be98"
 dependencies = [
  "alsa 0.9.1",
  "core-foundation-sys",
@@ -1045,6 +1045,7 @@ dependencies = [
  "cpal 0.15.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam",
  "jack",
+ "keyboard-types",
  "libc",
  "log",
  "midi-consts",
@@ -1255,14 +1256,14 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 [[package]]
 name = "plugin-kit-queue"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=f7aaa2b01655db5ec7432bd7b71733b8553aa5dd#f7aaa2b01655db5ec7432bd7b71733b8553aa5dd"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=91faf69ae98045b9c1d3b4846c7831262353be98#91faf69ae98045b9c1d3b4846c7831262353be98"
 
 [[package]]
 name = "plugin-kit-standalone"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=f7aaa2b01655db5ec7432bd7b71733b8553aa5dd#f7aaa2b01655db5ec7432bd7b71733b8553aa5dd"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=91faf69ae98045b9c1d3b4846c7831262353be98#91faf69ae98045b9c1d3b4846c7831262353be98"
 dependencies = [
- "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=f7aaa2b01655db5ec7432bd7b71733b8553aa5dd)",
+ "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=91faf69ae98045b9c1d3b4846c7831262353be98)",
  "crossbeam-channel",
  "midir",
  "plugin-kit-queue",

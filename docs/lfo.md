@@ -19,13 +19,18 @@ the IDs are `lfo::PARAM_IDS[n]`.
 | `lfoN_timed` | `BoolParam` | off | RATE's timed key |
 | `lfoN_division` | `EnumParam<params::Division>` | the timed oscillators' 18, 1/4 | RATE while timed |
 | `lfoN_phase` | `FloatParam` | 0..360 degrees, 0 | PHASE |
-| `lfoN_rise` | `FloatParam` | 0..10 s, cube-root travel (factor 1/3: 1 s at 0.46), 0 | RISE |
+| `lfoN_fade` | `FloatParam` | -10..10 s, off at 0 (the centre), out below, in above; RISE's cube-root travel mirrored (`SymmetricalSkewed`, factor 1/3: 1 s at 0.27 and 0.73); 0 | FADE (R-LFO-FADE) |
 | `lfoN_mode` | `EnumParam<lfo::LfoMode>` | FREE, RETRIG, ENV; FREE | MODE (three-position toggle) |
 | `lfoN_mono` | `BoolParam` | on | MONO |
 | `lfoN_polarity` | `EnumParam<lfo::Polarity>` | BI (Bipolar), UNI (Unipolar); BI | UNI's key |
 | `lfoN_reverse` | `BoolParam` | off | WAVEFORM's menu: REVERSE |
 | `lfoN_on` | `BoolParam` | on | ON's key (its word the title) |
 | `lfoN_level` | `FloatParam` | 0..100 %, linear, 100 | its OUT jack (no knob: the wheel, typed, a cord) |
+
+FADE was RISE (`lfoN_rise`, 0..10 s) in 0.3.0's beta: a preset, a session, an assignment to it
+and a MIDI mapping that name `lfoN_rise` are read as FADE's, a fade in (`lfo::RISE_IDS`,
+`Ca72::filter_state`, `presets::targets_for_sound`, `Target::of_saved`; an assignment's depth
+halved, since FADE's right half is half its travel).
 
 POLARITY, REVERSE and ON (R-LFO's corrections) are `lfo::LfoKeys`, nested after the macros so
 that no parameter before them moves (`params.lfo_keys(n)`, `params.lfo1_keys` to `lfo4_keys`);
@@ -109,7 +114,7 @@ them; choosing a preset loads its own (none where it names none); a MIDI pad's p
 `lfo::Target` (`TARGETS`, 51), the same for every source (the macros' knobs are not targets):
 the panel's continuous knobs and the strip's (27, the strip's LEVEL last: R-LFO's corrections),
 each oscillator's CONTINUOUS shape (`KNOB_TARGETS`, 30, first), then each LFO's own five
-(R-LFO's addendum), LFO by LFO: `Target::LfoRate(n)`, `LfoPhase(n)`, `LfoRise(n)`,
+(R-LFO's addendum), LFO by LFO: `Target::LfoRate(n)`, `LfoPhase(n)`, `LfoFade(n)`,
 `LfoShape(n)` (its CONTINUOUS shape) and `LfoLevel(n)`, `lfo::LfoKnob` their kind
 (`Target::lfo_knob`, `Target::of_lfo`, `Target::is_lfo`). Their IDs are their parameters'
 (`lfo2_rate`, `lfo2_shape`, `lfo2_level`), their screen names `LFO2 LEVEL` and so on (ten
@@ -122,7 +127,7 @@ which the hover pop-up marks "shared").
   the panel control's parameter ID. `oscN_waveform` gives `oscN_shape` while CONTINUOUS, none
   while STEPPED; `osc2_frequency` and `osc3_frequency` none while timed (their knob is then a
   DIVISION dial); `lfoN_waveform` gives `LfoShape(n)` while CONTINUOUS, `lfoN_rate` none while
-  timed, `lfoN_phase`, `lfoN_rise` and `lfoN_level` always. Switches, selectors, VOICES, the
+  timed, `lfoN_phase`, `lfoN_fade` and `lfoN_level` always. Switches, selectors, VOICES, the
   wheels and the drawers' knobs are none. An assignment already made stays where its knob cannot
   take one (it does nothing then).
 - `lfo::takes_shared(params, source, target)`: whether a MONO-off LFO moves `target` by its
@@ -154,12 +159,12 @@ from blocks or steps; otherwise they run as before, to the bit (`Bank::step`, `a
   the tempo's, the time since its note, ON's fade); then its knobs are set from the sources'
   values **at the latest tick** (`lfo::moved`: the knob's travel + Σ depth × value, clamped,
   through its parameter's own range, `RATE_RANGE` and the rest), so nothing feeds back within
-  one; then its value there (`Gen::tick_value`: waveform, RISE, POLARITY, ON's fade, LEVEL; not
+  one; then its value there (`Gen::tick_value`: waveform, FADE, POLARITY, ON's fade, LEVEL; not
   EDGES' slew, which smooths only what reaches the sound). `lfo::Cross` keeps each copy's
   settings in force and its value, and TEMPO in force (`Cross::tempo`, by the shared copies'
   values at the latest tick).
 - **The sound** reads each generator at its own time between ticks (`Bank::peek`: its cycle on
-  at the settings in force, RISE, EDGES' slew, ON's fade, LEVEL), as before every step.
+  at the settings in force, FADE, EDGES' slew, ON's fade, LEVEL), as before every step.
 - **The glide's end** (R-LFO-STRESS), where an LFO moves a pitch or CUTOFF: the same ticks and
   reading run on a copy of the bank (`Ahead::bank`, kept so the step allocates nothing) to the
   step's end and halfway, so the glide ends where the next step's knobs will be, the LFOs'
@@ -178,13 +183,13 @@ from blocks or steps; otherwise they run as before, to the bit (`Bank::step`, `a
 ## What the audio thread gives back
 
 `params.lfo_scope: Arc<lfo::Scope>`, published after each block while an editor is open.
-`Scope::read(lfo) -> Reading { value, phase, since, rise, moving, shape, offset, level, moved }`:
+`Scope::read(lfo) -> Reading { value, phase, since, fade, moving, shape, offset, level, moved }`:
 
-- `value`: the output, -1..1 (0..1 UNI), after RISE, EDGES and ON's fade (the latest voice's
+- `value`: the output, -1..1 (0..1 UNI), after FADE, EDGES and ON's fade (the latest voice's
   where MONO is off): a knob's present point is `travel + depth × value`, clamped.
 - `phase`: where in its cycle (0..1, PHASE included).
 - `since`: seconds since the note that last started it (how far an ENV is through its cycle).
-- `rise`: RISE's gain now (0..1).
+- `fade`: FADE's gain now (0..1): rising to 1 fading in, falling to 0 fading out, 1 off.
 - `moving`: assigned, running, not an ENV whose cycle is over, and not muted and faded out (the
   orb's frame runs only while some LFO moves). `Scope::any_moving()`: the rail key's faint glow.
 - `shape`, `offset`, `level`, `moved`: its WAVEFORM's place, PHASE (cycles) and LEVEL as in
@@ -198,7 +203,7 @@ reading the modulated value"), and the TEMPO screen the moving tempo (`Meters::p
 
 For the still trace: `lfo::settings(params, n, edges) -> Settings`, and
 `Settings::cycle_at(x)` (the waveform `x` of the way through one cycle from PHASE, REVERSE and
-POLARITY as set, before RISE and EDGES; at 1 the cycle's last value), `Settings::hz_at(tempo)`,
+POLARITY as set, before FADE and EDGES; at 1 the cycle's last value), `Settings::hz_at(tempo)`,
 `lfo::wave(at, phase)` (the shapes), `lfo::read(at, phase, reverse)`.
 
 ## Colours: the computer's (the macros' too)
@@ -230,11 +235,15 @@ one a session brought there listed `inert`).
   places as the oscillators do; past SQUARE the duty narrows from exactly 50 % through the
   circuit's 30 and 17.9 % to the floor (about 6.4 %).
 - FREE runs on (timed: its phase from the host's place each block, never drifting); RETRIG
-  starts at PHASE and resets RISE at every note-on, independently of the main contour's
+  starts at PHASE and resets FADE at every note-on, independently of the main contour's
   RETRIGGER switch (R-LFO-NOTE-RETRIG). ENV runs one cycle from PHASE and holds. Shared ENV
-  and FREE's RISE follow main RETRIGGER: off, a key from silence; on, every key. A POLY voice's own LFOs start
+  and FREE's FADE follow main RETRIGGER: off, a key from silence; on, every key. A POLY voice's own LFOs start
   with each note it takes.
-- RISE fades the output in from the new note. EDGES SOFT slews it (10 to 90 % in 2 ms).
+- FADE (R-LFO-FADE), one bipolar knob: to the right of its centre it fades the output in from
+  the new note (RISE's ramp, 0 to full over its seconds), to the left out (full to nothing over
+  them), at the centre off. Before any note, a fade in is at nothing and a fade out at full (it
+  has not begun to fall). A source can move it across the centre. EDGES SOFT slews the output
+  (10 to 90 % in 2 ms).
 - Modulation every 32 samples, where the voices are given their panel: travel after the glide
   plus the sum of depth × value, clamped, through the knob's law; each voice's own where MONO
   is off (option C for the shared targets).
@@ -267,8 +276,8 @@ one a session brought there listed `inert`).
   trace one cycle from PHASE, `lfo::settings(..).cycle_at(x)` (R-LFO's corrections: the owner,
   2026-10-20, "it should be 1"); the orb from the last `Scope::read` (read at most 30 times a
   second, only while the page shows) along that cycle by `phase` less PHASE (`lfo_page::orb_at`;
-  an ENV at the cycle's end once over); at `value`, its wake at `rise`'s gain (RISE shows as the
-  orb under the trace), or on the trace while it does not move. MODULATES from
+  an ENV at the cycle's end once over); at `value`, its wake at `fade`'s gain (FADE shows as the
+  orb under the trace, rising into it or sinking away), or on the trace while it does not move. MODULATES from
   `Patch::assignments(Source::Lfo(n))`. UNI's trace and orb lie above the centre line (0..1);
   muted (`Column::on` off), the trace is drawn at about a third, the orb goes once faded out,
   and MODULATES reads MUTED, dim. A UNI LFO's rings run one way (`Ring::one_way`, as a macro's),
@@ -284,7 +293,7 @@ one a session brought there listed `inert`).
 ## The LFOs' own knobs in the editor (R-LFO's addendum)
 
 - With the page showing, its controls are in view for modulation (`lfo_page::in_view`,
-  `Editing::mod_hit` finding the page's): RATE, PHASE, RISE and WAVEFORM (CONTINUOUS) take a cord,
+  `Editing::mod_hit` finding the page's): RATE, PHASE, FADE and WAVEFORM (CONTINUOUS) take a cord,
   rings on their own sweeps, the hover pop-up, the tip's depths and the menu's heads, as any knob.
 - **LEVEL is the OUT jack's:** each LFO's `lfoN_level` control, `Kind::Jack` at the jack
   (`controls::lfo_index(n, LFO_LEVEL_PART)`, from `LFO_LEVEL_FIRST`; CONTROL_SET revision 7), drawn

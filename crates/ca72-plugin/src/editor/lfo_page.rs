@@ -309,7 +309,7 @@ pub(super) fn lfo_param<'a>(
         "timed" => &q.timed,
         "division" => &q.division,
         "phase" => &q.phase,
-        "rise" => &q.rise,
+        "fade" => &q.fade,
         "mode" => &q.mode,
         "mono" => &q.mono,
         "polarity" => &keys.polarity,
@@ -603,9 +603,9 @@ impl Editing {
                 .flatten()
                 .any(|a| a.depth != 0.0);
             let x = orb_at(&drawn, &r, tempo, assigned);
-            // (Moving, at its output, RISE's fade and EDGES in it; still, on the trace.)
+            // (Moving, at its output, FADE's gain and EDGES in it; still, on the trace.)
             let (y, gain) = if r.moving {
-                (f64::from(r.value), f64::from(r.rise).clamp(0.0, 1.0))
+                (f64::from(r.value), f64::from(r.fade).clamp(0.0, 1.0))
             } else {
                 (drawn.cycle_at(x) * level, 1.0)
             };
@@ -632,7 +632,7 @@ impl Editing {
                 timed: q.timed.value(),
                 division: q.division.value().to_index(),
                 phase: v(3),
-                rise: v(4),
+                fade: v(4),
                 mode: v(5),
                 mono: q.mono.value(),
                 trace,
@@ -640,7 +640,7 @@ impl Editing {
                 orb: (on || r.moving).then_some((x, y)),
                 uni: keys.polarity.value() == lfo::Polarity::Uni,
                 on,
-                orb_rise: gain,
+                orb_fade: gain,
                 screen,
                 in_use,
                 live: r.moved,

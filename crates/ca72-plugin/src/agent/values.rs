@@ -29,12 +29,14 @@ pub enum Shape {
 }
 
 /// How a number is read: the parameter's own value, a FREQUENCY pot's position as the
-/// oscillator's semitones from its centre, or DETUNE's share as cents.
+/// oscillator's semitones from its centre, DETUNE's share as cents, or an LFO's FADE in
+/// seconds, signed (in above 0, out below, off at 0: decisions.md R-LFO-FADE).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Units {
     Plain,
     Semitones(Pot),
     Cents,
+    Fade,
 }
 
 /// A parameter as the agent operates it, whatever its type.
@@ -524,7 +526,7 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
             &q.timed,
             &q.division,
             &q.phase,
-            &q.rise,
+            &q.fade,
             &q.mode,
             &q.mono,
             &keys.polarity,
@@ -538,7 +540,11 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
                 crate::lfo::PARAM_LABELS[n][k],
                 crate::lfo::SECTIONS[n],
                 param,
-                Plain,
+                if k == crate::lfo::FADE_PART {
+                    Fade
+                } else {
+                    Plain
+                },
             ));
         }
     }
@@ -583,6 +589,11 @@ impl Entry<'_> {
         let (unit, min, max) = match self.units {
             Units::Semitones(pot) => ("semitones", pot.semitones(0.0), pot.semitones(1.0)),
             Units::Cents => ("cents", 0.0, DOUBLE_CENTS),
+            Units::Fade => (
+                "s",
+                -f64::from(crate::lfo::FADE_MOST),
+                f64::from(crate::lfo::FADE_MOST),
+            ),
             Units::Plain => {
                 let (min, max) = (self.param.plain_of(0.0), self.param.plain_of(1.0));
                 (self.param.unit_text().trim(), min, max)
@@ -603,7 +614,7 @@ impl Entry<'_> {
         match self.units {
             Units::Semitones(pot) => pot.semitones(f64::from(normalized)),
             Units::Cents => self.param.plain_of(normalized) / 100.0 * DOUBLE_CENTS,
-            Units::Plain => self.param.plain_of(normalized),
+            Units::Plain | Units::Fade => self.param.plain_of(normalized),
         }
     }
 
@@ -791,7 +802,7 @@ impl Entry<'_> {
                     .normalized_of((2.0 * w - 1.0) * ca72::freq_dial::DIAL_END)
             }
             Units::Cents => self.param.normalized_of(x / DOUBLE_CENTS * 100.0),
-            Units::Plain => self.param.normalized_of(x),
+            Units::Plain | Units::Fade => self.param.normalized_of(x),
         })
     }
 
@@ -811,6 +822,8 @@ impl Entry<'_> {
                     .unwrap_or(t);
                 t.trim().trim_start_matches('+').parse().ok()
             }
+            // ("Off", "In 1.2", "Out 1.2", "-1.2 s".)
+            Units::Fade => crate::lfo::fade_typed(t).map(f64::from),
             Units::Plain => {
                 let t = if unit.is_empty() {
                     t
