@@ -970,3 +970,104 @@ fn standalone_raw_mpe_matches_host_note_expressions_without_callback_allocation(
     assert!(app.iter().flat_map(|(l, _)| l).any(|s| s.abs() > 0.0001));
     assert_ne!(app, plain, "the expression is heard");
 }
+
+/// The standalone's own path in the library (`PluginApi::Standalone`: its audio thread made an
+/// audio thread, POLY's workers too) never asks the system's RTKit, sets this process's
+/// RLIMIT_RTTIME or handles SIGXCPU: only the application's `main` turns RTKit on
+/// (`ca72_rt::use_rtkit`, decisions.md R-RTKIT). A test is not to change how the machine it runs
+/// on schedules it. Where the system refuses real-time priority (CI's runners, or `prlimit
+/// --rtprio=0:0` on a machine with RTKit) the threads stay ordinary; where it allows it they are
+/// `SCHED_FIFO`, promoted directly; never RTKit's `SCHED_RR`.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_standalone_path_never_asks_rtkit_unless_the_application_does() {
+    fn rttime() -> (u64, u64) {
+        let mut r = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: a valid, writable rlimit.
+        assert_eq!(unsafe { libc::getrlimit(libc::RLIMIT_RTTIME, &mut r) }, 0);
+        (r.rlim_cur, r.rlim_max)
+    }
+    fn xcpu_handled() -> bool {
+        // SAFETY: a zeroed sigaction, only read into.
+        unsafe {
+            let mut old: libc::sigaction = std::mem::zeroed();
+            assert_eq!(
+                libc::sigaction(libc::SIGXCPU, std::ptr::null(), &mut old),
+                0
+            );
+            old.sa_sigaction != libc::SIG_DFL
+        }
+    }
+    /// The policy of thread `tid` (0: the calling one), RTKit's reset-on-fork flag taken off.
+    fn policy(tid: i32) -> i32 {
+        // SAFETY: a thread id of this process; -1 if it has gone.
+        unsafe { libc::sched_getscheduler(tid) & !libc::SCHED_RESET_ON_FORK }
+    }
+    let before = (rttime(), xcpu_handled());
+    let policies = std::thread::spawn(|| {
+        let plugin = Ca72::default();
+        let params = plugin.parameters().clone();
+        let (mut processor, session) = Processor::new(plugin, &[]).expect("adapter");
+        session.set_parameter(params.poly.as_ptr(), 1.0);
+        processor
+            .prepare(ProcessConfig {
+                sample_rate: 48_000.0,
+                max_buffer_frames: 256,
+            })
+            .expect("prepared");
+        let note = [MidiEvent {
+            source: 1,
+            data: [0x90, 60, 100],
+            len: 3,
+        }];
+        let (mut left, mut right) = ([0.0; 256], [0.0; 256]);
+        for b in 0..40 {
+            processor.process(AudioBlock {
+                left: &mut left,
+                right: &mut right,
+                input_left: &[],
+                input_right: &[],
+                midi: if b == 0 { &note } else { &[] },
+                panic: false,
+            });
+            // (Time for RTKit's answer, had it been asked: half a second in all.)
+            std::thread::sleep(std::time::Duration::from_millis(12));
+        }
+        // This thread's and every other thread's of the process now (POLY's workers among them).
+        let mut policies = vec![("the audio thread".to_owned(), policy(0))];
+        for task in std::fs::read_dir("/proc/self/task").expect("the process's threads") {
+            let task = task.expect("a thread").path();
+            let name = std::fs::read_to_string(task.join("comm")).unwrap_or_default();
+            if let Some(tid) = task
+                .file_name()
+                .and_then(|t| t.to_str())
+                .and_then(|t| t.parse().ok())
+            {
+                policies.push((name.trim().to_owned(), policy(tid)));
+            }
+        }
+        // (Promoted directly where the system allows it: made ordinary again before it ends.)
+        ca72_rt::demote();
+        processor.deactivate();
+        policies
+    })
+    .join()
+    .expect("the standalone's path played");
+    assert!(
+        !ca72_rt::uses_rtkit(),
+        "the library turned RTKit on: only the application's main is to"
+    );
+    assert_eq!(
+        (rttime(), xcpu_handled()),
+        before,
+        "RLIMIT_RTTIME or SIGXCPU's handler changed (set for RTKit)"
+    );
+    let rr: Vec<_> = policies
+        .iter()
+        .filter(|(_, p)| *p == libc::SCHED_RR)
+        .collect();
+    assert!(rr.is_empty(), "made SCHED_RR (RTKit's): {rr:?}");
+}

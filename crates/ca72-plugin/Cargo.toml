@@ -115,6 +115,11 @@ tempfile.workspace = true
 # wrapper takes, at its revision.
 clap-sys = { git = "https://github.com/micahrj/clap-sys.git", rev = "25d7f53fdb6363ad63fbd80049cb7a42a97ac156" }
 
+# The process's RLIMIT_RTTIME, SIGXCPU handler and threads' policies read
+# (`tests/standalone_adapter.rs`: the library never asks RTKit, decisions.md R-RTKIT).
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc.workspace = true
+
 # The Objective-C classes of other copies of softbuffer, and the test's own view
 # (tests/softbuffer_copies.rs): the versions softbuffer takes.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
