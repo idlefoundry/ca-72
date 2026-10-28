@@ -16240,8 +16240,8 @@ session; its figures are cited below.
 - **Runs past the deadline are still shared, until the period's end** (`Pool::block`'s grace).
   Only past the grace does the audio thread play a run alone, late rather than silent (R18). A
   voice a worker has not finished by the grace is silent for its run, as at the deadline before.
-- **Not done:** an RTKit request (D-Bus) for systems with RTKit but no rtprio allowance. The
-  laptop has neither, so only a system change helps it: the user in the `realtime` group, whose
+- **Not done:** an RTKit request (D-Bus) for systems with RTKit but no rtprio allowance (done
+  since: R-RTKIT). The laptop has neither, so only a system change helps it: the user in the `realtime` group, whose
   `limits.d` entry is already installed, or RTKit installed and running. Also not done: a
   warning in the editor rather than on standard error.
 
@@ -16326,3 +16326,110 @@ session; its figures are cited below.
 - A laptop with real-time priority allowed. Not allowed here, as the laptop is the user's.
 - Buffer sizes other than 256 frames.
 - DAWs hosting the plug-ins on Linux. They get the grace and the spin, but never the promotion.
+
+## R-RTKIT. The standalone asks RTKit where Linux refuses it real-time priority, and says when it has none
+
+**Owner decision, 2026-10-28:** an RTKit fallback on Linux for the standalone's real-time
+priority, and a warning in the editor when its audio cannot have it. Ubuntu, Fedora and most
+desktops give a user's programs real-time priority only through RTKit
+(`org.freedesktop.RealtimeKit1`, a system service on D-Bus), not an rtprio allowance, so
+R-DROPOUTS's promotion did nothing there; and a refusal was said only on standard error.
+
+**Agent decisions, 2026-10-28** (placeholder id; not yet reviewed by the owner):
+- **The order:** `SCHED_FIFO` 70 directly (an rtprio allowance), then RTKit, then ordinary
+  priority, each thread's outcome kept in atomics by group (`ca72_rt::Group`: the audio thread,
+  `audio_thread::AUDIO`; POLY's workers and ULTRA's split crews, `WORKERS`), counted afresh as a
+  stream or a pool begins. The standalone alone (`ca72_rt::use_rtkit`, from
+  `AudioThread::prepare`, before the workers start): a plug-in in a host never asks RTKit, never
+  sets a limit or a signal handler, and promotes its own workers directly as before.
+- **Never on an audio thread.** A refused thread leaves its kernel id (`gettid`) in a table of
+  atomics and wakes `ca72_rt`'s RTKit thread (`ca72-rt-rtkit`, ordinary), which makes the D-Bus
+  calls. An answer for a thread that has ended, or for a set of the group's threads since
+  replaced, is let go.
+- **The calls, spoken by hand** (`crates/ca72-rt/src/rtkit.rs`, no new dependency): D-Bus's wire protocol on the system bus's socket (`DBUS_SYSTEM_BUS_ADDRESS` if
+  set), `EXTERNAL` authentication, `Hello`, `Properties.Get` of `MaxRealtimePriority`,
+  `MinNiceLevel` and `RTTimeUSecMax`, then `MakeThreadRealtimeWithPID` (`MakeThreadRealtime`
+  where RTKit predates it). `zbus` would bring an async executor and a tree of crates for four
+  calls; the `dbus` crate links libdbus, which the build, CI and the Linux package would then
+  need (headers, `pkg-config`, a runtime library). Nothing is added to THIRD-PARTY-NOTICES.
+- **The priority** is the workers' 70, at most RTKit's `MaxRealtimePriority` (20 as RTKit comes).
+  RTKit gives `SCHED_RR | SCHED_RESET_ON_FORK`; `ca72_rt` now reads that flag as real-time too.
+- **RLIMIT_RTTIME: 150 ms soft, 200 ms hard.** RTKit refuses a process whose hard
+  `RLIMIT_RTTIME` is above its `RTTimeUSecMax` (200 ms as it comes). Past the soft limit the
+  kernel sends SIGXCPU (which ends a process that does not handle it), and at the hard limit
+  SIGKILL. The hard limit is set to `RTTimeUSecMax`, at most 200 ms; the soft one 50 ms below it
+  (half the hard if that is less). SIGXCPU is handled: every thread `ca72_rt` promoted is made
+  ordinary at once, the soft limit is put back (the kernel moves it a second on), and the
+  watchdog says so and counts it. 50 ms is many scheduler ticks for that before SIGKILL could
+  come. A block's work stays far under 150 ms, even at 8192 frames, as the audio thread blocks
+  on the device after each block and a worker parks between blocks. Without an rtprio allowance
+  the watchdog cannot run above RTKit's threads; this stands in for it, as RTKit's canary does
+  for the system. PipeWire's ALSA client, in the same process, sets the limit itself as it opens
+  a stream, soft and hard alike; the limits are set again before each request and the soft one
+  kept below the hard at each of the watchdog's looks.
+- **The warning,** once all asked are answered and some thread is ordinary:
+  - **On the walnut, once:** a tip after PANIC, as the TYPING and MIDI keys' tips are, for 15 s
+    from when the editor first sees it, while no other tip is shown: which threads (`AUDIO`,
+    `AUDIO THREAD`, `POLY'S THREADS`), `NOT REAL-TIME: MAY DROP OUT`, and the fix:
+    `INSTALL RTKIT OR JOIN THE REALTIME OR AUDIO GROUP, THEN LOG IN AGAIN` (RTKit refused or
+    failing: join the group). Logging in again for RTKit too: the desktop portal reads RTKit as
+    it was at login (below).
+  - **SETTINGS:** under STANDALONE, after AUDIO & MIDI…, `NOT REAL-TIME: SEE AUDIO & MIDI…`, not
+    to be chosen, as AGENTS says how they stand.
+  - **AUDIO & MIDI:** its status ends `· real-time`, `· real-time (RTKit)`,
+    `· asking RTKit for real-time priority` or `· ordinary priority`; under it, which threads
+    (with how many of POLY's workers) and why (no rtprio allowance; RTKit not running, refused,
+    or not to be asked; no system bus), then the fix in full.
+  - **macOS and Windows** never ask for the audio thread (CoreAudio's and WASAPI's are already
+    the system's audio threads): only a worker the system refuses is said, with no Linux fix.
+  - **The state** reaches the editor through `ca72_rt::Group`'s atomics only, read at each
+    frame.
+- **The effects' helpers are not covered.** Their audio threads are promoted in DAW-v3's
+  vendored code (`third_party/daw-v3`, its patches and tree hash recorded); one process an
+  effect, whose state the editor could not read through atomics. Each would take a place in
+  RTKit's per-user limits (25 threads, 15 processes as it comes). A refusal there is still said
+  on the helper's standard error.
+
+**Evidence, 2026-10-28.**
+- **omarchy** (in `realtime`, rtprio 98; no RTKit installed). The standalone, POLY at HI,
+  silent, on workspace 10; `ps -L -o tid,cls,rtprio,comm` and `chrt -p` after 6 to 8 s. The
+  stand-in RTKit is `scripts/fake-rtkit.py` on a private bus (`dbus-run-session`,
+  `DBUS_SYSTEM_BUS_ADDRESS` pointed at it, `prlimit --rtprio=0:98`).
+
+  | Run | int/dropouts (4d82b11) | this branch |
+  |---|---|---|
+  | rtprio allowed | (R-DROPOUTS: FF 70) | workers and `cpal_alsa_out` FF 70; RLIMIT_RTTIME unlimited |
+  | `prlimit --rtprio=0`, no RTKit | all TS | all TS; "RTKit is not running (ServiceUnknown)" |
+  | stand-in RTKit granting | all TS (only PipeWire's own thread RR 20) | 9 workers and `cpal_alsa_out` RR 20 (`SCHED_RR\|SCHED_RESET_ON_FORK`); RLIMIT_RTTIME 150000/200000 |
+  | stand-in refusing | | all TS; "RTKit refused (AccessDenied)" for both groups |
+  | stand-in granting 7, then refusing | | 6 workers RR 20, 3 workers and `cpal_alsa_out` TS (PipeWire's own thread took the 7th) |
+
+- **The laptop with real RTKit** (rtkit 0.14, installed by the owner 2026-10-28; `ulimit -r` 0;
+  `MaxRealtimePriority` 20, `RTTimeUSecMax` 200000, `MinNiceLevel` -15). This branch: 6 workers
+  and `cpal_alsa_out` RR 20, granted by `rtkit-daemon` ("Successfully made thread ... RT at
+  priority 20"), RLIMIT_RTTIME 150000/200000, the process alive until closed; int/dropouts: all
+  TS. Both with PipeWire's own real-time module off in the process (a private client.conf,
+  `module.rt = false`, through `PIPEWIRE_CONFIG_DIR`), because of the next point.
+- **Found: with RTKit installed but the session not restarted, every build is killed.** The
+  desktop portal (`xdg-desktop-portal`, started at login, before RTKit was installed) answers
+  RTKit's properties as 0. PipeWire's client in the standalone (`libpipewire-module-rt`) reads
+  them through it, sets RLIMIT_RTTIME to 0/0 ("clamping rt.time.soft ... to 0 because of RTKit"),
+  then has its `data-loop.0` made RR 1. The kernel kills the process (status 137) about 1.5 s
+  after the stream opens: int/dropouts and this branch alike. This branch then refuses to ask
+  RTKit for its own threads ("its hard limit is already 0 us"). It is not the CA-72's to fix; a
+  new login should restart the portal (not checked yet). Hence "then log in again" in the fix.
+- **SIGXCPU:** `rtkit::tests::a_runaway_thread_is_demoted_by_sigxcpu_not_killed` (ignored; run
+  alone on omarchy): a `SCHED_FIFO` thread spinning without blocking was made ordinary after
+  157.5 ms, and the process lived.
+- **The calls against a real bus:** `rtkit::tests::a_private_bus_answers_and_names_rtkit_absent`
+  starts a private `dbus-daemon` where one is installed.
+- **PipeWire's own requests.** PipeWire's client in the standalone asks RTKit for each stream it
+  opens, and the device list opens streams every second or so (11 requests in 8 s with the
+  stand-in). RTKit allows 25 requests a user in 20 s as it comes, so the standalone's own could
+  be refused for that when a stream restarts later. Not measured with real RTKit.
+
+**Not done:**
+- A real RTKit with PipeWire's real-time module on in the process, after a new login.
+- Ubuntu and Fedora themselves; RTKit older than 0.11 (`MakeThreadRealtime`).
+- The SIGXCPU path under RTKit itself (checked with `SCHED_FIFO`; the kernel's limit is the same).
+- Listening, and dropouts measured with RTKit's priority 20 against FIFO 70.

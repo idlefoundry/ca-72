@@ -723,8 +723,10 @@ impl Learning {
     /// its name, and whether it can be used; `pack` the one the editor is drawn in, if any); under
     /// MOD WHEEL SOURCE, what moves the MOD wheel (`source`: R-MODWHEEL-SOURCE); in the
     /// standalone, under AGENTS, whether AI agents may operate it (`agents`, marked; none in a
-    /// host: decisions.md R-MCP), how they stand, and the setups for their clients to copy. The title always names this build's version, independent of the
-    /// update check; opening this menu does not start a check.
+    /// host: decisions.md R-MCP), how they stand, and the setups for their clients to copy; under
+    /// STANDALONE, its audio not real-time (`realtime`'s row, if any: decisions.md R-RTKIT). The
+    /// title always names this build's version, independent of the update check; opening this
+    /// menu does not start a check.
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
@@ -739,6 +741,7 @@ impl Learning {
             bool,
         ),
         (packs, pack): (&[(String, bool)], Option<usize>),
+        realtime: Option<&str>,
     ) {
         let mut items: Vec<(Item, String)> = vec![
             (Item::Head, "LOOK".into()),
@@ -790,7 +793,13 @@ impl Learning {
         if crate::standalone_settings::available() {
             items.push((Item::Head, "STANDALONE".into()));
             items.push((Item::StandaloneSettings, "AUDIO & MIDI…".into()));
+            // (Its audio not real-time, as AGENTS says how they stand: decisions.md R-RTKIT.)
+            if let Some(row) = realtime {
+                items.push((Item::Not, row.to_owned()));
+            }
         }
+        #[cfg(not(feature = "standalone-production"))]
+        let _ = realtime;
         if let Some(a) = &agents {
             items.push((Item::Head, "AGENTS".into()));
             items.push((Item::Agents(true), "ALLOW".into()));
@@ -1485,6 +1494,7 @@ mod tests {
                     true,
                 ),
                 (&[], None),
+                None,
             );
             let items = l.menu().expect("menu").items.clone();
             let at = items

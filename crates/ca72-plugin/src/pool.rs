@@ -700,6 +700,8 @@ impl<V: Play> Pool<V> {
         });
         if period.is_some() && (workers > 0 || splits > 0) {
             ca72_rt::watch();
+            // (Its threads' promotions counted afresh: decisions.md R-RTKIT.)
+            crate::audio_thread::WORKERS.clear();
         }
         // (The pool first: should a worker not start, those started stop and are joined and
         // the budget is given back as it drops.)
@@ -732,7 +734,7 @@ impl<V: Play> Pool<V> {
             for _ in 0..splits {
                 let start: ca72::threaded::Start = Arc::new(move || {
                     if let Some(p) = period {
-                        let _ = ca72_rt::promote(p, p / 2);
+                        let _ = ca72_rt::promote_in(&crate::audio_thread::WORKERS, p, p / 2);
                     }
                 });
                 let interval = period
@@ -1303,8 +1305,10 @@ fn work<V: Play>(b: &Board<V>, period: Option<Duration>, driver: bool) {
     // becomes an audio thread.
     std::thread::park_timeout(Duration::from_nanos(1));
     let _ = Instant::now().elapsed();
+    // (Where the system refuses, the standalone asks RTKit, through `ca72_rt`'s thread: the
+    // answer is said there, and counted for the editor. decisions.md R-RTKIT.)
     if let Some(period) = period
-        && let Err(e) = ca72_rt::promote(period, period / 2)
+        && let Err(e) = ca72_rt::promote_in(&crate::audio_thread::WORKERS, period, period / 2)
     {
         // (Said once a process, here on a worker: not the audio thread. They play on as
         // ordinary threads, which other work preempts: decisions.md R-DROPOUTS.)

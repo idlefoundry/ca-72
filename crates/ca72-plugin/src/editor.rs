@@ -1536,7 +1536,32 @@ struct Editing {
     /// AI agents operating the editor through MCP, while allowed (`editor/agent.rs`;
     /// decisions.md R-MCP).
     agents: agent::Agents,
+    /// The standalone's audio threads not real-time, said (decisions.md R-RTKIT).
+    realtime: Realtime,
 }
+
+/// What the standalone's editor says of its audio threads' priority (decisions.md R-RTKIT): read
+/// from the audio side's atomics at each frame (`read`: the tests give their own), the warning
+/// while one is due, and when the walnut began saying it ([`REALTIME_NOTICE`], once).
+#[derive(Debug)]
+struct Realtime {
+    read: fn() -> (ca72_rt::Standing, ca72_rt::Standing),
+    warning: Option<crate::audio_thread::Warning>,
+    since: Option<Instant>,
+}
+
+impl Default for Realtime {
+    fn default() -> Self {
+        Self {
+            read: crate::audio_thread::standing,
+            warning: None,
+            since: None,
+        }
+    }
+}
+
+/// How long the walnut says, once, that the standalone's audio is not real-time.
+const REALTIME_NOTICE: Duration = Duration::from_secs(15);
 
 impl PanelWindow {
     /// The editor's window: `width` logical pixels wide, `dpr` physical pixels a logical one,
@@ -1885,6 +1910,7 @@ impl Editing {
             #[cfg(feature = "standalone-production")]
             standalone_dialog: None,
             agents: agent::Agents::default(),
+            realtime: Realtime::default(),
         };
         editing.use_effects(FxView::new(effects));
         editing.opened().listening()
@@ -1957,6 +1983,7 @@ impl Editing {
                 self.settings.hover_cables,
             ),
             (&packs, pack),
+            self.realtime.warning.as_ref().map(|w| w.row),
         );
     }
 
@@ -4550,6 +4577,7 @@ impl Editing {
             Meters::load(&self.meters.bend),
             Meters::load(&self.meters.modulation),
         );
+        self.read_realtime(Instant::now());
         self.scene.tip = self.tip();
         self.scene.entry = self
             .knob_entry
@@ -4691,8 +4719,43 @@ impl Editing {
     }
 
     /// The tip: over the control operated, else over the one under the pointer (an effects'
-    /// slot's: its effect's whole name and maker).
+    /// slot's: its effect's whole name and maker); else, for a while once, the standalone's
+    /// audio not real-time, on the walnut (decisions.md R-RTKIT).
     fn tip(&self) -> Option<(String, f64, f64)> {
+        self.pointed_tip().or_else(|| self.realtime_tip())
+    }
+
+    /// The standalone's audio threads' priority read (at each frame, from the audio side's
+    /// atomics): the warning while one is due, and the walnut's notice begun the first time.
+    fn read_realtime(&mut self, now: Instant) {
+        if !self.playing.standalone {
+            return;
+        }
+        let (audio, workers) = (self.realtime.read)();
+        self.realtime.warning =
+            crate::audio_thread::warning(audio, workers, cfg!(target_os = "linux"));
+        if self.realtime.warning.is_some() && self.realtime.since.is_none() {
+            self.realtime.since = Some(now);
+        }
+    }
+
+    /// The walnut's notice that the standalone's audio is not real-time, after its TYPING, MIDI
+    /// and PANIC keys as their tips are: for [`REALTIME_NOTICE`] once, while nothing else's
+    /// tip is shown.
+    fn realtime_tip(&self) -> Option<(String, f64, f64)> {
+        let since = self.realtime.since?;
+        if since.elapsed() >= REALTIME_NOTICE {
+            return None;
+        }
+        let text = self.realtime.warning.as_ref()?.tip.clone();
+        let b = art::tip_bounds(self.renderer.fonts(), &text, self.renderer.text_size());
+        let (px, py) = art::tempo_key_at(self.renderer.arrangement(), art::TempoKey::LAST);
+        let left = px + art::TEMPO_KEY.0 / 2.0 + 12.0;
+        Some((text, left - b[0], py - (b[1] + b[3]) / 2.0))
+    }
+
+    /// The tip of what the pointer is on or operates.
+    fn pointed_tip(&self) -> Option<(String, f64, f64)> {
         if let Some(t) = self.fx_pin_tip() {
             return Some(t);
         }
@@ -8355,6 +8418,232 @@ mod tests {
         away(&mut p);
         save(&mut p, "5-plugin.png");
         keys(&mut p, "0-keys-plugin.png");
+    }
+
+    /// The audio threads' standings the tests give the editor (decisions.md R-RTKIT): none
+    /// asked, one waiting for RTKit, both refused with RTKit absent, the audio thread refused by
+    /// RTKit with the workers real-time, two of six workers refused by RTKit, every one through
+    /// RTKit.
+    mod stood {
+        use ca72_rt::{Standing, Why};
+        const fn s(
+            direct: u32,
+            rtkit: u32,
+            waiting: u32,
+            ordinary: u32,
+            why: Option<Why>,
+        ) -> Standing {
+            Standing {
+                direct,
+                rtkit,
+                waiting,
+                ordinary,
+                why,
+            }
+        }
+        pub fn asking() -> (Standing, Standing) {
+            (s(0, 0, 1, 0, None), s(0, 0, 6, 0, None))
+        }
+        pub fn no_rtkit() -> (Standing, Standing) {
+            (
+                s(0, 0, 0, 1, Some(Why::NoRtkit)),
+                s(0, 0, 0, 6, Some(Why::NoRtkit)),
+            )
+        }
+        pub fn audio_refused() -> (Standing, Standing) {
+            (s(0, 0, 0, 1, Some(Why::RtkitRefused)), s(6, 0, 0, 0, None))
+        }
+        pub fn workers_partly() -> (Standing, Standing) {
+            (s(0, 1, 0, 0, None), s(0, 4, 0, 2, Some(Why::RtkitRefused)))
+        }
+        pub fn through_rtkit() -> (Standing, Standing) {
+            (s(0, 1, 0, 0, None), s(0, 6, 0, 0, None))
+        }
+    }
+
+    /// The standalone's audio not real-time (decisions.md R-RTKIT): said once on the walnut
+    /// after its keys, for a while, while nothing else's tip is; nothing while RTKit has yet to
+    /// answer or every thread is real-time; never in a plug-in.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_standalone_says_once_that_its_audio_is_not_real_time() {
+        let (mut e, _, _) = editing_standalone();
+        e.fit(1.0, 1720, 1720);
+        go(&mut e, Point { x: 2.0, y: 2.0 });
+        e.realtime.read = stood::asking;
+        e.update_scene();
+        assert!(e.tip().is_none(), "said before RTKit answered");
+        e.realtime.read = stood::through_rtkit;
+        e.update_scene();
+        assert!(e.tip().is_none() && e.realtime.warning.is_none());
+        e.realtime.read = stood::no_rtkit;
+        e.update_scene();
+        let (t, x, _) = e.tip().expect("the walnut's notice");
+        assert_eq!(
+            t,
+            "AUDIO NOT REAL-TIME: MAY DROP OUT · INSTALL RTKIT OR JOIN THE REALTIME OR AUDIO GROUP, THEN LOG IN AGAIN"
+        );
+        let (px, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::LAST);
+        assert!(x > px + art::TEMPO_KEY.0 / 2.0, "after the walnut's keys");
+        assert_eq!(e.scene.tip.as_ref().map(|t| &t.0), Some(&t));
+        // A control under the pointer has its own tip meanwhile.
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.update_scene();
+        assert!(e.tip().expect("CUTOFF's tip").0.starts_with("CUTOFF"));
+        go(&mut e, Point { x: 2.0, y: 2.0 });
+        e.update_scene();
+        assert!(e.tip().is_some(), "the notice back while its while lasts");
+        // Once: past its while, not again; the warning itself stays (SETTINGS, AUDIO & MIDI).
+        e.realtime.since = Some(Instant::now() - REALTIME_NOTICE);
+        e.update_scene();
+        assert!(e.tip().is_none());
+        e.realtime.read = stood::workers_partly;
+        e.update_scene();
+        assert!(e.tip().is_none(), "said again");
+        let w = e.realtime.warning.as_ref().expect("the warning");
+        assert!(w.tip.starts_with("POLY'S THREADS"), "{}", w.tip);
+        assert_eq!(w.row, "NOT REAL-TIME: SEE AUDIO & MIDI…");
+        // A plug-in's: never.
+        let (mut p, _, _) = editing();
+        p.realtime.read = stood::no_rtkit;
+        p.update_scene();
+        assert!(p.realtime.warning.is_none() && p.tip().is_none());
+    }
+
+    /// The standalone's audio not real-time (decisions.md R-RTKIT) for looking at, written to
+    /// `$CA72_RTKIT_PNG`, the folder, at `$CA72_RTKIT_DPR` (2 by default) the window's 1720
+    /// logical pixels: the window with the walnut's notice (`1-window.png`); the walnut close up
+    /// for each case (`2-walnut-<case>.png`: both refused with RTKit absent, the audio thread
+    /// refused by RTKit, two workers of six refused) and in the classic look and LARGE lettering
+    /// (`3-walnut-<look>.png`); SETTINGS opened, its STANDALONE at the foot (`4-settings.png`);
+    /// AUDIO & MIDI with the warning (`5-audio-midi.png`) and real-time through RTKit
+    /// (`5-audio-midi-rtkit.png`).
+    #[cfg(all(target_os = "linux", feature = "standalone-production"))]
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_realtime_warning_pngs() {
+        let Some(out) = std::env::var_os("CA72_RTKIT_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        let dpr: f64 = std::env::var("CA72_RTKIT_DPR")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2.0);
+        let width = 1720;
+        let sized = |e: &mut Editing| {
+            e.fit(dpr, width, (f64::from(width) * dpr).round() as u32);
+            e.draw();
+        };
+        let away = |e: &mut Editing| go(e, Point { x: 2.0, y: 2.0 });
+        let save = |e: &mut Editing, name: &str| {
+            e.composed = None;
+            window_frame(e).save_png(out.join(name)).unwrap();
+        };
+        // The top walnut, the window's width, from its top to the panel.
+        let walnut = |e: &mut Editing, name: &str| {
+            e.composed = None;
+            let s = e.renderer.scale();
+            let top = e.renderer.top();
+            let (_, y, _, h) = art::tempo_window(e.renderer.arrangement().plate_at());
+            let f = window_frame(e);
+            let y1 = (((y + h + 60.0 - top) * s) as u32).min(f.height());
+            let w = f.width();
+            let mut c = ca72_panel::Pixmap::new(w, y1).unwrap();
+            let n = (w * y1) as usize * 4;
+            c.data_mut().copy_from_slice(&f.data()[..n]);
+            c.save_png(out.join(name)).unwrap();
+        };
+        let fresh = |read: fn() -> (ca72_rt::Standing, ca72_rt::Standing)| {
+            let (mut e, _, _) = editing_standalone();
+            e.realtime.read = read;
+            sized(&mut e);
+            away(&mut e);
+            e.update_scene();
+            e
+        };
+        let mut e = fresh(stood::no_rtkit);
+        save(&mut e, "1-window.png");
+        walnut(&mut e, "2-walnut-no-rtkit.png");
+        let mut e = fresh(stood::audio_refused);
+        walnut(&mut e, "2-walnut-audio-rtkit-refused.png");
+        let mut e = fresh(stood::workers_partly);
+        walnut(&mut e, "2-walnut-workers-partly.png");
+        for (name, skin, lettering) in [
+            ("classic", Skin::Drawn, Lettering::Standard),
+            ("large", Skin::Worn, Lettering::Large),
+        ] {
+            let mut e = fresh(stood::no_rtkit);
+            e.set_look(skin);
+            e.set_lettering(lettering);
+            sized(&mut e);
+            away(&mut e);
+            e.update_scene();
+            walnut(&mut e, &format!("3-walnut-{name}.png"));
+        }
+        // SETTINGS and AUDIO & MIDI need the standalone's host: one without devices.
+        let directory = tempfile::tempdir().expect("a state folder");
+        let mut runtime = plugin_kit_standalone::spawn(
+            Box::new(NoAudio),
+            None,
+            plugin_kit_standalone::AppOptions {
+                app_id: "ca72-rtkit-review".into(),
+                state_dir: directory.path().to_owned(),
+                device_access: false,
+            },
+        )
+        .expect("a host without devices");
+        runtime
+            .wait_ready(Duration::from_secs(2))
+            .expect("the host ready");
+        plugin_kit_standalone::AppHandle::install_current(&runtime.handle());
+        let mut e = fresh(stood::no_rtkit);
+        e.realtime.since = Some(Instant::now() - REALTIME_NOTICE);
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        assert!(
+            menu_items(&e)
+                .iter()
+                .any(|(t, on)| t == "NOT REAL-TIME: SEE AUDIO & MIDI…" && !on),
+            "{:?}",
+            menu_items(&e)
+        );
+        // (Its foot in view: the menu is taller than the window.)
+        let m = e.learning.menu().expect("the menu").clone();
+        let foot = at(&e, m.item_at(m.items.len() - 1));
+        go(&mut e, foot);
+        for _ in 0..40 {
+            wheel(&mut e, -3.0);
+        }
+        save(&mut e, "4-settings.png");
+        for (name, read) in [
+            ("5-audio-midi.png", stood::no_rtkit as fn() -> _),
+            ("5-audio-midi-rtkit.png", stood::through_rtkit),
+        ] {
+            let mut e = fresh(read);
+            crate::standalone_settings::request_open();
+            e.draw();
+            e.standalone_dialog
+                .as_mut()
+                .expect("AUDIO & MIDI open")
+                .review(read());
+            save(&mut e, name);
+        }
+        let _ = runtime.shutdown();
+    }
+
+    /// A processor that plays nothing, for a standalone host without devices.
+    #[cfg(feature = "standalone-production")]
+    struct NoAudio;
+
+    #[cfg(feature = "standalone-production")]
+    impl plugin_kit_standalone::AudioProcessor for NoAudio {
+        fn prepare(&mut self, _: plugin_kit_standalone::ProcessConfig) -> Result<(), String> {
+            Ok(())
+        }
+        fn process(&mut self, _: plugin_kit_standalone::AudioBlock<'_>) {}
+        fn deactivate(&mut self) {}
     }
 
     fn editing_for_api(

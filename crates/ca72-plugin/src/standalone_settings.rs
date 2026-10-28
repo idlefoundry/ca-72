@@ -163,6 +163,10 @@ pub struct Dialog {
     /// TEMPO as shown, and whether it changed since the editor last took it.
     tempo: u16,
     tempo_changed: bool,
+    /// The audio threads' priority as last read, and where it is read (decisions.md R-RTKIT:
+    /// the audio side's atomics; the tests give their own).
+    realtime: (ca72_rt::Standing, ca72_rt::Standing),
+    read_realtime: fn() -> (ca72_rt::Standing, ca72_rt::Standing),
 }
 
 impl Dialog {
@@ -183,7 +187,48 @@ impl Dialog {
             changed: true,
             tempo: crate::params::DEFAULT_TEMPO as u16,
             tempo_changed: false,
+            realtime: crate::audio_thread::standing(),
+            read_realtime: crate::audio_thread::standing,
         }
+    }
+
+    /// For a look (the editor's review frames): playing at 48 kHz in 256-frame blocks, its audio
+    /// threads standing as `realtime`, polled no more.
+    #[cfg(test)]
+    pub(crate) fn review(&mut self, realtime: (ca72_rt::Standing, ca72_rt::Standing)) {
+        self.frame();
+        self.next_poll = Instant::now() + Duration::from_secs(3600);
+        self.snapshot.phase = Phase::Running;
+        self.snapshot.actual_sample_rate = 48_000;
+        self.snapshot.actual_buffer_frames = 256;
+        self.snapshot.error = None;
+        self.snapshot.warning = None;
+        // (A device to play on, as a computer has.)
+        let id = DeviceId {
+            name: "Speakers".into(),
+            input_channels: 0,
+            output_channels: 2,
+        };
+        let capability = plugin_kit_standalone::StreamCapability {
+            channels: 2,
+            min_sample_rate: 44_100,
+            max_sample_rate: 48_000,
+            buffer_range: Some([64, 1024]),
+        };
+        self.snapshot.devices.backend = "ALSA".into();
+        self.snapshot.devices.default_output = Some(id.clone());
+        self.snapshot.devices.default_sample_rate = 48_000;
+        self.snapshot.devices.audio = vec![plugin_kit_standalone::DeviceInfo {
+            id: id.clone(),
+            input_configs: Vec::new(),
+            output_configs: vec![capability],
+            sample_rates: vec![44_100, 48_000],
+            default_sample_rate: 48_000,
+        }];
+        self.snapshot.config.output = Some(id.clone());
+        self.draft.output = Some(id);
+        self.realtime = realtime;
+        self.changed = true;
     }
 
     /// TEMPO as this computer has it (the editor's, as it opens the dialog).
@@ -206,6 +251,11 @@ impl Dialog {
                     Err(error) => self.complete_application(Err(error)),
                     Ok(None) => {}
                 }
+            }
+            let realtime = (self.read_realtime)();
+            if realtime != self.realtime {
+                self.realtime = realtime;
+                self.changed = true;
             }
             let snapshot = self.app.snapshot();
             let stamp = format!("{snapshot:?}");
@@ -913,11 +963,20 @@ impl Dialog {
             Phase::Recovering => "RECOVERING",
             Phase::Error => "ERROR",
         };
+        // (The audio threads' priority after, while it plays: decisions.md R-RTKIT.)
+        let (audio, workers) = self.realtime;
+        let priority = match crate::audio_thread::summary(audio, workers) {
+            crate::audio_thread::Standing::Unknown => "",
+            crate::audio_thread::Standing::Asking => " · asking RTKit for real-time priority",
+            crate::audio_thread::Standing::RealTime { rtkit: false } => " · real-time",
+            crate::audio_thread::Standing::RealTime { rtkit: true } => " · real-time (RTKit)",
+            crate::audio_thread::Standing::Ordinary => " · ordinary priority",
+        };
         let actual = self.snapshot.buffer_duration_ms().map_or_else(
             || "Audio has not started".to_owned(),
             |ms| {
                 format!(
-                    "{} Hz · actual callback {} frames · buffer duration {ms:.2} ms",
+                    "{} Hz · actual callback {} frames · buffer duration {ms:.2} ms{priority}",
                     self.snapshot.actual_sample_rate, self.snapshot.actual_buffer_frames
                 )
             },
@@ -936,6 +995,7 @@ impl Dialog {
             .or_else(|| self.snapshot.error.clone())
             .or_else(|| self.validation().err())
             .or_else(|| self.snapshot.warning.clone());
+        let busy = issue.is_some();
         if let Some(issue) = issue {
             text(
                 &mut svg,
@@ -946,10 +1006,37 @@ impl Dialog {
                 "#e5b94d",
             );
         }
+        // The audio not real-time (decisions.md R-RTKIT): which threads and why, then the fix,
+        // under any other issue, the note below moved down for them.
+        let mut note = status_y + 135.0;
+        if let Some(w) = crate::audio_thread::warning(audio, workers, cfg!(target_os = "linux")) {
+            let (y, size) = if busy {
+                note += 34.0;
+                (status_y + 101.0, 27.0)
+            } else {
+                (status_y + 67.0, 30.0)
+            };
+            text(
+                &mut svg,
+                X + 55.0,
+                y,
+                size,
+                &ellipsize(&w.detail, 124),
+                "#e5b94d",
+            );
+            text(
+                &mut svg,
+                X + 55.0,
+                y + 34.0,
+                27.0,
+                &ellipsize(w.remedy, 124),
+                "#e5b94d",
+            );
+        }
         text(
             &mut svg,
             X + 55.0,
-            status_y + 135.0,
+            note,
             27.0,
             "External input is adapted to the output clock. Changing settings briefly interrupts sound.",
             "#a6a5a1",
