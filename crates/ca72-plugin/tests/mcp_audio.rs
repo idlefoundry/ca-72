@@ -233,7 +233,7 @@ fn offline_env_routing_retriggers_per_voice_and_survives_preset_export() {
         "osc1_volume":0,"loudness_attack":0,"loudness_sustain":10,"volume":10,
         "lfo1_mode":"Env","lfo1_waveform":"Sawtooth","lfo1_reverse":true,
         "lfo1_polarity":"Unipolar","lfo1_rate":4,"lfo1_mono":false,
-        "lfo1_phase":0,"lfo1_rise":0,"retrigger":false});
+        "lfo1_phase":0,"lfo1_fade":0,"retrigger":false});
     let mut args = json!({"preset":"White Lotus","effects":"dry","values":values,
         "modulations":[{"source":"lfo1","target":"osc1_volume","depth":100}],
         "notes":notes,"seconds":0.85,"sample_rate":48000,
@@ -321,10 +321,10 @@ fn offline_env_routing_retriggers_per_voice_and_survives_preset_export() {
     assert_ne!(removed["wav_sha256"], rendered["wav_sha256"]);
 }
 
-/// A held first key makes the second key legato. Individual RETRIG must restart RISE in
+/// A held first key makes the second key legato. Individual RETRIG must restart FADE in
 /// the actual shipped bridge with the main envelope RETRIGGER off, including file replay.
 #[test]
-fn offline_individual_retrig_restarts_rise_on_legato_notes() {
+fn offline_individual_retrig_restarts_fade_on_legato_notes() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = Client::new(dir.path());
     let notes = json!([
@@ -337,7 +337,7 @@ fn offline_individual_retrig_restarts_rise_on_legato_notes() {
         "osc1_volume":10,"loudness_attack":0,"loudness_sustain":10,"volume":0,
         "lfo1_on":true,"lfo1_mode":"Retrig","lfo1_waveform":"Square",
         "lfo1_polarity":"Unipolar","lfo1_rate":0.01,"lfo1_mono":true,
-        "lfo1_phase":0,"lfo1_rise":0.4,"retrigger":false},
+        "lfo1_phase":0,"lfo1_fade":0.4,"retrigger":false},
         "modulations":[{"source":"lfo1","target":"volume","depth":100}],
         "notes":notes,"seconds":0.95,"sample_rate":48000,
         "output_dir":dir.path().join("individual")});
@@ -361,11 +361,11 @@ fn offline_individual_retrig_restarts_rise_on_legato_notes() {
     assert!(late_first > 1e-4);
     assert!(
         reset < late_first * 0.2,
-        "individual RISE restarts on the overlapping key"
+        "individual FADE restarts on the overlapping key"
     );
     assert!(
         rms(&rendered["path"], 0.82, 0.88) > reset * 4.0,
-        "RISE builds again"
+        "FADE builds again"
     );
     args["values"]["lfo1_mode"] = json!("Free");
     args["output_dir"] = json!(dir.path().join("free"));

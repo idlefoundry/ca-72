@@ -20,7 +20,8 @@
 //! 50 % and 1.0 OCT, TIMBRE -30 % and 2.5 OCT (the mock-up's), INPUT reading MPE, the MPE key
 //! lit; `CA72_MPE_INPUT=channel` or `none` INPUT so.
 //! `CA72_LFO=1` the LFO page over the lower page (decisions.md R-LFO), the round-2 mock-ups'
-//! four LFOs, the LFO key lit (`CA72_LFO_KEYS=1` LFO 2 UNI and LFO 3 muted); `CA72_LFO_COLORS=amber,green,blue,red` other phosphors;
+//! four LFOs, the LFO key lit (`CA72_LFO_KEYS=1` LFO 2 UNI and LFO 3 muted; `CA72_LFO_FADE=-1.2`
+//! every LFO's FADE at so many seconds, out below 0, in above, off at 0: R-LFO-FADE); `CA72_LFO_COLORS=amber,green,blue,red` other phosphors;
 //! `CA72_LFO_RINGS=1` the mock-ups' rings on CUTOFF, OSCILLATOR-2 FREQUENCY and VOLUME (each
 //! LFO's point on them), `CA72_LFO_CORD=<param>` an assignment from LFO 1's jack dragged over
 //! that knob, `CA72_LFO_POPUP=1` CUTOFF's hover pop-up.
@@ -752,7 +753,7 @@ fn drop_fx(
 /// The round-2 mock-ups' four LFOs, as the editor shows them: their states and traces.
 pub fn lfo_example() -> ca72_panel::strip::lfo::LfoScene {
     use ca72_panel::strip::lfo::{Column, LfoScene, TRACE_POINTS};
-    // (wave place, continuous, rate Hz, timed division, phase deg, mode, mono, rise s, screen, orb)
+    // (wave place, continuous, rate Hz, timed division, phase deg, mode, mono, fade s, screen, orb)
     #[allow(clippy::type_complexity)]
     let lfos: [(
         f64,
@@ -817,7 +818,11 @@ pub fn lfo_example() -> ca72_panel::strip::lfo::LfoScene {
     let words: Vec<&str> = colours.split(',').collect();
     let mut scene = LfoScene::default();
     for (n, (c, l)) in scene.columns.iter_mut().zip(lfos).enumerate() {
-        let (at, continuous, hz, timed, phase, mode, mono, rise, screen, orb) = l;
+        let (at, continuous, hz, timed, phase, mode, mono, fade, screen, orb) = l;
+        let fade = std::env::var("CA72_LFO_FADE")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(fade);
         // (A dotted eighth at 120 BPM: 0.75 of a beat.)
         let hz = if timed.is_some() { 2.0 / 0.75 } else { hz };
         let shape = |at: f64, p: f64| -> f64 {
@@ -859,11 +864,11 @@ pub fn lfo_example() -> ca72_panel::strip::lfo::LfoScene {
         c.trace = (0..TRACE_POINTS)
             .map(|i| out(i as f64 / (TRACE_POINTS - 1) as f64) as f32)
             .collect();
-        // (ENV's orb held at its cycle's end; one RISE is fading in, a little way into it.)
+        // (ENV's orb held at its cycle's end; a FADE is fading in or out, a little way into it.)
         let orb = if mode == 1.0 { 1.0 } else { orb };
-        let gain = if rise > 0.0 { 0.6 } else { 1.0 };
+        let gain = if fade != 0.0 { 0.6 } else { 1.0 };
         c.orb = Some((orb, out(orb) * gain));
-        c.orb_rise = gain;
+        c.orb_fade = gain;
         c.colour = rgb(words.get(n).copied().unwrap_or("amber"));
         c.continuous = continuous;
         c.shape_at = at;
@@ -875,7 +880,7 @@ pub fn lfo_example() -> ca72_panel::strip::lfo::LfoScene {
             c.rate = d as f64 / 17.0;
         }
         c.phase = phase / 360.0;
-        c.rise = (rise / 10.0).cbrt();
+        c.fade = 0.5 + 0.5 * fade.signum() * (fade.abs() / 10.0).cbrt();
         c.mode = mode;
         c.mono = mono;
         c.screen = screen.into();

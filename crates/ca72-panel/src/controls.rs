@@ -41,8 +41,10 @@ pub enum Dial {
     LfoRate,
     /// An LFO's PHASE: 0 to 360 degrees.
     LfoPhase,
-    /// An LFO's RISE: 0 to 10 s on a cube-root travel, so that short fades have room.
-    LfoRise,
+    /// An LFO's FADE (decisions.md R-LFO-FADE): off at its top, out to the left and in to the
+    /// right, 10 s at each end, on a cube-root travel each way, so that short fades have room;
+    /// its centre a detent (`interact::release`).
+    LfoFade,
     /// A macro's (decisions.md R-MACROS): 0 to 10, eleven ticks, only its ends numbered, its
     /// name's screen over its top.
     Macro,
@@ -394,7 +396,7 @@ const fn lfo_column(
         lfo(params[1], labels[1], p.rate, lfo_knob(Dial::LfoRate)),
         lfo(params[2], labels[2], p.timed, Kind::Key),
         lfo(params[3], labels[3], p.phase, lfo_knob(Dial::LfoPhase)),
-        lfo(params[4], labels[4], p.rise, lfo_knob(Dial::LfoRise)),
+        lfo(params[4], labels[4], p.fade, lfo_knob(Dial::LfoFade)),
         lfo(
             params[5],
             labels[5],
@@ -414,7 +416,7 @@ const fn lfo_column(
 
 /// The parts of an LFO's column that are controls, their parameters' IDs' last parts.
 pub const LFO_PARTS: [&str; 10] = [
-    "waveform", "rate", "timed", "phase", "rise", "mode", "mono", "polarity", "on", "level",
+    "waveform", "rate", "timed", "phase", "fade", "mode", "mono", "polarity", "on", "level",
 ];
 
 /// LEVEL's place among [`LFO_PARTS`]: its OUT jack's (R-LFO's addendum).
@@ -428,7 +430,7 @@ const LFO_COLUMNS: [[Control; 10]; 4] = [
             "lfo1_rate",
             "lfo1_timed",
             "lfo1_phase",
-            "lfo1_rise",
+            "lfo1_fade",
             "lfo1_mode",
             "lfo1_mono",
             "lfo1_polarity",
@@ -440,7 +442,7 @@ const LFO_COLUMNS: [[Control; 10]; 4] = [
             "LFO 1 RATE",
             "LFO 1 TIMED",
             "LFO 1 PHASE",
-            "LFO 1 RISE",
+            "LFO 1 FADE",
             "LFO 1 MODE (FREE, RETRIG or ENV)",
             "LFO 1 MONO",
             "LFO 1 POLARITY (BI or UNI)",
@@ -455,7 +457,7 @@ const LFO_COLUMNS: [[Control; 10]; 4] = [
             "lfo2_rate",
             "lfo2_timed",
             "lfo2_phase",
-            "lfo2_rise",
+            "lfo2_fade",
             "lfo2_mode",
             "lfo2_mono",
             "lfo2_polarity",
@@ -467,7 +469,7 @@ const LFO_COLUMNS: [[Control; 10]; 4] = [
             "LFO 2 RATE",
             "LFO 2 TIMED",
             "LFO 2 PHASE",
-            "LFO 2 RISE",
+            "LFO 2 FADE",
             "LFO 2 MODE (FREE, RETRIG or ENV)",
             "LFO 2 MONO",
             "LFO 2 POLARITY (BI or UNI)",
@@ -482,7 +484,7 @@ const LFO_COLUMNS: [[Control; 10]; 4] = [
             "lfo3_rate",
             "lfo3_timed",
             "lfo3_phase",
-            "lfo3_rise",
+            "lfo3_fade",
             "lfo3_mode",
             "lfo3_mono",
             "lfo3_polarity",
@@ -494,7 +496,7 @@ const LFO_COLUMNS: [[Control; 10]; 4] = [
             "LFO 3 RATE",
             "LFO 3 TIMED",
             "LFO 3 PHASE",
-            "LFO 3 RISE",
+            "LFO 3 FADE",
             "LFO 3 MODE (FREE, RETRIG or ENV)",
             "LFO 3 MONO",
             "LFO 3 POLARITY (BI or UNI)",
@@ -509,7 +511,7 @@ const LFO_COLUMNS: [[Control; 10]; 4] = [
             "lfo4_rate",
             "lfo4_timed",
             "lfo4_phase",
-            "lfo4_rise",
+            "lfo4_fade",
             "lfo4_mode",
             "lfo4_mono",
             "lfo4_polarity",
@@ -521,7 +523,7 @@ const LFO_COLUMNS: [[Control; 10]; 4] = [
             "LFO 4 RATE",
             "LFO 4 TIMED",
             "LFO 4 PHASE",
-            "LFO 4 RISE",
+            "LFO 4 FADE",
             "LFO 4 MODE (FREE, RETRIG or ENV)",
             "LFO 4 MONO",
             "LFO 4 POLARITY (BI or UNI)",
@@ -969,7 +971,7 @@ pub const CONTROLS: [Control; 116] = [
         576.0 + KEY_BELOW_RANGE,
     ),
     // The LFO page's (decisions.md R-LFO), the plug-in's own, after every other, so that no
-    // control moves: each LFO's WAVEFORM, RATE, its TIMED key, PHASE, RISE, MODE and MONO.
+    // control moves: each LFO's WAVEFORM, RATE, its TIMED key, PHASE, FADE, MODE and MONO.
     LFO_COLUMNS[0][0],
     LFO_COLUMNS[0][1],
     LFO_COLUMNS[0][2],
@@ -1066,28 +1068,28 @@ pub const CONTROL_SET: ControlSet = ControlSet {
         ("lfo1_rate", 4),
         ("lfo1_timed", 4),
         ("lfo1_phase", 4),
-        ("lfo1_rise", 4),
+        ("lfo1_fade", 4),
         ("lfo1_mode", 4),
         ("lfo1_mono", 4),
         ("lfo2_waveform", 4),
         ("lfo2_rate", 4),
         ("lfo2_timed", 4),
         ("lfo2_phase", 4),
-        ("lfo2_rise", 4),
+        ("lfo2_fade", 4),
         ("lfo2_mode", 4),
         ("lfo2_mono", 4),
         ("lfo3_waveform", 4),
         ("lfo3_rate", 4),
         ("lfo3_timed", 4),
         ("lfo3_phase", 4),
-        ("lfo3_rise", 4),
+        ("lfo3_fade", 4),
         ("lfo3_mode", 4),
         ("lfo3_mono", 4),
         ("lfo4_waveform", 4),
         ("lfo4_rate", 4),
         ("lfo4_timed", 4),
         ("lfo4_phase", 4),
-        ("lfo4_rise", 4),
+        ("lfo4_fade", 4),
         ("lfo4_mode", 4),
         ("lfo4_mono", 4),
         ("macro1", 5),

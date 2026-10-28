@@ -4,10 +4,10 @@
 //!
 //! - its scope (a CRT in the LFO's phosphor colour: graticule, the glowing trace of one cycle
 //!   of its waveform from PHASE, and an orb along it where the LFO is in its cycle, at its
-//!   output: under the trace while RISE fades it in, stopped at the cycle's end in ENV), MODE (the panel's three-position toggle: FREE, RETRIG, ENV) and MONO beside it;
+//!   output: under the trace while FADE fades it in or out, stopped at the cycle's end in ENV), MODE (the panel's three-position toggle: FREE, RETRIG, ENV) and MONO beside it;
 //! - WAVEFORM (the oscillators' switch, STEPPED or CONTINUOUS), RATE (Hz, or its note values
 //!   while its timed key is on), PHASE;
-//! - RISE, the OUT jack its assignments are dragged from, and the MODULATES screen.
+//! - FADE, the OUT jack its assignments are dragged from, and the MODULATES screen.
 //!
 //! Every control is the panel's own at the panel's size (`controls::CONTROLS`, `Place::Lfo`),
 //! drawn as the panel's renderer draws controls. What does not change is drawn once a scale on a
@@ -49,7 +49,7 @@ const TITLE: f64 = super::TITLE;
 const TITLE_Y: f64 = H - 50.0;
 const LEGEND_UP: f64 = 109.0;
 const PITCH: f64 = 212.0;
-/// The rows: WAVEFORM, RATE and PHASE; RISE, the jack and the screen.
+/// The rows: WAVEFORM, RATE and PHASE; FADE, the jack and the screen.
 pub const ROW1: f64 = 1365.0;
 pub const ROW2: f64 = 1612.0;
 const TIMED_Y: f64 = ROW1 + 118.0;
@@ -63,7 +63,7 @@ const MODE_AT: (f64, f64) = (228.0, 1152.0);
 const MONO_AT: (f64, f64) = (176.0, 1214.0);
 /// The ON key and POLARITY's UNI key (R-LFO's corrections), in the foot's band beside the
 /// title (round 2's budget: the title 644–774 of a column 370–1047.5, about its middle ±65;
-/// RISE's numbers down to 1704, the screen's surround to 1643, the foot 1769). ON's cap just
+/// FADE's numbers down to 1704, the screen's surround to 1643, the foot 1769). ON's cap just
 /// left of the title, as far from it as a key's word is from its cap, so that the title is its
 /// word (the title is pressed as the key is); UNI's to the title's right, under the screen.
 const TITLE_HALF: f64 = 65.0;
@@ -103,7 +103,7 @@ pub struct Places {
     pub rate: (f64, f64),
     pub phase: (f64, f64),
     pub timed: (f64, f64),
-    pub rise: (f64, f64),
+    pub fade: (f64, f64),
     pub jack: (f64, f64),
     pub screen: (f64, f64, f64, f64),
 }
@@ -121,7 +121,7 @@ pub const fn places(n: usize) -> Places {
         rate: (c, ROW1),
         phase: (c + PITCH, ROW1),
         timed: (c, TIMED_Y),
-        rise: (c - PITCH, ROW2),
+        fade: (c - PITCH, ROW2),
         jack: (c + JACK_AT.0, JACK_AT.1),
         screen: (c + SCREEN.0, SCREEN.1, SCREEN.2, SCREEN.3),
     }
@@ -230,11 +230,11 @@ pub struct Column {
     pub wave: f64,
     pub continuous: bool,
     pub shape_at: f64,
-    /// RATE's knob (its Hz, or its DIVISION while timed), PHASE's, RISE's (normalized), MODE's
+    /// RATE's knob (its Hz, or its DIVISION while timed), PHASE's, FADE's (normalized), MODE's
     /// toggle (0 FREE, 0.5 RETRIG, 1 ENV).
     pub rate: f64,
     pub phase: f64,
-    pub rise: f64,
+    pub fade: f64,
     pub mode: f64,
     /// Its timed key on (RATE in note values: its dial printed so), its division's place among
     /// the eighteen (the key's sign), MONO.
@@ -253,9 +253,9 @@ pub struct Column {
     pub trace: Vec<f32>,
     /// The orb: how far along the trace (0..1), and the output there (-1..1); none, no orb.
     pub orb: Option<(f64, f64)>,
-    /// RISE's gain at the orb (0..1): its wake drawn at so much of the trace's height, as the
+    /// FADE's gain at the orb (0..1): its wake drawn at so much of the trace's height, as the
     /// orb rides at the output.
-    pub orb_rise: f64,
+    pub orb_fade: f64,
     /// What MODULATES reads, and whether lit (dim: NOT IN USE).
     pub screen: String,
     pub in_use: bool,
@@ -270,7 +270,7 @@ impl Default for Column {
             shape_at: 0.0,
             rate: 0.5,
             phase: 0.0,
-            rise: 0.0,
+            fade: 0.5,
             mode: 0.0,
             timed: false,
             division: 8,
@@ -279,7 +279,7 @@ impl Default for Column {
             on: true,
             trace: vec![0.0; TRACE_POINTS],
             orb: None,
-            orb_rise: 1.0,
+            orb_fade: 1.0,
             screen: "NOT IN USE".into(),
             in_use: false,
             live: false,
@@ -596,7 +596,7 @@ impl LfoRenderer {
     fn orb_for(&mut self, n: usize, col: &Column) -> Vec<[i32; 4]> {
         // (Its screen drawn again: its patch cut from the new one.)
         let key: Key = match col.orb {
-            Some((x, v)) => vec![1, word(x), word(v), word(col.orb_rise), self.generations[n]],
+            Some((x, v)) => vec![1, word(x), word(v), word(col.orb_fade), self.generations[n]],
             None => vec![0],
         };
         if self.orbs[n].as_ref().is_some_and(|(k, _)| *k == key) {
@@ -638,7 +638,7 @@ impl LfoRenderer {
             .map(|j| {
                 at(
                     j,
-                    f64::from(col.trace[j.min(col.trace.len() - 1)]) * col.orb_rise,
+                    f64::from(col.trace[j.min(col.trace.len() - 1)]) * col.orb_fade,
                 )
             })
             .collect();
@@ -802,7 +802,7 @@ impl LfoRenderer {
             1 => vec![word(col.rate), u64::from(col.timed)],
             2 => vec![u64::from(col.timed), col.division as u64],
             3 => vec![word(col.phase)],
-            4 => vec![word(col.rise)],
+            4 => vec![word(col.fade)],
             5 => vec![word(col.mode)],
             6 => vec![u64::from(col.mono)],
             7 => vec![u64::from(col.uni)],
@@ -861,7 +861,7 @@ impl LfoRenderer {
                 }
                 1 => panel.paint_control(i, col.rate),
                 3 => panel.paint_control(i, col.phase),
-                4 => panel.paint_control(i, col.rise),
+                4 => panel.paint_control(i, col.fade),
                 _ => panel.paint_control(i, col.mode),
             }
         };
@@ -1435,7 +1435,7 @@ fn surfaces(oy: f64, skin: Skin) -> String {
                 (p.wave, art::SELECTOR_R + 2.0),
                 (p.rate, art::STD.skirt),
                 (p.phase, art::STD.skirt),
-                (p.rise, art::STD.skirt),
+                (p.fade, art::STD.skirt),
             ] {
                 put!(
                     u,
@@ -1553,7 +1553,7 @@ fn print_svg(oy: f64, lettering: Lettering, layout: &Layout, times: &str) -> Str
             (p.wave, "WAVEFORM"),
             (p.rate, "RATE"),
             (p.phase, "PHASE"),
-            (p.rise, "RISE"),
+            (p.fade, "FADE"),
         ] {
             text(&mut t, x, y - LEGEND_UP, w, legend);
         }
@@ -1569,7 +1569,7 @@ fn print_svg(oy: f64, lettering: Lettering, layout: &Layout, times: &str) -> Str
         text(&mut t, sx + sw / 2.0, sy - 27.0, "MODULATES", small);
         art::dial_print(&mut t, p.rate.0, p.rate.1, Dial::LfoRate, times);
         art::dial_print(&mut t, p.phase.0, p.phase.1, Dial::LfoPhase, times);
-        art::dial_print(&mut t, p.rise.0, p.rise.1, Dial::LfoRise, times);
+        art::dial_print(&mut t, p.fade.0, p.fade.1, Dial::LfoFade, times);
         art::waveform_marks(&mut t, p.wave.0, p.wave.1, layout, false);
     }
     t.0.push_str("</g>");
@@ -1678,7 +1678,7 @@ mod tests {
             let steps: [&dyn Fn(&mut LfoScene); 9] = [
                 &|s| s.columns[0].phase = 0.7,
                 &|s| s.columns[2].orb = Some((0.8, -0.5)),
-                &|s| s.columns[2].orb_rise = 0.4,
+                &|s| s.columns[2].orb_fade = 0.4,
                 &|s| s.columns[1].trace[100] = 0.9,
                 &|s| {
                     s.columns[3].timed = true;

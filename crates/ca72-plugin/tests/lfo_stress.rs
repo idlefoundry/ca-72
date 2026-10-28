@@ -1,6 +1,6 @@
 //! The LFOs at their worst (decisions.md R-LFO-STRESS): the test presets of
 //! `docs/lfo-stress/presets` (each aimed at one weakness: fast LFOs on pitch and CUTOFF at strong
-//! EMPHASIS, SHARP and SOFT edges, four LFOs clamped, MONO off with RETRIG, RISE and ENV, timed at
+//! EMPHASIS, SHARP and SOFT edges, four LFOs clamped, MONO off with RETRIG, FADE and ENV, timed at
 //! 200 BPM, a CONTINUOUS WAVEFORM, FEEDBACK and DETUNE, the heaviest patch), read as the library
 //! reads them and played through the plug-in's own `process` as a host renders offline:
 //! 256-frame blocks at 48 kHz, each preset's MIDI phrase, the transport playing.
@@ -206,7 +206,7 @@ fn phrase(n: u32) -> Vec<(f64, f64, u8)> {
             }
             out
         }
-        // A note a second (RISE and ENV start at each).
+        // A note a second (FADE and ENV start at each).
         11 => (0..7)
             .map(|k| {
                 let t = 0.25 + f64::from(k);

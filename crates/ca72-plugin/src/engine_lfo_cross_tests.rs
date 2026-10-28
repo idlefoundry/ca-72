@@ -6,8 +6,8 @@
 
 use super::*;
 use crate::lfo::{
-    self, Assignment, Edges, LEVEL_RANGE, LfoKnob, Mode, PHASE_RANGE, RATE_HZ, RATE_RANGE,
-    RISE_RANGE, Settings, Source, TICKS_A_SECOND, Target,
+    self, Assignment, Edges, FADE_RANGE, LEVEL_RANGE, LfoKnob, Mode, PHASE_RANGE, RATE_HZ,
+    RATE_RANGE, Settings, Source, TICKS_A_SECOND, Target,
 };
 use ca72::voice::{SHAPE_PLACES, shape_snapped};
 
@@ -25,7 +25,7 @@ fn travel(s: &Settings, k: LfoKnob) -> f32 {
     match k {
         LfoKnob::Rate => RATE_RANGE.normalize(s.hz as f32),
         LfoKnob::Phase => PHASE_RANGE.normalize((s.phase * 360.0) as f32),
-        LfoKnob::Rise => RISE_RANGE.normalize(s.rise as f32),
+        LfoKnob::Fade => FADE_RANGE.normalize(s.fade as f32),
         LfoKnob::Shape => (s.at / SHAPE_PLACES) as f32,
         LfoKnob::Level => LEVEL_RANGE.normalize((s.level * 100.0) as f32),
     }
@@ -88,7 +88,7 @@ fn values(e: &Engine) -> (u64, [f64; lfo::LFOS]) {
 
 /// A patch of loops: LFO 1's RATE moved by LFO 2 and LFO 2's by LFO 1 (a coupled pair), LFO
 /// 3's PHASE by LFO 4 and LFO 4's by LFO 3, LFO 3 on its own RATE, LFO 4 on its own LEVEL,
-/// macro 1 on LFO 2's RISE; each LFO on CUTOFF too. `mode` every LFO's.
+/// macro 1 on LFO 2's FADE; each LFO on CUTOFF too. `mode` every LFO's.
 fn looped(mode: Mode) -> Controls {
     let mut c = Controls {
         lfo: lfo::Lfos {
@@ -113,7 +113,7 @@ fn looped(mode: Mode) -> Controls {
         (Source::Lfo(2), Target::LfoPhase(3), 0.4),
         (Source::Lfo(2), Target::LfoRate(2), 0.45),
         (Source::Lfo(3), Target::LfoLevel(3), -0.8),
-        (Source::Macro(0), Target::LfoRise(1), 0.3),
+        (Source::Macro(0), Target::LfoFade(1), 0.3),
     ] {
         c = assign(c, from, t, d, 0.0);
     }
@@ -123,7 +123,7 @@ fn looped(mode: Mode) -> Controls {
     c
 }
 
-/// Each of an LFO's knobs takes a source, as its own knob would have it: RATE, PHASE, RISE,
+/// Each of an LFO's knobs takes a source, as its own knob would have it: RATE, PHASE, FADE,
 /// the CONTINUOUS shape and LEVEL, through their parameters' ranges, clamped; RATE not while
 /// timed, the shape not while STEPPED; LEVEL scaling every assignment of its LFO's; and with
 /// none, the LFO as its knobs have it.
@@ -154,8 +154,21 @@ fn each_lfo_knob_takes_a_source() {
     assert_eq!(s.hz, f64::from(RATE_HZ.1), "RATE clamped");
     let s = moved(base, Target::LfoPhase(0), 0.25);
     assert!((s.phase - 0.25).abs() < 1e-6, "PHASE {}", s.phase);
-    let s = moved(base, Target::LfoRise(0), 0.5);
-    assert!((s.rise - f64::from(RISE_RANGE.unnormalize(0.5))).abs() < 1e-6);
+    // FADE from its centre (off): a fade in; past its end, clamped; and a fade in carried
+    // across the centre to a fade out (decisions.md R-LFO-FADE).
+    let s = moved(base, Target::LfoFade(0), 0.25);
+    let want = FADE_RANGE.unnormalize(0.75);
+    assert!((s.fade - f64::from(want)).abs() < 1e-6, "FADE {}", s.fade);
+    let s = moved(base, Target::LfoFade(0), 1.0);
+    assert_eq!(s.fade, f64::from(lfo::FADE_MOST), "FADE clamped");
+    let fading_in = Settings { fade: 1.0, ..base };
+    let s = moved(fading_in, Target::LfoFade(0), -0.5);
+    let want = FADE_RANGE.unnormalize(FADE_RANGE.normalize(1.0) - 0.5);
+    assert!(
+        want < -1.0 && (s.fade - f64::from(want)).abs() < 1e-5,
+        "FADE {}",
+        s.fade
+    );
     let s = moved(base, Target::LfoLevel(0), -0.6);
     assert!((s.level - 0.3).abs() < 1e-6, "LEVEL {}", s.level);
     // The shape only while CONTINUOUS.

@@ -1228,7 +1228,7 @@ fn the_lfos_moving_each_other_neither_allocate_nor_free() {
 
 /// The LFOs' run for [`the_lfos_neither_allocate_nor_free`]; `cross`, half of each source's
 /// knobs the LFOs' own (an LFO's own RATE, the next one's RATE and PHASE, another's LEVEL; the
-/// macros' RISE, shape and LEVEL).
+/// macros' FADE, shape and LEVEL).
 fn lfos_play_without_allocating(cross: bool) {
     use ca72_plugin::Ca72;
     use ca72_plugin::lfo::{Source, Target};
@@ -1300,12 +1300,12 @@ fn lfos_play_without_allocating(cross: bool) {
         assert!(c.automate(a.lfo(n).mono.as_ptr(), 0.0));
     }
     // (The six macros on the same knobs, one way each: decisions.md R-MACROS; moving the
-    // LFOs, their RISE, shape and LEVEL too.)
+    // LFOs, their FADE, shape and LEVEL too.)
     for n in 0..ca72_plugin::lfo::MACROS {
         let mut on = targets(n);
         if cross {
             (on[4], on[5], on[6]) = (
-                Target::LfoRise(n % 4),
+                Target::LfoFade(n % 4),
                 Target::LfoShape((n + 1) % 4),
                 Target::LfoLevel((n + 3) % 4),
             );
@@ -1366,7 +1366,7 @@ fn lfos_play_without_allocating(cross: bool) {
         c.automate(q.mode.as_ptr(), (b / 37 % 3) as f32 / 2.0);
         c.automate(q.rate.as_ptr(), (b % 50) as f32 / 49.0);
         c.automate(q.timed.as_ptr(), if b % 90 < 45 { 1.0 } else { 0.0 });
-        c.automate(q.rise.as_ptr(), (b % 7) as f32 / 6.0);
+        c.automate(q.fade.as_ptr(), (b % 7) as f32 / 6.0);
         c.automate(q.mono.as_ptr(), if b % 130 < 100 { 0.0 } else { 1.0 });
         // (POLARITY, REVERSE and ON: R-LFO's corrections; ON's fade through.)
         let keys = a.lfo_keys(n);

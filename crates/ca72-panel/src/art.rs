@@ -633,24 +633,33 @@ fn marks(dial: Dial) -> DialMarks {
                 .collect::<Vec<_>>(),
             &["0", "90", "180", "270", "360"],
         ),
-        // RISE: its parameter's cube-root travel (a share `t` is 10 t^3 s), SEC. at its foot.
-        Dial::LfoRise => {
-            let at = |s: f64| -150.0 + 300.0 * (s / 10.0).cbrt();
-            let labels = [
-                (0.0, "0"),
-                (0.1, ".1"),
-                (0.5, ".5"),
-                (1.0, "1"),
-                (2.0, "2"),
-                (5.0, "5"),
-                (10.0, "10"),
-            ];
+        // FADE (decisions.md R-LFO-FADE): RISE's dial mirrored about its top, OFF there, a
+        // share `t` of the way to either end 10 t^3 s; ticks at .1, .5, 1, 2, 5 and 10 s each
+        // way, 1 and the ends' 10 numbered; OUT and IN either side of OFF, over the halves they
+        // name (as MODULATION MIX's OSC. 3 and NOISE name its ends); SEC. at its foot as RISE's.
+        Dial::LfoFade => {
+            let at = |s: f64| 150.0 * s.signum() * (s.abs() / 10.0).cbrt();
+            let ticks = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0];
+            let numbered = [1.0, 10.0];
             DialMarks {
-                ticks: labels
-                    .iter()
-                    .map(|&(s, _)| (at(s), 58.0, 71.0, 4.0))
+                ticks: std::iter::once((0.0, 58.0, 76.0, 4.0))
+                    .chain(ticks.iter().flat_map(|&s| {
+                        let r1 = if numbered.contains(&s) { 71.0 } else { 66.0 };
+                        [(at(-s), 58.0, r1, 4.0), (at(s), 58.0, r1, 4.0)]
+                    }))
                     .collect(),
-                labels: labels.iter().map(|&(s, t)| (at(s), t, None)).collect(),
+                labels: [
+                    (0.0, "OFF", None),
+                    (-FADE_WAY, "OUT", None),
+                    (FADE_WAY, "IN", None),
+                ]
+                .into_iter()
+                .chain(
+                    [(1.0, "1"), (10.0, "10")]
+                        .into_iter()
+                        .flat_map(|(s, t)| [(at(-s), t, None), (at(s), t, None)]),
+                )
+                .collect(),
                 r: 86.0,
                 captions: vec![(0.0, 82.0, "SEC.")],
             }
@@ -676,6 +685,9 @@ fn marks(dial: Dial) -> DialMarks {
         },
     }
 }
+
+/// Where FADE's OUT and IN stand either side of its OFF (degrees from twelve o'clock).
+const FADE_WAY: f64 = 40.0;
 
 /// Where an LFO's RATE dial points at `hz` (degrees from twelve o'clock): its parameter's
 /// skewed travel, 0.01 to 50 Hz, the travel's share the fifth root of the range's.

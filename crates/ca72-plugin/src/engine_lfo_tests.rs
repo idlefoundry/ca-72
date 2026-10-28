@@ -1,6 +1,6 @@
 //! The LFOs in the engine (decisions.md R-LFO): nothing assigned is the engine as before to the
 //! bit; an assigned knob moved by depth × LFO after its glide, clamped to its travel, through
-//! its law; RETRIG independent of the main RETRIGGER, ENV and FREE's RISE against it;
+//! its law; RETRIG independent of the main RETRIGGER, ENV and FREE's FADE against it;
 //! each voice its own with MONO off, the
 //! shared targets the shared copy; the timed lock; the sleep.
 
@@ -82,7 +82,7 @@ fn slot_of(e: &Engine, key: u8) -> usize {
         .expect("a voice")
 }
 
-/// With no assignment, or every depth 0, the LFOs' settings (MONO off, RETRIG, RISE, timed)
+/// With no assignment, or every depth 0, the LFOs' settings (MONO off, RETRIG, FADE, timed)
 /// change nothing: the samples are the same to the bit, the one instrument and POLY.
 #[test]
 fn nothing_assigned_plays_as_before_to_the_bit() {
@@ -99,7 +99,7 @@ fn nothing_assigned_plays_as_before_to_the_bit() {
                 hz: 7.0,
                 mode: Mode::Retrig,
                 mono: false,
-                rise: 0.3,
+                fade: 0.3,
                 // (And POLARITY UNI, REVERSE and ON off: R-LFO's corrections.)
                 uni: k % 2 == 0,
                 reverse: k < 2,
@@ -531,31 +531,31 @@ fn a_knob_is_moved_through_its_own_law() {
     assert!((e.controls.feedback - ca72::voice::feedback_law((0.2 * v).max(0.0))).abs() < 1e-6);
 }
 
-/// Each LFO's RETRIG starts phase and RISE again on a legato key independently of the main
+/// Each LFO's RETRIG starts phase and FADE again on a legato key independently of the main
 /// contours' RETRIGGER. The one instrument and POLY's shared LFO.
 #[test]
-fn retrig_and_rise_start_on_every_note_independently_of_main_retrigger() {
+fn retrig_and_fade_start_on_every_note_independently_of_main_retrigger() {
     for poly in [false, true] {
         for retrigger in [false, true] {
             let mut c = controls();
             c.poly = poly;
             c.panel.retrigger = retrigger;
             let s = Settings {
-                rise: 1.0,
+                fade: 1.0,
                 ..sharp(Mode::Retrig, 2.0, 1.0)
             };
             let c = with(c, 0, s, Target::Cutoff, 0.5, 0.5);
             let mut e = engine(&c);
             assert_eq!(
-                e.lfo_readings()[0].rise,
+                e.lfo_readings()[0].fade,
                 0.0,
-                "no note yet: RISE at nothing"
+                "no note yet: a FADE in at nothing"
             );
             key(&mut e, 60, true);
             run(&mut e, secs(0.3));
             let r = e.lfo_readings()[0];
             assert!((r.since - 0.3).abs() < 0.002, "{r:?}");
-            assert!((r.rise - 0.3).abs() < 0.002 && (r.phase - 0.3).abs() < 0.002);
+            assert!((r.fade - 0.3).abs() < 0.002 && (r.phase - 0.3).abs() < 0.002);
             key(&mut e, 64, true);
             run(&mut e, secs(0.1));
             let r = e.lfo_readings()[0];
@@ -592,7 +592,7 @@ fn only_retrig_sources_restart_on_a_legato_key() {
                 {
                     let s = Settings {
                         mono,
-                        rise: 1.0,
+                        fade: 1.0,
                         phase: 0.15,
                         ..sharp(mode, 2.0, 1.0)
                     };
@@ -609,7 +609,7 @@ fn only_retrig_sources_restart_on_a_legato_key() {
                     let phase = if reset && j != 2 { 0.25 } else { 0.55 };
                     assert!(
                         (r.since - since).abs() < 0.002
-                            && (r.rise - since).abs() < 0.002
+                            && (r.fade - since).abs() < 0.002
                             && (r.phase - phase).abs() < 0.002,
                         "unison {unison}, mono {mono}, main retrigger {retrigger}, source {j}: {r:?}"
                     );
@@ -617,6 +617,115 @@ fn only_retrig_sources_restart_on_a_legato_key() {
             }
         }
     }
+}
+
+/// A FADE out (decisions.md R-LFO-FADE) starts where RISE started, and by the same rules: at
+/// full before any note, however long; from full at each note-on for RETRIG, whatever the main
+/// RETRIGGER; for FREE and ENV as main RETRIGGER says (off, a key from silence; on, every key);
+/// each POLY voice's own (MONO off) at the note it takes. Once over, the LFO gives nothing: its
+/// knob is where it is set.
+#[test]
+fn a_fade_out_falls_from_each_note_by_rises_rules() {
+    let out = |mode, mono| Settings {
+        mono,
+        fade: -1.0,
+        phase: 0.15,
+        ..sharp(mode, 2.0, 1.0)
+    };
+    // Before any note: full, the waveform as it is.
+    let c = with(
+        controls(),
+        0,
+        out(Mode::Free, true),
+        Target::Cutoff,
+        0.5,
+        0.5,
+    );
+    let mut e = engine(&c);
+    run(&mut e, secs(1.5));
+    let r = e.lfo_readings()[0];
+    assert_eq!(r.fade, 1.0, "no note yet: a FADE out at full");
+    assert!(r.value != 0.0 && r.moving, "{r:?}");
+    // Each mode, each copy, against main RETRIGGER.
+    for unison in [false, true] {
+        for mono in [false, true] {
+            for retrigger in [false, true] {
+                let mut c = controls();
+                c.unison = unison;
+                c.voices = 2;
+                c.panel.retrigger = retrigger;
+                for (j, mode) in [Mode::Retrig, Mode::Env, Mode::Free, Mode::Retrig]
+                    .into_iter()
+                    .enumerate()
+                {
+                    c = with(c, j, out(mode, mono), Target::Tune, 0.001, 0.5);
+                }
+                let mut e = engine(&c);
+                key(&mut e, 60, true);
+                run(&mut e, secs(0.3));
+                for r in e.lfo_readings() {
+                    assert!((r.fade - 0.7).abs() < 0.002, "{r:?}");
+                }
+                key(&mut e, 64, true);
+                run(&mut e, secs(0.1));
+                for (j, r) in e.lfo_readings().iter().enumerate() {
+                    let reset = retrigger || matches!(j, 0 | 3);
+                    let since = if reset { 0.1 } else { 0.4 };
+                    assert!(
+                        (r.since - since).abs() < 0.002 && (r.fade - (1.0 - since)).abs() < 0.002,
+                        "unison {unison}, mono {mono}, main retrigger {retrigger}, source {j}: {r:?}"
+                    );
+                }
+                // From silence, every one again.
+                key(&mut e, 60, false);
+                key(&mut e, 64, false);
+                run(&mut e, secs(0.1));
+                key(&mut e, 62, true);
+                run(&mut e, secs(0.05));
+                for r in e.lfo_readings() {
+                    assert!((r.fade - 0.95).abs() < 0.002, "from silence: {r:?}");
+                }
+                // Over: nothing.
+                run(&mut e, secs(1.0));
+                for (j, r) in e.lfo_readings().iter().enumerate() {
+                    assert_eq!(r.fade, 0.0, "source {j}");
+                    assert_eq!(r.value, 0.0, "source {j}");
+                }
+            }
+        }
+    }
+}
+
+/// A POLY voice's own LFO (MONO off) fading out starts from full at the note the voice takes,
+/// whatever the other voices' fades have reached: each voice's knob moved by its own.
+#[test]
+fn each_poly_voice_fades_out_from_its_own_note() {
+    let mut c = controls();
+    c.poly = true;
+    c.voices = 4;
+    let s = Settings {
+        mono: false,
+        fade: -1.0,
+        ..sharp(Mode::Free, 3.0, 0.01)
+    };
+    let c = with(c, 0, s, Target::Cutoff, 0.4, 0.5);
+    let mut e = engine(&c);
+    key(&mut e, 60, true);
+    run(&mut e, secs(0.6));
+    key(&mut e, 67, true);
+    run(&mut e, secs(0.2));
+    // SQUARE at its top (1): the first voice's fade at 0.2, the second's at 0.8.
+    let (a, b) = (panel(&e, slot_of(&e, 60)), panel(&e, slot_of(&e, 67)));
+    assert!((a.cutoff - (0.5 + 0.4 * 0.2)).abs() < 0.01, "{}", a.cutoff);
+    assert!((b.cutoff - (0.5 + 0.4 * 0.8)).abs() < 0.01, "{}", b.cutoff);
+    run(&mut e, secs(1.0));
+    let (a, b) = (panel(&e, slot_of(&e, 60)), panel(&e, slot_of(&e, 67)));
+    assert!(
+        (a.cutoff - 0.5).abs() < 1e-9 && (b.cutoff - 0.5).abs() < 1e-9,
+        "both over: as set, {} {}",
+        a.cutoff,
+        b.cutoff
+    );
 }
 
 /// Restarting an individual LFO must not open the physical trigger contact or restart the
@@ -635,7 +744,7 @@ fn individual_retrig_keeps_the_main_contours_legato() {
             c,
             0,
             Settings {
-                rise: 0.9,
+                fade: 0.9,
                 ..sharp(Mode::Retrig, 0.0, 4.2)
             },
             Target::Tune,

@@ -214,7 +214,7 @@ pub const LEARNABLE: [Learnable; 168] = [
     switch("lfo1_timed", "LFO 1 TIMED"),
     stepped("lfo1_division", "LFO 1 DIVISION"),
     knob("lfo1_phase", "LFO 1 PHASE"),
-    knob("lfo1_rise", "LFO 1 RISE"),
+    knob("lfo1_fade", "LFO 1 FADE"),
     stepped("lfo1_mode", "LFO 1 MODE"),
     switch("lfo1_mono", "LFO 1 MONO"),
     stepped("lfo2_waveform", "LFO 2 WAVEFORM"),
@@ -224,7 +224,7 @@ pub const LEARNABLE: [Learnable; 168] = [
     switch("lfo2_timed", "LFO 2 TIMED"),
     stepped("lfo2_division", "LFO 2 DIVISION"),
     knob("lfo2_phase", "LFO 2 PHASE"),
-    knob("lfo2_rise", "LFO 2 RISE"),
+    knob("lfo2_fade", "LFO 2 FADE"),
     stepped("lfo2_mode", "LFO 2 MODE"),
     switch("lfo2_mono", "LFO 2 MONO"),
     stepped("lfo3_waveform", "LFO 3 WAVEFORM"),
@@ -234,7 +234,7 @@ pub const LEARNABLE: [Learnable; 168] = [
     switch("lfo3_timed", "LFO 3 TIMED"),
     stepped("lfo3_division", "LFO 3 DIVISION"),
     knob("lfo3_phase", "LFO 3 PHASE"),
-    knob("lfo3_rise", "LFO 3 RISE"),
+    knob("lfo3_fade", "LFO 3 FADE"),
     stepped("lfo3_mode", "LFO 3 MODE"),
     switch("lfo3_mono", "LFO 3 MONO"),
     stepped("lfo4_waveform", "LFO 4 WAVEFORM"),
@@ -244,7 +244,7 @@ pub const LEARNABLE: [Learnable; 168] = [
     switch("lfo4_timed", "LFO 4 TIMED"),
     stepped("lfo4_division", "LFO 4 DIVISION"),
     knob("lfo4_phase", "LFO 4 PHASE"),
-    knob("lfo4_rise", "LFO 4 RISE"),
+    knob("lfo4_fade", "LFO 4 FADE"),
     stepped("lfo4_mode", "LFO 4 MODE"),
     switch("lfo4_mono", "LFO 4 MONO"),
     // The macros (decisions.md R-MACROS).
@@ -962,10 +962,11 @@ impl Saved {
             return Saved(out);
         };
         for a in list {
+            // (An LFO's RISE, as 0.3.0's beta saved it, is its FADE: R-LFO-FADE.)
             let param = a
                 .get("param")
                 .and_then(serde_json::Value::as_str)
-                .and_then(index);
+                .and_then(|id| index(id).or_else(|| index(crate::lfo::fade_id(id)?)));
             let channel = a.get("channel").and_then(serde_json::Value::as_u64);
             let cc = a.get("cc").and_then(serde_json::Value::as_u64);
             // (A switch's note, R-MIDI-MAP: an entry with a controller as well is a controller's.)
@@ -1414,7 +1415,7 @@ mod tests {
             // ON and HOLD switches; the expression's four reaches, knobs: R-MPE; oscillators
             // 2's and 3's timed DIVISION and TIMED; each oscillator's waveform: its SHAPE knob,
             // its STEPPED or CONTINUOUS and its MOD switches, its MOD DIRECTION stepped;
-            // GLIDE RANGE, a switch; each LFO's SHAPE, RATE, PHASE and RISE knobs, WAVEFORM,
+            // GLIDE RANGE, a switch; each LFO's SHAPE, RATE, PHASE and FADE knobs, WAVEFORM,
             // DIVISION and MODE selectors, STEPPED or CONTINUOUS, TIMED and MONO switches: R-LFO;
             // the six macros, knobs: R-MACROS; each LFO's POLARITY, REVERSE and ON switches:
             // R-LFO's corrections; each LFO's LEVEL, a knob: R-LFO's addendum; the velocity's

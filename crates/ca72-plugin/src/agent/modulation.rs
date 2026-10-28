@@ -74,7 +74,7 @@ fn named(p: &Ca72Params, s: Source) -> String {
 }
 
 /// The knob an agent names (an id, a panel label or a host name; an oscillator's or an LFO's
-/// WAVEFORM, its CONTINUOUS shape; an LFO's RATE, PHASE, RISE or LEVEL: R-LFO's addendum), if it
+/// WAVEFORM, its CONTINUOUS shape; an LFO's RATE, PHASE, FADE or LEVEL: R-LFO's addendum), if it
 /// can take a source now, as the panel's drag allows.
 fn target_of(p: &Ca72Params, v: Option<&Value>) -> Result<Target, ApiError> {
     let Some(Value::String(key)) = v else {
@@ -613,7 +613,7 @@ mod tests {
         assert!(set(&p, &json!({"source": "lfo1", "target": "lfo3_waveform"})).is_err());
         let r = list(&p);
         let targets = r["targets"].as_array().unwrap();
-        for id in ["lfo1_rate", "lfo2_phase", "lfo3_rise", "lfo4_level"] {
+        for id in ["lfo1_rate", "lfo2_phase", "lfo3_fade", "lfo4_level"] {
             assert!(targets.contains(&json!(id)), "{id}");
         }
         assert!(!targets.contains(&json!("lfo1_waveform")));
