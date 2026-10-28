@@ -2067,11 +2067,12 @@ mod tests {
         assert_eq!(b.drawer.editing, None);
         assert_eq!(b.drawer.hint, "Choose a preset first.");
         typed(&mut b, "pad", &p);
-        // (With the factory pads, R-PRESETS-0.3.0.)
+        // (With the factory pads, R-PRESETS-0.3.0 and R-OWNER-PRESETS.)
         let pads = [
+            "Finger in a Light Socket",
             "Gated Chords",
-            "LFO LOOP Coupled Rates",
-            "LFO LOOP Level Pump",
+            "Gatekeeper",
+            "Level Pump",
             "Morph Bloom",
         ];
         let with_pads = |mine: &[&str]| {

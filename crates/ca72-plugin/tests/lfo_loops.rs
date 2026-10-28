@@ -1,7 +1,9 @@
-//! The LFO LOOP presets (decisions.md R-LFO's addendum: the LFOs moving each other's knobs and
-//! their own, in loops), factory presets since 0.3.0 (R-PRESETS-0.3.0), played through the
-//! plug-in's own `process` as a host renders offline (`common::host`). Each moves an LFO's own
-//! knob, and sounds: finite, not silent, not clipped.
+//! The LFO loop presets (decisions.md R-LFO's addendum: the LFOs moving each other's knobs and
+//! their own, in loops), factory presets since 0.3.0 (R-PRESETS-0.3.0) under the names the owner
+//! gave them (R-OWNER-PRESETS: Finger in a Light Socket, Phase Chase, Level Pump and Hold Me Long
+//! Time, the factory's tag `loop`), played through the plug-in's own `process` as a host renders
+//! offline (`common::host`). Each moves an LFO's own knob, and sounds: finite, not silent, not
+//! clipped.
 //!
 //! By hand, their sound for listening: `CA72_LFO_LOOPS_OUT=<dir> cargo test --release -p
 //! ca72-plugin --test lfo_loops -- --ignored --nocapture` writes each one's eight seconds at HI
@@ -19,15 +21,25 @@ use std::path::PathBuf;
 /// The WAVs' peak, dBFS: well under full scale, whatever the patch does.
 const PEAK_DBFS: f64 = -14.0;
 
-/// The LFO LOOP presets, as the factory set has them.
+/// The LFO loop presets, as the factory set has them: those tagged `loop`.
 fn presets() -> Vec<Sound> {
     let mut out: Vec<Sound> = factory()
         .iter()
-        .filter(|s| s.name.starts_with("LFO LOOP "))
+        .filter(|s| s.tags.iter().any(|t| t == "loop"))
         .cloned()
         .collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));
-    assert_eq!(out.len(), 4, "the four LFO LOOP presets");
+    let names: Vec<&str> = out.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "Finger in a Light Socket",
+            "Hold Me Long Time",
+            "Level Pump",
+            "Phase Chase"
+        ],
+        "the four LFO loop presets"
+    );
     out
 }
 
@@ -56,7 +68,8 @@ fn play(s: &Sound, seconds: f64, quality: Quality) -> Play {
     p
 }
 
-/// Each LFO LOOP preset has an LFO's own knob moved by a source, and sounds (LO, two seconds): finite, not silent, not clipped.
+/// Each LFO loop preset has an LFO's own knob moved by a source, and sounds (LO, two seconds):
+/// finite, not silent, not clipped.
 #[test]
 fn the_lfo_loop_presets_read_loop_and_sound() {
     for s in presets() {
