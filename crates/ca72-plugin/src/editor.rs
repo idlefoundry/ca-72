@@ -8424,6 +8424,7 @@ mod tests {
     /// asked, one waiting for RTKit, both refused with RTKit absent, the audio thread refused by
     /// RTKit with the workers real-time, two of six workers refused by RTKit, every one through
     /// RTKit.
+    #[cfg(target_os = "linux")]
     mod stood {
         use ca72_rt::{Standing, Why};
         const fn s(
@@ -8634,10 +8635,10 @@ mod tests {
     }
 
     /// A processor that plays nothing, for a standalone host without devices.
-    #[cfg(feature = "standalone-production")]
+    #[cfg(all(target_os = "linux", feature = "standalone-production"))]
     struct NoAudio;
 
-    #[cfg(feature = "standalone-production")]
+    #[cfg(all(target_os = "linux", feature = "standalone-production"))]
     impl plugin_kit_standalone::AudioProcessor for NoAudio {
         fn prepare(&mut self, _: plugin_kit_standalone::ProcessConfig) -> Result<(), String> {
             Ok(())

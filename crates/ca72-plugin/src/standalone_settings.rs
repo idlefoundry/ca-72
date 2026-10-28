@@ -194,7 +194,7 @@ impl Dialog {
 
     /// For a look (the editor's review frames): playing at 48 kHz in 256-frame blocks, its audio
     /// threads standing as `realtime`, polled no more.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn review(&mut self, realtime: (ca72_rt::Standing, ca72_rt::Standing)) {
         self.frame();
         self.next_poll = Instant::now() + Duration::from_secs(3600);
