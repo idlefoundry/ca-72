@@ -114,8 +114,18 @@ pub enum Standing {
 
 /// The audio thread's and the workers' standing now ([`ca72_rt::Group::standing`]): for the
 /// editor, at its frames (atomics only).
+#[cfg(not(test))]
 pub fn standing() -> (ca72_rt::Standing, ca72_rt::Standing) {
     (AUDIO.standing(), WORKERS.standing())
+}
+
+/// In the unit tests, nothing asked: the groups are the process's, and the tests' own POLY
+/// workers are refused real-time where the system allows none (CI's runners), so an editor that
+/// read them would say so, its tip drawn whole, as other tests run. A test of what is said gives
+/// its own (the editor's `stood`, AUDIO & MIDI's `review`).
+#[cfg(test)]
+pub fn standing() -> (ca72_rt::Standing, ca72_rt::Standing) {
+    Default::default()
 }
 
 /// The standalone's audio as `audio` and `workers` stand.

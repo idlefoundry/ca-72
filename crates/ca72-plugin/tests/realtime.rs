@@ -1497,6 +1497,11 @@ fn a_moving_tempo_neither_allocates_nor_frees() {
             }
         }
     };
+    // The stream's first block, off the count: there the standalone's audio thread is promoted,
+    // once (decisions.md R-DROPOUTS), and where the system refuses real-time (no rtprio
+    // allowance, as on CI's runners) the refusal's explanation is allocated, as
+    // `AudioThread::begin` permits.
+    p.process(&mut buffer, &mut aux, &mut c);
     HERE.with(|h| h.set(true));
     for b in 0..900usize {
         ARMED.store(false, Ordering::SeqCst);

@@ -40,7 +40,7 @@ class WindowIdentity(unittest.TestCase):
                            "THIRD-PARTY-NOTICES.txt"]:
                 shutil.copy(ROOT / source, payload)
             shutil.copy(ROOT / "LICENSE", payload / "LICENSE.txt")
-            for binary in ["ca72-standalone", "ca72-mcp"]:
+            for binary in ["ca72-standalone", "ca72-mcp", "ca72-fx-helper"]:
                 (payload / binary).write_text("#!/bin/sh\nexit 0\n")
             prefix = root / "prefix with spaces %"
             # A custom prefix must be an existing folder (R-INSTALL-DESTINATION).
