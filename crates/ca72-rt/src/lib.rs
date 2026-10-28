@@ -5,8 +5,9 @@
 //! promoted here, Windows's threads join MMCSS, and the flush bits travel (decisions.md R18).
 //!
 //! - macOS: the Mach time-constraint policy, with the block period;
-//! - Linux: `SCHED_FIFO`, which needs an rtprio allowance (`/etc/security/limits.conf`,
-//!   rtkit or the `audio` group); without it the thread stays as it was;
+//! - Linux: `SCHED_FIFO`, which needs an rtprio allowance (`/etc/security/limits.conf`, as
+//!   the `realtime` or `audio` group has it on some systems); without it the thread stays as
+//!   it was, or in the standalone application is asked of RTKit (below);
 //! - Windows: MMCSS's "Pro Audio" task at critical priority, as hosts' audio threads are
 //!   (time-critical thread priority where MMCSS refuses), left when the thread ends.
 //!
@@ -21,10 +22,20 @@
 //! and said on stderr. The audio then runs on, late if it must, and the machine answers.
 //! Never the host's own audio threads or another plug-in's: only threads promoted here.
 //! With none alive, the watchdog's threads sleep until one is.
+//!
+//! The standalone application alone ([`use_rtkit`]; decisions.md R-RTKIT): where Linux refuses
+//! `SCHED_FIFO` (no rtprio allowance), a thread promoted through [`promote_in`] is asked of
+//! RTKit (`org.freedesktop.RealtimeKit1`, on the system bus), by a thread of this crate's: never
+//! by the thread itself, as a D-Bus call blocks. What became of each [`Group`]'s threads is kept
+//! in atomics, for the editor to say.
 
 #![allow(unsafe_code)]
 
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::time::Duration;
+
+#[cfg(target_os = "linux")]
+mod rtkit;
 
 /// Promotes the calling thread for audio work that repeats every `period` and needs up
 /// to `computation` of it. Returns an explanation when the system refuses.
@@ -38,10 +49,225 @@ pub fn promote(period: Duration, computation: Duration) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     if r.is_ok() {
         watchdog::start();
+        watchdog::wake();
     } else if new {
         watchdog::unregister();
     }
     r
+}
+
+/// How [`promote_in`] promoted the calling thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Promoted {
+    /// At once, by the system (`SCHED_FIFO`, MMCSS, the time-constraint policy).
+    Now,
+    /// Refused, and asked of RTKit (Linux, the standalone application: [`use_rtkit`]): the
+    /// answer comes later, in its [`Group`].
+    Asked,
+}
+
+/// As [`promote`], the calling thread one of `group`'s, whose [`Group::standing`] counts it.
+/// Where the system refuses and [`use_rtkit`] was called (Linux), the thread is asked of RTKit
+/// instead of left ordinary: by this crate's RTKit thread, never the calling one, as a D-Bus
+/// call blocks. Allocates nothing but what [`promote`] does.
+pub fn promote_in(
+    group: &'static Group,
+    period: Duration,
+    computation: Duration,
+) -> Result<Promoted, String> {
+    #[cfg(target_os = "linux")]
+    let Some(new) = watchdog::register() else {
+        group.left(Why::Full);
+        return Err("too many real-time threads to watch".into());
+    };
+    match sys::promote(period, computation) {
+        Ok(()) => {
+            #[cfg(target_os = "linux")]
+            {
+                watchdog::start();
+                watchdog::wake();
+            }
+            group.direct.fetch_add(1, Ordering::AcqRel);
+            Ok(Promoted::Now)
+        }
+        Err(e) => {
+            #[cfg(target_os = "linux")]
+            {
+                // (Counted as waiting first: the answer may come before `ask` returns. The
+                // thread stays the watchdog's, to be demoted should it run away once promoted.)
+                group.waiting.fetch_add(1, Ordering::AcqRel);
+                let Err(why) = rtkit::ask(tid(), group) else {
+                    return Ok(Promoted::Asked);
+                };
+                group.answered();
+                if new {
+                    watchdog::unregister();
+                }
+                group.left(why);
+            }
+            #[cfg(not(target_os = "linux"))]
+            group.left(Why::Refused);
+            Err(e)
+        }
+    }
+}
+
+/// The standalone application's alone (decisions.md R-RTKIT): from now on, on Linux, a thread
+/// [`promote_in`] the system refuses is asked of RTKit. Starts the thread that asks (once per
+/// process). Off the audio thread; a plug-in in a host never calls this.
+pub fn use_rtkit() {
+    #[cfg(target_os = "linux")]
+    rtkit::enable();
+}
+
+/// Why a [`Group`]'s thread was left at ordinary priority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Why {
+    /// The system refused, and RTKit was not asked (not Linux, or not the standalone
+    /// application).
+    Refused = 1,
+    /// Too many real-time threads to watch, or to ask for at once.
+    Full,
+    /// Linux refused (no rtprio allowance), and there is no system bus to ask RTKit on.
+    NoBus,
+    /// Linux refused, and RTKit is not installed or not running.
+    NoRtkit,
+    /// Linux refused, and RTKit refused too (its limits, or its policy).
+    RtkitRefused,
+    /// Linux refused, and RTKit could not be asked: its real-time timeout could not be set on
+    /// this process (`RLIMIT_RTTIME`, which RTKit requires), or it did not answer.
+    RtkitFailed,
+}
+
+impl Why {
+    fn from_u8(v: u8) -> Option<Why> {
+        Some(match v {
+            1 => Why::Refused,
+            2 => Why::Full,
+            3 => Why::NoBus,
+            4 => Why::NoRtkit,
+            5 => Why::RtkitRefused,
+            6 => Why::RtkitFailed,
+            _ => return None,
+        })
+    }
+}
+
+/// Threads promoted alike (the standalone's audio thread; POLY's workers), and what the system
+/// made of them since [`Group::clear`]: counted in atomics, read from any thread.
+#[derive(Debug)]
+pub struct Group {
+    name: &'static str,
+    direct: AtomicU32,
+    rtkit: AtomicU32,
+    waiting: AtomicU32,
+    ordinary: AtomicU32,
+    /// Why the last thread left ordinary was (`Why as u8`; 0: none).
+    why: AtomicU8,
+    /// Which set of its threads is counted ([`Group::clear`] begins another): RTKit's answer for
+    /// a thread of an earlier set is let go.
+    set: AtomicU32,
+}
+
+/// A [`Group`]'s threads as they stand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Standing {
+    /// Promoted by the system at once.
+    pub direct: u32,
+    /// Promoted by RTKit.
+    pub rtkit: u32,
+    /// Asked of RTKit, not yet answered.
+    pub waiting: u32,
+    /// Left at ordinary priority, and why the last of them was.
+    pub ordinary: u32,
+    pub why: Option<Why>,
+}
+
+impl Group {
+    /// A group named `name` in what is said on standard error ("POLY's workers").
+    pub const fn new(name: &'static str) -> Group {
+        Group {
+            name,
+            direct: AtomicU32::new(0),
+            rtkit: AtomicU32::new(0),
+            waiting: AtomicU32::new(0),
+            ordinary: AtomicU32::new(0),
+            why: AtomicU8::new(0),
+            set: AtomicU32::new(0),
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// Its threads as they stand.
+    pub fn standing(&self) -> Standing {
+        Standing {
+            direct: self.direct.load(Ordering::Acquire),
+            rtkit: self.rtkit.load(Ordering::Acquire),
+            waiting: self.waiting.load(Ordering::Acquire),
+            ordinary: self.ordinary.load(Ordering::Acquire),
+            why: Why::from_u8(self.why.load(Ordering::Acquire)),
+        }
+    }
+
+    /// Counted from nothing again: a new set of its threads is starting (a stream, a pool).
+    /// RTKit's answers still to come for the set before are let go.
+    pub fn clear(&self) {
+        self.set.fetch_add(1, Ordering::AcqRel);
+        for c in [&self.direct, &self.rtkit, &self.waiting, &self.ordinary] {
+            c.store(0, Ordering::Release);
+        }
+        self.why.store(0, Ordering::Release);
+    }
+
+    /// The set of its threads now counted.
+    #[cfg(target_os = "linux")]
+    fn set(&self) -> u32 {
+        self.set.load(Ordering::Acquire)
+    }
+
+    /// A thread left ordinary, for `why`.
+    pub fn left(&self, why: Why) {
+        self.why.store(why as u8, Ordering::Release);
+        self.ordinary.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// A thread asked of RTKit has its answer (counted after this as promoted or left).
+    fn answered(&self) {
+        let _ = self
+            .waiting
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |w| {
+                Some(w.saturating_sub(1))
+            });
+    }
+
+    /// RTKit's answer for a thread of set `set`: promoted, or left ordinary for `why`, or
+    /// (None) let go, the thread having ended. Not counted if a new set has begun since.
+    #[cfg(target_os = "linux")]
+    fn answer(&self, set: u32, outcome: Option<Result<(), Why>>) -> bool {
+        if self.set() != set {
+            return false;
+        }
+        match outcome {
+            Some(Ok(())) => {
+                self.rtkit.fetch_add(1, Ordering::AcqRel);
+            }
+            Some(Err(why)) => self.left(why),
+            None => {}
+        }
+        self.answered();
+        true
+    }
+}
+
+impl Standing {
+    /// Every thread asked of RTKit has its answer.
+    pub fn settled(&self) -> bool {
+        self.waiting == 0
+    }
 }
 
 /// Makes the calling thread ordinary again (Linux: `SCHED_OTHER`; Windows: out of MMCSS, at
@@ -358,10 +584,22 @@ pub fn is_realtime() -> bool {
     {
         // SAFETY: pid 0 is the calling thread.
         let p = unsafe { libc::sched_getscheduler(0) };
-        p == libc::SCHED_FIFO || p == libc::SCHED_RR
+        realtime_policy(p)
     }
     #[cfg(not(target_os = "linux"))]
     false
+}
+
+/// Whether a scheduling policy (`sched_getscheduler`'s) is real-time: `SCHED_FIFO` or
+/// `SCHED_RR`, with or without `SCHED_RESET_ON_FORK` (which RTKit sets).
+#[cfg(target_os = "linux")]
+fn realtime_policy(p: i32) -> bool {
+    let p = if p < 0 {
+        p
+    } else {
+        p & !libc::SCHED_RESET_ON_FORK
+    };
+    p == libc::SCHED_FIFO || p == libc::SCHED_RR
 }
 
 /// The calling thread's id (Linux; 0 elsewhere), for [`pin`].
@@ -556,6 +794,39 @@ mod watchdog {
         let _ = PLACE.try_with(Place::let_go);
     }
 
+    /// Whether thread `tid` is one of ours (RTKit's thread asks only for those: one that has
+    /// ended has let go of its place, before its id can be another's).
+    pub fn holds(tid: i32) -> bool {
+        tid != 0 && OURS.iter().any(|t| t.load(Ordering::Acquire) == tid)
+    }
+
+    /// Wakes the watchdog: a thread of ours was made real-time by another (RTKit's thread).
+    pub fn wake() {
+        if let Some(w) = WATCHDOG.get() {
+            w.unpark();
+        }
+    }
+
+    /// Whether `tid` runs at real-time priority.
+    fn realtime(tid: i32) -> bool {
+        // SAFETY: a thread id; an error (the thread has gone) is -1.
+        let p = unsafe { libc::sched_getscheduler(tid) };
+        super::realtime_policy(p)
+    }
+
+    /// Every thread of ours made ordinary, from a signal handler (RLIMIT_RTTIME's SIGXCPU:
+    /// decisions.md R-RTKIT): atomics and system calls only.
+    pub fn demote_all() {
+        for t in &OURS {
+            let tid = t.load(Ordering::Acquire);
+            if tid != 0 {
+                let param = libc::sched_param { sched_priority: 0 };
+                // SAFETY: a thread of this process (or gone: an error); `param` is valid.
+                unsafe { libc::sched_setscheduler(tid, libc::SCHED_OTHER, &param) };
+            }
+        }
+    }
+
     /// The threads of ours alive now (for the tests).
     #[cfg(test)]
     pub fn ours() -> Vec<i32> {
@@ -685,8 +956,25 @@ mod watchdog {
         let mut said = false;
         // SAFETY: no arguments, always succeeds.
         let me = unsafe { libc::gettid() };
+        let mut xcpu = 0;
         loop {
-            if !OURS.iter().any(|t| t.load(Ordering::Acquire) != 0) {
+            super::rtkit::keep_rttime();
+            // (RLIMIT_RTTIME's signal demoted them: said here, as a signal handler cannot.)
+            let x = super::rtkit::XCPU.load(Ordering::Acquire);
+            if x != xcpu {
+                xcpu = x;
+                DEMOTIONS.fetch_add(1, Ordering::Relaxed);
+                eprintln!(
+                    "ca72: a real-time thread of CA-72's ran {} ms without blocking (RLIMIT_RTTIME): its real-time threads now run at ordinary priority",
+                    super::rtkit::soft_ms()
+                );
+            }
+            // (Watching while a thread of ours is real-time: one asked of RTKit and refused
+            // stays ours, ordinary, and wakes nothing.)
+            if !OURS.iter().any(|t| {
+                let tid = t.load(Ordering::Acquire);
+                tid != 0 && realtime(tid)
+            }) {
                 b.active.store(false, Ordering::Release);
                 std::thread::park_timeout(IDLE);
                 continue;
@@ -699,9 +987,15 @@ mod watchdog {
                     c.unpark();
                 }
                 if (!ok || top <= 70) && !std::mem::replace(&mut said, true) {
-                    eprintln!(
-                        "ca72: the real-time watchdog cannot run above the audio threads (real-time priority allowed: {top})"
-                    );
+                    if super::rtkit::enabled() && top == 0 {
+                        eprintln!(
+                            "ca72: the real-time watchdog runs at ordinary priority (no rtprio allowance); RLIMIT_RTTIME stands in for it above RTKit's threads"
+                        );
+                    } else {
+                        eprintln!(
+                            "ca72: the real-time watchdog cannot run above the audio threads (real-time priority allowed: {top})"
+                        );
+                    }
                 }
             }
             std::thread::sleep(LOOK);
@@ -752,7 +1046,7 @@ mod watchdog {
             }
             // SAFETY: a thread id; an error (the thread has gone) is -1.
             let p = unsafe { libc::sched_getscheduler(tid) };
-            if p != libc::SCHED_FIFO && p != libc::SCHED_RR {
+            if !super::realtime_policy(p) {
                 continue;
             }
             // `/proc/self/task/<tid>/stat`: after the name's closing parenthesis, the state
