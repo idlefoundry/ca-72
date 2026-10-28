@@ -10166,17 +10166,23 @@ the process's end ends it). nih-plug's production wrapper calls the function the
 ⌘Q, the quit Apple event), before its own Ctrl+Q and the editor's quit request close it, and
 as it is dropped otherwise (`third_party/nih-plug/PATCHES.md`). plugin-kit-standalone is
 unchanged: its two seconds are for a driver that never answers, and awake, the shutdown takes
-a tenth of that.
+well under half of that.
 
-Not done: an activity while the window is open and no audio runs. Napped, the app still takes
-a moment to be told it is quitting (below), but a hidden app playing nothing has no reason to
+Not done: an activity while the window is open and no audio runs. Napped, the app is still told
+late that it is to quit, seconds late on a busy Mac (below), but a hidden app playing nothing has no reason to
 be kept awake, and its frames would run on for nothing.
 
-**Evidence.** Hidden and napped (priority 4) for 6 minutes or more, quit with AppleScript's
-`quit`: with the fix, the quit Apple event reached the app 0.7 to 3.0 s after it was sent
-(App Nap's delay, before any of the app's code), and from there to the process's end took
-0.16 to 1.8 s, the shutdown 0.09 to 0.42 s, on a Mac under heavy load (load average near 200);
-each exited with its session saved and no error.
+**Evidence** (the Mac, 2026-10-27 and 28, under a load average of 150 to 200 from other
+work). Hidden and napped (priority 4), quit with AppleScript's `quit`, the final build: after
+12.6 hours, 3 of 3 exited, no error, the session saved, in 14.7, 5.9 and 11.4 s; after 6 minutes,
+3 of 3 again, in 6.0, 13.5 and 7.4 s, its priority leaving 4 (the activity begun) 4.7, 13.0 and
+6.3 s after the quit was sent and the process ending 1.3, 0.4 and 1.1 s after that. Most of
+the wait is App Nap's before any of the app's code: the quit Apple event reaches a napped app
+late, the more so the busier the Mac. Traced, the same code took 0.2 to 1.8 s from the quit
+event to the process's end, the shutdown 0.09 to 0.42 s. A first try that began the activity
+only as the window's handler was dropped came too late: the window's closing still ran napped,
+for 17.5 s once. Visible, with audio running (priority 97), quits took 0.66 and 0.63 s, as
+before.
 
 ## R-FX-SAFETY. No effect can make the standalone dead or keep it from starting (issue 82)
 
