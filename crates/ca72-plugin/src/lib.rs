@@ -1176,6 +1176,15 @@ mod tests {
         TestProcessContext::new(params, 48_000.0, ProcessMode::Realtime)
     }
 
+    /// The same, rendering offline: every voice waited for (decisions.md R18). For two renders
+    /// compared to the bit with POLY or UNISON on: in real time a voice whose worker misses the
+    /// block's deadline is silent for the run, and under load that differs from render to render
+    /// (R-ARP, "Fixed, 2026-10-27").
+    pub(crate) fn offline(p: &Ca72) -> TestProcessContext<Ca72> {
+        let params: Arc<dyn Params> = p.params.clone();
+        TestProcessContext::new(params, 48_000.0, ProcessMode::Offline)
+    }
+
     fn note(timing: u32, channel: u8, pitch: u8, on: bool) -> NoteEvent<()> {
         if on {
             NoteEvent::NoteOn {
@@ -1993,7 +2002,7 @@ mod tests {
     /// The arpeggiator's notes go through the engine exactly as played ones: a chord held with it
     /// on at 1/16, UP, GATE 50 %, the transport playing at 120, renders to the bit what the same
     /// keys pressed and let go at its steps' samples render with it off; in blocks of 256 and
-    /// 1000, realtime and offline. MONO with RETRIGGER, and POLY.
+    /// 1000, offline (every voice waited for: `offline`). MONO with RETRIGGER, and POLY.
     #[test]
     fn arpeggiated_notes_play_through_the_engine_as_played_ones() {
         // (POLY's workers come from the process's budget: one at a time with the tests that
@@ -2002,7 +2011,7 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         for (poly, retrigger) in [(false, true), (true, false)] {
-            for (len, mode) in [(256, ProcessMode::Realtime), (1000, ProcessMode::Offline)] {
+            for len in [256, 1000] {
                 let (mut a, mut b) = (initialised(poly), initialised(poly));
                 for p in [&mut a, &mut b] {
                     p.params
@@ -2010,10 +2019,7 @@ mod tests {
                         .store(0xca72, std::sync::atomic::Ordering::Relaxed);
                     p.engine.prepare(48_000.0, p.params.seed());
                 }
-                let params: Arc<dyn Params> = a.params.clone();
-                let mut ca = TestProcessContext::new(params, 48_000.0, mode);
-                let params: Arc<dyn Params> = b.params.clone();
-                let mut cb = TestProcessContext::new(params, 48_000.0, mode);
+                let (mut ca, mut cb) = (offline(&a), offline(&b));
                 for (p, c) in [(&a, &ca), (&b, &cb)] {
                     assert!(
                         c.automate(p.params.retrigger.as_ptr(), f32::from(u8::from(retrigger)))
@@ -2118,7 +2124,8 @@ mod tests {
     /// HOLD with the arpeggiator off holds the keys as played (the owner's drone, 2026-10-19):
     /// a chord pressed and let go, then a new chord, renders to the bit what the same keys held
     /// by hand render, the first let go as the second is pressed; in MONO with RETRIGGER, MONO
-    /// with GLIDE and HIGH priority, POLY and UNISON, realtime and offline.
+    /// with GLIDE and HIGH priority, POLY and UNISON, in blocks of 256 and 1000, offline (every
+    /// voice waited for: `offline`).
     #[test]
     fn a_held_drone_plays_through_the_engine_as_held_keys() {
         // (POLY's workers come from the process's budget: one at a time with the tests that
@@ -2136,7 +2143,7 @@ mod tests {
             ("unison", &[("unison", 1.0)]),
         ];
         for (name, set) in cases {
-            for (len, mode) in [(256, ProcessMode::Realtime), (1000, ProcessMode::Offline)] {
+            for len in [256, 1000] {
                 let (mut a, mut b) = (initialised(false), initialised(false));
                 for p in [&mut a, &mut b] {
                     p.params
@@ -2144,10 +2151,7 @@ mod tests {
                         .store(0xca72, std::sync::atomic::Ordering::Relaxed);
                     p.engine.prepare(48_000.0, p.params.seed());
                 }
-                let params: Arc<dyn Params> = a.params.clone();
-                let mut ca = TestProcessContext::new(params, 48_000.0, mode);
-                let params: Arc<dyn Params> = b.params.clone();
-                let mut cb = TestProcessContext::new(params, 48_000.0, mode);
+                let (mut ca, mut cb) = (offline(&a), offline(&b));
                 for (p, c) in [(&a, &ca), (&b, &cb)] {
                     let map = p.params.param_map();
                     for (id, v) in set {
@@ -2871,7 +2875,7 @@ mod tests {
                 let mut reference = initialised_with_seed(poly, Some(42));
                 let mut p = initialised_with_seed(poly, Some(42));
                 p.params.midi_map.set_wheel_source(source);
-                let (mut original, mut c) = (hostless(&reference), hostless(&p));
+                let (mut original, mut c) = (offline(&reference), offline(&p));
                 for (params, context) in [(&reference.params, &mut original), (&p.params, &mut c)] {
                     context.automate(params.osc_mod.as_ptr(), 1.0);
                     context.automate(params.filter_mod.as_ptr(), 1.0);
@@ -3813,7 +3817,7 @@ mod tests {
         for poly in [false, true] {
             let mut was = initialised_with_seed(poly, Some(81));
             let mut now = initialised_with_seed(poly, Some(81));
-            let (mut cw, mut cn) = (hostless(&was), hostless(&now));
+            let (mut cw, mut cn) = (offline(&was), offline(&now));
             let mut heard = 0.0;
             for b in 0..10u8 {
                 if b == 0 {
@@ -3863,7 +3867,7 @@ mod tests {
             let mut was = initialised_with_seed(poly, Some(74));
             let mut now = initialised_with_seed(poly, Some(74));
             assert_eq!(now.params.timbre_rest(), expression::TimbreRest::Centred);
-            let (mut cw, mut cn) = (hostless(&was), hostless(&now));
+            let (mut cw, mut cn) = (offline(&was), offline(&now));
             for (c, p) in [(&cw, &was), (&cn, &now)] {
                 assert!(c.automate(p.params.timbre_filter.as_ptr(), 0.9));
                 assert!(c.automate(p.params.timbre_mod.as_ptr(), 1.0));
