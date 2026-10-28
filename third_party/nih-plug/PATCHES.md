@@ -233,6 +233,13 @@ them to the window under the pointer) asks for it with `app_window::request_quit
 window acts on at its next frame. The manifest takes `keyboard-types` for the key, as baseview
 gives it, with the `standalone-production` feature.
 
+The production standalone's window closing (the CA-72's `docs/decisions.md` R-QUIT-NAP,
+2026-10-27): `app_window::on_closing` gives the function called once as the app's window
+starts to close, however it is closed: at its `WillClose` (the close button; on macOS ⌘Q and
+the quit Apple event, baseview's change 11), before `app_window::quits` and `request_quit`
+close it, and as the window's handler is dropped otherwise. The CA-72 lifts App Nap there, so
+that a napped app's shutdown runs at its ordinary pace. Nothing is called if none is given.
+
 Production standalone PANIC identity: the additive ProcessContext token accessor
 and per-block adapter metadata carry the exact token captured by plugin-kit's
 panic flag. Read the token before consuming the panic; direct, untagged and hosted
