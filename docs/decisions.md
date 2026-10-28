@@ -9785,6 +9785,23 @@ allowed it (a step shorter than 20 ms held the note the step's length); it is no
 plug-ins in a DAW; the Mac and Windows builds; the standalone with an audio device (it ran with
 `--no-devices`; its process is the one the renders ran).
 
+**Fixed, 2026-10-27 (the tests only; agent decisions):**
+`a_held_drone_plays_through_the_engine_as_held_keys` failed in a full test run on the laptop with
+builds beside it (load about 24), and passed alone. Its POLY and UNISON renders in blocks of 256 ran
+in real time, where each block has a deadline (0.75 of its period, `engine::DEADLINE`) and a voice
+whose worker misses it is silent for the run (R18): under load the two renders lost different runs.
+Probed with `Engine::silent_runs` under 32 busy loops: every real-time render that differed had lost
+runs (2 to 16), every one that matched had lost none, and the offline renders (no deadline, every
+voice waited for) lost none and matched every time. The budget's lock (`BUDGET_TESTS`), which the
+test already took, settles how many workers there are, not whether they keep time. Not the
+product's: a host's offline bounce waits for every voice (the deadline is the only thing
+`ProcessMode` changes in `process`), and in real time a late voice silent is R18's choice. So
+renders compared to the bit with POLY or UNISON on now render offline (`tests::offline`): this test
+and `arpeggiated_notes_play_through_the_engine_as_played_ones` (both block sizes offline now),
+`alternative_wheel_sources_render_identically_to_cc1_at_the_same_samples`,
+`expression_without_reach_leaves_the_output_as_it_was` and
+`a_centred_timbre_rests_at_64_and_half_brightness` (which failed twice on the desktop under load).
+
 ## R-FX-HOST. Effects in the standalone, hosted out of process with DAW-v3's sandbox (issue 82)
 
 **Owner decisions, 2026-10-18** (relayed by the coordinating agent): the standalone
