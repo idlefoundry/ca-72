@@ -16775,3 +16775,11 @@ library test checks both the embedded TOML and loaded factory sounds for effects
 The rule also appears in CONTRIBUTING.md. Personal presets retain their existing ability
 to save effect chains. These two saved edits have empty chains, which are omitted from the
 factory data.
+
+**Measured output trims:** Cycle of Fifths VOLUME 8.044 -> 8.192, LEVEL 0;
+LO/HI/ULTRA -18.13/-17.87/-17.86 LUFS. Hold Me Long Time VOLUME 8.0833 ->
+8.652, LEVEL 0.17 -> 0; LO/HI/ULTRA -18.21/-17.79/-17.82 LUFS. Every other
+saved synth value is preserved exactly. All factory AUTO GAIN curves were
+remeasured, generator output is idempotent, and a trial import containing a
+VST3 slot is rejected before changing the factory file. Logs and measurements:
+/mnt/lab/artifacts/ca-72/final-presets-20261028/.

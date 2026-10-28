@@ -1374,6 +1374,8 @@ spread = 0
 name = "Cycle of Fifths"
 description = "Four UNISON voices of two sawtooths at 8', about a fifth apart, each note DOUBLE 30 cents wide across the whole field, gliding; the last key held sounds."
 tags = ["fat", "glide"]
+drive_curve = [-4.2434635, -6.7190666, -7.9736896, -8.681424]
+drive_curve_lo = [-4.3580794, -6.725092, -7.716546, -8.09175]
 
 [preset.values]
 a440 = 0
@@ -1526,7 +1528,7 @@ unison = 1
 velocity_curve = 0
 velocity_floor = 0
 voices = 4
-volume = 8.044
+volume = 8.192
 
 [[preset]]
 name = "Acid Squelch"
@@ -4518,7 +4520,7 @@ glide_range = 0
 inner = 0
 keyboard_control_1 = 1
 keyboard_control_2 = 0
-level = 0.17
+level = 0
 lfo1_division = 8
 lfo1_fade = 0
 lfo1_level = 100
@@ -4640,4 +4642,4 @@ unison = 0
 velocity_curve = 0
 velocity_floor = 0
 voices = 4
-volume = 8.0833
+volume = 8.652
