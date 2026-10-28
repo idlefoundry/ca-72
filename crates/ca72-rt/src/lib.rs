@@ -236,6 +236,7 @@ impl Group {
     }
 
     /// A thread asked of RTKit has its answer (counted after this as promoted or left).
+    #[cfg(target_os = "linux")]
     fn answered(&self) {
         let _ = self
             .waiting
