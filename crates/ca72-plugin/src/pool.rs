@@ -578,6 +578,9 @@ pub struct Pool<V: Play = Playing> {
     board: Arc<Board<V>>,
     threads: Vec<(Thread, Option<JoinHandle<()>>)>,
     run: u32,
+    /// Until when, in the present block, a run offered past its deadline is still shared
+    /// ([`Pool::block`]; None: none, the run played here, decisions.md R-DROPOUTS).
+    grace: Option<Instant>,
     /// The budget its threads came out of, and how many.
     budget: Option<(&'static Budget, usize)>,
     /// ULTRA's split crews, the host's block count their keyboards' helpers open their
@@ -704,6 +707,7 @@ impl<V: Play> Pool<V> {
             board,
             threads: Vec::with_capacity(workers),
             run: 0,
+            grace: None,
             budget: period.map(|_| (budget, got)),
             splits: Vec::with_capacity(splits),
             split_block: Arc::new(AtomicU64::new(0)),
@@ -789,11 +793,12 @@ impl<V: Play> Pool<V> {
     /// [`CHUNK`] samples' time between them, each its share (all of a run's own in a block no
     /// longer than that): the workers' interval told the whole of a longer block's period, the
     /// system ran them slowly enough to fill it (decisions.md R-MAC-512).
-    pub fn block(&self, len: usize) {
+    pub fn block(&mut self, len: usize, grace: Option<Instant>) {
         self.board
             .due
             .store(due_share(len).to_bits(), Ordering::Relaxed);
         self.split_block.fetch_add(1, Ordering::Release);
+        self.grace = grace;
     }
 
     /// The host's block is over, its runs played: the workers park as they finish, rather
@@ -827,10 +832,16 @@ impl<V: Play> Pool<V> {
     ) -> [bool; MAX] {
         let count = list.len().min(MAX);
         let mut played = [false; MAX];
-        // Past the deadline the run is not offered: the workers would take voices only for
-        // this thread to give them up at once, silent for the run. Late, rather than silent
-        // (decisions.md R18).
-        if self.threads.is_empty() || deadline.is_some_and(|d| Instant::now() >= d) {
+        // Past the deadline the run is still shared, and waited for until the block's grace
+        // (its period's end, [`Pool::block`]): played here alone, a block cut into many short
+        // runs (an LFO's or a macro's steps) took several periods once its deadline had passed
+        // (decisions.md R-DROPOUTS). Past the grace, or with none, the run is not offered: the
+        // workers would take voices only for this thread to give them up at once, silent for
+        // the run. Late, rather than silent (R18).
+        let now = Instant::now();
+        let past = deadline.is_some_and(|d| now >= d);
+        let until = if past { self.grace } else { deadline };
+        if self.threads.is_empty() || (past && until.is_none_or(|g| now >= g)) {
             for (ok, &slot) in played.iter_mut().zip(&list[..count]) {
                 if let Ok(mut p) = self.board.voices[slot].try_lock() {
                     p.play(n, ext, rate, mix);
@@ -891,17 +902,27 @@ impl<V: Play> Pool<V> {
             if here[i] {
                 continue;
             }
+            // In real time (a deadline) the audio thread spins, its clock read every few looks:
+            // it never yields or sleeps, which on a busy computer gave its processor away for
+            // longer than the block had left (decisions.md R-DROPOUTS). Offline, with every
+            // voice waited for, it backs off as before.
             let mut wait = Backoff::new();
+            let mut looks = 0u32;
             loop {
                 let d = b.done[slot].load(Ordering::Acquire);
                 if d & !FAILED == u64::from(run) {
                     played[i] = d & FAILED == 0;
                     break;
                 }
-                if deadline.is_some_and(|d| Instant::now() >= d) {
+                let Some(until) = until else {
+                    wait.snooze();
+                    continue;
+                };
+                looks = looks.wrapping_add(1);
+                if looks.is_multiple_of(16) && Instant::now() >= until {
                     break;
                 }
-                wait.snooze();
+                std::hint::spin_loop();
             }
         }
         self.close();
@@ -1282,8 +1303,15 @@ fn work<V: Play>(b: &Board<V>, period: Option<Duration>, driver: bool) {
     // becomes an audio thread.
     std::thread::park_timeout(Duration::from_nanos(1));
     let _ = Instant::now().elapsed();
-    if let Some(period) = period {
-        let _ = ca72_rt::promote(period, period / 2);
+    if let Some(period) = period
+        && let Err(e) = ca72_rt::promote(period, period / 2)
+    {
+        // (Said once a process, here on a worker: not the audio thread. They play on as
+        // ordinary threads, which other work preempts: decisions.md R-DROPOUTS.)
+        static SAID: AtomicBool = AtomicBool::new(false);
+        if !SAID.swap(true, Ordering::AcqRel) {
+            eprintln!("CA-72: POLY's workers run at ordinary priority: {e}");
+        }
     }
     let token = b.interval.as_ref().and_then(ca72_rt::WorkInterval::join);
     // (The first worker opens the interval at each run, due within the run's share of the
@@ -1646,7 +1674,7 @@ mod tests {
         }
         let mut pool = Pool::start(2, &voices, None).unwrap();
         for _ in 0..20 {
-            pool.block(CHUNK);
+            pool.block(CHUNK, None);
             let played = pool.play(&[0, 1, 2], 64, &EXT, 48_000.0, &mix(), false, MAX, None);
             assert_eq!(&played[..3], &[true; 3]);
             let elsewhere = voices

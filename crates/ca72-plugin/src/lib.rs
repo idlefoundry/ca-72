@@ -4,6 +4,7 @@
 
 pub mod agent;
 pub mod arp;
+mod audio_thread;
 pub mod character;
 pub mod clipboard;
 pub mod compat;
@@ -104,6 +105,9 @@ pub struct Ca72 {
     /// Each key's velocity as struck, which the notes it gives play at (decisions.md
     /// R-VELOCITY).
     played: velocity::Played,
+    /// The standalone's audio thread, made an audio thread as its first block begins
+    /// (decisions.md R-DROPOUTS).
+    audio_thread: audio_thread::AudioThread,
 }
 
 impl std::fmt::Debug for Ca72 {
@@ -171,6 +175,7 @@ impl Ca72 {
             timed_clock: crate::timed::Clock::default(),
             now: 0,
             played: velocity::Played::default(),
+            audio_thread: audio_thread::AudioThread::default(),
         }
     }
 }
@@ -903,6 +908,10 @@ impl Plugin for Ca72 {
         // the audio thread waiting: running threads are kept then (R18).
         let period = std::time::Duration::from_secs_f64(block as f64 / rate);
         self.engine.start_workers(crate::engine::AUTO, Some(period));
+        // The standalone's own audio thread, an audio thread as the workers are, from its next
+        // block (decisions.md R-DROPOUTS): a plug-in's host's thread is the host's.
+        self.audio_thread
+            .prepare(context.plugin_api() == PluginApi::Standalone, period);
         // The effects at the device's rate and block (the audio thread is stopped here).
         #[cfg(feature = "fx-host")]
         if let Some(fx) = &mut self.fx {
@@ -939,6 +948,13 @@ impl Plugin for Ca72 {
     ) -> ProcessStatus {
         #[cfg(feature = "fx-host")]
         let started = std::time::Instant::now();
+        // (The standalone's audio thread made an audio thread at its first block: decisions.md
+        // R-DROPOUTS. Where the system refuses, it stays as it was.)
+        if let Some(Err(_)) = self.audio_thread.begin()
+            && let Some(helper) = &self.helper
+        {
+            helper.ask(helper::REPORT);
+        }
         // (The standalone's TEMPO a modulation target there alone: decisions.md R-LFO.)
         self.params
             .set_standalone(context.plugin_api() == PluginApi::Standalone);

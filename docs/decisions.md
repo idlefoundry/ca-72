@@ -16054,3 +16054,231 @@ The merge keeps them all. Each one meets the glide as follows:
 
 Not tried: listening, the standalone with TEMPO moved live, `paced` and `cost` after the merges,
 macOS and Windows.
+
+## R-MAC-LO-LOAD. macOS: LO shares its voices by load, as Windows does
+
+**Agent finding and decision, 2026-10-27** (placeholder id; not yet reviewed by the owner). The
+user heard dropouts in the 0.3.0 standalone on the MacBook (M4 Pro, 10 performance and 4
+efficiency cores) at LO and HI, which 0.2.8 had not given. R-LO-WORKERS made macOS share LO's
+voices with POLY's workers always, from a harness whose measuring thread stood in for the
+host's. In CoreAudio's own IO thread, under the Mac's real background load, that sharing made
+blocks late where the IO thread alone made none. `engine::lo_sharing` now returns
+`LoSharing::Load` on macOS as on Windows: LO plays every voice on the IO thread while it has
+headroom, as 0.2.8 did, and shares once the smoothed load passes half the period or after a
+late block or a voice's run not heard (`engine::Busy`, unchanged). Linux is unchanged here.
+HI and ULTRA are unchanged (they share whatever `lo_sharing` says).
+
+**How it was measured.** The standalone itself, launched with `open` on the built-in output
+(48 kHz, 256 frames, the output muted), each run in a session folder of its own, played by a
+virtual CoreMIDI source: eight-note chords at varied velocities, two a second, for 60 s, after
+8 s to start. Two counts: CoreAudio's own, the client's `HALC_ProxyIOContext::IOWorkLoop:
+skipping cycle due to overload` lines in the unified log for that process id (each an audible
+gap); and, from a build of this branch with a diagnostic counter added (not committed), the
+engine's `silent_runs` (a voice's run not heard: a gap CoreAudio does not see) and the blocks
+whose `process` took longer than the period. Every late block the counter saw was one
+CoreAudio skipped, and no voice's run went unheard at LO in any run. Background load as the user
+has it: a third-party Virtualization.framework VM busy on about 12 of the 14 cores, Codex,
+load average 130 to 250. The two builds were alternated, four rounds, to share the load's
+drift.
+
+**Evidence (LO, POLY, eight voices, DOUBLE on; 0.2.8's last session as set, and the user's
+0.3.0 session with its macros and LFOs, which cut each block into 32-sample runs):**
+
+| Build | Sound | Runs × 60 s | Skipped cycles | Late blocks | Silent runs | IO thread mean | Process CPU |
+|---|---|---|---|---|---|---|---|
+| release-0.3.0 (always) | 0.2.8 session | 4 | 4, 1, 3, 0 | as skipped | 0 | 0.35 ms | 42–45 % |
+| this branch (load) | 0.2.8 session | 4 | 0, 0, 0, 0 | 0 | 0 | 1.26 ms | 17–18 % |
+| release-0.3.0 (always) | user's session | 4 | 1, 0, 0, 0 | as skipped | 0 | 0.49 ms | 52–53 % |
+| this branch (load) | user's session | 4 | 0, 0, 0, 0 | 0 | 0 | 1.37 ms | 17–20 % |
+
+Earlier rounds the same evening agree: the release's sharing (always) 1, 1, 0, 3, 1, 0, 3, 0
+skipped cycles in eight runs of 60 s; sharing never (the measurement switch,
+`set_lo_sharing_for_measurement`) 0 in eight. 0.2.8
+(`/Applications/CA-72.app`, the release build) at LO: 0 in each of three runs of 30 s. The
+IO thread's mean, 1.3 ms of the 5.3 ms period, is a quarter of it: far from `Busy::ON`, so with
+load the sharing stays off for these sounds. The late blocks while sharing had no voice's run
+unheard: the workers had finished within the deadline, and the IO thread itself came back late
+from its wait (`ca72::threaded::Backoff` spins, yields, then sleeps 20 us at a time); not traced
+further.
+
+**HI is not this.** At HI (which shares whatever this says) 0.3.0 skipped fewer cycles than
+0.2.8 under the same load, the same notes, 60 s a run: on 0.2.8's session 0.2.8 9 and 9,
+0.3.0 3 and 0; on the user's session 0.2.8 4, 14, 6, 14 and 5, 0.3.0 0, 2, 1, 2 and 1. But with
+the user's macros and LFOs (32-sample runs) 0.3.0 left voices' runs unheard, which CoreAudio does
+not count: 1, 7, 1, 0 and 6 a run, against none in five runs of 0.2.8's session without them.
+(0.2.8 has no counter, and no LFOs.) That is the cross-platform question of HI with an LFO, the
+shared work on `int/dropouts`, and is not changed here.
+
+**Not done:** the owner's ears; a Mac without the VM's load; an Intel Mac; a DAW hosting the
+plug-in on macOS (the plug-ins take the same `lo_sharing`); buffer sizes other than 256.
+
+## R-DROPOUTS. The standalone's audio thread made an audio thread; runs past the deadline still shared; no sleep while the audio thread waits
+
+**Report, 2026-10-27:** constant dropouts in the 0.3.0 standalone, with every preset, at HI and
+LO, on the Omarchy laptop (PipeWire) and the MacBook (CoreAudio, a VM busy on about 12 cores).
+The per-block DSP cost had been measured flat across the merges.
+
+**Agent findings, 2026-10-27/28** (placeholder id; not yet reviewed by the owner). This record
+covers Linux. The macOS change is R-MAC-LO-LOAD (merged here). Windows was measured by another
+session; its figures are cited below.
+
+- **What the laptop's audio runs at.** Nothing in its audio path is real-time. RTKit is not
+  running (PipeWire logs `mod.rt: RTKit error: ServiceUnknown` at each start), the user is not
+  in the `realtime` group, and `ulimit -r` is 0. So PipeWire's own data loops, the standalone's
+  audio thread (CPAL's `cpal_alsa_out`) and POLY's workers (`ca72-voices-*`) all run as
+  `SCHED_OTHER`. During the user's session (15:41 to 17:53) PipeWire logged 647 `out of buffers`
+  underruns on the speakers' path. The laptop was also not idle. Other sessions' CA-74 test and
+  bench runs pushed the load average between 4 and 28 (one test binary at about 18 cores).
+- **The standalone's audio thread is never promoted, on any build.** It is not promoted even
+  where the system allows real-time priority. On the desktop (`omarchy`, in `realtime`,
+  PipeWire at `SCHED_FIFO` 83) the workers ran at `SCHED_FIFO` 70 while `cpal_alsa_out` stayed
+  ordinary. CPAL's ALSA backend does not promote its thread. CoreAudio's I/O thread and CPAL's
+  WASAPI thread are already the system's audio threads.
+- **Not a regression at idle.** In the standalone driven by ALSA MIDI into a PipeWire null sink,
+  every build had no gaps at idle on both machines: 0.2.7, 0.2.8, 0.3.0 and the fix. Builds were
+  run back to back, 20 to 40 s each, with POLY at HI and LO and the user's own mono LO session.
+  Routing to the real speakers (muted) gave the same result.
+- **Under load every build drops out while its audio thread is ordinary.** POLY at LO and HI,
+  12 busy loops on 16 threads, `prlimit --rtprio=0` (as on the laptop), two runs of 30 s each:
+  - LO: 0.2.7 51 gaps, 0.2.8 37, 0.3.0 69.
+  - HI: 0.2.7 139, 0.2.8 164, 0.3.0 110.
+  Gaps are zero runs of 8 samples or more in the null sink's recording.
+- **The one regression is HI with an LFO (or a macro, or velocity) under load.** An LFO cuts each
+  block into 32-sample runs (`lfo::STEP`), eight wake-and-wait cycles a 256-frame block where
+  0.2.8 had two. Once the deadline (75 % of the period) had passed, `Pool::play` played every
+  later run's voices on the audio thread alone. A block that missed its deadline early took two
+  to six periods.
+  - The in-process probe (below), Brass Choir with LFO 1 on CUTOFF, 12 busy loops, 2 × 10 s:
+    0.2.8 (which has no LFO) 203 late blocks, 0.3.0 2315.
+  - Windows (i5-13600K, 18 busy loops): 0.2.8 49–60, 0.3.0 484–1277 a 10 s.
+  - macOS: unheard runs with the user's macros and LFOs at HI (R-MAC-LO-LOAD).
+- **LO's sharing is not what dropped out on Linux.** At LO, 0.3.0 was as good as 0.2.8 or
+  better:
+  - Its audio thread used 12 to 20 % of the period, against 0.2.8's 41 %.
+  - Late blocks under load were 0 to 1 for both.
+  - On the laptop in `lo_workers` `paced` (ordinary threads, its own load), the two traded
+    places. Light chords had 2 runs unheard shared and none on the host's thread. Doubled
+    chords had 48 late blocks on the host's thread and none shared.
+  - Linux keeps `Always` (an experiment that gated it on real-time workers was dropped).
+- **The drift after a missed run is real, and not new.** A voice that sits a run out resumes
+  where it stopped, a run behind (R-LO-WORKERS). After that, the real-time render can differ from
+  the offline one for the rest of the take. This is a time shift of that voice's state, not a
+  growing drift. The LFOs' generators advance on the engine's clock, not by the voice's runs.
+
+  On the laptop's probe runs (blocks with a run unheard → blocks differing, of 1688):
+
+  | Build | Case | Unheard → differing |
+  |---|---|---|
+  | 0.2.8 | — | 90 → 1671 |
+  | 0.2.8 | — | 407 → 1077 |
+  | 0.2.8 | — | 36 → 127 |
+  | 0.3.0 | without an LFO | 5 → 10 |
+  | 0.3.0 | without an LFO | 1 → 2 |
+  | 0.3.0 | with an LFO | 13 → 1626 |
+  | 0.3.0 | with an LFO | 10 → 1309 |
+
+  Which state carries it for so long (oscillators running across notes, or a voice's LFO copy)
+  was not traced. Nothing beyond the gap itself is known to be heard. It is not changed here: with
+  the audio thread real-time, no run went unheard.
+
+**Agent decisions, 2026-10-28** (not yet reviewed by the owner):
+- **The standalone's audio thread is made an audio thread on Linux** (`audio_thread.rs`).
+  `Ca72::initialize` asks, for the standalone only (`PluginApi::Standalone`). The first block
+  calls `ca72_rt::promote`, which gives `SCHED_FIFO` 70, the workers' priority. The watchdog that
+  demotes a runaway thread watches it too. A plug-in's host's thread is never touched. Where the
+  system refuses, the thread stays as it was, and the helper thread says so once on standard
+  error. A worker that is refused says so once.
+- **No sleep or yield on the audio thread while it waits for the workers** (`Pool::play`). In
+  real time it spins, reading the clock every 16 looks, until the run is done or its time is
+  up. Offline, with no deadline, it backs off as before. On the Mac the I/O thread came back late
+  from `Backoff`'s 20 µs sleeps with every voice already played (R-MAC-LO-LOAD). ULTRA's split
+  crews keep `Backoff`: they have no deadline.
+- **Runs past the deadline are still shared, until the period's end** (`Pool::block`'s grace).
+  Only past the grace does the audio thread play a run alone, late rather than silent (R18). A
+  voice a worker has not finished by the grace is silent for its run, as at the deadline before.
+- **Not done:** an RTKit request (D-Bus) for systems with RTKit but no rtprio allowance. The
+  laptop has neither, so only a system change helps it: the user in the `realtime` group, whose
+  `limits.d` entry is already installed, or RTKit installed and running. Also not done: a
+  warning in the editor rather than on standard error.
+
+**Evidence (Linux, 2026-10-28; omarchy, Ryzen 7 7800X3D, 16 threads; the laptop, 32 threads):**
+- **The in-process probe.** The Windows session's `dropouts` test (`/mnt/lab/artifacts/ca-72/
+  dropouts-windows-0.3.0/harness`) was ported to Linux, where its `tc` priority is
+  `ca72_rt::promote`. It plays a factory preset through the plug-in's own `process` in real
+  time, 256-frame blocks at 48 kHz, each block at its time. It compares the output with an
+  offline render of the same events. Each case was run 2 × 10 s, builds back to back, 12 busy
+  loops. Conditions:
+  - `nort`: nothing real-time.
+  - `rt`: workers `SCHED_FIFO`, the audio thread ordinary, as 0.3.0 runs in the standalone.
+  - `rtcb`: the audio thread too, as this record makes it.
+
+  Late blocks / voices' runs not heard:
+
+  | Case | Condition | 0.2.8 | 0.3.0 | this branch |
+  |---|---|---|---|---|
+  | Brass Choir HI | nort | 199 / 5037 | 247 / 5161 | 191 / 8297 |
+  | Brass Choir HI | rt | 670 / 1899 | 464 / 2076 | 159 / 983 |
+  | Brass Choir HI | rtcb | 0 / 0 | 0 / 0 | 0 / 0 |
+  | + LFO on CUTOFF, HI | nort | 203 / 5104 | 2315 / 6700 | 635 / 13899 |
+  | + LFO on CUTOFF, HI | rt | 304 / 1596 | 820 / 1774 | 380 / 1972 |
+  | + LFO on CUTOFF, HI | rtcb | 0 / 0 | 0 / 0 | 0 / 0 |
+  | Brass Choir LO | all three | 0–1 / 0 | 0 / 0 | 0 / 0 |
+
+  - With the audio thread real-time, every build played every block in time. The output was
+    the same to the bit as offline: the audio thread's mean was 39 to 43 % of the period, its
+    most 70 %.
+  - Without it, the grace brings 0.3.0's late blocks with an LFO back near 0.2.8's (2315 to 635
+    ordinary; 820 to 380 with real-time workers). It cuts the worst block from 488 % of the
+    period to 324 %. The price is more voices' runs unheard when nothing is real-time (6700 to
+    13899): late blocks become voice gaps. A late block is a gap in the whole output.
+- **The standalone (omarchy, real-time allowed, 12 busy loops).** POLY HI with LFO 1 on CUTOFF,
+  2 × 30 s, null sink:
+  - 0.3.0: 14 gaps (50.6 ms), 58 late blocks, 44 runs unheard.
+  - With only the audio thread promoted (`ba32488`): none of any.
+  - Without the LFO, 0.3.0 had 2 gaps, 80 late and 13 unheard; promoted, none.
+  - With `prlimit --rtprio=0` the promotion is refused and nothing changes: 131 against 157 gaps.
+  - `ps` showed `cpal_alsa_out` at `FF 70`.
+- **The standalone, the branch's final build (297323d) against 0.3.0 and 0.2.8,** back to back,
+  2 × 30 s, null sink. Figures are gaps / late blocks / runs unheard.
+  - Omarchy, real-time allowed, 12 busy loops:
+
+    | Sound | 0.3.0 | 0.2.8 | this branch |
+    |---|---|---|---|
+    | POLY HI with the LFO | 9 (14.2 ms) / 67 / 34 | 0 / 13 / 23 (no LFO in 0.2.8) | 0 / 0 / 0 |
+    | POLY HI | 1 / 45 / 20 | 0 / 22 / 26 | 0 / 0 / 0 |
+    | POLY LO (one run) | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+
+    At idle, every build had 0 / 0 / 0. The branch's slowest block was 0.98 ms of the 2.7 ms
+    period, against 0.3.0's 5.9 ms.
+  - The laptop, as it is (nothing real-time; the CA-74 sessions' load, averages 3.7 to 12.4):
+
+    | Sound | Runs | 0.3.0 | 0.2.8 | this branch |
+    |---|---|---|---|---|
+    | POLY HI with the LFO | 3 | 1 / 2 / 28 | 18 / 11 / 55 | 0 / 0 / 0 |
+    | POLY HI | 2 | 0 / 0 / 0 | 254 / 116 / 292 | 53 / 9 / 273 |
+    | Mono LO (the user's session) | 3 | 7 (10.7 ms) / 0 / 0 | 0 / 0 / 0 | 88 (126.7 ms) / 3 / 0 |
+
+    These follow the load's bursts more than the build. Each non-zero 0.2.8 and branch figure
+    is one run that met a burst, and the branch's mono gaps are one run whose load rose from 3.0
+    to 15.6 (a CA-74 test at about 29 cores). Mono's path is not changed here, beyond the refused
+    promotion. There the branch's promotion is refused, and it
+    says so:
+
+    ```
+    CA-72: the audio thread runs at ordinary priority: this system gives this user no real-time
+    priority ...
+    CA-72: POLY's workers run at ordinary priority: SCHED_FIFO refused (Operation not permitted ...
+    ```
+
+    The laptop is not fixed by this branch alone. It needs real-time priority allowed.
+- **Tests.**
+  - `audio_thread::tests::only_the_standalone_s_thread_is_promoted_and_once`: plug-ins never;
+    the standalone once after each `prepare`, on Linux; a granted promotion is real.
+  - `pool.rs`'s tests and `ultra_split.rs` take the grace as `None`, as before.
+
+**Not done:**
+- Listening.
+- The final branch on macOS and Windows: the commands are with the coordinator.
+- A laptop with real-time priority allowed. Not allowed here, as the laptop is the user's.
+- Buffer sizes other than 256 frames.
+- DAWs hosting the plug-ins on Linux. They get the grace and the spin, but never the promotion.

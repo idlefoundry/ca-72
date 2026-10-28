@@ -25,6 +25,9 @@ pub const MEND: u32 = 1;
 pub const SERVE: u32 = 2;
 /// A queued preset press or its audio acknowledgement is ready.
 pub const PRESETS: u32 = 4;
+/// The standalone's audio thread refused real-time priority: said on standard error
+/// (decisions.md R-DROPOUTS).
+pub const REPORT: u32 = 8;
 
 /// What the helper and the plug-in share: what is asked, and whether to stop.
 #[derive(Debug, Default)]
@@ -135,6 +138,9 @@ fn help(
         }
         #[cfg(test)]
         hold(s);
+        if asks & REPORT != 0 {
+            crate::audio_thread::report_refusal();
+        }
         if asks & MEND != 0 {
             spares.mend_until(quit);
         }
