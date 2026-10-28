@@ -16054,3 +16054,60 @@ The merge keeps them all. Each one meets the glide as follows:
 
 Not tried: listening, the standalone with TEMPO moved live, `paced` and `cost` after the merges,
 macOS and Windows.
+
+## R-MAC-LO-LOAD. macOS: LO shares its voices by load, as Windows does
+
+**Agent finding and decision, 2026-10-27** (placeholder id; not yet reviewed by the owner). The
+user heard dropouts in the 0.3.0 standalone on the MacBook (M4 Pro, 10 performance and 4
+efficiency cores) at LO and HI, which 0.2.8 had not given. R-LO-WORKERS made macOS share LO's
+voices with POLY's workers always, from a harness whose measuring thread stood in for the
+host's. In CoreAudio's own IO thread, under the Mac's real background load, that sharing made
+blocks late where the IO thread alone made none. `engine::lo_sharing` now returns
+`LoSharing::Load` on macOS as on Windows: LO plays every voice on the IO thread while it has
+headroom, as 0.2.8 did, and shares once the smoothed load passes half the period or after a
+late block or a voice's run not heard (`engine::Busy`, unchanged). Linux is unchanged here.
+HI and ULTRA are unchanged (they share whatever `lo_sharing` says).
+
+**How it was measured.** The standalone itself, launched with `open` on the built-in output
+(48 kHz, 256 frames, the output muted), each run in a session folder of its own, played by a
+virtual CoreMIDI source: eight-note chords at varied velocities, two a second, for 60 s, after
+8 s to start. Two counts: CoreAudio's own, the client's `HALC_ProxyIOContext::IOWorkLoop:
+skipping cycle due to overload` lines in the unified log for that process id (each an audible
+gap); and, from a build of this branch with a diagnostic counter added (not committed), the
+engine's `silent_runs` (a voice's run not heard: a gap CoreAudio does not see) and the blocks
+whose `process` took longer than the period. Every late block the counter saw was one
+CoreAudio skipped, and no voice's run went unheard at LO in any run. Background load as the user
+has it: a third-party Virtualization.framework VM busy on about 12 of the 14 cores, Codex,
+load average 130 to 250. The two builds were alternated, four rounds, to share the load's
+drift.
+
+**Evidence (LO, POLY, eight voices, DOUBLE on; 0.2.8's last session as set, and the user's
+0.3.0 session with its macros and LFOs, which cut each block into 32-sample runs):**
+
+| Build | Sound | Runs × 60 s | Skipped cycles | Late blocks | Silent runs | IO thread mean | Process CPU |
+|---|---|---|---|---|---|---|---|
+| release-0.3.0 (always) | 0.2.8 session | 4 | 4, 1, 3, 0 | as skipped | 0 | 0.35 ms | 42–45 % |
+| this branch (load) | 0.2.8 session | 4 | 0, 0, 0, 0 | 0 | 0 | 1.26 ms | 17–18 % |
+| release-0.3.0 (always) | user's session | 4 | 1, 0, 0, 0 | as skipped | 0 | 0.49 ms | 52–53 % |
+| this branch (load) | user's session | 4 | 0, 0, 0, 0 | 0 | 0 | 1.37 ms | 17–20 % |
+
+Earlier rounds the same evening agree: the release's sharing (always) 1, 1, 0, 3, 1, 0, 3, 0
+skipped cycles in eight runs of 60 s; sharing never (the measurement switch,
+`set_lo_sharing_for_measurement`) 0 in eight. 0.2.8
+(`/Applications/CA-72.app`, the release build) at LO: 0 in each of three runs of 30 s. The
+IO thread's mean, 1.3 ms of the 5.3 ms period, is a quarter of it: far from `Busy::ON`, so with
+load the sharing stays off for these sounds. The late blocks while sharing had no voice's run
+unheard: the workers had finished within the deadline, and the IO thread itself came back late
+from its wait (`ca72::threaded::Backoff` spins, yields, then sleeps 20 us at a time); not traced
+further.
+
+**HI is not this.** At HI (which shares whatever this says) 0.3.0 skipped fewer cycles than
+0.2.8 under the same load, the same notes, 60 s a run: on 0.2.8's session 0.2.8 9 and 9,
+0.3.0 3 and 0; on the user's session 0.2.8 4, 14, 6, 14 and 5, 0.3.0 0, 2, 1, 2 and 1. But with
+the user's macros and LFOs (32-sample runs) 0.3.0 left voices' runs unheard, which CoreAudio does
+not count: 1, 7, 1, 0 and 6 a run, against none in five runs of 0.2.8's session without them.
+(0.2.8 has no counter, and no LFOs.) That is the cross-platform question of HI with an LFO, the
+shared work on `int/dropouts`, and is not changed here.
+
+**Not done:** the owner's ears; a Mac without the VM's load; an Intel Mac; a DAW hosting the
+plug-in on macOS (the plug-ins take the same `lo_sharing`); buffer sizes other than 256.
