@@ -69,7 +69,8 @@ pub enum Promoted {
 /// As [`promote`], the calling thread one of `group`'s, whose [`Group::standing`] counts it.
 /// Where the system refuses and [`use_rtkit`] was called (Linux), the thread is asked of RTKit
 /// instead of left ordinary: by this crate's RTKit thread, never the calling one, as a D-Bus
-/// call blocks. Allocates nothing but what [`promote`] does.
+/// call blocks. Allocates nothing but what [`promote`] does; on Linux, not even the refusal's
+/// explanation when RTKit is asked instead (the standalone's audio thread, at its first block).
 pub fn promote_in(
     group: &'static Group,
     period: Duration,
@@ -80,7 +81,13 @@ pub fn promote_in(
         group.left(Why::Full);
         return Err("too many real-time threads to watch".into());
     };
-    match sys::promote(period, computation) {
+    // (On Linux the refusal is explained only where it is returned: the explanation is a String,
+    // and RTKit asked instead returns none.)
+    #[cfg(target_os = "linux")]
+    let r = sys::fifo(period, computation);
+    #[cfg(not(target_os = "linux"))]
+    let r = sys::promote(period, computation);
+    match r {
         Ok(()) => {
             #[cfg(target_os = "linux")]
             {
@@ -92,7 +99,7 @@ pub fn promote_in(
         }
         Err(e) => {
             #[cfg(target_os = "linux")]
-            {
+            let e = {
                 // (Counted as waiting first: the answer may come before `ask` returns. The
                 // thread stays the watchdog's, to be demoted should it run away once promoted.)
                 group.waiting.fetch_add(1, Ordering::AcqRel);
@@ -104,7 +111,8 @@ pub fn promote_in(
                     watchdog::unregister();
                 }
                 group.left(why);
-            }
+                sys::explain(&e)
+            };
             #[cfg(not(target_os = "linux"))]
             group.left(Why::Refused);
             Err(e)
@@ -1084,17 +1092,24 @@ mod watchdog {
 mod sys {
     use std::time::Duration;
 
-    pub fn promote(_period: Duration, _computation: Duration) -> Result<(), String> {
+    pub fn promote(period: Duration, computation: Duration) -> Result<(), String> {
+        fifo(period, computation).map_err(|e| explain(&e))
+    }
+
+    /// `SCHED_FIFO` for the calling thread, or the system's refusal: allocates nothing.
+    pub fn fifo(_period: Duration, _computation: Duration) -> std::io::Result<()> {
         let param = libc::sched_param { sched_priority: 70 };
         // SAFETY: pid 0 is the calling thread; `param` is valid.
         if unsafe { libc::sched_setscheduler(0, libc::SCHED_FIFO, &param) } == 0 {
             Ok(())
         } else {
-            Err(format!(
-                "SCHED_FIFO refused ({}); allow real-time priority for this user to use it",
-                std::io::Error::last_os_error()
-            ))
+            Err(std::io::Error::last_os_error())
         }
+    }
+
+    /// What a refusal of [`fifo`]'s means.
+    pub fn explain(e: &std::io::Error) -> String {
+        format!("SCHED_FIFO refused ({e}); allow real-time priority for this user to use it")
     }
 }
 
