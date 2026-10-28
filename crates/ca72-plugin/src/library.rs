@@ -1091,6 +1091,28 @@ mod tests {
         list.iter().map(|e| e.sound.name.as_str()).collect()
     }
 
+    /// Factory sounds must work without any external plug-in installed (R-FINAL-PRESETS).
+    /// Inspect the source too: a section silently ignored by a reader must not ship either.
+    #[test]
+    fn factory_presets_never_include_hosted_effects() {
+        let raw: toml::Table = FACTORY_FILE.parse().unwrap();
+        assert!(
+            !raw.contains_key("effects"),
+            "factory-level effects section"
+        );
+        for preset in raw["preset"].as_array().unwrap() {
+            let table = preset.as_table().unwrap();
+            assert!(
+                !table.contains_key("effects"),
+                "{} includes a hosted effects section",
+                table["name"]
+            );
+        }
+        for sound in factory() {
+            assert!(sound.effects.is_none(), "{} includes effects", sound.name);
+        }
+    }
+
     #[test]
     fn effects_are_opaque_and_keep_every_byte_through_library_edits() {
         let dir = tempfile::tempdir().unwrap();

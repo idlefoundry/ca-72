@@ -96,7 +96,9 @@ def owner(name, description=None, **changes):
     t = tomllib.loads((OWNER / f"{name}.toml").read_text())
     assert t["name"] == name, name
     effects = t.get("effects", {}).get("chain")
-    assert effects is None or not json.loads(effects)["slots"], f"{name}: effects"
+    assert effects is None or not json.loads(effects)["slots"], (
+        f"{name}: factory presets must not include hosted effects (VST3 or CLAP)"
+    )
     v = dict(t["values"])
     # (Saved by 0.3.0's beta, an LFO's RISE: its FADE now, a fade in, decisions.md R-LFO-FADE.)
     for n in range(1, 5):
@@ -110,7 +112,7 @@ def owner(name, description=None, **changes):
                 tags=list(t.get("tags", [])), macro_names=list(t.get("macro_names", [])),
                 values=v)
 
-P = []
+P = [owner("Cycle of Fifths")]
 
 # ---- Sounds the 0.2.8 set does not have.
 

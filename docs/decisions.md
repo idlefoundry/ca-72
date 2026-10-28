@@ -16757,3 +16757,29 @@ to 91faf69, import change 14 if retaining a local baseview, and run their
 factory preset identity checks. Malleator can remove its R35 release grace
 once it uses this fix; retaining it would retain the unnecessary delay.
 Their repositories are not changed here.
+
+## R-FINAL-PRESETS. The owner's final preset edits; factory sounds have no hosted effects
+
+**Owner, 2026-10-28:** include the latest saved edits before release, and always ensure
+that presets bundled with the synth never include a VST.
+
+The laptop's saved Cycle of Fifths and Hold Me Long Time replace their factory synth
+settings. Their source files are retained in scripts/presets_owner. Cycle of Fifths now
+comes through the same generator as the other owner presets, in the same factory-list
+position, so regeneration preserves the edit. AUTO GAIN curves are remeasured and levels
+checked at LO, HI and ULTRA; only output trims may change during levelling.
+
+Factory presets contain no hosted effects of either supported format (VST3 or CLAP).
+The generator imports synth values and refuses a non-empty source effect chain. A dedicated
+library test checks both the embedded TOML and loaded factory sounds for effects sections.
+The rule also appears in CONTRIBUTING.md. Personal presets retain their existing ability
+to save effect chains. These two saved edits have empty chains, which are omitted from the
+factory data.
+
+**Measured output trims:** Cycle of Fifths VOLUME 8.044 -> 8.192, LEVEL 0;
+LO/HI/ULTRA -18.13/-17.87/-17.86 LUFS. Hold Me Long Time VOLUME 8.0833 ->
+8.652, LEVEL 0.17 -> 0; LO/HI/ULTRA -18.21/-17.79/-17.82 LUFS. Every other
+saved synth value is preserved exactly. All factory AUTO GAIN curves were
+remeasured, generator output is idempotent, and a trial import containing a
+VST3 slot is rejected before changing the factory file. Logs and measurements:
+/mnt/lab/artifacts/ca-72/final-presets-20261028/.

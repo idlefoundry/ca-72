@@ -12,6 +12,9 @@ Bug reports, measurements and fixes are welcome.
   (on Linux `--all-features` needs the ALSA, JACK and OpenGL headers as well:
   `libasound2-dev libjack-jackd2-dev libgl-dev`). CI builds, tests and runs clippy so, with
   the validators, on macOS, Windows and Linux.
+- **Factory presets:** bundled presets must contain only the synth sound, with no hosted
+  effects (VST3 or CLAP), plug-in paths, or effect state. Import synth values only; the factory
+  library test enforces this for every bundled preset. Personal presets may keep effects.
 - **The sound:** the voice is derived from circuit simulations and tested against them
   (`docs/circuit/`). A change that alters the samples needs its reason and a measurement.
   `crates/ca72-plugin/tests/preset_render.rs` compares every factory preset with the code
