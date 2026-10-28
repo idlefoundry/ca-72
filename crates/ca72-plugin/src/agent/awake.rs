@@ -37,7 +37,10 @@ pub fn quitting() {
     {
         static ONCE: std::sync::Once = std::sync::Once::new();
         ONCE.call_once(|| {
-            std::mem::forget(mac::Token::begin("Quitting: saving the session", mac::QUITTING));
+            std::mem::forget(mac::Token::begin(
+                "Quitting: saving the session",
+                mac::QUITTING,
+            ));
         });
     }
 }
