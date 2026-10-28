@@ -168,6 +168,8 @@ jobs:
         run: |
           python3 scripts/test-linux-window-identity.py
           CARGO_TARGET_DIR="$RUNNER_TEMP/ca72-window-identity" cargo test --manifest-path third_party/baseview/Cargo.toml --lib
+          # A held key through the X server's repeats (baseview's change 14, R-X11-REPEAT).
+          CARGO_TARGET_DIR="$RUNNER_TEMP/ca72-window-identity" xvfb-run -a cargo test --manifest-path third_party/baseview/Cargo.toml --test x11_key_repeat -- --ignored --test-threads=1
 
       - name: Validators, cached
         uses: actions/cache@v5

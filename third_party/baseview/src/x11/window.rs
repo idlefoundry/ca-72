@@ -101,8 +101,9 @@ pub(crate) struct WindowInner {
     mouse_cursor: Cell<MouseCursor>,
 
     pub(crate) close_requested: Cell<bool>,
-    /// A window of its own (no parent), whose size the window manager is told (`resize`).
-    top_level: bool,
+    /// A window of its own (no parent), whose size the window manager is told (`resize`, change
+    /// 13) and whose handler is told of the keyboard's focus (change 14).
+    pub(crate) top_level: bool,
 
     #[cfg(feature = "opengl")]
     gl_context: Option<GlContext>,
@@ -226,6 +227,8 @@ impl<'a> Window<'a> {
                         | EventMask::BUTTON_RELEASE
                         | EventMask::KEY_PRESS
                         | EventMask::KEY_RELEASE
+                        // The keys' focus, for their repeats (PATCHES.md, change 14).
+                        | EventMask::FOCUS_CHANGE
                         | EventMask::STRUCTURE_NOTIFY
                         | EventMask::ENTER_WINDOW
                         | EventMask::LEAVE_WINDOW,

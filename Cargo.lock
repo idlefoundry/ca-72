@@ -728,7 +728,7 @@ dependencies = [
 [[package]]
 name = "cpal"
 version = "0.15.3"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=bcc4d8f7706043dccdecfe8b115ba129f84ec39c#bcc4d8f7706043dccdecfe8b115ba129f84ec39c"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=91faf69ae98045b9c1d3b4846c7831262353be98#91faf69ae98045b9c1d3b4846c7831262353be98"
 dependencies = [
  "alsa 0.9.1",
  "core-foundation-sys",
@@ -1047,7 +1047,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1954,7 +1954,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 [[package]]
 name = "plugin-kit-materials"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=4c0f0f31041cb28b9dc803996dd01d8f44af5ce8#4c0f0f31041cb28b9dc803996dd01d8f44af5ce8"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=91faf69ae98045b9c1d3b4846c7831262353be98#91faf69ae98045b9c1d3b4846c7831262353be98"
 dependencies = [
  "resvg",
 ]
@@ -1962,14 +1962,14 @@ dependencies = [
 [[package]]
 name = "plugin-kit-queue"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=bcc4d8f7706043dccdecfe8b115ba129f84ec39c#bcc4d8f7706043dccdecfe8b115ba129f84ec39c"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=91faf69ae98045b9c1d3b4846c7831262353be98#91faf69ae98045b9c1d3b4846c7831262353be98"
 
 [[package]]
 name = "plugin-kit-standalone"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=bcc4d8f7706043dccdecfe8b115ba129f84ec39c#bcc4d8f7706043dccdecfe8b115ba129f84ec39c"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=91faf69ae98045b9c1d3b4846c7831262353be98#91faf69ae98045b9c1d3b4846c7831262353be98"
 dependencies = [
- "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=bcc4d8f7706043dccdecfe8b115ba129f84ec39c)",
+ "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=91faf69ae98045b9c1d3b4846c7831262353be98)",
  "crossbeam-channel",
  "midir",
  "plugin-kit-queue",
@@ -1981,7 +1981,7 @@ dependencies = [
 [[package]]
 name = "plugin-kit-stereo"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=4c0f0f31041cb28b9dc803996dd01d8f44af5ce8#4c0f0f31041cb28b9dc803996dd01d8f44af5ce8"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=91faf69ae98045b9c1d3b4846c7831262353be98#91faf69ae98045b9c1d3b4846c7831262353be98"
 dependencies = [
  "libm",
  "serde",
@@ -2189,7 +2189,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2518,7 +2518,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2537,7 +2537,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3003,7 +3003,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

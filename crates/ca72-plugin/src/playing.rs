@@ -344,6 +344,10 @@ impl Playing {
     }
 }
 
+// A key held on a real X server (decisions.md R-X11-REPEAT): Linux, ignored, Xvfb.
+#[cfg(all(test, target_os = "linux"))]
+mod x11_tests;
+
 impl Drop for Playing {
     fn drop(&mut self) {
         self.release();
@@ -487,6 +491,60 @@ mod tests {
             p.owned, [0; 128],
             "repeat after takeover cannot start a phantom note"
         );
+    }
+
+    /// A held key as baseview gives it on every system (on X11 since its change 14, decisions.md
+    /// R-X11-REPEAT): one press, then presses marked `repeat`, then one release. A and X held
+    /// through 30 repeats each: one note struck and one octave stepped; A let go and struck again
+    /// at once is struck again.
+    #[test]
+    fn a_held_key_strikes_and_an_octave_key_steps_once_through_30_repeats() {
+        let mut p = Playing::default();
+        let mut x = key(KeyState::Down, "x");
+        x.code = Code::KeyX;
+        let mut a = key(KeyState::Down, "a");
+        a.code = Code::KeyA;
+        assert!(p.key(&x, true));
+        assert!(p.key(&a, true));
+        x.repeat = true;
+        a.repeat = true;
+        for _ in 0..30 {
+            assert!(p.key(&a, true));
+            assert!(p.key(&x, true));
+        }
+        assert_eq!(p.typing_root, 60, "one octave up, not 30");
+        let on = p.notes.pop().expect("A struck");
+        assert_eq!((on.note, on.on), (60, true));
+        assert!(p.notes.pop().is_none(), "struck once");
+        let mut up = key(KeyState::Up, "a");
+        up.code = Code::KeyA;
+        assert!(p.key(&up, true));
+        a.repeat = false;
+        assert!(p.key(&a, true));
+        assert!(p.key(&up, true));
+        let events: Vec<_> = std::iter::from_fn(|| p.notes.pop())
+            .map(|e| (e.note, e.on))
+            .collect();
+        assert_eq!(
+            events,
+            [(60, false), (60, true), (60, false)],
+            "struck again"
+        );
+        let mut x_up = key(KeyState::Up, "x");
+        x_up.code = Code::KeyX;
+        assert!(p.key(&x_up, true));
+        assert_eq!(p.typing_root, 60);
+        let mut z = key(KeyState::Down, "z");
+        z.code = Code::KeyZ;
+        assert!(p.key(&z, true));
+        z.repeat = true;
+        for _ in 0..30 {
+            assert!(p.key(&z, true));
+        }
+        assert_eq!(p.typing_root, 48, "one octave down, not 30");
+        z.state = KeyState::Up;
+        assert!(p.key(&z, true));
+        assert!(!p.active());
     }
 
     #[test]
