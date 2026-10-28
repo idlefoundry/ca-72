@@ -13603,7 +13603,10 @@ the strip's: a layout naming one is refused, one made for revisions 1 to 3 loads
 - **RATE's numbers** are .01 .1 1 2 5 10 50 (the mock-ups' were .05 to 50 for a 0.05 floor; the
   owner chose 0.01); .5 is a tick, as numbered it crowded 1 and 2.
 - **The pop-up sits under its knob** (over whatever is there), so that the tip above stays read,
-  and is kept while the pointer is over it; it gives way to the knob's menu.
+  and is kept while the pointer is over it; it gives way to the knob's menu, and to the knob's
+  drag (the owner, 2026-10-28: dragging the knob down ran the pointer onto it and the knob
+  stopped; gone from the press, back on the first move after the release. Alt was weighed to
+  call it up instead, but Alt-drag already sets the last touched source's depth).
 - **An assignment's preview while hovering is visual only** (its ring at 25 %); the sound does not
   change until the drop (the spec's "optionally").
 - **Dragging a depth to 0 takes the assignment away** (the pop-up's, the ring's, Alt's, a typed 0),

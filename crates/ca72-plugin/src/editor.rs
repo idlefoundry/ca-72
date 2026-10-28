@@ -3756,6 +3756,8 @@ impl Editing {
                     fine: modifiers.contains(Modifiers::SHIFT),
                     moved: false,
                 });
+                // (A knob's pop-up gives way to its drag, back on the next move after it.)
+                self.modulating.popup = None;
             }
             Target::Power => self.set_power(self.params.bypass.value()),
             Target::Grip => {
@@ -3981,6 +3983,7 @@ impl Editing {
             return;
         }
         if !self.learning.menu_open()
+            && self.drag.is_none()
             && self
                 .mod_scene
                 .popup
@@ -16231,6 +16234,43 @@ mod tests {
     /// colour, dragged up for more depth; a ring's end dragged round sets it; Alt/Option-drag on
     /// the knob sets the last touched LFO's; the tip lists the depths; the knob's menu has a head
     /// per source with DEPTH… (typed) and REMOVE.
+    #[test]
+    fn a_knobs_pop_up_gives_way_to_its_drag() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _host, params) = editing();
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Cutoff, 0.4)
+            .expect("room");
+        e.playing.visible = false;
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.draw();
+        let popup = e.mod_scene.popup.clone().expect("its pop-up");
+        let (_, dials) = ca72_panel::modulation::popup_layout(&popup);
+        // Pressed, it goes; dragged down over where its dial stood, the knob keeps following.
+        press(&mut e);
+        e.draw();
+        assert!(e.mod_scene.popup.is_none(), "gone as the knob is pressed");
+        let dragged = |e: &Editing| e.drag.as_ref().expect("its drag").value;
+        let before = dragged(&e);
+        let dial = at(&e, dials[0].0);
+        go(&mut e, below(cutoff, (dial.y - cutoff.y) / 2.0));
+        let halfway = dragged(&e);
+        go(&mut e, dial);
+        e.draw();
+        assert!(e.mod_scene.popup.is_none(), "not back mid-drag");
+        assert!(
+            halfway < before && dragged(&e) < halfway,
+            "the knob followed"
+        );
+        release(&mut e);
+        // Let go, it is back on the next move over the knob.
+        go(&mut e, cutoff);
+        e.draw();
+        assert!(e.mod_scene.popup.is_some(), "back after the drag");
+    }
+
     #[test]
     fn depths_are_set_by_the_pop_up_the_ring_alt_drag_and_the_menu() {
         use crate::lfo::{Source, Target as T};

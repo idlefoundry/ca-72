@@ -1206,9 +1206,15 @@ impl Editing {
     }
 
     /// The pop-up shown for the knob under the pointer (with something on it), kept while the
-    /// pointer is over the pop-up itself.
+    /// pointer is over the pop-up itself; none while a knob is dragged (the owner, 2026-10-28:
+    /// the pointer ran onto it and the knob stopped).
     pub(super) fn follow_popup(&mut self, at: (f64, f64)) {
         if self.modulating.depth.is_some() {
+            return;
+        }
+        if self.drag.is_some() || self.fx_pin_drag.is_some() {
+            self.modulating.popup = None;
+            self.modulating.popup_hover = None;
             return;
         }
         if let (Some(p), Some(_)) = (&self.mod_scene.popup, self.modulating.popup)

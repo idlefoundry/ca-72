@@ -76,6 +76,7 @@ impl Editing {
             value: pin.value,
             fine: modifiers.contains(Modifiers::SHIFT),
         });
+        self.modulating.popup = None;
         true
     }
 
