@@ -124,5 +124,6 @@ bug_fixes = [
   "Drawer digits, legends and titles match the panel in both looks, with LARGE lettering too.",
   "Fewer dropouts in POLY with DOUBLE at QUALITY HI on a busy computer.",
   "Hosts that load the CA-72 on a smaller thread no longer crash.",
+  "Linux standalone: fewer dropouts on a busy computer; it takes real-time priority, asking RTKit if need be, and says so when it cannot.",
   "The Audio Unit no longer crashes when a host prepares it on a thread with a small stack.",
 ]

@@ -205,6 +205,14 @@ again; if its saved settings crash it, its menu's **LOAD WITHOUT ITS SETTINGS** 
 fresh and keeps them. After a run that did not close properly, or with Shift (Option on macOS) held
 as it opens, or `--safe-start`, it starts with every effect OFF: click a slot to turn them back on.
 
+On Linux the standalone plays at real-time priority, so that other work on the computer cannot
+hold its sound up. It takes it itself where your user is allowed it (an rtprio limit: on Arch
+and Omarchy the `realtime` group of `realtime-privileges`, on Debian and Ubuntu the `audio` group
+where JACK's setup gave it one), and otherwise asks RTKit (`rtkit`, which Ubuntu, Fedora and most
+desktops run). Where it gets neither, a note after PANIC says so for a few seconds as it starts,
+and SETTINGS and AUDIO & MIDI go on saying so: install rtkit or join the group, then log in
+again. macOS and Windows give it real-time priority themselves.
+
 CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.
 The development JACK launcher is kept separately (Building); direct ASIO and
 native PipeWire are not included in the production host. External input and output
