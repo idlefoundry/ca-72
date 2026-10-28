@@ -16702,3 +16702,38 @@ LFO 4 is not assigned.
 - **A beta assignment's depth halved**, above.
 - **The agents** read and set FADE in signed seconds (`unit` `s`, -10 to 10; `agent::values`'
   `Units::Fade`), refusing a value past its ends rather than clamping it, as every value.
+
+
+## R-X11-REPEAT. Held computer keys sustain on Linux
+
+**Owner, 2026-10-28:** fix this in shared plugin-kit, then take the fix into
+CA-72. Release timing does not change that choice. Malleator identified the
+problem; its R35 documented a temporary 40 ms release grace period.
+
+**Implementation:** plugin-kit commit `91faf69ae98045b9c1d3b4846c7831262353be98`
+(PR idlefoundry/plugin-kit#12), baseview change 14, requests detectable XKB
+auto-repeat on each window connection and marks presses of held keys as
+repeats. The fallback suppresses the classic same-key, same-window,
+same-timestamp release/press pair. Focus changes clear held-key state;
+top-level focus loss reaches the editor so it can release notes. Real
+releases have no added delay. CA-72 retains its local baseview patches,
+imports this upstream change, and moves its git plugin-kit dependencies to
+that revision. Provenance and the local window-size difference are recorded
+in baseview/PATCHES.md. No grace timer is added to Playing.
+
+**Validation:** plugin-kit's Linux, macOS and Windows CI passed. Its
+real-server checks passed under Xvfb and the laptop's Hyprland XWayland,
+with detectable repeat enabled and forced off: 1 initial press, 24 repeats,
+1 release, versus 25 unmarked press/release pairs before the fix. CA-72's
+full workspace suite with standalone-production passed; formatting and
+all-target/all-feature Clippy passed. Every factory preset matched the
+parent 172fa2b render sample for sample. The CA-72 Xvfb integration test
+passes a held X and A through baseview into Playing: one octave step,
+one sustained note, then two genuine quick re-presses. The unit regression
+also covers 30 repeated presses of A, X and Z.
+
+**Other instruments:** Malleator and CA-74 can pin their kit dependencies
+to 91faf69, import change 14 if retaining a local baseview, and run their
+factory preset identity checks. Malleator can remove its R35 release grace
+once it uses this fix; retaining it would retain the unnecessary delay.
+Their repositories are not changed here.

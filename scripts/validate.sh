@@ -126,6 +126,10 @@ if [ "$os" = linux ] && [ "${CA72_SKIP_GUI_TESTS:-0}" != 1 ]; then
     ${display[@]+"${display[@]}"} cargo test --manifest-path "$root/Cargo.toml" \
         -p ca72-plugin --lib --features standalone-production \
         editor::linux_resize_tests -- --ignored --nocapture --test-threads=1
+    # A typed key held through the X server's own repeats (decisions.md R-X11-REPEAT).
+    echo "== Linux typed keys held"
+    ${display[@]+"${display[@]}"} cargo test --manifest-path "$root/Cargo.toml" \
+        -p ca72-plugin --lib playing::x11_tests -- --ignored --nocapture --test-threads=1
 fi
 
 echo "== clap-validator $CLAP_VALIDATOR"

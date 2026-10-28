@@ -64,8 +64,8 @@ ca72-rt.workspace = true
 libm.workspace = true
 ca72-panel = { path = "../ca72-panel" }
 nih_plug.workspace = true
-plugin-kit-queue = { git = "https://github.com/idlefoundry/plugin-kit", rev = "bcc4d8f7706043dccdecfe8b115ba129f84ec39c" }
-plugin-kit-standalone = { git = "https://github.com/idlefoundry/plugin-kit", rev = "bcc4d8f7706043dccdecfe8b115ba129f84ec39c", optional = true }
+plugin-kit-queue = { git = "https://github.com/idlefoundry/plugin-kit", rev = "91faf69ae98045b9c1d3b4846c7831262353be98" }
+plugin-kit-standalone = { git = "https://github.com/idlefoundry/plugin-kit", rev = "91faf69ae98045b9c1d3b4846c7831262353be98", optional = true }
 resvg = { version = "0.45", default-features = false, features = ["text"], optional = true }
 # The editor's window and its pixels: baseview at the revision nih-plug's own examples use,
 # and softbuffer 0.4.8, both patched (third_party/baseview/PATCHES.md,
@@ -88,8 +88,8 @@ ca72-analysis.workspace = true
 base64 = "0.22"
 sha2 = "0.10"
 # The stereo and AUTO GAIN's machinery (plugin-kit's K6 and K7), from github.com/idlefoundry/plugin-kit
-# at one commit (its main, K5 to K7 merged), as the panel takes K5.
-plugin-kit-stereo = { git = "https://github.com/idlefoundry/plugin-kit", rev = "4c0f0f31041cb28b9dc803996dd01d8f44af5ce8" }
+# at the one commit every kit crate is taken at (decisions.md R-X11-REPEAT), as the panel takes K5.
+plugin-kit-stereo = { git = "https://github.com/idlefoundry/plugin-kit", rev = "91faf69ae98045b9c1d3b4846c7831262353be98" }
 
 # The screen's size, for the editor's first size (and on Windows the keyboard's focus and
 # the pointer's capture, and the shell that opens a release in the browser): the versions
@@ -126,6 +126,11 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 # The editor's pixels read and its window captured, in the tests in a real window.
 [target.'cfg(target_os = "windows")'.dev-dependencies]
 winapi = { version = "0.3.9", features = ["winuser", "windef", "wingdi", "processthreadsapi", "realtimeapiset"] }
+
+# A key held on a real X server, as a keyboard holds it (XTEST: `playing/x11_tests.rs`,
+# decisions.md R-X11-REPEAT).
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+x11rb = { version = "0.13.0", features = ["randr", "xtest"] }
 
 [lints]
 workspace = true
