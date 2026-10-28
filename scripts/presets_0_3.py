@@ -85,17 +85,20 @@ def preset(name, description, tags, *parts, names=(), **values):
         v.update(LEVELS[name])
     return dict(name=name, description=description, tags=tags, macro_names=list(names), values=v)
 
-def owner(name, description=None):
+def owner(name, description=None, **changes):
     """The owner's preset, as their CA-72 saved it (scripts/presets_owner/<name>.toml, kept as
-    it came: decisions.md R-OWNER-PRESETS): its values, every one, as they are; its tags and
-    macros' names; its description, else `description`. MAIN OUTPUT VOLUME and LEVEL as the
-    others', from the levels file once levelled. Its AUTO GAIN curve is not taken: the factory
-    measures its own (tests/factory_curves.rs)."""
+    it came: decisions.md R-OWNER-PRESETS): its values, every one, as they are, but `changes`
+    (the owner's own, decided after); its tags and macros' names; its description, else
+    `description`. MAIN OUTPUT VOLUME and LEVEL as the others', from the levels file once
+    levelled. Its AUTO GAIN curve is not taken: the factory measures its own
+    (tests/factory_curves.rs)."""
     t = tomllib.loads((OWNER / f"{name}.toml").read_text())
     assert t["name"] == name, name
     effects = t.get("effects", {}).get("chain")
     assert effects is None or not json.loads(effects)["slots"], f"{name}: effects"
     v = dict(t["values"])
+    assert set(changes) <= set(v), f"{name}: {set(changes) - set(v)}"
+    v.update(changes)
     if name in LEVELS:
         v.update(LEVELS[name])
     return dict(name=name, description=t.get("description") or description or "",
@@ -360,6 +363,7 @@ P.append(owner(
     "instruments spread across the field, DOUBLE and FEEDBACK thickening them; timed LFOs "
     "turn the first's width and the pitch over bars, a slow one the filter, and HOLD keeps "
     "the notes sounding until the next. A dark drone.",
+    ext_on=0,  # (EXTERNAL INPUT off: the owner, 2026-10-28.)
 ))
 
 

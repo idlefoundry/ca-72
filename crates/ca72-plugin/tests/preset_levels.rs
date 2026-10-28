@@ -21,7 +21,8 @@
 //! the presets retired from the plug-in (`sounds/retired.toml`, decisions.md R55) measured
 //! instead, which its pack ships. `CA72_USER_PRESETS` (a presets folder): the user's presets in
 //! it measured instead, each as the library reads it (decisions.md R-OWNER-PRESETS: the owner's
-//! files against the factory's levelled versions of them). `CA72_NEVER_SLEEP` (set): the engine
+//! files against the factory's levelled versions of them). `CA72_VELOCITY` (1 to 127): the notes'
+//! velocity, 100 by default. `CA72_NEVER_SLEEP` (set): the engine
 //! alone plays each phrase at LO, the one instrument never sleeping (decisions.md R68), to show
 //! that its sleeping changes no sample (the engine knows no arpeggiator or transport).
 
@@ -81,7 +82,7 @@ fn with_overrides(s: &Sound) -> Sound {
 
 /// How `s` is played at `q`: its phrase, or `CA72_PHRASE`'s.
 fn play_of(s: &Sound, q: Quality) -> Play {
-    match phrase_file() {
+    let mut p = match phrase_file() {
         Some((notes, cc)) => {
             let mut p = Play::new(notes, q);
             p.seconds += 1.0;
@@ -89,7 +90,9 @@ fn play_of(s: &Sound, q: Quality) -> Play {
             p
         }
         None => Play::phrase(s, q),
-    }
+    };
+    p.velocity = env("CA72_VELOCITY", 100.0f32) / 127.0;
+    p
 }
 
 /// The engine alone playing the phrase at LO, never sleeping (`CA72_NEVER_SLEEP`).

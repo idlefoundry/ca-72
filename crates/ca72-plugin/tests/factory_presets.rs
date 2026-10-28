@@ -90,9 +90,9 @@ fn waveform_apart(a: &(Vec<f32>, Vec<f32>), b: &(Vec<f32>, Vec<f32>)) -> f64 {
 /// with its TEMPO at 90 (their 10 ms loudness within a decibel, and 90 against 120 more than a
 /// decibel and a half apart, or their waveforms more than 20 dB from the same where the tempo
 /// moves what loudness hardly shows, as in four of the owner's: Glass Bell's timed vibrato,
-/// Gatekeeper's gentle gate, Droning On's LFOs over bars, Bright Xylo's arpeggiator struck again
-/// with each note; decisions.md R-OWNER-PRESETS. A preset that did not follow would play the
-/// same to the sample). Three seconds of its phrase at LO.
+/// Gatekeeper's gentle gate, Droning On's LFOs over bars, Bright Xylo's short arpeggio;
+/// decisions.md R-OWNER-PRESETS. A preset that did not follow would play the same to the
+/// sample). Three seconds of its phrase at LO.
 #[test]
 fn the_timed_presets_keep_the_hosts_tempo_and_the_standalones() {
     let timed: Vec<&Sound> = factory().iter().filter(|s| timed(s)).collect();

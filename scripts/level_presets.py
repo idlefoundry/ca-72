@@ -9,7 +9,10 @@ one up, VOLUME at 10) so that
 - where midway leaves ULTRA outside the tolerance, the level moves (as far as LO and HI stay
   0.25 dB within it) to bring ULTRA in, or as near as it comes;
 
-and measures again until each is within 0.1 dB of where it was sent. 0.3.0's levels go into
+and measures again until each is within 0.1 dB of where it was sent. A preset whose MAIN OUTPUT
+VOLUME an LFO, a macro or velocity moves keeps its VOLUME, and LEVEL alone moves (VOLUME moved
+would move the modulation along the pot's taper, or leave it nothing to raise at 10:
+decisions.md R-OWNER-PRESETS). 0.3.0's levels go into
 scripts/presets_0_3_levels.json and the generator is run; another preset's VOLUME and LEVEL
 are written into crates/ca72-plugin/sounds/presets.toml in place. Prints each preset's readings
 before and after, and with --report writes them as Markdown.
@@ -42,9 +45,11 @@ def db_of(volume, level):
     g = output_gain(volume)
     return (20 * math.log10(g) if g > 0 else -math.inf) + level
 
-def volume_level_for(db):
+def volume_level_for(db, volume=None):
     """VOLUME and LEVEL for a gain of `db`: VOLUME alone at or under unity, else VOLUME at 10
-    and LEVEL the rest."""
+    and LEVEL the rest; with `volume` (a modulated VOLUME, kept), LEVEL the rest."""
+    if volume is not None:
+        return volume, round(min(max(db - db_of(volume, 0), LEVEL_RANGE[0]), LEVEL_RANGE[1]), 2)
     if db >= 0:
         return 10, round(min(db, LEVEL_RANGE[1]), 2)
     lo, hi = 0.0, 10.0
@@ -57,7 +62,8 @@ def volume_level_for(db):
     return round((lo + hi) / 2, 3), 0
 
 def presets():
-    """(name, generated, volume, level) of every factory preset, in the file's order."""
+    """(name, generated, volume, level, volume modulated) of every factory preset, in the
+    file's order."""
     text = FILE.read_text()
     at = text.find("\n" + MARKER)
     out = []
@@ -67,8 +73,10 @@ def presets():
             name = json.loads(re.search(r'^name = (".*")$', block, re.M).group(1))
             vol = re.search(r"^volume = (\S+)$", block, re.M)
             lev = re.search(r"^level = (\S+)$", block, re.M)
+            moved = any(float(v) != 0 for v in
+                        re.findall(r"^\w+_to_volume = (\S+)$", block, re.M))
             out.append((name, generated, float(vol.group(1)) if vol else 10.0,
-                        float(lev.group(1)) if lev else 0.0))
+                        float(lev.group(1)) if lev else 0.0, moved))
     return out
 
 def binary():
@@ -148,13 +156,13 @@ def main():
     for n in range(args.passes if not args.check else 0):
         levels = json.loads(LEVELS.read_text()) if LEVELS.exists() else {}
         moves = []
-        for name, generated, volume, level in presets():
+        for name, generated, volume, level, modulated in presets():
             if name not in now:
                 continue
             g = gain_for(now[name], generated)
             if abs(g) < CLOSE:
                 continue
-            v, l = volume_level_for(db_of(volume, level) + g)
+            v, l = volume_level_for(db_of(volume, level) + g, volume if modulated else None)
             if (v, l) == (volume, level):
                 continue
             moves.append(name)

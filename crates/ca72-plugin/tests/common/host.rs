@@ -147,6 +147,8 @@ pub struct Play {
     pub standalone_tempo: f64,
     /// Channel pressure swelling from none to full and back over each note.
     pub pressure: bool,
+    /// The notes' velocity, 0 to 1 ([`VELOCITY`]).
+    pub velocity: f32,
 }
 
 impl Play {
@@ -161,6 +163,7 @@ impl Play {
             host_tempo: Some(120.0),
             standalone_tempo: ca72_plugin::params::DEFAULT_TEMPO,
             pressure: false,
+            velocity: VELOCITY,
         }
     }
 
@@ -187,7 +190,7 @@ fn events(play: &Play) -> Vec<(usize, NoteEvent<()>)> {
                 voice_id: None,
                 channel: 0,
                 note,
-                velocity: VELOCITY,
+                velocity: play.velocity,
             };
             let off = NoteEvent::NoteOff {
                 timing: 0,

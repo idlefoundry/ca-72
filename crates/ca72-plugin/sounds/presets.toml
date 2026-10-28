@@ -15,8 +15,8 @@
 # held bass fitted to a recording by measurement (R43); Cycle of Fifths, last, the owner's. MAIN
 # OUTPUT VOLUME, then LEVEL where VOLUME is at 10, levels them against each other (measured
 # on the model: `tests/preset_levels.rs`).
-# Bright Xylo, Feedback Funk and Loose Hat are as the owner edited them for 0.3.0, every value
-# theirs but VOLUME and LEVEL (decisions.md R-OWNER-PRESETS).
+# Bright Xylo and Feedback Funk are as the owner edited them for 0.3.0, every value theirs but
+# VOLUME and LEVEL; Bright Xylo, its arpeggiator on, is tagged arp (decisions.md R-OWNER-PRESETS).
 # ENTROPY uses the extended scale: 5 % is the former minimum (R-ENTROPY-FLOOR).
 # `drive_curve` and `drive_curve_lo` are AUTO GAIN's curves for the sound at QUALITY HI (ULTRA
 # too) and LO, the corrections at DRIVE's 6, 12, 18 and 24 dB, as the plug-in measures them at
@@ -608,7 +608,7 @@ volume = 10
 [[preset]]
 name = "Bright Xylo"
 description = "A 4' triangle with a sharp filter blip and a quick decay to silence, RETRIGGER striking it again on every note: a xylophone. Staccato, middle and upper keys."
-tags = ["percussive", "mallet"]
+tags = ["percussive", "mallet", "arp"]
 drive_curve = [-5.345311, -10.090885, -13.564593, -15.215646]
 drive_curve_lo = [-5.2536407, -10.032413, -13.519246, -14.372896]
 
@@ -1041,21 +1041,14 @@ volume = 10
 name = "Loose Hat"
 description = "The closed hat's noise with a longer decay, RETRIGGER striking it again on every hit: an open hi-hat for the off-beats. Any key."
 tags = ["drums", "hi-hat", "noise", "percussive"]
-drive_curve = [-5.616578, -10.45604, -13.815408, -15.564928]
-drive_curve_lo = [-5.485016, -9.791689, -11.976063, -12.5473995]
+drive_curve = [-5.536216, -10.230811, -13.452346, -15.180038]
+drive_curve_lo = [-5.584828, -10.1626425, -12.704918, -13.467244]
 
 [preset.values]
 a440 = 0
-arp_direction = 0
-arp_gate = 50
-arp_latch = 0
-arp_octaves = 1
-arp_on = 0
-arp_rate = 9
-arp_swing = 0
 auto_gain = 1
 contour_amount = 0
-cutoff = 1
+cutoff = 5
 decay_on = 1
 double = 0
 doubled = 0
@@ -1066,83 +1059,20 @@ ext_on = 0
 ext_volume = 8
 feedback = 0
 filter_attack = 0
-filter_decay = 2.3341
+filter_decay = 4
 filter_mod = 0
 filter_mode = 0
 filter_sustain = 5
 glide = 0
 glide_on = 0
-glide_range = 0
 inner = 0
 keyboard_control_1 = 1
 keyboard_control_2 = 0
-level = 5.5
-lfo1_division = 8
-lfo1_level = 100
-lfo1_mode = 0
-lfo1_mono = 1
-lfo1_on = 1
-lfo1_phase = 0
-lfo1_polarity = 0
-lfo1_rate = 2
-lfo1_reverse = 0
-lfo1_rise = 0
-lfo1_shape = 0
-lfo1_shape_mode = 0
-lfo1_timed = 0
-lfo1_waveform = 0
-lfo2_division = 8
-lfo2_level = 100
-lfo2_mode = 0
-lfo2_mono = 1
-lfo2_on = 1
-lfo2_phase = 0
-lfo2_polarity = 0
-lfo2_rate = 2
-lfo2_reverse = 0
-lfo2_rise = 0
-lfo2_shape = 0
-lfo2_shape_mode = 0
-lfo2_timed = 0
-lfo2_waveform = 0
-lfo3_division = 8
-lfo3_level = 100
-lfo3_mode = 0
-lfo3_mono = 1
-lfo3_on = 1
-lfo3_phase = 0
-lfo3_polarity = 0
-lfo3_rate = 2
-lfo3_reverse = 0
-lfo3_rise = 0
-lfo3_shape = 0
-lfo3_shape_mode = 0
-lfo3_timed = 0
-lfo3_waveform = 0
-lfo4_division = 8
-lfo4_level = 100
-lfo4_mode = 0
-lfo4_mono = 1
-lfo4_on = 1
-lfo4_phase = 0
-lfo4_polarity = 0
-lfo4_rate = 2
-lfo4_reverse = 0
-lfo4_rise = 0
-lfo4_shape = 0
-lfo4_shape_mode = 0
-lfo4_timed = 0
-lfo4_waveform = 0
+level = 3.97
 lock = 0
 loudness_attack = 0
-loudness_decay = 0.8815
+loudness_decay = 2.3
 loudness_sustain = 0
-macro1 = 0
-macro2 = 0
-macro3 = 0
-macro4 = 0
-macro5 = 0
-macro6 = 0
 main_output = 1
 mod_mix = 0
 mod_wheel = 0
@@ -1152,52 +1082,26 @@ noise_volume = 10
 note_priority = 1
 osc1_on = 0
 osc1_range = 3
-osc1_shape = 0.3361
-osc1_shape_mod = 0
-osc1_shape_mod_dir = 0
-osc1_shape_mode = 0
 osc1_volume = 8
 osc1_waveform = 2
-osc2_division = 8
 osc2_frequency = 0
 osc2_on = 0
 osc2_range = 3
-osc2_shape = 0.3361
-osc2_shape_mod = 0
-osc2_shape_mod_dir = 0
-osc2_shape_mode = 0
-osc2_timed = 0
 osc2_volume = 8
 osc2_waveform = 2
 osc3_control = 1
-osc3_division = 8
 osc3_frequency = 0
 osc3_on = 0
 osc3_range = 3
-osc3_shape = 0.3361
-osc3_shape_mod = 0
-osc3_shape_mod_dir = 0
-osc3_shape_mode = 0
-osc3_timed = 0
 osc3_volume = 8
 osc3_waveform = 2
 osc_mod = 0
 placement = 0
 poly = 0
-pressure_filter = 0
-pressure_mod = 0
 retrigger = 1
 spread = 0
-timbre_filter = 0
-timbre_mod = 0
 tune = 0
 unison = 0
-velocity_curve = 0
-velocity_floor = 0
-velocity_to_cutoff = 25
-velocity_to_filter_decay = 25
-velocity_to_loudness_decay = 19.9886
-velocity_to_volume = 25
 voices = 4
 volume = 10
 
@@ -1648,7 +1552,7 @@ glide_range = 0
 inner = 0
 keyboard_control_1 = 1
 keyboard_control_2 = 1
-level = 0
+level = -0.76
 lfo1_division = 8
 lfo1_level = 100
 lfo1_mode = 0
@@ -1775,7 +1679,7 @@ unison = 0
 velocity_curve = 0
 velocity_floor = 0
 voices = 8
-volume = 5.924
+volume = 6.119
 
 [[preset]]
 name = "Glass Bell"
@@ -2733,7 +2637,7 @@ glide_range = 0
 inner = 36.3379
 keyboard_control_1 = 1
 keyboard_control_2 = 1
-level = 0
+level = -1.47
 lfo1_division = 8
 lfo1_level = 100
 lfo1_mode = 0
@@ -2855,7 +2759,7 @@ unison = 0
 velocity_curve = 0
 velocity_floor = 0
 voices = 6
-volume = 8.442
+volume = 8.81
 
 [[preset]]
 name = "Tempo Wobble"
@@ -3703,7 +3607,7 @@ glide_range = 0
 inner = 0
 keyboard_control_1 = 1
 keyboard_control_2 = 0
-level = 5.5
+level = 5.87
 lfo1_division = 8
 lfo1_level = 100
 lfo1_mode = 0
@@ -3826,14 +3730,14 @@ velocity_to_filter_decay = 25
 velocity_to_loudness_decay = 19.9886
 velocity_to_volume = 25
 voices = 4
-volume = 10
+volume = 7.9663
 
 [[preset]]
 name = "Droning On"
 description = "Wide rectangles at 8', 4' and 2', oscillators 2 and 3 tuned apart, UNISON's four instruments spread across the field, DOUBLE and FEEDBACK thickening them; timed LFOs turn the first's width and the pitch over bars, a slow one the filter, and HOLD keeps the notes sounding until the next. A dark drone."
 tags = ["bass", "dark", "drone"]
-drive_curve = [-3.0419707, -5.3251367, -5.25953, -7.1339297]
-drive_curve_lo = [-2.8069217, -3.6109154, -3.6451468, -3.5660357]
+drive_curve = [-3.3966024, -5.077812, -5.790694, -5.9414306]
+drive_curve_lo = [-2.99958, -4.1111355, -4.367424, -4.2353716]
 
 [preset.values]
 a440 = 0
@@ -3853,7 +3757,7 @@ doubled = 1
 drive = 0
 emphasis = 2.26
 entropy = 35.0326
-ext_on = 1
+ext_on = 0
 ext_volume = 5
 feedback = 5.5798
 filter_attack = 7.2333
@@ -3991,7 +3895,7 @@ unison = 1
 velocity_curve = 0
 velocity_floor = 0
 voices = 4
-volume = 7.342
+volume = 7.884
 
 [[preset]]
 name = "Finger in a Light Socket"
