@@ -16421,6 +16421,19 @@ R-DROPOUTS's promotion did nothing there; and a refusal was said only on standar
 - **SIGXCPU:** `rtkit::tests::a_runaway_thread_is_demoted_by_sigxcpu_not_killed` (ignored; run
   alone on omarchy): a `SCHED_FIFO` thread spinning without blocking was made ordinary after
   157.5 ms, and the process lived.
+- **Found by CA-74, 2026-10-28: a thread RTKit made real-time was never demoted, and the process
+  was killed.** CA-74's session found it porting this fallback (its commit 0094894), at ULTRA with
+  an LFO under load. RTKit's threads have `SCHED_RESET_ON_FORK`, and only a privileged process may
+  clear it (sched(7)). So the SIGXCPU handler's `SCHED_OTHER` was refused (EPERM), the thread stayed
+  real-time, and the kernel killed the process at the hard limit (status 137). The test above
+  promotes directly, without the flag, so it never saw this. Now every demotion (the SIGXCPU
+  handler, the watchdog's "had not run for…", `ca72_rt::demote`) asks for `SCHED_OTHER` and, if
+  that is refused, `SCHED_OTHER | SCHED_RESET_ON_FORK` (`make_ordinary`). The flag is not always
+  added, as CA-74 does: a thread promoted directly would keep it and could not be promoted
+  directly again. `rtkit::tests::a_runaway_thread_rtkit_promoted_is_demoted_not_killed` (ignored;
+  the system's RTKit; built on omarchy, run alone on the laptop under `prlimit --rtprio=0:0`):
+  before, the process was killed (137); after, demoted after 174.9, 178.3 and 186.2 ms in three
+  runs, the process alive. The test above still passes there (171.0 ms).
 - **The calls against a real bus:** `rtkit::tests::a_private_bus_answers_and_names_rtkit_absent`
   starts a private `dbus-daemon` where one is installed.
 - **PipeWire's own requests.** PipeWire's client in the standalone asks RTKit for each stream it
@@ -16431,5 +16444,4 @@ R-DROPOUTS's promotion did nothing there; and a refusal was said only on standar
 **Not done:**
 - A real RTKit with PipeWire's real-time module on in the process, after a new login.
 - Ubuntu and Fedora themselves; RTKit older than 0.11 (`MakeThreadRealtime`).
-- The SIGXCPU path under RTKit itself (checked with `SCHED_FIFO`; the kernel's limit is the same).
 - Listening, and dropouts measured with RTKit's priority 20 against FIFO 70.

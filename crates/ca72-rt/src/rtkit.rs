@@ -961,6 +961,52 @@ mod tests {
         );
     }
 
+    /// A thread RTKit made real-time (`SCHED_RR | SCHED_RESET_ON_FORK`) that runs past the soft
+    /// RLIMIT_RTTIME is made ordinary by the SIGXCPU handler, and the process lives on: no
+    /// SIGKILL at the hard limit. (Clearing RTKit's reset-on-fork flag needs a privilege, so
+    /// `SCHED_OTHER` alone was refused and the process killed: found by CA-74.) Ignored: it asks
+    /// the system's RTKit, sets the process's RLIMIT_RTTIME and spins a real-time thread for
+    /// 400 ms; run it alone with direct promotion refused (`prlimit --rtprio=0:0 <the test
+    /// binary> --ignored --exact rtkit::tests::a_runaway_thread_rtkit_promoted_is_demoted_not_killed`).
+    #[test]
+    #[ignore = "asks the system's RTKit and spins a real-time thread"]
+    fn a_runaway_thread_rtkit_promoted_is_demoted_not_killed() {
+        use super::super::{Promoted, is_realtime, promote_in, use_rtkit};
+        static G: Group = Group::new("the test's runaway thread");
+        use_rtkit();
+        let before = XCPU.load(Ordering::Acquire);
+        let demoted_at = std::thread::spawn(|| {
+            let period = Duration::from_millis(5);
+            assert_eq!(promote_in(&G, period, period / 2), Ok(Promoted::Asked));
+            let t = std::time::Instant::now();
+            while !is_realtime() && t.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(
+                is_realtime(),
+                "RTKit did not make it real-time: {:?}",
+                G.standing()
+            );
+            assert!(soft_ms() > 0 && soft_ms() <= 150, "{} ms", soft_ms());
+            let start = std::time::Instant::now();
+            let mut demoted_at = None;
+            // (Never blocking: the CPU time counts toward RLIMIT_RTTIME.)
+            while start.elapsed() < Duration::from_millis(400) {
+                if demoted_at.is_none() && !is_realtime() {
+                    demoted_at = Some(start.elapsed());
+                }
+                std::hint::spin_loop();
+            }
+            demoted_at
+        })
+        .join()
+        .expect("the thread")
+        .expect("demoted while it ran");
+        assert!(XCPU.load(Ordering::Acquire) > before, "SIGXCPU handled");
+        eprintln!("demoted after {demoted_at:?} of spinning");
+        assert!(demoted_at < Duration::from_millis(200), "{demoted_at:?}");
+    }
+
     /// A real bus (a private `dbus-daemon`, where one is installed): authenticated, said hello,
     /// a call answered, and RTKit's absence named as such.
     #[test]

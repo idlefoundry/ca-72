@@ -276,9 +276,7 @@ impl Standing {
 pub fn demote() {
     #[cfg(target_os = "linux")]
     {
-        let param = libc::sched_param { sched_priority: 0 };
-        // SAFETY: pid 0 is the calling thread; `param` is valid.
-        unsafe { libc::sched_setscheduler(0, libc::SCHED_OTHER, &param) };
+        make_ordinary(0);
         watchdog::unregister();
     }
     #[cfg(windows)]
@@ -603,6 +601,24 @@ fn realtime_policy(p: i32) -> bool {
     p == libc::SCHED_FIFO || p == libc::SCHED_RR
 }
 
+/// Makes thread `tid` (0: the calling one) ordinary (`SCHED_OTHER`). A thread RTKit made
+/// real-time has `SCHED_RESET_ON_FORK`, which only a privileged process may clear
+/// (sched(7)): `SCHED_OTHER` alone is refused (EPERM) and the thread stays real-time, until
+/// RLIMIT_RTTIME's SIGKILL (found by CA-74: decisions.md R-RTKIT). So it is asked again with the
+/// flag kept. Not with the flag always: a thread promoted directly would then keep it, and could
+/// not be promoted directly again (`SCHED_FIFO` alone would clear it). System calls only: from
+/// the SIGXCPU handler too.
+#[cfg(target_os = "linux")]
+fn make_ordinary(tid: i32) {
+    let param = libc::sched_param { sched_priority: 0 };
+    // SAFETY: a thread id (0: the calling thread; one gone is an error); `param` is valid.
+    unsafe {
+        if libc::sched_setscheduler(tid, libc::SCHED_OTHER, &param) != 0 {
+            libc::sched_setscheduler(tid, libc::SCHED_OTHER | libc::SCHED_RESET_ON_FORK, &param);
+        }
+    }
+}
+
 /// The calling thread's id (Linux; 0 elsewhere), for [`pin`].
 #[cfg(target_os = "linux")]
 pub fn tid() -> i32 {
@@ -821,9 +837,8 @@ mod watchdog {
         for t in &OURS {
             let tid = t.load(Ordering::Acquire);
             if tid != 0 {
-                let param = libc::sched_param { sched_priority: 0 };
-                // SAFETY: a thread of this process (or gone: an error); `param` is valid.
-                unsafe { libc::sched_setscheduler(tid, libc::SCHED_OTHER, &param) };
+                // (A thread of this process, or gone: an error.)
+                super::make_ordinary(tid);
             }
         }
     }
@@ -1015,9 +1030,7 @@ mod watchdog {
                 let ours = realtime_threads(me);
                 if ours.iter().any(|t| t.running_on == Some(*cpu)) {
                     for t in &ours {
-                        let param = libc::sched_param { sched_priority: 0 };
-                        // SAFETY: a thread of this process; `param` is valid.
-                        unsafe { libc::sched_setscheduler(t.tid, libc::SCHED_OTHER, &param) };
+                        super::make_ordinary(t.tid);
                     }
                     DEMOTIONS.fetch_add(1, Ordering::Relaxed);
                     eprintln!(
