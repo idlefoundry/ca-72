@@ -119,6 +119,8 @@ clap-sys = { git = "https://github.com/micahrj/clap-sys.git", rev = "25d7f53fdb6
 # (`tests/standalone_adapter.rs`: the library never asks RTKit, decisions.md R-RTKIT).
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 libc.workspace = true
+# Held-key integration tests on X11 (R-X11-REPEAT).
+x11rb = { version = "0.13.0", features = ["randr", "xtest"] }
 
 # The Objective-C classes of other copies of softbuffer, and the test's own view
 # (tests/softbuffer_copies.rs): the versions softbuffer takes.
@@ -131,11 +133,6 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 # The editor's pixels read and its window captured, in the tests in a real window.
 [target.'cfg(target_os = "windows")'.dev-dependencies]
 winapi = { version = "0.3.9", features = ["winuser", "windef", "wingdi", "processthreadsapi", "realtimeapiset"] }
-
-# A key held on a real X server, as a keyboard holds it (XTEST: `playing/x11_tests.rs`,
-# decisions.md R-X11-REPEAT).
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-x11rb = { version = "0.13.0", features = ["randr", "xtest"] }
 
 [lints]
 workspace = true
