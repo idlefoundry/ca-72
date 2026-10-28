@@ -4079,17 +4079,17 @@ static LO_SHARING_OVERRIDE: std::sync::atomic::AtomicUsize = std::sync::atomic::
 
 /// How LO shares its voices on this system (decisions.md R-LO-WORKERS, the owner's decision
 /// of 2026-10-19): by load on Windows, where the workers' short runs cost two to four times the
-/// voices' own processor time and the host's thread gained little while it was not busy;
-/// always elsewhere: on Linux and macOS waking a worker costs little (on an M4 Pro the
-/// process's processor time rose 0 to 12 points of a core, the host's thread's fell to a third
-/// or less, and a host's thread playing every voice itself was at times slowed past its
-/// period). A measurement's own, if it has set one.
+/// voices' own processor time and the host's thread gained little while it was not busy; by
+/// load on macOS too (R-MAC-LO-LOAD): in CoreAudio's own IO thread a light LO load waiting for
+/// the workers made a block late about once a minute under background load, where the IO
+/// thread playing every voice itself, as 0.2.8 does, made none; always on Linux, where waking a
+/// worker costs little. A measurement's own, if it has set one.
 pub fn lo_sharing() -> LoSharing {
     match LO_SHARING_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
         1 => LoSharing::Never,
         2 => LoSharing::Always,
         3 => LoSharing::Load,
-        _ if cfg!(windows) => LoSharing::Load,
+        _ if cfg!(any(windows, target_os = "macos")) => LoSharing::Load,
         _ => LoSharing::Always,
     }
 }
