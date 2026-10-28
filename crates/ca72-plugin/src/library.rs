@@ -1096,7 +1096,10 @@ mod tests {
     #[test]
     fn factory_presets_never_include_hosted_effects() {
         let raw: toml::Table = FACTORY_FILE.parse().unwrap();
-        assert!(!raw.contains_key("effects"), "factory-level effects section");
+        assert!(
+            !raw.contains_key("effects"),
+            "factory-level effects section"
+        );
         for preset in raw["preset"].as_array().unwrap() {
             let table = preset.as_table().unwrap();
             assert!(
