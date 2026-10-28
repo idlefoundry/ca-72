@@ -87,7 +87,7 @@ bug_fixes = [
 [[release]]
 version = "0.3.0"
 features = [
-  "21 new factory presets, 40 in all: organ, bell, acid and sub basses, arpeggios, tempo gates and LFO loops.",
+  "24 new factory presets, 43 in all: organ, bell, acid and sub basses, arpeggios, tempo gates, a drone and LFO loops.",
   "GLOBAL, KEYS and LFO select the three lower pages; any page key shows PANEL if hidden.",
   "An arpeggiator: press ARP on the rail for ON, HOLD, DIRECTION, RATE, OCTAVES, GATE and SWING, in time with your host.",
   "HOLD with the arpeggiator off keeps your notes sounding as a drone until you play a new chord.",

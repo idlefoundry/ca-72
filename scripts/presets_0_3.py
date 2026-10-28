@@ -1,20 +1,22 @@
-"""0.3.0's factory presets (decisions.md R-PRESETS-0.3.0; docs/preset-candidates/README.md):
-the seventeen made for 0.3 and the four LFO LOOP presets, written into
-crates/ca72-plugin/sounds/presets.toml after its marker line (everything after it is this
-script's), in the file's format, every panel value named as the factory presets name them. The
-AUTO GAIN curves already there for a preset of the same name are kept (they depend on neither
-VOLUME nor LEVEL; tests/factory_curves.rs writes them). MAIN OUTPUT VOLUME and LEVEL come from
-scripts/presets_0_3_levels.json, which scripts/level_presets.py writes from the measurement
-(tests/preset_levels.rs).
+"""0.3.0's factory presets (decisions.md R-PRESETS-0.3.0, R-OWNER-PRESETS;
+docs/preset-candidates/README.md): those made for 0.3 and the owner's (scripts/presets_owner,
+their files as their CA-72 saved them: their edits of 0.3's, their renamed LFO loops and Club
+Stab, and three of their own), written into crates/ca72-plugin/sounds/presets.toml after its
+marker line (everything after it is this script's), in the file's format, every panel value
+named as the factory presets name them. The AUTO GAIN curves already there for a preset of the
+same name are kept (they depend on neither VOLUME nor LEVEL; tests/factory_curves.rs writes
+them). MAIN OUTPUT VOLUME and LEVEL come from scripts/presets_0_3_levels.json, which
+scripts/level_presets.py writes from the measurement (tests/preset_levels.rs).
 
     python3 scripts/presets_0_3.py [repository root] [levels.json]
 """
-import json, pathlib, re, sys
+import json, pathlib, re, sys, tomllib
 
 ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else pathlib.Path(__file__).parent.parent)
 LEVELS_FILE = (pathlib.Path(sys.argv[2]) if len(sys.argv) > 2
                else ROOT / "scripts/presets_0_3_levels.json")
 LEVELS = json.loads(LEVELS_FILE.read_text()) if LEVELS_FILE.exists() else {}
+OWNER = ROOT / "scripts/presets_owner"
 
 # Indices. Footage: LO 32 16 8 4 2. Wave: tri shark saw square wide narrow.
 LO, F32, F16, F8, F4, F2 = range(6)
@@ -83,6 +85,26 @@ def preset(name, description, tags, *parts, names=(), **values):
         v.update(LEVELS[name])
     return dict(name=name, description=description, tags=tags, macro_names=list(names), values=v)
 
+def owner(name, description=None, **changes):
+    """The owner's preset, as their CA-72 saved it (scripts/presets_owner/<name>.toml, kept as
+    it came: decisions.md R-OWNER-PRESETS): its values, every one, as they are, but `changes`
+    (the owner's own, decided after); its tags and macros' names; its description, else
+    `description`. MAIN OUTPUT VOLUME and LEVEL as the others', from the levels file once
+    levelled. Its AUTO GAIN curve is not taken: the factory measures its own
+    (tests/factory_curves.rs)."""
+    t = tomllib.loads((OWNER / f"{name}.toml").read_text())
+    assert t["name"] == name, name
+    effects = t.get("effects", {}).get("chain")
+    assert effects is None or not json.loads(effects)["slots"], f"{name}: effects"
+    v = dict(t["values"])
+    assert set(changes) <= set(v), f"{name}: {set(changes) - set(v)}"
+    v.update(changes)
+    if name in LEVELS:
+        v.update(LEVELS[name])
+    return dict(name=name, description=t.get("description") or description or "",
+                tags=list(t.get("tags", [])), macro_names=list(t.get("macro_names", [])),
+                values=v)
+
 P = []
 
 # ---- Sounds the 0.2.8 set does not have.
@@ -102,46 +124,9 @@ P.append(preset(
     glide_on=1, glide=1.2, note_priority=1, drive=9,
 ))
 
-P.append(preset(
-    "Tonewheel Drift",
-    "Triangles at 16', 8' and 4' with a click of contour, POLY's eight voices: a soft drawbar "
-    "organ. Three LFOs turn it as a rotating speaker turns (the level, the filter and the width); "
-    "MACRO 1 (ROTOR) spins them up from slow to fast, gliding as a rotor does; MACRO 2 (PERC) adds "
-    "a percussive bite.",
-    ["organ", "keys", "poly", "lfo", "macros"],
-    lfo(1, {"volume": -8}, rate=0.8),
-    lfo(2, {"cutoff": 6}, rate=0.75, phase=90),
-    lfo(3, {"spread": 30}, rate=0.85, phase=180),
-    macro(1, {"lfo1_rate": 23, "lfo2_rate": 23, "lfo3_rate": 23}),
-    macro(2, {"contour_amount": 40, "emphasis": 20}),
-    names=["ROTOR", "PERC"],
-    osc1_range=F16, osc1_waveform=TRI, osc1_volume=7,
-    osc2_on=1, osc2_range=F8, osc2_waveform=TRI, osc2_volume=8,
-    osc3_on=1, osc3_range=F4, osc3_waveform=TRI, osc3_volume=5,
-    cutoff=2, keyboard_control_2=1, contour_amount=1.5, filter_decay=0.4, filter_sustain=0,
-    loudness_decay=0.8, loudness_sustain=10, volume=9,
-    poly=1, voices=8, entropy=15, spread=40,
-))
+P.append(owner("Tonewheel Drift"))
 
-P.append(preset(
-    "Glass Bell",
-    "A triangle at 8' and a quieter one at 4', both frequency-modulated by oscillator 3 at 2' "
-    "(OSCILLATOR MODULATION, the mod wheel a third forward) a little over three octaves above, "
-    "struck and left to ring: an inharmonic glass bell, POLY's eight voices across the field, "
-    "TUNE a little down to take back the pitch the modulation adds; struck harder, it rings "
-    "brighter (velocity on CUTOFF). MACRO 1 (CLANG) retunes oscillator 3 for a harsher strike.",
-    ["bell", "poly", "velocity", "macros"],
-    macro(1, {"osc3_frequency": 12}),
-    velocity({"cutoff": 12}),
-    names=["CLANG"],
-    osc1_range=F8, osc1_waveform=TRI, osc1_volume=9,
-    osc2_on=1, osc2_range=F4, osc2_waveform=TRI, osc2_volume=4,
-    osc3_range=F2, osc3_waveform=TRI, osc3_frequency=-2.5, osc3_on=0,
-    osc_mod=1, mod_mix=0, mod_wheel=0.3, tune=-0.1,
-    cutoff=1, emphasis=2, contour_amount=3, filter_decay=5, filter_sustain=0,
-    keyboard_control_2=1, loudness_decay=7, loudness_sustain=0,
-    poly=1, voices=8, entropy=10, spread=40,
-))
+P.append(owner("Glass Bell"))
 
 P.append(preset(
     "Night Surf",
@@ -209,22 +194,13 @@ P.append(preset(
     glide_on=1, glide=0.6, note_priority=1, retrigger=1, drive=15,
 ))
 
-P.append(preset(
-    "Club Stab",
+# (Club Stab, the owner's, renamed: decisions.md R-OWNER-PRESETS.)
+P.append(owner(
+    "Zither Me Timbres",
     "Two sawtooths and a square at 4', a quick filter blip and no sustain, POLY's eight voices "
-    "spread wide: a chord stab for house and garage, brighter the harder it is struck "
-    "(velocity on CUTOFF). MACRO 1 (OPEN) opens the filter and lengthens it; MACRO 2 (WIDE) "
-    "spreads the voices and DOUBLE further.",
-    ["stab", "keys", "poly", "velocity", "macros"],
-    macro(1, {"cutoff": 25, "filter_decay": 20}),
-    macro(2, {"spread": 50, "double": 20}),
-    velocity({"cutoff": 15}),
-    names=["OPEN", "WIDE"],
-    osc1_volume=10, osc2_on=1, osc2_volume=9, osc2_frequency=0.08,
-    osc3_on=1, osc3_range=F4, osc3_waveform=SQUARE, osc3_volume=5,
-    cutoff=-1.5, emphasis=3.5, contour_amount=5.5, filter_decay=2.4, filter_sustain=1.5,
-    loudness_decay=3.4, loudness_sustain=0,
-    poly=1, voices=8, entropy=10, spread=45, double=8,
+    "spread wide: a plucked chord stab. Struck harder, its contour opens further and it rings "
+    "longer (velocity on AMOUNT OF CONTOUR and the loudness DECAY). MACRO 1 (OPEN) opens the "
+    "filter and lengthens it; MACRO 2 (WIDE) spreads the voices and DOUBLE further.",
 ))
 
 # ---- The arpeggiator.
@@ -264,23 +240,7 @@ P.append(preset(
     double=6, spread=40,
 ))
 
-P.append(preset(
-    "Swing Keys",
-    "The arpeggiator UP and DOWN at swung eighths through the chord held, on a mellow triangle "
-    "with a quiet 4' tine above it, POLY so each note rings into the next, with a gentle "
-    "tremolo. MACRO 1 (TINE) brings the tine and the contour forward.",
-    ["arp", "keys", "poly", "lfo", "macros"],
-    arp(arp_direction=ARP_DIR["updown"], arp_rate=ARP_RATE["1/8"], arp_octaves=1,
-        arp_gate=70, arp_swing=60),
-    lfo(1, {"volume": -6}, rate=4.2),
-    macro(1, {"osc2_volume": 40, "contour_amount": 15}),
-    names=["TINE"],
-    osc1_waveform=TRI, osc1_volume=9,
-    osc2_on=1, osc2_range=F4, osc2_waveform=TRI, osc2_volume=4,
-    cutoff=-0.5, keyboard_control_2=1, contour_amount=3.5, filter_decay=2.4, filter_sustain=2,
-    loudness_decay=4.4, loudness_sustain=2, volume=9,
-    poly=1, voices=6, entropy=20, spread=50,
-))
+P.append(owner("Swing Keys"))
 
 # ---- The LFOs, the macros, the timed and CONTINUOUS oscillators, pressure.
 
@@ -337,6 +297,16 @@ P.append(preset(
     poly=1, voices=8, entropy=15, spread=55, double=9,
 ))
 
+# (The owner's, saved from Gated Chords as it was before 0.3.0 made it gate harder:
+# decisions.md R-OWNER-PRESETS.)
+P.append(owner(
+    "Gatekeeper",
+    "Two sawtooths a hair apart, POLY's eight voices, chopped into sixteenths by oscillator 3 "
+    "TIMED at LO (a square) through FILTER MODULATION, in step with the host's tempo, and a "
+    "two-bar LFO sweeping the filter: Gated Chords with the filter further open, so the gate "
+    "is gentler. The mod wheel sets how hard it chops.",
+))
+
 P.append(preset(
     "Pressure Solo",
     "A sawtooth and a square at 8', gliding, with a vibrato that rises in after each note starts "
@@ -376,114 +346,59 @@ P.append(preset(
     poly=1, voices=8, entropy=20, spread=50, inner=20, double=6,
 ))
 
-P.append(preset(
-    "Bubble Computer",
-    "A square into a ringing filter that four timed LFOs step about: sixteenths, chopped by "
-    "dotted eighths, against quarter-note triplets, under a two-bar swell of emphasis. A 1970s "
-    "film computer thinking aloud, in time with the host. Hold one key.",
-    ["fx", "tempo", "lfo"],
-    lfo(1, {"cutoff": 30}, waveform=SQUARE, timed=1, division=DIV["1/16"], edges=True),
-    lfo(2, {"lfo1_level": -70}, timed=1, division=DIV["1/8d"]),
-    lfo(3, {"cutoff": 15}, waveform=SAW, timed=1, division=DIV["1/4t"]),
-    lfo(4, {"emphasis": 10}, timed=1, division=DIV["2bars"]),
-    osc1_waveform=SQUARE, osc1_volume=6,
-    cutoff=-2, emphasis=8.4, contour_amount=0, keyboard_control_2=1,
-    loudness_sustain=10,
+P.append(owner("Bubble Computer"))
+
+# ---- The owner's (decisions.md R-OWNER-PRESETS).
+
+P.append(owner(
+    "Velocihator",
+    "The hat's noise, short, played by velocity: struck harder, it is louder and brighter and "
+    "rings longer (velocity on VOLUME, CUTOFF, the filter's DECAY and the loudness DECAY). "
+    "Any key.",
+))
+
+P.append(owner(
+    "Droning On",
+    "Wide rectangles at 8', 4' and 2', oscillators 2 and 3 tuned apart, UNISON's four "
+    "instruments spread across the field, DOUBLE and FEEDBACK thickening them; timed LFOs "
+    "turn the first's width and the pitch over bars, a slow one the filter, and HOLD keeps "
+    "the notes sounding until the next. A dark drone.",
+    ext_on=0,  # (EXTERNAL INPUT off: the owner, 2026-10-28.)
 ))
 
 
-# ---- The LFO LOOP presets (decisions.md R-LFO's addendum): the LFOs moving each other's knobs
-# and their own. Every value named, as they were made (docs/lfo-loops until 0.3.0).
+# ---- The LFO loops (decisions.md R-LFO's addendum): the LFOs moving each other's knobs and
+# their own. 0.3.0's four LFO LOOP presets, as the owner renamed them (R-OWNER-PRESETS).
 
-LOOP_VALUES, LOOP_DESCRIPTIONS = {}, {}
-LOOP_TAGS = {
-    "LFO LOOP Coupled Rates": ["pad", "poly", "lfo", "loop"],
-    "LFO LOOP Phase Chase": ["lead", "lfo", "loop"],
-    "LFO LOOP Level Pump": ["pad", "poly", "lfo", "loop"],
-    "LFO LOOP Self Rate": ["lead", "lfo", "loop"],
-}
+P.append(owner(
+    "Finger in a Light Socket",
+    "Two LFOs each setting the other's speed, a loop: LFO 1 (TRIANGLE, 1.2 Hz) sweeps CUTOFF; "
+    "LFO 2 (TRIANGLE, 0.3 Hz) pushes LFO 1's RATE up and down (+35 %) while LFO 1 pulls LFO 2's "
+    "(-30 %), so the sweep speeds up, slows down and never quite repeats; DOUBLE on and the "
+    "voices spread. Hold a chord.",
+))
 
-LOOP_VALUES['LFO LOOP Coupled Rates'] = {
-    'a440': 0, 'auto_gain': 0, 'contour_amount': 3, 'cutoff': 0.5, 'decay_on': 1, 'double': 0,
-    'doubled': 0, 'drive': 0, 'emphasis': 3, 'entropy': 5, 'ext_on': 0, 'feedback': 0,
-    'filter_attack': 0, 'filter_decay': 4, 'filter_mod': 0, 'filter_mode': 0, 'filter_sustain': 6,
-    'glide': 0, 'glide_on': 0, 'inner': 0, 'keyboard_control_1': 1, 'keyboard_control_2': 0,
-    'level': 7, 'lfo1_level': 100, 'lfo1_mode': 0, 'lfo1_mono': 1, 'lfo1_phase': 0,
-    'lfo1_rate': 1.2, 'lfo1_rise': 0.0, 'lfo1_timed': 0, 'lfo1_to_cutoff': 30,
-    'lfo1_to_lfo2_rate': -30, 'lfo1_waveform': 0, 'lfo2_level': 100, 'lfo2_mode': 0,
-    'lfo2_mono': 1, 'lfo2_phase': 0, 'lfo2_rate': 0.3, 'lfo2_rise': 0.0, 'lfo2_timed': 0,
-    'lfo2_to_lfo1_rate': 35, 'lfo2_to_osc2_frequency': 2, 'lfo2_waveform': 0, 'lock': 0,
-    'loudness_attack': 1, 'loudness_decay': 5, 'loudness_sustain': 10, 'main_output': 1,
-    'mod_mix': 0, 'mod_wheel': 0, 'noise_on': 0, 'note_priority': 0, 'osc1_on': 1,
-    'osc1_range': 3, 'osc1_volume': 6, 'osc1_waveform': 2, 'osc2_frequency': 0.08, 'osc2_on': 1,
-    'osc2_range': 3, 'osc2_volume': 6, 'osc2_waveform': 2, 'osc3_frequency': 0, 'osc3_on': 0,
-    'osc3_range': 3, 'osc3_volume': 6, 'osc3_waveform': 2, 'osc_mod': 0, 'poly': 1,
-    'retrigger': 0, 'spread': 0, 'unison': 0, 'voices': 6, 'volume': 7,
-}
-LOOP_DESCRIPTIONS['LFO LOOP Coupled Rates'] = "Two LFOs each setting the other's speed, a loop: LFO 1 (TRIANGLE, 1.2 Hz) sweeps CUTOFF; LFO 2 (TRIANGLE, 0.3 Hz) pushes LFO 1's RATE up and down (+35 %) while LFO 1 pulls LFO 2's (-30 %), so the sweep speeds up, slows down and never quite repeats. Hold a chord."
+P.append(owner(
+    "Phase Chase",
+    "Two LFOs at the same speed pushing each other's PHASE, a loop: LFO 1 (SAWTOOTH, 2 Hz) on "
+    "CUTOFF, LFO 3 (TRIANGLE, 2 Hz) on OSCILLATOR 1's VOLUME, each moving the other's PHASE by "
+    "+40 %. The rhythm leans, stumbles and catches itself. NOTE PRIORITY LAST. Hold one note.",
+))
 
-LOOP_VALUES['LFO LOOP Phase Chase'] = {
-    'a440': 0, 'auto_gain': 0, 'contour_amount': 3, 'cutoff': 1.5, 'decay_on': 1, 'double': 0,
-    'doubled': 0, 'drive': 0, 'emphasis': 3, 'entropy': 5, 'ext_on': 0, 'feedback': 0,
-    'filter_attack': 0, 'filter_decay': 4, 'filter_mod': 0, 'filter_mode': 0, 'filter_sustain': 6,
-    'glide': 0, 'glide_on': 0, 'inner': 0, 'keyboard_control_1': 1, 'keyboard_control_2': 0,
-    'level': 12, 'lfo1_level': 100, 'lfo1_mode': 0, 'lfo1_mono': 1, 'lfo1_phase': 0,
-    'lfo1_rate': 2.0, 'lfo1_rise': 0.0, 'lfo1_timed': 0, 'lfo1_to_cutoff': 25,
-    'lfo1_to_lfo3_phase': 40, 'lfo1_waveform': 2, 'lfo3_level': 100, 'lfo3_mode': 0,
-    'lfo3_mono': 1, 'lfo3_phase': 90, 'lfo3_rate': 2.0, 'lfo3_rise': 0.0, 'lfo3_timed': 0,
-    'lfo3_to_lfo1_phase': 40, 'lfo3_to_osc1_volume': -25, 'lfo3_waveform': 0, 'lock': 0,
-    'loudness_attack': 1, 'loudness_decay': 5, 'loudness_sustain': 10, 'main_output': 1,
-    'mod_mix': 0, 'mod_wheel': 0, 'noise_on': 0, 'note_priority': 0, 'osc1_on': 1,
-    'osc1_range': 3, 'osc1_volume': 6, 'osc1_waveform': 2, 'osc2_frequency': 0.08, 'osc2_on': 1,
-    'osc2_range': 3, 'osc2_volume': 6, 'osc2_waveform': 2, 'osc3_frequency': 0, 'osc3_on': 0,
-    'osc3_range': 3, 'osc3_volume': 6, 'osc3_waveform': 2, 'osc_mod': 0, 'poly': 0,
-    'retrigger': 0, 'spread': 0, 'unison': 0, 'voices': 4, 'volume': 7,
-}
-LOOP_DESCRIPTIONS['LFO LOOP Phase Chase'] = "Two LFOs at the same speed pushing each other's PHASE, a loop: LFO 1 (SAWTOOTH, 2 Hz) on CUTOFF, LFO 3 (TRIANGLE, 2 Hz) on OSCILLATOR 1's VOLUME, each moving the other's PHASE by +40 %. The rhythm leans, stumbles and catches itself. Hold one note."
+P.append(owner(
+    "Level Pump",
+    "An LFO fading another in and out by its LEVEL: LFO 1 (SQUARE, 4 Hz, SOFT) pumps MAIN "
+    "OUTPUT VOLUME (-45 %) and CUTOFF; LFO 2 (TRIANGLE, 0.15 Hz) takes LFO 1's LEVEL down "
+    "(-100 %) and back, and LFO 1 dents LFO 2's own LEVEL (-20 %), a loop. The pumping swells in "
+    "and dies away. Hold a chord.",
+))
 
-LOOP_VALUES['LFO LOOP Level Pump'] = {
-    'a440': 0, 'auto_gain': 0, 'contour_amount': 3, 'cutoff': 0.5, 'decay_on': 1, 'double': 0,
-    'doubled': 0, 'drive': 0, 'emphasis': 3, 'entropy': 5, 'ext_on': 0, 'feedback': 0,
-    'filter_attack': 0, 'filter_decay': 4, 'filter_mod': 0, 'filter_mode': 0, 'filter_sustain': 6,
-    'glide': 0, 'glide_on': 0, 'inner': 0, 'keyboard_control_1': 1, 'keyboard_control_2': 0,
-    'level': -2, 'lfo1_level': 100, 'lfo1_mode': 0, 'lfo1_mono': 1, 'lfo1_phase': 0,
-    'lfo1_rate': 4.0, 'lfo1_rise': 0.0, 'lfo1_timed': 0, 'lfo1_to_cutoff': 15,
-    'lfo1_to_lfo2_level': -20, 'lfo1_to_volume': -45, 'lfo1_waveform': 3, 'lfo2_level': 100,
-    'lfo2_mode': 0, 'lfo2_mono': 1, 'lfo2_phase': 0, 'lfo2_rate': 0.15, 'lfo2_rise': 0.0,
-    'lfo2_timed': 0, 'lfo2_to_lfo1_level': -100, 'lfo2_waveform': 0, 'lock': 0,
-    'loudness_attack': 1, 'loudness_decay': 5, 'loudness_sustain': 10, 'main_output': 1,
-    'mod_mix': 0, 'mod_wheel': 0, 'noise_on': 0, 'note_priority': 0, 'osc1_on': 1,
-    'osc1_range': 3, 'osc1_volume': 6, 'osc1_waveform': 2, 'osc2_frequency': 0.08, 'osc2_on': 1,
-    'osc2_range': 3, 'osc2_volume': 6, 'osc2_waveform': 2, 'osc3_frequency': 0, 'osc3_on': 0,
-    'osc3_range': 3, 'osc3_volume': 6, 'osc3_waveform': 2, 'osc_mod': 0, 'poly': 1,
-    'retrigger': 0, 'spread': 0, 'unison': 0, 'voices': 6, 'volume': 7,
-}
-LOOP_DESCRIPTIONS['LFO LOOP Level Pump'] = "An LFO fading another in and out by its LEVEL: LFO 1 (SQUARE, 4 Hz, SOFT) pumps MAIN OUTPUT VOLUME (-45 %) and CUTOFF; LFO 2 (TRIANGLE, 0.15 Hz) takes LFO 1's LEVEL down (-100 %) and back, and LFO 1 dents LFO 2's own LEVEL (-20 %), a loop. The pumping swells in and dies away. Hold a chord."
-
-LOOP_VALUES['LFO LOOP Self Rate'] = {
-    'a440': 0, 'auto_gain': 0, 'contour_amount': 3, 'cutoff': 1.5, 'decay_on': 1, 'double': 0,
-    'doubled': 0, 'drive': 0, 'emphasis': 3, 'entropy': 5, 'ext_on': 0, 'feedback': 0,
-    'filter_attack': 0, 'filter_decay': 4, 'filter_mod': 0, 'filter_mode': 0, 'filter_sustain': 6,
-    'glide': 0, 'glide_on': 0, 'inner': 0, 'keyboard_control_1': 1, 'keyboard_control_2': 0,
-    'level': 12, 'lfo1_level': 100, 'lfo1_mode': 1, 'lfo1_mono': 1, 'lfo1_phase': 0,
-    'lfo1_rate': 0.8, 'lfo1_rise': 0.0, 'lfo1_timed': 0, 'lfo1_to_cutoff': 35,
-    'lfo1_to_lfo1_rate': 60, 'lfo1_to_osc2_frequency': 3, 'lfo1_waveform': 1, 'lock': 0,
-    'loudness_attack': 1, 'loudness_decay': 5, 'loudness_sustain': 10, 'main_output': 1,
-    'mod_mix': 0, 'mod_wheel': 0, 'noise_on': 0, 'note_priority': 0, 'osc1_on': 1,
-    'osc1_range': 3, 'osc1_volume': 6, 'osc1_waveform': 2, 'osc2_frequency': 0.08, 'osc2_on': 1,
-    'osc2_range': 3, 'osc2_volume': 6, 'osc2_waveform': 2, 'osc3_frequency': 0, 'osc3_on': 0,
-    'osc3_range': 3, 'osc3_volume': 6, 'osc3_waveform': 2, 'osc_mod': 0, 'poly': 0,
-    'retrigger': 1, 'spread': 0, 'unison': 0, 'voices': 4, 'volume': 7,
-}
-LOOP_DESCRIPTIONS['LFO LOOP Self Rate'] = "An LFO on its own RATE: LFO 1 (the shark tooth, 0.8 Hz, RETRIG) on CUTOFF and OSCILLATOR 2's FREQUENCY, and on its own RATE (+60 %), so it races up its rise and drags down its fall; RETRIGGER on, each note starts it again the same. Play notes."
-
-for name, tags in LOOP_TAGS.items():
-    v = dict(LOOP_VALUES[name])
-    if name in LEVELS:
-        v.update(LEVELS[name])
-    P.append(dict(name=name, description=LOOP_DESCRIPTIONS[name], tags=tags, macro_names=[],
-                  values=v))
-
+P.append(owner(
+    "Hold Me Long Time",
+    "An LFO on its own RATE: LFO 1 (the shark tooth, 0.8 Hz, RETRIG) on CUTOFF and OSCILLATOR "
+    "2's FREQUENCY, and on its own RATE (+60 %), so it races up its rise and drags down its "
+    "fall; RETRIGGER on, each note starts it again the same. Play notes.",
+))
 
 
 def fmt(x):
@@ -509,10 +424,11 @@ def table(p, curves):
 FILE = ROOT / "crates/ca72-plugin/sounds/presets.toml"
 MARKER = "# ---- 0.3.0's presets"
 HEAD = MARKER + """: generated from here to the end by scripts/presets_0_3.py (edit them there).
-# The seventeen made for 0.3 (sounds the 0.2.8 set left out, and the arpeggiator, the LFOs, the
-# macros, velocity, the timed and CONTINUOUS oscillators and pressure in use), then the four LFO
-# LOOP presets (the LFOs moving each other's knobs and their own). Levelled as the rest, -18 LUFS
-# midway between LO and HI (scripts/level_presets.py; decisions.md R-PRESETS-0.3.0).
+# Those made for 0.3 (sounds the 0.2.8 set left out, and the arpeggiator, the LFOs, the macros,
+# velocity, the timed and CONTINUOUS oscillators and pressure in use) and the owner's (their
+# edits, their own, and the LFO loops as they renamed them: the LFOs moving each other's knobs
+# and their own). Levelled as the rest, -18 LUFS midway between LO and HI
+# (scripts/level_presets.py; decisions.md R-PRESETS-0.3.0, R-OWNER-PRESETS).
 """
 
 text = FILE.read_text()

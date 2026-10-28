@@ -76,10 +76,23 @@ fn apart(a: &(Vec<f32>, Vec<f32>), b: &(Vec<f32>, Vec<f32>)) -> f64 {
     d.iter().sum::<f64>() / d.len().max(1) as f64
 }
 
+/// How far apart two renders are sample by sample: their difference against the first, dB.
+fn waveform_apart(a: &(Vec<f32>, Vec<f32>), b: &(Vec<f32>, Vec<f32>)) -> f64 {
+    let energy = |x: &mut dyn Iterator<Item = f64>| x.map(|v| v * v).sum::<f64>();
+    let pairs = || a.0.iter().zip(&b.0).chain(a.1.iter().zip(&b.1));
+    let diff = energy(&mut pairs().map(|(x, y)| f64::from(x - y)));
+    let own = energy(&mut pairs().map(|(x, _)| f64::from(*x)));
+    10.0 * (diff.max(1e-30) / own.max(1e-30)).log10()
+}
+
 /// Each preset that keeps time plays in the standalone at its TEMPO, 120 BPM, as at a host's
 /// 120 BPM; at a host's 90 BPM it plays otherwise (it follows the host), as the standalone does
 /// with its TEMPO at 90 (their 10 ms loudness within a decibel, and 90 against 120 more than a
-/// decibel and a half apart). Three seconds of its phrase at LO.
+/// decibel and a half apart, or their waveforms more than 20 dB from the same where the tempo
+/// moves what loudness hardly shows, as in four of the owner's: Glass Bell's timed vibrato,
+/// Gatekeeper's gentle gate, Droning On's LFOs over bars, Bright Xylo's short arpeggio;
+/// decisions.md R-OWNER-PRESETS. A preset that did not follow would play the same to the
+/// sample). Three seconds of its phrase at LO.
 #[test]
 fn the_timed_presets_keep_the_hosts_tempo_and_the_standalones() {
     let timed: Vec<&Sound> = factory().iter().filter(|s| timed(s)).collect();
@@ -99,9 +112,10 @@ fn the_timed_presets_keep_the_hosts_tempo_and_the_standalones() {
             apart(&slower, &standalone_slower),
         );
         let other = apart(&host, &slower);
+        let unlike = waveform_apart(&host, &slower);
         println!(
             "{:20} standalone {same:.3} dB at 120, {same_slower:.3} dB at 90; 90 against 120 \
-             {other:.2} dB",
+             {other:.2} dB, waveforms {unlike:.1} dB",
             s.name
         );
         assert!(
@@ -114,7 +128,11 @@ fn the_timed_presets_keep_the_hosts_tempo_and_the_standalones() {
             "{}: the standalone at 90 is {same_slower} dB off",
             s.name
         );
-        assert!(other > 1.5, "{}: 90 BPM plays as 120 ({other} dB)", s.name);
+        assert!(
+            other > 1.5 || unlike > -20.0,
+            "{}: 90 BPM plays as 120 ({other} dB, waveforms {unlike} dB)",
+            s.name
+        );
     }
 }
 

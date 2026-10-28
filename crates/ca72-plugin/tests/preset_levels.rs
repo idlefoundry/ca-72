@@ -19,9 +19,12 @@
 //! `scripts/calibration/midi_capture.py`, played instead: the notes and modulation wheel sent
 //! to the hardware reference, at their times, and 3 s after the last). `CA72_RETIRED` (set):
 //! the presets retired from the plug-in (`sounds/retired.toml`, decisions.md R55) measured
-//! instead, which its pack ships. `CA72_NEVER_SLEEP` (set): the engine alone plays each phrase
-//! at LO, the one instrument never sleeping (decisions.md R68), to show that its sleeping
-//! changes no sample (the engine knows no arpeggiator or transport).
+//! instead, which its pack ships. `CA72_USER_PRESETS` (a presets folder): the user's presets in
+//! it measured instead, each as the library reads it (decisions.md R-OWNER-PRESETS: the owner's
+//! files against the factory's levelled versions of them). `CA72_VELOCITY` (1 to 127): the notes'
+//! velocity, 100 by default. `CA72_NEVER_SLEEP` (set): the engine
+//! alone plays each phrase at LO, the one instrument never sleeping (decisions.md R68), to show
+//! that its sleeping changes no sample (the engine knows no arpeggiator or transport).
 
 #![allow(clippy::unwrap_used)]
 
@@ -29,7 +32,7 @@ mod common;
 
 use ca72_analysis::loudness::loudness;
 use ca72_plugin::engine::{Engine, Event};
-use ca72_plugin::library::{Sound, factory, parse_factory};
+use ca72_plugin::library::{Library, Origin, Sound, factory, parse_factory};
 use common::host::{Play, Quality, RATE, TARGET_LUFS, render, write_wav};
 use common::{controls_of, env, phrase, played_as};
 
@@ -79,7 +82,7 @@ fn with_overrides(s: &Sound) -> Sound {
 
 /// How `s` is played at `q`: its phrase, or `CA72_PHRASE`'s.
 fn play_of(s: &Sound, q: Quality) -> Play {
-    match phrase_file() {
+    let mut p = match phrase_file() {
         Some((notes, cc)) => {
             let mut p = Play::new(notes, q);
             p.seconds += 1.0;
@@ -87,7 +90,9 @@ fn play_of(s: &Sound, q: Quality) -> Play {
             p
         }
         None => Play::phrase(s, q),
-    }
+    };
+    p.velocity = env("CA72_VELOCITY", 100.0f32) / 127.0;
+    p
 }
 
 /// The engine alone playing the phrase at LO, never sleeping (`CA72_NEVER_SLEEP`).
@@ -157,6 +162,14 @@ fn each_preset_in_its_register() {
     println!("preset                    quality  momentary max   integrated  to -18  (LUFS)");
     let sounds = if std::env::var_os("CA72_RETIRED").is_some() {
         parse_factory(include_str!("../sounds/retired.toml")).unwrap()
+    } else if let Some(dir) = std::env::var_os("CA72_USER_PRESETS") {
+        let (entries, bad) = Library::at(std::path::PathBuf::from(dir)).entries();
+        assert!(bad.is_empty(), "{bad:?}");
+        entries
+            .into_iter()
+            .filter(|e| e.origin != Origin::Factory)
+            .map(|e| e.sound)
+            .collect()
     } else {
         factory().to_vec()
     };

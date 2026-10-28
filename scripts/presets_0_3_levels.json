@@ -3,14 +3,6 @@
   "volume": 10,
   "level": 4.99
  },
- "Tonewheel Drift": {
-  "volume": 5.98,
-  "level": 0
- },
- "Glass Bell": {
-  "volume": 7.097,
-  "level": 0
- },
  "Night Surf": {
   "volume": 10,
   "level": 9.41
@@ -27,10 +19,6 @@
   "volume": 10,
   "level": 5.04
  },
- "Club Stab": {
-  "volume": 8.143,
-  "level": 0
- },
  "Octave Runner": {
   "volume": 10,
   "level": 1.08
@@ -38,10 +26,6 @@
  "Random Glass": {
   "volume": 10,
   "level": 0.11
- },
- "Swing Keys": {
-  "volume": 8.81,
-  "level": 0
  },
  "Tempo Wobble": {
   "volume": 9.892,
@@ -63,24 +47,44 @@
   "volume": 6.919,
   "level": 0
  },
+ "Tonewheel Drift": {
+  "volume": 6.119,
+  "level": -0.76
+ },
+ "Glass Bell": {
+  "volume": 7.037,
+  "level": 0
+ },
+ "Zither Me Timbres": {
+  "volume": 7.53,
+  "level": 0
+ },
+ "Swing Keys": {
+  "volume": 8.81,
+  "level": -1.47
+ },
+ "Gatekeeper": {
+  "volume": 7.005,
+  "level": 0
+ },
  "Bubble Computer": {
-  "volume": 8.768,
+  "volume": 9.721,
   "level": 0
  },
- "LFO LOOP Coupled Rates": {
-  "volume": 7.899,
+ "Velocihator": {
+  "volume": 7.9663,
+  "level": 5.87
+ },
+ "Droning On": {
+  "volume": 7.884,
   "level": 0
  },
- "LFO LOOP Phase Chase": {
-  "volume": 9.722,
+ "Finger in a Light Socket": {
+  "volume": 8.058,
   "level": 0
  },
- "LFO LOOP Level Pump": {
-  "volume": 4.22,
+ "Phase Chase": {
+  "volume": 9.745,
   "level": 0
- },
- "LFO LOOP Self Rate": {
-  "volume": 10,
-  "level": 0.17
  }
 }
