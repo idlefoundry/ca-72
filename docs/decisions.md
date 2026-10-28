@@ -16339,9 +16339,29 @@ R-DROPOUTS's promotion did nothing there; and a refusal was said only on standar
 - **The order:** `SCHED_FIFO` 70 directly (an rtprio allowance), then RTKit, then ordinary
   priority, each thread's outcome kept in atomics by group (`ca72_rt::Group`: the audio thread,
   `audio_thread::AUDIO`; POLY's workers and ULTRA's split crews, `WORKERS`), counted afresh as a
-  stream or a pool begins. The standalone alone (`ca72_rt::use_rtkit`, from
-  `AudioThread::prepare`, before the workers start): a plug-in in a host never asks RTKit, never
-  sets a limit or a signal handler, and promotes its own workers directly as before.
+  stream or a pool begins. The standalone application alone (`ca72_rt::use_rtkit`, from its
+  `main`, `src/bin/standalone.rs`, before any stream; was `AudioThread::prepare` until the fix
+  below): a plug-in in a host never asks RTKit, never sets a limit or a signal handler, and
+  promotes its own workers directly as before.
+- **Turned on at run time by the application, never by the library** (fixed 2026-10-28, after CI's
+  Linux fix): `AudioThread::prepare` called `use_rtkit` under `#[cfg(not(test))]` only, but the
+  integration tests (`crates/ca72-plugin/tests/*.rs`) build the library without `cfg(test)`. So a
+  test that played the standalone's path (`PluginApi::Standalone`: `standalone_adapter.rs`,
+  `realtime.rs`, `arp_renders.rs`) asked the system's RTKit for its threads and set the test
+  process's RLIMIT_RTTIME and SIGXCPU handler, wherever RTKit runs and `SCHED_FIFO` is refused (a
+  developer machine with RTKit and no rtprio allowance). Now `ca72_rt::use_rtkit` is a switch only
+  the shipped standalone's `main` turns on; no library code calls it, so the plug-ins (CLAP, VST3,
+  AU: no `main` of ours) and every test leave it off, and a refused thread is left ordinary
+  (`Why::Refused`), as in a plug-in. A test turns it on only deliberately: `rtkit`'s two ignored
+  tests, run alone. nih-plug's development example (`examples/standalone.rs`) leaves it off too.
+  `ca72_rt::uses_rtkit` says whether it is on; `standalone_adapter.rs`'s
+  `the_standalone_path_never_asks_rtkit_unless_the_application_does` plays the standalone's path
+  with POLY and checks RTKit off, RLIMIT_RTTIME and SIGXCPU's handler as they were, and no thread
+  `SCHED_RR`. The other places that could reach RTKit or `setrlimit` are all behind the switch:
+  `promote_in` (the audio thread, POLY's workers, ULTRA's split crews) asks only through
+  `rtkit::ask`, which refuses while it is off; `limit_rttime` and `handle_xcpu` run only in RTKit's
+  thread once asked; the watchdog's `keep_rttime` does nothing until a limit was set. The watchdog's
+  own `SCHED_FIFO` (where an rtprio allowance gives one) is unchanged.
 - **Never on an audio thread.** A refused thread leaves its kernel id (`gettid`) in a table of
   atomics and wakes `ca72_rt`'s RTKit thread (`ca72-rt-rtkit`, ordinary), which makes the D-Bus
   calls. An answer for a thread that has ended, or for a set of the group's threads since

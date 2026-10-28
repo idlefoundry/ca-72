@@ -65,6 +65,10 @@ fn main() {
     // audio and MIDI stopped by then. From the moment it starts to close, App Nap is lifted until
     // the process ends (R-QUIT-NAP): napped, quitting could outlast the shutdown's two seconds.
     nih_plug::wrapper::production::app_window::on_closing(ca72_plugin::agent::awake::quitting);
+    // Real-time priority asked of RTKit where Linux refuses it directly (decisions.md R-RTKIT):
+    // this application's alone, so turned on here, before any stream, and nowhere in the
+    // library. A plug-in in a host and the tests never ask RTKit nor set RLIMIT_RTTIME.
+    ca72_rt::use_rtkit();
     let result = nih_plug::wrapper::production::run_with_midi_reset_scope::<ca72_plugin::Ca72>(
         options,
         &["pitch_wheel", "mod_wheel"],

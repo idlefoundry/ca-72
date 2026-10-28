@@ -10,12 +10,14 @@
 //! voices sat runs out while it waited for workers it could not get back from. It is made an
 //! audio thread here, as the workers are, as its first block begins, wherever the system allows
 //! real-time priority (an rtprio allowance, `ca72_rt::promote_in`). Where it does not, in the
-//! standalone, the thread and the workers are asked of RTKit (`ca72_rt::use_rtkit`), by
-//! `ca72_rt`'s own thread: the audio thread only leaves its id. Where RTKit cannot or will not,
-//! they stay as they were, and the editor says so ([`warning`]). The watchdog that makes the
-//! threads promoted here ordinary again, should one never stop, watches it too. On macOS
-//! CoreAudio's I/O thread and on Windows CPAL's boosted WASAPI thread are already the system's
-//! audio threads: nothing is done there, and only a worker refused is said.
+//! standalone application, the thread and the workers are asked of RTKit, by `ca72_rt`'s own
+//! thread: the audio thread only leaves its id. RTKit is turned on by the application's `main`
+//! (`ca72_rt::use_rtkit`, `src/bin/standalone.rs`), never here: this library, in a plug-in or a
+//! test, never asks RTKit nor sets RLIMIT_RTTIME (decisions.md R-RTKIT). Where RTKit cannot or
+//! will not, they stay as they were, and the editor says so ([`warning`]). The watchdog that
+//! makes the threads promoted here ordinary again, should one never stop, watches it too. On
+//! macOS CoreAudio's I/O thread and on Windows CPAL's boosted WASAPI thread are already the
+//! system's audio threads: nothing is done there, and only a worker refused is said.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -54,17 +56,15 @@ pub struct AudioThread {
 impl AudioThread {
     /// Before a stream's first block, off the audio thread (`Plugin::initialize`): the next
     /// block promotes its thread if this is the standalone application (`standalone`) on Linux,
-    /// for blocks of at most `period`. The watchdog, and RTKit's thread, are started here, where
-    /// starting a thread is allowed. A plug-in never comes past the first line.
+    /// for blocks of at most `period`. The watchdog is started here, where starting a thread is
+    /// allowed. A plug-in never comes past the first line. RTKit is not turned on here: only
+    /// the application's `main` does that (`ca72_rt::use_rtkit`), before any stream, so that a
+    /// test that plays the standalone's path (`PluginApi::Standalone`) never asks the system's
+    /// RTKit nor sets its own RLIMIT_RTTIME (decisions.md R-RTKIT).
     pub fn prepare(&mut self, standalone: bool, period: Duration) {
         self.asked = (standalone && cfg!(target_os = "linux")).then_some(period);
         if self.asked.is_some() {
             AUDIO.clear();
-            // (Not in the tests: a test process is not to ask the system's RTKit for its
-            // threads, nor have its RLIMIT_RTTIME set. `ca72_rt`'s own tests and the
-            // standalone's check it: decisions.md R-RTKIT.)
-            #[cfg(not(test))]
-            ca72_rt::use_rtkit();
             ca72_rt::watch();
         }
     }
@@ -72,10 +72,10 @@ impl AudioThread {
     /// At a block's start, on the audio thread: its thread promoted, the first time after
     /// [`AudioThread::prepare`] asked; the system's answer (None: nothing asked). Asked of
     /// RTKit is an answer to come (`AUDIO`); a refusal is for [`report_refusal`] to say.
-    pub fn begin(&mut self) -> Option<Result<ca72_rt::Promoted, String>> {
+    pub fn begin(&mut self) -> Option<Result<ca72_rt::Promoted, ca72_rt::Refusal>> {
         let period = self.asked.take()?;
         // (The watchdog's note of the thread, the first time it is promoted, is its one
-        // allocation, and a refusal's explanation another; the plug-ins never come here.)
+        // allocation; a refusal is not explained here. The plug-ins never come here.)
         let r = nih_plug::util::permit_alloc(|| ca72_rt::promote_in(&AUDIO, period, period / 2));
         if r.is_err() {
             REFUSED.store(true, Ordering::Release);
@@ -238,10 +238,11 @@ mod tests {
         let linux = cfg!(target_os = "linux");
         std::thread::spawn(move || {
             a.prepare(true, period);
+            // (RTKit is the application's to turn on, never the library's: `prepare`.)
+            assert!(!ca72_rt::uses_rtkit(), "the library turned RTKit on");
             let r = a.begin();
             assert_eq!(r.is_some(), linux);
             if let Some(Ok(p)) = r {
-                // (RTKit is not used in the tests: `prepare`.)
                 assert_eq!(p, ca72_rt::Promoted::Now);
                 assert!(ca72_rt::is_realtime(), "said promoted, but ordinary");
                 ca72_rt::demote();

@@ -914,9 +914,9 @@ impl Plugin for Ca72 {
         // the audio thread waiting: running threads are kept then (R18).
         let period = std::time::Duration::from_secs_f64(block as f64 / rate);
         // The standalone's own audio thread, an audio thread as the workers are, from its next
-        // block (decisions.md R-DROPOUTS): a plug-in's host's thread is the host's. Before the
-        // workers start, so that in the standalone they too are asked of RTKit where the system
-        // refuses them (R-RTKIT).
+        // block (decisions.md R-DROPOUTS): a plug-in's host's thread is the host's. RTKit, where
+        // the system refuses it and the workers, is asked only in the standalone application,
+        // whose `main` turned it on before any stream (R-RTKIT); never by this library.
         self.audio_thread
             .prepare(context.plugin_api() == PluginApi::Standalone, period);
         self.engine.start_workers(crate::engine::AUTO, Some(period));
