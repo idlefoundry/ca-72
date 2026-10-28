@@ -265,7 +265,9 @@ pub fn targets_for_sound(
     p: &Ca72Params,
     sound: &crate::library::Sound,
 ) -> Vec<(&'static str, f32)> {
-    let value = |id: &str| sound.values.iter().find(|(k, _)| k == id).map(|(_, v)| *v);
+    let named = |id: &str| sound.values.iter().find(|(k, _)| k == id).map(|(_, v)| *v);
+    // (A preset 0.3.0's beta saved names its LFOs' RISE: their FADE, a fade in, R-LFO-FADE.)
+    let value = |id: &str| named(id).or_else(|| crate::lfo::rise_id(id).and_then(named));
     sound_params(p)
         .into_iter()
         .filter_map(|(id, q)| match value(id) {
@@ -1865,6 +1867,57 @@ mod tests {
             bend(&named),
             Some(p.midi_bend_range.preview_normalized(12.0))
         );
+    }
+
+    /// A preset 0.3.0's beta saved names its LFOs' RISE (`lfoN_rise`): each is read as FADE at
+    /// as many seconds, a fade in; a preset naming FADE has its own, whatever a RISE beside it
+    /// says; one naming neither, FADE off; an assignment to RISE is FADE's at half the depth
+    /// (decisions.md R-LFO-FADE). A preset saved now names FADE, not RISE.
+    #[test]
+    fn a_beta_preset_s_rise_is_read_as_a_fade_in() {
+        let p = Ca72Params::default();
+        let sound = |values: &[(&str, f64)]| crate::library::Sound {
+            name: "Beta".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            values: values.iter().map(|(k, v)| ((*k).to_owned(), *v)).collect(),
+            drive_curve: None,
+            drive_curve_lo: None,
+            macro_names: Vec::new(),
+            effects: None,
+        };
+        let fade = |s: &crate::library::Sound, n: usize| {
+            targets_for_sound(&p, s)
+                .into_iter()
+                .find(|(k, _)| *k == crate::lfo::PARAM_IDS[n][crate::lfo::FADE_PART])
+                .map(|(_, v)| p.lfo(n).fade.preview_plain(v))
+        };
+        let beta = sound(&[
+            ("lfo1_rise", 0.9),
+            ("lfo4_rise", 5.0714),
+            ("lfo1_to_tune", 3.0),
+            ("macro1_to_lfo2_rise", 40.0),
+        ]);
+        assert!((fade(&beta, 0).unwrap() - 0.9).abs() < 1e-5);
+        assert!((fade(&beta, 3).unwrap() - 5.0714).abs() < 1e-5);
+        assert_eq!(fade(&beta, 1), Some(0.0), "none named: off");
+        assert_eq!(
+            crate::lfo::fade_heard(fade(&beta, 0).unwrap()),
+            f64::from(0.9f32),
+            "heard as the file names it"
+        );
+        let both = sound(&[("lfo1_fade", -2.0), ("lfo1_rise", 0.9)]);
+        assert!((fade(&both, 0).unwrap() + 2.0).abs() < 1e-5);
+        p.lfo_patch.load_values(&beta.values);
+        assert_eq!(
+            p.lfo_patch
+                .depth(crate::lfo::Source::Macro(0), crate::lfo::Target::LfoFade(1)),
+            Some(0.2)
+        );
+        let saved = values_now(&p);
+        assert!(saved.iter().any(|(k, _)| k == "lfo1_fade"));
+        assert!(saved.iter().any(|(k, _)| k == "macro1_to_lfo2_fade"));
+        assert!(saved.iter().all(|(k, _)| !k.ends_with("_rise")));
     }
 
     /// What the LFOs modulate, and their EDGES, are a preset's (decisions.md R-LFO): saved with

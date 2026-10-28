@@ -390,7 +390,7 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   side by side, each with:
   - its **scope**, in its own phosphor colour (LFO 1 amber, LFO 2 green, LFO 3 blue, LFO 4 red
     at first): one cycle of its waveform from PHASE, and an orb where the LFO is in it now, at its
-    output (under the trace while RISE fades it in; at the cycle's end once ENV holds). Right-click the scope for its **COLOR** (amber, green, blue, red,
+    output (under the trace while FADE fades it in or out; at the cycle's end once ENV holds). Right-click the scope for its **COLOR** (amber, green, blue, red,
     violet or white; kept on this computer, not in the patch) and its **EDGES**: SOFT (the
     default, a jump eased over about 2 ms) or SHARP;
   - **MODE**: FREE runs on; RETRIG starts again at PHASE with a new note; ENV runs one cycle from
@@ -406,8 +406,9 @@ are [standalone-spec.md](docs/standalone-spec.md) and
     oscillator's), and **REVERSE** in the same menu, which reads the waveform backwards (a
     sawtooth falls); **RATE**, 0.01 to 50 Hz, or with its timed key (the note beside it shows the
     value) a note value locked to the host's tempo, as the timed oscillators' dials; **PHASE**,
-    0 to 360°, where the cycle starts (a negative depth inverts the LFO exactly); **RISE**, 0 to
-    10 s, how long it fades in after a new note;
+    0 to 360°, where the cycle starts (a negative depth inverts the LFO exactly); **FADE**, off at
+    its centre (it settles there when let go near it), to the right how long it fades in after a
+    new note, to the left how long it fades out, up to 10 s either way;
   - its **OUT** jack and its **MODULATES** screen (the knob and its depth, the count, or NOT IN
     USE; its tip lists them all, a click drops the list with DEPTH… and REMOVE for each).
 
@@ -431,7 +432,7 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   parameter that can be automated or MIDI-learned. The LFO key is lit while its page shows and
   glows faintly while an LFO is assigned and moving a knob with it put away.
 
-  **LFOs move LFOs.** An LFO's RATE (not while timed), PHASE, RISE and WAVEFORM (while
+  **LFOs move LFOs.** An LFO's RATE (not while timed), PHASE, FADE and WAVEFORM (while
   CONTINUOUS) take a cord from any LFO's OUT jack, its own included, or from a macro's jack, as
   the panel's knobs do, with the same rings, pop-up, menus and tip. An LFO's **OUT** jack is also
   its **LEVEL**, how much of every one of its assignments it gives (0 to 100 %, 100 to start; a

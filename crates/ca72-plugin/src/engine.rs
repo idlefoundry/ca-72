@@ -2686,7 +2686,7 @@ impl Engine {
                     self.last_velocity = self.velocities[usize::from(key)];
                 }
                 // (Each LFO's RETRIG resets on every key, independently of the contours.
-                // FREE's RISE and shared ENV still follow the main trigger. Bring the
+                // FREE's FADE and shared ENV still follow the main trigger. Bring the
                 // generators up to this event before restarting: R-LFO-NOTE-RETRIG.)
                 let new = on && (phrase || self.controls.panel.retrigger);
                 if on {

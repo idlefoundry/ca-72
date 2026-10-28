@@ -212,7 +212,7 @@ agent to use the bridge that came with that instance.
 | `ca72_midi_learn` | Learns, cancels, or assigns outright | `control?, cancel?, channel?, cc?, note?` (`note` for PREVIOUS and NEXT PRESET only) |
 | `ca72_midi_assignments` | Lists MIDI Learn's assignments | none |
 | `ca72_midi_forget` | REMOVE MIDI ASSIGNMENT | `control` |
-| `ca72_modulations` | Lists what each modulation source (LFO 1 to 4, MACRO 1 to 6) modulates: each knob (an LFO's own RATE, PHASE, RISE, shape or LEVEL among them, `lfo2_rate`, `lfo2_level`), its depth in %, `shared` (an LFO with MONO off on a knob every voice shares, or on a MONO LFO's own knob) and `inert`; each LFO's EDGES and MONO; each macro's `name` ("" for none) and its knob's `value` in %; the knobs that can take one now (decisions.md R-LFO, R-MACROS) | none |
+| `ca72_modulations` | Lists what each modulation source (LFO 1 to 4, MACRO 1 to 6) modulates: each knob (an LFO's own RATE, PHASE, FADE, shape or LEVEL among them, `lfo2_rate`, `lfo2_level`), its depth in %, `shared` (an LFO with MONO off on a knob every voice shares, or on a MONO LFO's own knob) and `inert`; each LFO's EDGES and MONO; each macro's `name` ("" for none) and its knob's `value` in %; the knobs that can take one now (decisions.md R-LFO, R-MACROS) | none |
 | `ca72_modulation_set` | Assigns a source to a knob, as a drag from its OUT jack or a macro's jack (25 % if no depth), or changes its depth; sets an LFO's EDGES; names a macro | `source` (lfo1 to lfo4, "LFO 1", 1 to 4; macro1 to macro6, "MACRO 1" or a macro's name), `target?`, `depth?` (-100 to 100), `edges?` (SOFT, SHARP), `name?` (a macro's, 7 characters, "" for none) |
 | `ca72_modulation_remove` | REMOVE, for one knob or all of a source's | `source`, `target?` |
 | `ca72_effect_parameters` | The standalone's effects only: an effect's parameters a player may pin, in name order, with their IDs, names, units, steps, value in %, the plug-in's own text and their pin targets (decisions.md R-FX-PARAMS) | `slot` (1 to 4), `find?` |
@@ -325,7 +325,7 @@ set with the `modulation` tools (saved with presets and sessions, not a host par
 | RATE | knob | 0.01 to 50 Hz (2 Hz) | `lfoN_rate` |
 | RATE's timed key, the note value | key, dial | on/off (off); 4 bars to 1/32, as the timed oscillators' (1/4) | `lfoN_timed`, `lfoN_division` |
 | PHASE | knob | 0 to 360 degrees (0) | `lfoN_phase` |
-| RISE | knob | 0 to 10 s (0) | `lfoN_rise` |
+| FADE (R-LFO-FADE) | knob, off at its centre | -10 to 10 s (0): above 0 a fade in from each note, below 0 a fade out; printed Off, In 1.20 s, Out 1.20 s; taken as a number of seconds or as `"Off"`, `"In 1.2"`, `"Out 1.2 s"`, `"-1.2"` | `lfoN_fade` |
 | MODE | toggle | Free, Retrig, Env (Free) | `lfoN_mode` |
 | MONO | key | on/off (on) | `lfoN_mono` |
 | UNI (POLARITY: R-LFO's corrections) | key | Bipolar, Unipolar (Bipolar) | `lfoN_polarity` |
@@ -338,7 +338,7 @@ set with the `modulation` tools (saved with presets and sessions, not a host par
 | MODULATES | screen | | `ca72_modulations` (each LFO's `polarity`, `reverse` and `on` too) |
 
 The LFOs' own knobs are targets too (R-LFO's addendum): any LFO (itself included) or macro on an
-LFO's RATE (`lfoN_rate`, not while it is timed), PHASE (`lfoN_phase`), RISE (`lfoN_rise`),
+LFO's RATE (`lfoN_rate`, not while it is timed), PHASE (`lfoN_phase`), FADE (`lfoN_fade`),
 WAVEFORM while CONTINUOUS (`lfoN_waveform`, its shape) and LEVEL (`lfoN_level`, "LFO 2 LEVEL";
 the strip's LEVEL is `level`), by `ca72_modulation_set {source, target, depth}` as any knob.
 Loops are allowed: each LFO reads the others' values from the latest of its ticks, every 0.5 ms
@@ -521,7 +521,7 @@ or AUTO GAIN, use the live controls, release notes, then capture again; `ca72_sn
 BUSY while measurement is pending. Verify the settled curve before saving.
 
 **Secondary envelopes and routing without an app.** All four LFOs' controls are already
-parameters in `values` (`lfoN_mode`, `rate`, `phase`, `rise`, `waveform`, `polarity`,
+parameters in `values` (`lfoN_mode`, `rate`, `phase`, `fade`, `waveform`, `polarity`,
 `reverse`, `mono`, `level`). `Env` runs one cycle and holds its final value; the rate
 sets the duration, or a timed division follows tempo. `modulations` adds or changes routing
 with the same `source`, `target`, `depth`, `edges` and macro `name` rules as
@@ -543,7 +543,7 @@ the standard loudness contour:
     "poly": true, "osc1_volume": 0, "osc2_on": false, "osc3_on": false,
     "noise_on": false, "loudness_attack": 0, "loudness_sustain": 10,
     "lfo1_mode": "Env", "lfo1_waveform": "Triangle", "lfo1_rate": 0.8,
-    "lfo1_phase": 0, "lfo1_rise": 0, "lfo1_polarity": "Unipolar",
+    "lfo1_phase": 0, "lfo1_fade": 0, "lfo1_polarity": "Unipolar",
     "lfo1_mono": false
   },
   "modulations": [{"source":"lfo1", "target":"osc1_volume", "depth":100}],
@@ -556,9 +556,9 @@ the standard loudness contour:
 MONO off gives each voice its own copy for per-voice targets such as oscillator mixer
 volumes and cutoff. Main `volume` and strip `level` are shared targets even with MONO off.
 For a breath envelope, route the relevant oscillator/noise volumes and filter, rather than
-assuming main VOLUME is per voice. Each LFO's `Retrig` mode restarts phase and RISE on every
+assuming main VOLUME is per voice. Each LFO's `Retrig` mode restarts phase and FADE on every
 note-on, independently of the main `retrigger` switch. This permits note-reset vibrato with
-legato loudness/filter contours. Shared ENV and FREE's RISE retain the main switch's phrase
+legato loudness/filter contours. Shared ENV and FREE's FADE retain the main switch's phrase
 triggering; newly allocated polyphonic voices start their own generators, as in playback.
 Saved presets retain the routing and LFO parameters; export and reload the file to verify it.
 

@@ -49,7 +49,7 @@ PANEL = dict(
     doubled=0, drive=0, auto_gain=1, lock=0, note_priority=0, retrigger=0,
 )
 LFO = dict(waveform=TRI, shape_mode=0, shape=0, rate=2.0, timed=0, division=DIV["1/4"],
-           phase=0, rise=0, mode=FREE, mono=1, polarity=0, reverse=0, on=1, level=100)
+           phase=0, fade=0, mode=FREE, mono=1, polarity=0, reverse=0, on=1, level=100)
 ARP = dict(arp_on=1, arp_latch=0, arp_direction=0, arp_rate=ARP_RATE["1/16"], arp_octaves=1,
            arp_gate=50, arp_swing=0)
 
@@ -89,14 +89,19 @@ def owner(name, description=None, **changes):
     """The owner's preset, as their CA-72 saved it (scripts/presets_owner/<name>.toml, kept as
     it came: decisions.md R-OWNER-PRESETS): its values, every one, as they are, but `changes`
     (the owner's own, decided after); its tags and macros' names; its description, else
-    `description`. MAIN OUTPUT VOLUME and LEVEL as the others', from the levels file once
-    levelled. Its AUTO GAIN curve is not taken: the factory measures its own
+    `description`. An LFO's RISE, as 0.3.0's beta saved it, is its FADE, a fade in
+    (decisions.md R-LFO-FADE). MAIN OUTPUT VOLUME and LEVEL as the others', from the levels file
+    once levelled. Its AUTO GAIN curve is not taken: the factory measures its own
     (tests/factory_curves.rs)."""
     t = tomllib.loads((OWNER / f"{name}.toml").read_text())
     assert t["name"] == name, name
     effects = t.get("effects", {}).get("chain")
     assert effects is None or not json.loads(effects)["slots"], f"{name}: effects"
     v = dict(t["values"])
+    # (Saved by 0.3.0's beta, an LFO's RISE: its FADE now, a fade in, decisions.md R-LFO-FADE.)
+    for n in range(1, 5):
+        if f"lfo{n}_rise" in v:
+            v.setdefault(f"lfo{n}_fade", v.pop(f"lfo{n}_rise"))
     assert set(changes) <= set(v), f"{name}: {set(changes) - set(v)}"
     v.update(changes)
     if name in LEVELS:
@@ -310,11 +315,11 @@ P.append(owner(
 P.append(preset(
     "Pressure Solo",
     "A sawtooth and a square at 8', gliding, with a vibrato that rises in after each note starts "
-    "(an LFO on TUNE, RISE about a second). Pressure, a note's own (MPE) or the keyboard's, opens "
+    "(an LFO on TUNE, FADE in about a second). Pressure, a note's own (MPE) or the keyboard's, opens "
     "the filter up to an octave and a half; MPE's slide (timbre) adds a noisy growl through the "
     "mod wheel. An expressive solo lead.",
     ["lead", "expressive", "glide", "lfo"],
-    lfo(1, {"tune": 3}, rate=5.4, rise=0.9, mode=RETRIG),
+    lfo(1, {"tune": 3}, rate=5.4, fade=0.9, mode=RETRIG),
     pressure_filter=1.5, timbre_mod=70,
     osc1_volume=10, osc2_on=1, osc2_waveform=SQUARE, osc2_volume=6, osc2_frequency=0.04,
     mod_mix=10, filter_mod=1, mod_wheel=0,

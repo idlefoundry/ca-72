@@ -89,6 +89,18 @@ fn time_knob(ms: f64) -> f64 {
 
 const FOOTAGES: [f64; 6] = [0.0, 32.0, 16.0, 8.0, 4.0, 2.0];
 
+/// An LFO's FADE (s, signed) with its knob at `knob` (0..1): RISE's cube-root travel each way
+/// from the centre, as its parameter's range has it.
+fn fade_at(knob: f64) -> f64 {
+    let t = 2.0 * knob.clamp(0.0, 1.0) - 1.0;
+    10.0 * t.powi(3)
+}
+
+/// Its knob's travel (0..1) at FADE `s` seconds (signed): [`fade_at`]'s inverse.
+fn fade_knob(s: f64) -> f64 {
+    0.5 + 0.5 * (s / 10.0).clamp(-1.0, 1.0).cbrt()
+}
+
 fn unit(control: usize) -> &'static str {
     if let Some(r) = readout(control) {
         return match r {
@@ -118,9 +130,9 @@ fn unit(control: usize) -> &'static str {
             ..
         } => "degrees",
         Kind::Knob {
-            dial: Dial::LfoRise,
+            dial: Dial::LfoFade,
             ..
-        } => "s",
+        } => "s \u{b7} \u{2013} out \u{b7} + in",
         Kind::Selector(Legends::Ranges) => "ft · 0 = LO",
         Kind::Selector(_) => "position 1–6",
         _ => "dial",
@@ -137,7 +149,8 @@ fn plain(control: usize, knob: f64) -> f64 {
             // An LFO's, through its parameter's travel (decisions.md R-LFO).
             Dial::LfoRate => 0.01 + 49.99 * knob.powi(5),
             Dial::LfoPhase => knob * 360.0,
-            Dial::LfoRise => 10.0 * knob.powi(3),
+            // (FADE signed: out to the left of its centre, in to the right.)
+            Dial::LfoFade => fade_at(knob),
             _ => knob * 10.0,
         },
         Kind::Selector(Legends::Ranges) => FOOTAGES[(knob * 5.0).round() as usize],
@@ -155,6 +168,15 @@ fn normalized(control: usize, text: &str) -> Option<f64> {
         }
     );
     let text = text.trim();
+    // An LFO's FADE: "Off", "In 1.2", "Out 1.2", or seconds signed (decisions.md R-LFO-FADE).
+    if let Kind::Knob {
+        dial: Dial::LfoFade,
+        ..
+    } = CONTROLS[control].kind
+    {
+        let s = crate::lfo::fade_typed(text)?;
+        return Some(fade_knob(f64::from(s)));
+    }
     let (text, scale) = if time {
         if let Some(t) = text.strip_suffix("ms") {
             (t.trim(), 1.0)
@@ -167,7 +189,7 @@ fn normalized(control: usize, text: &str) -> Option<f64> {
         (text, 1.0)
     };
     let lfo_dial = match CONTROLS[control].kind {
-        Kind::Knob { dial, .. } => matches!(dial, Dial::LfoRate | Dial::LfoPhase | Dial::LfoRise),
+        Kind::Knob { dial, .. } => matches!(dial, Dial::LfoRate | Dial::LfoPhase),
         _ => false,
     };
     let text = if lfo_dial {
@@ -191,7 +213,6 @@ fn normalized(control: usize, text: &str) -> Option<f64> {
                 Dial::Time => time_knob(v * scale),
                 Dial::LfoRate => ((v - 0.01) / 49.99).clamp(0.0, 1.0).powf(0.2),
                 Dial::LfoPhase => v / 360.0,
-                Dial::LfoRise => (v / 10.0).clamp(0.0, 1.0).cbrt(),
                 _ => v / 10.0,
             },
             Kind::Selector(Legends::Ranges) => {

@@ -27,7 +27,7 @@ four LFO LOOP presets, are factory presets, forty in all, at the end of
 | Tempo Wobble | bass | two timed LFOs faded in by macros (WOB 8, WOB 16) through their LEVEL; GROWL |
 | Pulse Strings | strings, POLY | CONTINUOUS waveforms with MOD: PWM from each voice's oscillator 3 at LO |
 | Gated Chords | pad, POLY | oscillator 3 TIMED at LO through FILTER MODULATION: a tempo gate |
-| Pressure Solo | lead | PRESSURE to the filter, TIMBRE to the mod wheel; delayed vibrato by RISE |
+| Pressure Solo | lead | PRESSURE to the filter, TIMBRE to the mod wheel; delayed vibrato by FADE |
 | Morph Bloom | pad, POLY | per-voice LFOs (MONO off) on CONTINUOUS shapes; four named macros |
 | Bubble Computer | FX | four timed LFOs, one moving another's LEVEL; SHARP edges |
 | LFO LOOP Coupled Rates | pad, POLY | two LFOs setting each other's RATE |
