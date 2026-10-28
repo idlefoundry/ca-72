@@ -10131,14 +10131,52 @@ for a short of their own.)
   removed by the bridge's next call). Audio running keeps a hidden application awake through
   coreaudiod's assertion; without it, App Nap, above.
 
-**Found, not fixed:** a standalone left hidden and napped for minutes (no audio, agents off)
-does not finish quitting within plugin-kit-standalone's two seconds (`runtime.rs`) and shows
-its error window; one just hidden quits. Not agents': it wants the activity, or a longer wait,
-while the standalone shuts down.
+**Found, then fixed (R-QUIT-NAP):** a standalone left hidden and napped for minutes (no audio,
+agents off) did not finish quitting within plugin-kit-standalone's two seconds (`runtime.rs`)
+and showed its error window; one just hidden quit. Not agents': from its window's closing
+until the process ends, the standalone now holds a user-initiated activity.
 
 **Not tried.** Minimising on macOS (Accessibility is needed); requests while a native modal
 loop runs (baseview's frame timer is in the run loop's default mode only); the COPY SETUP items
 clicked in a running application on each system; Claude Desktop.
+
+## R-QUIT-NAP. A napped standalone quits cleanly (0.3.0)
+
+**Found** in R-MCP's testing on the Mac, 2026-10-27: a standalone hidden for minutes with no
+audio running (`--no-devices`, agents off) is napped (every thread at priority 4), and asked
+to quit, it could stop at its error window: "Standalone shutdown did not finish within two
+seconds". A running audio device keeps the app awake (coreaudiod's assertion), but no device,
+a failed one or one that stopped leaves it nap-able, and quitting must never fail.
+
+**The cause** (measured with timestamps through the quit, `--no-devices`, hidden 6 to 8
+minutes, macOS 27, Apple silicon). Nothing waits on anything that never comes: every step is
+slow, CPU, timers and I/O alike. In one failure the quit Apple event arrived 1.9 s after it
+was sent; the window's run returned 12.8 s later; the control thread left its loop at once
+when asked to stop, then the processor's `deactivate` (stopping the voices' worker threads)
+took 4.3 s and the final save 3.7 s (its `F_FULLFSYNC` alone 2.1 s; a periodic save's took up
+to 2.7 s while napped). The main thread's own two-second wait ran 3.7 s before it gave up. A
+longer timeout would not do: no figure fits a process at priority 4. Of five napped quits of
+the old build traced, two ended in the error window and three took 5 to 6 s.
+
+**Decision (agent's, 2026-10-27).** From the moment the app's window starts to close until
+the process ends, the standalone holds an NSProcessInfo activity, user initiated with idle
+sleep allowed and not latency critical (`agent/awake.rs`'s `quitting`, its token never ended:
+the process's end ends it). nih-plug's production wrapper calls the function the app gives it
+(`app_window::on_closing`) once, as the window closes: at its `WillClose` (the close button,
+⌘Q, the quit Apple event), before its own Ctrl+Q and the editor's quit request close it, and
+as it is dropped otherwise (`third_party/nih-plug/PATCHES.md`). plugin-kit-standalone is
+unchanged: its two seconds are for a driver that never answers, and awake, the shutdown takes
+a tenth of that.
+
+Not done: an activity while the window is open and no audio runs. Napped, the app still takes
+a moment to be told it is quitting (below), but a hidden app playing nothing has no reason to
+be kept awake, and its frames would run on for nothing.
+
+**Evidence.** Hidden and napped (priority 4) for 6 minutes or more, quit with AppleScript's
+`quit`: with the fix, the quit Apple event reached the app 0.7 to 3.0 s after it was sent
+(App Nap's delay, before any of the app's code), and from there to the process's end took
+0.16 to 1.8 s, the shutdown 0.09 to 0.42 s, on a Mac under heavy load (load average near 200);
+each exited with its session saved and no error.
 
 ## R-FX-SAFETY. No effect can make the standalone dead or keep it from starting (issue 82)
 

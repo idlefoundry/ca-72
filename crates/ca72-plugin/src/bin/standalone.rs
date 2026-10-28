@@ -62,7 +62,9 @@ fn main() {
     };
     // Until the window closes, however it is closed: its close button, the system's shortcuts
     // and menus for quitting, logging out (decisions.md R-QUIT). The session is saved and the
-    // audio and MIDI stopped by then.
+    // audio and MIDI stopped by then. From the moment it starts to close, App Nap is lifted until
+    // the process ends (R-QUIT-NAP): napped, quitting could outlast the shutdown's two seconds.
+    nih_plug::wrapper::production::app_window::on_closing(ca72_plugin::agent::awake::quitting);
     let result = nih_plug::wrapper::production::run_with_midi_reset_scope::<ca72_plugin::Ca72>(
         options,
         &["pitch_wheel", "mod_wheel"],
