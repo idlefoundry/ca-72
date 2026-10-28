@@ -16445,3 +16445,158 @@ R-DROPOUTS's promotion did nothing there; and a refusal was said only on standar
 - A real RTKit with PipeWire's real-time module on in the process, after a new login.
 - Ubuntu and Fedora themselves; RTKit older than 0.11 (`MakeThreadRealtime`).
 - Listening, and dropouts measured with RTKit's priority 20 against FIFO 70.
+
+## R-OWNER-PRESETS. The owner's presets become 0.3.0's factory presets
+
+**The owner, 2026-10-28** (through the coordinator): the presets the owner reworked on the Mac
+become 0.3.0's factory presets, levelled. Their rules: the new factory set is exactly what the
+owner's preset drawer shows, every visible factory preset and every user preset in the folder;
+the hidden factory presets were replaced on purpose by the owner's renamed versions, which take
+their places under the owner's names; of the files copied in on 2026-10-26, one that differs from
+0.3.0's in sound-shaping values (not format, level or calibration-era fields) is a deliberate edit
+and the owner's is taken, else 0.3.0's stays under that name; and a script, run by hand after
+the new build is installed, cleans the owner's folder. Built as `int/owner-presets` from
+`release-0.3.0` (`b60d2b6`).
+
+**The source:** the snapshot of the owner's folder taken at 10:49
+(`/mnt/lab/artifacts/ca-72/owner-presets-20261028-1049/Presets/`: 27 presets and
+`factory.toml`, with `settings.toml` beside it). The live folder on the Mac had the same 28
+files to the byte at 10:58 and again at the end of the work. The owner's working build is
+`~/Applications/CA-72 V0.3.app` (0.3.0, 2026-10-28 09:10), whose built-in set is
+`release-0.3.0`'s forty; `/Applications/CA-72.app` is 0.2.8.
+
+**What the drawer shows** (`library.rs`, `Library::read`): every factory preset but those
+`factory.toml` hides and those a user preset stands in for, then every user preset. A user
+preset stands in for the factory preset named in its `replaces`, else the one of its own name,
+ignoring case (`Origin::Edited`, marked EDITED); the factory's own is then not listed, so a
+same-named user preset **shadows** it, never both. So the owner's drawer listed 43 presets:
+sixteen of the factory's (0.2.8's set but Bright Xylo, Feedback Funk and Loose Hat), nineteen
+EDITED (every other factory name but the five hidden) and eight YOURS.
+
+**The set, 43** (the owner's files are in `scripts/presets_owner`, as they came):
+- **Taken from the owner, 15.** Their edits of Bright Xylo, Feedback Funk, Loose Hat, Tonewheel
+  Drift, Glass Bell, Swing Keys and Bubble Computer (each saved by 0.3.0 since 2026-10-27);
+  their renamed versions of the five hidden presets; and three of their own, which no hidden
+  preset matches and whose nearest factory preset is still in the drawer: Gatekeeper, Velocihator
+  and Droning On.
+- **The five hidden, matched by their values** (`presets::targets_for_sound`, every parameter
+  as the plug-in loads it, against every factory preset; VOLUME and LEVEL left out):
+  Club Stab is Zither Me Timbres (9 values apart, the next nearest 29: AMOUNT OF CONTOUR, the
+  loudness DECAY, velocity moved from CUTOFF to the contour and the decay, ENTROPY; its macros
+  OPEN and WIDE, its tags stab, keys, poly); LFO LOOP Coupled Rates is Finger in a Light Socket
+  (5 apart, next 15: DOUBLE on, SPREAD 50); LFO LOOP Level Pump is Level Pump and LFO LOOP Self
+  Rate is Hold Me Long Time (each only CONTINUOUS's unused travel apart, the next 13 and 14, at
+  0.3.0's VOLUME); LFO LOOP Phase Chase is Phase Chase (NOTE PRIORITY LAST, tagged bass).
+- **0.3.0's own, 28:** the sixteen 0.2.8 presets not edited, and the twelve copied in on
+  2026-10-26, all stale (below).
+
+**The twelve of 2026-10-26** (Acid Squelch, Deep Boom, Gated Chords, Morph Bloom, Night Surf,
+Octave Runner, Pitch Tom, Pressure Solo, Pulse Strings, Random Glass, Ray Gun, Tempo Wobble):
+each is, to the byte, the candidates' load file of `b089ded` (`docs/preset-candidates/load`,
+committed 12:42 that day), which no CA-72 wrote: no `version`, no `favorite`. None is in
+v0.2.8's set. Against 0.3.0's definitions, as written: Pitch Tom the same; ten differ in VOLUME
+or LEVEL alone (the candidates' levels, before the calibration and R-PRESETS-0.3.0's levelling);
+Random Glass also in a tag (`pluck`, which R-PRESETS-0.3.0 made `plucked`); Gated Chords in
+CUTOFF -2.5, EMPHASIS 3, AMOUNT OF CONTOUR 2 and the mod wheel 0.75, the candidate's settings
+that R-PRESETS-0.3.0 found did not gate and changed. Without `version` the plug-in reads their
+ENTROPY on the scale before 0.2.7 (5 % plays as 9.75 %: `compat::translate_entropy_preset`), so
+the owner heard them so; that is their format. All twelve are stale, 0.3.0's kept: Gated Chords'
+differences are R-PRESETS-0.3.0's own change, not the owner's, and the candidate's sound ships
+anyway as Gatekeeper (the same values, but CONTINUOUS's unused travel; saved by the owner at
+10:40).
+
+**Every value the owner's** but MAIN OUTPUT VOLUME and LEVEL, written as their file has them
+(the drawer's four decimals). What that carries with it, unchanged:
+- Seven of the owner's (Tonewheel Drift, Glass Bell, Zither Me Timbres, Swing Keys, Bubble
+  Computer, Gatekeeper and its copy of Gated Chords) began as the candidates' load files, so their
+  ENTROPY is the old scale's reading (10 % saved as 14.5 %, 15 as 19.25, 20 as 24, 5 as 9.75).
+- CONTINUOUS's travel for oscillators in STEPPED is 0.3361 where 0.3.0 writes 0.336134: unused.
+- Glass Bell has no velocity on CUTOFF (the candidate had none; R-PRESETS-0.3.0 added 12 %); its
+  own description, without velocity, is kept.
+- Bright Xylo has the arpeggiator on, its tags not `arp`; Droning On has EXTERNAL INPUT on.
+- Velocihator and the owner's Loose Hat are the same values; both are in the drawer, so both
+  ship.
+- The owner's files are 0.3.0's format whole: nothing is filled by a default but in the twelve
+  stale ones, which are not taken. Their effects chains are empty.
+- The owner's AUTO GAIN curves are not taken: several are another preset's, carried as the curve
+  in force when saved (Velocihator, Loose Hat and Tonewheel Drift's are the same). The factory
+  measures its own: `factory_curves`' writing test, every preset; those of the 28 unchanged came
+  out the same to the bit.
+
+Tags, macros' names and descriptions are the owner's; the eight new names had no description,
+so each has one written from its values (Club Stab's, the LFO LOOP presets' and Gated Chords'
+adapted where the sound is theirs), for the owner to change.
+
+**Levelled by `scripts/level_presets.py`, unchanged** (R-PRESETS-0.3.0): 0.2.8's three edited
+in place, the rest generated by `scripts/presets_0_3.py`, which now reads the owner's files.
+Momentary maximum on each preset's phrase, LUFS, before (the owner's VOLUME and LEVEL) and after:
+
+| Preset | LO | HI | ULTRA | VOLUME, LEVEL | heard |
+|---|---|---|---|---|---|
+| Feedback Funk | -21.00 to -18.33 | -20.34 to -17.67 | -21.82 to -19.15 | 9.021, 0 to 9.611, 0 | +2.67 dB |
+| Bright Xylo | -15.64 to -17.99 | -15.65 to -18.00 | -15.65 to -18.00 | 10, 5.71 to 10, 3.36 | -2.35 dB |
+| Loose Hat | -20.12 to -18.22 | -19.68 to -17.78 | -19.53 to -17.63 | 7.9663, 3.97 to 10, 5.5 | +1.90 dB |
+| Tonewheel Drift | -16.81 to -17.55 | -17.67 to -18.41 | -17.69 to -18.44 | 6.119, 0 to 5.924, 0 | -0.74 dB |
+| Glass Bell | -18.11 to -18.34 | -17.44 to -17.66 | -17.52 to -17.75 | 7.097, 0 to 7.037, 0 | -0.22 dB |
+| Zither Me Timbres | -16.51 to -18.20 | -16.11 to -17.80 | -16.03 to -17.73 | 7.978, 0 to 7.53, 0 | -1.69 dB |
+| Swing Keys | -16.67 to -18.17 | -16.40 to -17.90 | -16.40 to -17.90 | 8.81, 0 to 8.442, 0 | -1.50 dB |
+| Gatekeeper | -17.51 to -18.12 | -17.28 to -17.89 | -17.28 to -17.89 | 7.166, 0 to 7.005, 0 | -0.61 dB |
+| Bubble Computer | -20.83 to -16.56 | -23.68 to -19.41 | -23.52 to -19.25 | 8.768, 0 to 9.721, 0 | +4.27 dB |
+| Velocihator | -20.12 to -18.22 | -19.68 to -17.78 | -19.53 to -17.63 | 7.9663, 3.97 to 10, 5.5 | +1.90 dB |
+| Droning On | -13.69 to -19.16 | -13.78 to -19.25 | -9.84 to -15.31 | 8.7653, 0 to 7.342, 0 | -5.47 dB |
+| Finger in a Light Socket | -18.48 to -17.87 | -18.73 to -18.12 | -18.71 to -18.10 | 7.899, 0 to 8.058, 0 | +0.61 dB |
+| Phase Chase | -18.19 to -18.07 | -18.05 to -17.93 | -18.05 to -17.94 | 9.722, 0 to 9.745, 0 | +0.12 dB |
+
+The others did not move. Droning On's ULTRA stays 1.2 dB outside the tolerance: its FEEDBACK at
+ULTRA (the hardware's loop, R-CALIBRATION-0.3.0) reads 3.9 dB over its HI, as Feedback Funk's
+reads 1.5 under it. Bubble Computer reads 2.9 dB louder at LO than at HI, each inside.
+
+**The sound otherwise unchanged:** each owner's file (read by the library, as the drawer reads
+it) and its factory version played the same phrase through `process` (`preset_levels`, its new
+`CA72_USER_PRESETS`) at LO, HI and ULTRA; the factory's scaled by the best single gain, the
+difference against the owner's: Level Pump and Hold Me Long Time the same to the bit (not
+moved); Bright Xylo, Bubble Computer, Droning On, Finger in a Light Socket, Gatekeeper, Glass
+Bell, Loose Hat, Phase Chase, Velocihator and Zither Me Timbres -149 dB at each quality (the
+floats' rounding); Feedback Funk -122 dB (its FEEDBACK loop); Tonewheel Drift -55 dB and Swing
+Keys -42.5 dB. Each gain is its loudness change to 0.03 dB.
+- **Where levelling moves a modulated VOLUME, the modulation moves with it.** The script levels
+  by MAIN OUTPUT VOLUME, or LEVEL with VOLUME at 10, and an LFO, a macro or velocity moving
+  VOLUME moves it along the pot's taper from there, clamped at its end. Swing Keys' and Tonewheel
+  Drift's tremolos (LFO 1 on VOLUME) swing 4.73 and 6.28 dB where they swung 4.95 and 6.22; the
+  differences above are this. Velocihator and Loose Hat (velocity on VOLUME +25 %) went from
+  VOLUME 7.97 to 10 and LEVEL 3.97 to 5.5: at the phrase's velocity 100 the same but for gain,
+  but VOLUME at 10 leaves velocity nothing to raise, so their loudness no longer follows velocity
+  (the owner's rose about 9 dB from the softest note to the hardest). Not changed here, the
+  levelling being the project's; levelling these by LEVEL alone, VOLUME the owner's, would keep
+  it. For the owner to decide.
+
+**Changed with the set:** `tests/lfo_loops.rs` takes the presets tagged `loop` (the four, by
+their new names); `library.rs`' count is 43; `presets.rs`' search for "pad" finds Finger in a
+Light Socket, Gated Chords, Gatekeeper, Level Pump and Morph Bloom; `preset_levels.rs` measures
+a folder's user presets (`CA72_USER_PRESETS`); `factory_presets`' tempo test takes 90 BPM
+against 120 as followed where their loudness is 1.5 dB apart or, new, their waveforms more than
+20 dB from the same (Glass Bell's timed vibrato read 0.19 dB, Gatekeeper 0.62, Droning On 0.54,
+Bright Xylo 1.20; a preset that did not follow would play the same to the sample); 0.3.0's notes, `notes.toml` and the README name
+the 43. `scripts/presets_0_3_levels.json` holds the generated presets' levels by their new names.
+
+**The owner's Mac.** Until it is cleaned the owner's folder still stands in for the factory's
+under the same names (the twelve stale copies hide 0.3.0's versions; the others are the factory's
+own sound), and `factory.toml` hides five names the factory no longer has (harmless). The cleanup
+script, `/mnt/lab/artifacts/ca-72/owner-presets-cleanup/cleanup_owner_presets.py` (`--dry-run`,
+`--apply`), compares with the `presets.toml` beside it, and refuses to run unless an installed
+CA-72 carries that file byte for byte, and while any other CA-72 build is installed (every build
+shares the folder) unless told to; it backs the folder up beside it, removes each user preset
+that stands in for a factory preset with the same sound-shaping values (VOLUME and LEVEL aside;
+not a favourite, no effects), and clears `factory.toml`'s entries for names no longer in the
+set. Tried on a copy of the snapshot: 26 removed, Gated Chords kept (its values are the
+candidate's, not 0.3.0's: the owner may delete it, or REVERT it in the drawer, to hear 0.3.0's),
+the five hidden entries cleared, nothing else touched. Not run on the Mac.
+
+**Evidence (omarchy, Linux, Rust 1.97.1, 2026-10-28, on `be2425c`):** rustfmt; clippy
+(`--workspace --all-targets --all-features -D warnings`); `cargo test --workspace --features
+ca72-plugin/standalone-production`: 1253 passed, 0 failed, 109 ignored; `whats_new`; by hand,
+`factory_curves` with its ignored test (every curve its measurement, to the bit) and
+`scripts/level_presets.py --check` (every preset within -18 ± 1.5 at LO, HI and ULTRA but
+Droning On at ULTRA, each reading as levelled). The mapping, the renders' comparison and the
+levelling were run on `b60d2b6`; `be2425c` changes no sound. Tables, renders' logs and
+the scripts used: `/mnt/lab/artifacts/ca-72/owner-presets-0.3.0/`.
