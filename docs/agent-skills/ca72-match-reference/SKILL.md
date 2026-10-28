@@ -130,10 +130,11 @@ rates; unresolved sidebands are also null, not evidence of absent movement.
 
 Use the four LFOs for repeating movement or secondary envelopes when the measured behavior
 calls for it. `lfoN_mode:"Env"` plays one cycle and holds its endpoint; rate is inverse cycle
-duration or a timed division. Each LFO's `Retrig` restarts phase and RISE on every note-on
+duration or a timed division. Each LFO's `Retrig` restarts phase and FADE on every note-on
 independently of main `retrigger`. Keep main retrigger off when physical contours should stay
-legato. Shared Env and Free's RISE retain phrase/main-trigger behavior. RISE is a ramp, not
-a hard delay. With MONO off, mixer/filter routes can be per voice; main volume/output remain
+legato. Shared Env and Free's FADE retain phrase/main-trigger behavior. `lfoN_fade` is in
+seconds, signed: positive fades the LFO in from each note (a ramp, not a hard delay), negative
+fades it out from full to nothing, 0 is off. With MONO off, mixer/filter routes can be per voice; main volume/output remain
 shared. Configure values before `modulations [{source,target,depth}]`; depth is signed percent
 of target travel. Route continuous oscillator shape through `oscN_waveform`, not
 `oscN_shape`. Existing routes remain unless edited or removed with `remove:true`.

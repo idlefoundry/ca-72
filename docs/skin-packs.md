@@ -642,7 +642,7 @@ gets them from the plug-in, at their official places under oscillators 2's and 3
 nothing of the layout's is there.
 
 Revision 4 of the controls (0.3.0) adds the LFO page's 28 (`lfo1_waveform`, `lfo1_rate`,
-`lfo1_timed`, `lfo1_phase`, `lfo1_rise`, `lfo1_mode`, `lfo1_mono`, and the same for LFOs 2 to
+`lfo1_timed`, `lfo1_phase`, `lfo1_fade`, `lfo1_mode`, `lfo1_mono`, and the same for LFOs 2 to
 4). They are the plug-in's own, on a lower page of its own, and a layout does not place them,
 as it does not place the strip's: a layout naming one is refused (`layout.control`), and a
 layout made for revisions 1 to 3 loads as it did. The page is drawn in the pack's base look

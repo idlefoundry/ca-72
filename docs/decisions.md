@@ -16606,3 +16606,99 @@ same to the bit) and `scripts/level_presets.py --check` (every preset within -18
 and ULTRA, each reading as levelled). The first mapping and comparison were run on `b60d2b6`;
 `be2425c` changes no sound. Tables, renders' logs and the scripts used:
 `/mnt/lab/artifacts/ca-72/owner-presets-0.3.0/` (the owner's decisions' round in `round2/`).
+
+## R-LFO-FADE. Each LFO's RISE becomes FADE, one bipolar knob: off at its centre, in to the right, out to the left
+
+**The owner, 2026-10-28:** "1 knob": centre off, right in, left out. Each LFO's RISE (R-LFO), a
+fade in from each note over 0 to 10 s, becomes **FADE**, which fades the LFO in or out; decided
+for 0.3.0 during its final checks. The precedent is Elektron's LFO FADE (Digitakt, Analog Four
+and the rest): one bipolar parameter, no fade at 0, a fade in one way and a fade out the other.
+Elektron's fades in below 0 and out above; here a turn to the right fades in, as RISE turned, and
+to the left out, as the owner put it.
+
+**The parameter.** `lfo1_fade` to `lfo4_fade` (from `lfoN_rise`), "LFO n Fade", -10 to 10 s, 0
+(off) its default and its knob's centre. Its travel is RISE's cube-root travel mirrored about the
+centre (`lfo::FADE_RANGE`, nih-plug's `SymmetricalSkewed`, factor 1/3, centre 0): a share `t` of
+the way from the centre to either end is 10 t^3 s, so 1 s sits about a quarter of the way out
+(0.27 and 0.73 of the travel) and short fades have as much room either way as RISE gave them.
+It prints as DETUNE prints its none, and with RISE's hundredths of a second: `Off`, `In 1.20 s`,
+`Out 0.35 s` (`lfo::fade_text`; a fade under 5 ms either way prints `Off`, as it would print
+`0.00`). It is typed (the knob's field, the host, the agents) as `Off`, `In 1.2`, `Out 1.2 s`, or
+seconds signed as the knob turns, `-1.2` a fade out (`lfo::fade_typed`).
+
+**The engine** (`lfo.rs`). `Settings::fade`, signed seconds, and `Settings::fade_gain`, which
+takes RISE's place in `Gen::value`, `Gen::tick_value`, `Gen::peek` and the scope's reading:
+- above 0 (in): `clamp(since / fade, 0, 1)`, RISE's own arithmetic, to the bit;
+- below 0 (out): `clamp(1 − since / |fade|, 0, 1)`, from full at the note to nothing;
+- 0: 1.
+It starts where RISE started and by RISE's rules (R-LFO-NOTE-RETRIG): RETRIG at every note-on,
+whatever the main RETRIGGER; FREE and ENV as the main RETRIGGER says (off, a key from silence;
+on, every key); a POLY voice's own LFOs (MONO off) at the note the voice takes. Once a fade out
+is over the LFO gives nothing, and its knobs are where they are set. A note's start as the LFOs
+read each other (`Gen::fresh`, `Cross`) is at nothing fading in and at full fading out or off.
+The same comparisons and branches as RISE's: nothing allocates, nothing locks, the cost is as it
+was.
+
+**Before any note** (an agent decision, asked for): a fade in is at nothing, as RISE was; a fade
+out is at **full**, since it has not begun to fall, however long the LFO has run (FREE runs
+before a note, and its time since a note grows, but no note has started the fall). So a FREE LFO
+fading out moves its knobs from the moment it is assigned until the first note, then falls away.
+
+**As a modulation target** (`Target::LfoFade(n)`, `LfoKnob::Fade`, its ID `lfoN_fade`, its screen
+name `LFO1 FADE`): moved through its own knob's travel as RATE and PHASE are (`lfo::moved`,
+`FADE_RANGE`), clamped to its ends. A source can carry it across the centre, from a fade in
+through off to a fade out; that is allowed.
+
+**The knob** (`controls::Dial::LfoFade`, `art.rs`, `interact.rs`, `editor/entry.rs`). Its dial
+is RISE's mirrored: `OFF` at its top over a longer tick, `OUT` and `IN` either side of it, over
+the halves they name (as MODULATION MIX's OSC. 3 and NOISE name its ends), ticks at .1, .5, 1, 2,
+5 and 10 s each way, 1 and 10 numbered, `SEC.` at its foot as RISE's; FADE over it. The panel's
+other centre-zero knobs (TUNE, CUTOFF FREQUENCY, the FREQUENCY knobs, the expression drawer's
+MODULATION) have no detent; the one centre detent in the panel is the PITCH wheel's, which
+catches the wheel when it is let go near its centre (`interact::release`). FADE's is that: let go
+within `interact::FADE_DETENT` (0.015 of its travel, about 4.5 degrees) of its centre, it settles
+there, off. The window is under one notch of the mouse wheel (0.02), so a notch from the centre
+steps out of it, and the fades it swallows, 0.27 ms or less either way, cannot be heard as fades.
+A double click puts it back at off, its default, as any knob's does. Typed, its field's hint is
+`s · – out · + in`. The scope's wake follows FADE's gain as it followed RISE's: rising into the
+trace fading in, sinking from it fading out.
+
+**Compatibility.** RISE was never in a public release, so nothing of a user's needs translating.
+0.3.0's beta (0.3.0-beta.1) had it, and what a beta tester saved is read so (a few lines;
+`lfo::RISE_IDS`):
+- a preset naming `lfoN_rise` has FADE at that many seconds, a fade in (`presets::targets_for_sound`;
+  a `lfoN_fade` beside it wins);
+- a session's `lfoN_rise` is moved to `lfoN_fade` before it loads (`Ca72::filter_state`);
+- an assignment to `lfoN_rise`, a session's or a preset's (`macro1_to_lfo2_rise`), is FADE's at
+  half its depth (`Target::of_saved`), which moves FADE's right half as far as the depth moved
+  RISE's whole travel (they part only where a source took RISE below 0, which RISE clamped and
+  FADE crosses into a fade out);
+- a MIDI mapping of `lfoN_rise` maps `lfoN_fade` (`learn::Saved::from_json`); a controller now
+  sweeps the whole of FADE, out to in.
+A preset or session saved now names FADE alone. The owner's preset files are kept as they came
+(`scripts/presets_owner`, Droning On's `lfo4_rise`); the generator reads a RISE there as FADE.
+The LFO stress test's lab presets (`docs/lfo-stress/presets`) name FADE now, at the same values.
+
+**The two factory presets that used RISE.** Pressure Solo (`lfo1_fade = 0.9`, its vibrato fading
+in) and Droning On (`lfo4_fade = 5.0714`; LFO 4 modulates nothing there). Their values are RISE's;
+their sound is RISE's, to the bit. That needed one thing more (an agent decision): a preset's
+value reaches its parameter through the parameter's travel, and the centred travel cannot hold
+0.9 s exactly (it holds 0.8999996 s; the values it can hold near there are 16 or more f32 steps
+apart), so Pressure Solo rendered -114.7 dB RMS (-108.8 dB peak) from what it had. The engine
+therefore takes FADE from its parameter to a tenth of a millisecond, the places a preset keeps
+(`lfo::fade_heard`: four multiplications, roundings and divisions a block): 0.9 s is heard as 0.9
+s, as RISE heard it. A source's move of FADE is taken as it is (`lfo::fade_within`). Where RISE's
+own travel had not held a preset's value exactly either (5.0714 s it held as 5.0714006 s), FADE is
+heard as the preset names it, one f32 step from RISE; Droning On's is the only such value, and its
+LFO 4 is not assigned.
+
+**Agent decisions, 2026-10-28** (not separately approved):
+- **The words:** `Off`, `In 1.20 s`, `Out 1.20 s`, in the case the host's values are printed in
+  (DETUNE's `Off`, MODE's `Retrig`); the knob's tip reads `LFO 1 FADE: In 1.20 s`.
+- **The before-first-note rule**, above.
+- **The detent's width**, 0.015 of the travel, under a wheel notch, and applied when a drag or
+  the wheel ends, as the PITCH wheel's.
+- **Reading FADE to a tenth of a millisecond**, above.
+- **A beta assignment's depth halved**, above.
+- **The agents** read and set FADE in signed seconds (`unit` `s`, -10 to 10; `agent::values`'
+  `Units::Fade`), refusing a value past its ends rather than clamping it, as every value.
