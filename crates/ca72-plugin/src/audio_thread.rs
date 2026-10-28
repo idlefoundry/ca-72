@@ -13,7 +13,27 @@
 //! stop, watches it too. On macOS CoreAudio's I/O thread and on Windows CPAL's boosted WASAPI
 //! thread are already the system's audio threads: nothing is done there.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+/// The system refused to make the standalone's audio thread an audio thread (said once, off
+/// the audio thread: [`report_refusal`]).
+static REFUSED: AtomicBool = AtomicBool::new(false);
+
+/// Says once, on standard error, that the audio thread could not be made an audio thread, and
+/// what that means: called off the audio thread (the plug-in's helper), after
+/// [`AudioThread::begin`] was refused.
+pub fn report_refusal() {
+    static SAID: AtomicBool = AtomicBool::new(false);
+    if REFUSED.load(Ordering::Acquire) && !SAID.swap(true, Ordering::AcqRel) {
+        eprintln!(
+            "CA-72: the audio thread runs at ordinary priority: this system gives this user no \
+             real-time priority (on Linux an rtprio allowance: the `realtime` or `audio` group, \
+             or limits.conf). With other work on the computer the sound may drop out \
+             (decisions.md R-DROPOUTS)."
+        );
+    }
+}
 
 /// Whether the next block is to promote the thread it is played on, and for what period.
 #[derive(Debug, Default)]
@@ -34,14 +54,17 @@ impl AudioThread {
     }
 
     /// At a block's start, on the audio thread: its thread promoted, the first time after
-    /// [`AudioThread::prepare`] asked; the system's answer (None: nothing asked).
+    /// [`AudioThread::prepare`] asked; the system's answer (None: nothing asked). A refusal is
+    /// for [`report_refusal`] to say.
     pub fn begin(&mut self) -> Option<Result<(), String>> {
         let period = self.asked.take()?;
         // (The watchdog's note of the thread, the first time it is promoted, is its one
-        // allocation; the plug-ins never come here.)
-        Some(nih_plug::util::permit_alloc(|| {
-            ca72_rt::promote(period, period / 2)
-        }))
+        // allocation, and a refusal's explanation another; the plug-ins never come here.)
+        let r = nih_plug::util::permit_alloc(|| ca72_rt::promote(period, period / 2));
+        if r.is_err() {
+            REFUSED.store(true, Ordering::Release);
+        }
+        Some(r)
     }
 }
 

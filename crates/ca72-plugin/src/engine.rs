@@ -2341,14 +2341,16 @@ impl Engine {
         self.block_start = Some(now);
         self.block_silent = self.silent_runs;
         self.follow_poly();
-        if let Some(p) = &self.pool {
+        if let Some(p) = &mut self.pool {
             // (The block's samples, from its deadline, a share of its period from now: what
             // the workers' runs are due within on macOS, decisions.md R-MAC-512. 0 offline.)
             let len = deadline.map_or(0, |d| {
                 (d.saturating_duration_since(now).as_secs_f64() / DEADLINE * self.rate).round()
                     as usize
             });
-            p.block(len);
+            // (Runs past the deadline still shared until the period's end: R-DROPOUTS.)
+            let grace = deadline.map(|d| now + d.saturating_duration_since(now).div_f64(DEADLINE));
+            p.block(len, grace);
         }
     }
 

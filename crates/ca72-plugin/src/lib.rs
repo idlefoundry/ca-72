@@ -950,7 +950,11 @@ impl Plugin for Ca72 {
         let started = std::time::Instant::now();
         // (The standalone's audio thread made an audio thread at its first block: decisions.md
         // R-DROPOUTS. Where the system refuses, it stays as it was.)
-        let _ = self.audio_thread.begin();
+        if let Some(Err(_)) = self.audio_thread.begin()
+            && let Some(helper) = &self.helper
+        {
+            helper.ask(helper::REPORT);
+        }
         // (The standalone's TEMPO a modulation target there alone: decisions.md R-LFO.)
         self.params
             .set_standalone(context.plugin_api() == PluginApi::Standalone);

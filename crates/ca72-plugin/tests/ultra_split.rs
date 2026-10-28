@@ -318,7 +318,7 @@ fn split_ultra_voices_in_real_time() {
         }
         let t = Instant::now();
         let deadline = Some(t + period.mul_f64(DEADLINE));
-        pool.block(block);
+        pool.block(block, None);
         if let Some(h) = &driving {
             driver.begun.store(b as u64 + 1, Ordering::Release);
             h.thread().unpark();
