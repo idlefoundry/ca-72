@@ -16784,6 +16784,24 @@ remeasured, generator output is idempotent, and a trial import containing a
 VST3 slot is rejected before changing the factory file. Logs and measurements:
 /mnt/lab/artifacts/ca-72/final-presets-20261028/.
 
+## R-SKIN-KEY-INSTALLED. The owner's production public key
+
+**Owner, 2026-10-28:** generated the real key with pack_keygen and supplied only its
+public constant for inclusion. The production Ed25519 public key is now installed as
+idlefoundry-1, first_party true, in skin_pack::keys::IDLE_FOUNDRY_KEY; TRUSTED_KEYS
+includes that same key for the editor, signing tool and release gate. The release gate
+remains enabled and a dedicated test checks the shipped key against it.
+
+Only the owner-supplied public bytes are committed. The agent neither generated nor
+read the production private key. Private-key storage and backup remain with the owner.
+This completes the public-key insertion required by R-SKIN-KEYS; it does not sign a
+skin pack or publish a release.
+
+**Validation (Linux, Rust 1.97.1):** formatting; Clippy for skin-pack and all its targets
+with warnings denied and CA72_PUBLIC_RELEASE=1; all 87 skin-pack tests pass with that
+release gate enabled; check_release_key passes with CA72_PUBLIC_RELEASE=1 and separately
+with CA72_REQUIRE_NOTARIZATION=1. The five release-gate workflow tests also pass.
+
 
 ## R-GATEKEEPER-ONLY. Gatekeeper is the factory gate preset
 
