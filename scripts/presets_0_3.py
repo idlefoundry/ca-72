@@ -289,29 +289,14 @@ P.append(preset(
     poly=1, voices=8, entropy=35, spread=60,
 ))
 
-P.append(preset(
-    "Gated Chords",
-    "Two sawtooths a hair apart, POLY's eight voices, chopped into sixteenths by oscillator 3 "
-    "TIMED at LO (a square) through FILTER MODULATION, in step with the host's tempo, and a "
-    "two-bar LFO sweeping the filter: a trance-gate pad. The mod wheel sets how hard it chops.",
-    ["pad", "poly", "gate", "tempo", "lfo"],
-    lfo(1, {"cutoff": 12}, timed=1, division=DIV["2bars"]),
-    osc1_volume=9, osc2_on=1, osc2_volume=9, osc2_frequency=0.1,
-    osc3_range=LO, osc3_waveform=SQUARE, osc3_timed=1, osc3_division=DIV["1/16"],
-    osc3_control=0, filter_mod=1, mod_mix=0, mod_wheel=0.8,
-    cutoff=-5, emphasis=3.5, contour_amount=1, filter_attack=2, filter_decay=6,
-    filter_sustain=6, loudness_attack=1, loudness_decay=5, loudness_sustain=10,
-    poly=1, voices=8, entropy=15, spread=55, double=9,
-))
-
 # (The owner's, saved from Gated Chords as it was before 0.3.0 made it gate harder:
 # decisions.md R-OWNER-PRESETS.)
 P.append(owner(
     "Gatekeeper",
     "Two sawtooths a hair apart, POLY's eight voices, chopped into sixteenths by oscillator 3 "
     "TIMED at LO (a square) through FILTER MODULATION, in step with the host's tempo, and a "
-    "two-bar LFO sweeping the filter: Gated Chords with the filter further open, so the gate "
-    "is gentler. The mod wheel sets how hard it chops.",
+    "two-bar LFO sweeping the filter, with a gently opening gate. "
+    "The mod wheel sets how hard it chops.",
 ))
 
 P.append(preset(

@@ -1,8 +1,11 @@
 # The 0.3 presets (were candidates)
 
-**Shipped in 0.3.0** (decisions.md R-PRESETS-0.3.0): the seventeen presets proposed here, and the
-four LFO LOOP presets, are factory presets, forty in all, at the end of
-`crates/ca72-plugin/sounds/presets.toml`. Two aims, the owner's (2026-10-26):
+**Current pack:** 42 factory presets, including 23 added since 0.2.8. The owner's
+2026-10-28 selection keeps **Gatekeeper** and removes **Gated Chords**. The proposal
+and measurement tables below are historical; the current source is
+`crates/ca72-plugin/sounds/presets.toml` (decisions.md R-GATEKEEPER-ONLY).
+
+The original two aims were:
 
 1. **Sounds the 0.2.8 set leaves out.** Its nineteen are five basses, two horn leads, a brass
    section, a flute, a xylophone, bowed strings, a five-piece drum kit, a riser, a pad and a

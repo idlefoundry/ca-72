@@ -16783,3 +16783,15 @@ saved synth value is preserved exactly. All factory AUTO GAIN curves were
 remeasured, generator output is idempotent, and a trial import containing a
 VST3 slot is rejected before changing the factory file. Logs and measurements:
 /mnt/lab/artifacts/ca-72/final-presets-20261028/.
+
+
+## R-GATEKEEPER-ONLY. Gatekeeper is the factory gate preset
+
+**Owner, 2026-10-28:** Gatekeeper replaces Gated Chords; both were not intended to
+ship together. Remove Gated Chords from the factory generator and its level cache.
+Keep Gatekeeper's synth settings and gain curves exactly as approved, and describe
+it without referring to an absent factory variant. The factory set now contains
+42 sounds, 23 added since 0.2.8. README, release notes and bundled highlights use
+those counts; the original candidate measurements remain historical records.
+The factory-library selection test asserts Gatekeeper is present and Gated Chords
+is absent. Existing user presets and host projects are not rewritten by this change.
