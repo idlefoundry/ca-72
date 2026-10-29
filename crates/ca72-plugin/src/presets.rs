@@ -2123,7 +2123,6 @@ mod tests {
         // (With the factory pads, R-PRESETS-0.3.0 and R-OWNER-PRESETS.)
         let pads = [
             "Finger in a Light Socket",
-            "Gated Chords",
             "Gatekeeper",
             "Level Pump",
             "Morph Bloom",
