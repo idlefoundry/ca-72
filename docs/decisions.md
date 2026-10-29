@@ -16828,3 +16828,22 @@ state. The regression keeps the unread client connected while dropping the serve
 requires shutdown within two seconds, then releases the client even on failure. It fails
 on the old code and passes with the timeout; a companion test checks that a client reading
 the same large answer receives the complete response.
+
+## R-MOD-POPUP-PRESS. A held main control hides its modulation-depth pop-up
+
+**Owner report, 2026-10-28, Ableton Live on macOS:** the depth dials under CUTOFF stayed
+visible while the main knob was pressed. The shared editor kept rendering its hover
+pop-up without checking for an active main-control gesture. Its hover hit test could
+also consume a pointer move over that pop-up before the knob's drag received it.
+
+The pop-up is suppressed immediately while a main control is held, including before
+any movement. A cached pop-up cannot intercept its drag before the next frame redraws.
+Depth-dial gestures remain visible and editable; ordinary hover works after release.
+The same rule covers main knobs, LFO and macro knobs, tempo and effect pins on every
+platform. Modulation assignments, depths and audio processing are unchanged.
+
+The regression reproduces the owner's LFO 3 and MACRO 1 assignments to CUTOFF, checks
+press-and-hold without movement, then drags through the old pop-up's dial. It exercises
+both a redraw and no redraw between the press and move, verifies the main value changes
+without changing either depth, and checks hover returns after release. It fails before
+the fix and passes afterwards.

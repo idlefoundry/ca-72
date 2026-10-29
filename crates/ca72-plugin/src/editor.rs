@@ -4007,7 +4007,8 @@ impl Editing {
         if self.mod_moved((x, y)) {
             return;
         }
-        if !self.learning.menu_open()
+        if !self.dragging()
+            && !self.learning.menu_open()
             && self
                 .mod_scene
                 .popup
@@ -16571,6 +16572,53 @@ mod tests {
         assert!((hi - lo - 2.0 * quarter).abs() < 1e-9, "{lo}..{hi}");
         let popup = e.mod_scene.popup.clone().expect("its pop-up");
         assert_eq!(popup.span, k.span());
+    }
+
+    #[test]
+    fn a_knobs_depth_popup_hides_on_press_and_cannot_intercept_its_drag() {
+        use crate::lfo::{Source, Target as T};
+        // A move may arrive before the next frame removes the cached popup.
+        for redraw in [false, true] {
+            let (mut e, host, params) = editing();
+            for source in [Source::Lfo(2), Source::Macro(0)] {
+                params
+                    .lfo_patch
+                    .assign(source, T::Cutoff, 0.15)
+                    .expect("room");
+            }
+            let cutoff = at(&e, centre("cutoff"));
+            go(&mut e, cutoff);
+            e.draw();
+            let popup = e.mod_scene.popup.clone().expect("hover shows the depths");
+            let (_, dials) = ca72_panel::modulation::popup_layout(&popup);
+            let over_depth = at(&e, dials[0].0);
+            host.take();
+            press(&mut e);
+            if redraw {
+                e.draw();
+            }
+            assert!(e.drag.is_some(), "the main knob is held");
+            assert!(
+                e.mod_scene_now().popup.is_none(),
+                "hidden before any movement"
+            );
+            let before = e.drag.as_ref().unwrap().value;
+            go(&mut e, over_depth);
+            e.draw();
+            assert!(e.mod_scene.popup.is_none(), "hidden throughout the drag");
+            assert_ne!(e.drag.as_ref().unwrap().value, before);
+            release(&mut e);
+            well_formed(&host.take());
+            for source in [Source::Lfo(2), Source::Macro(0)] {
+                assert_eq!(params.lfo_patch.depth(source, T::Cutoff), Some(0.15));
+            }
+            go(&mut e, cutoff);
+            e.draw();
+            assert!(
+                e.mod_scene.popup.is_some(),
+                "hover works again after release"
+            );
+        }
     }
 
     /// The rings show only while the LFO page shows, an assignment is dragged, or on the knob

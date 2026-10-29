@@ -130,4 +130,5 @@ bug_fixes = [
   "The Audio Unit no longer crashes when a host prepares it on a thread with a small stack.",
   "A standalone left hidden on a Mac with no audio running quits cleanly, its session saved, instead of stopping at an error.",
   "An agent that stops reading replies no longer prevents closing the standalone or switching AGENTS off.",
+  "Modulation-depth pop-ups hide when you press a main control and stay hidden while you drag it.",
 ]

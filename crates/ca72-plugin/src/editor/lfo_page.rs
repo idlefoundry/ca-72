@@ -798,7 +798,9 @@ impl Editing {
         let popup = self
             .modulating
             .popup
-            .filter(|_| patching.is_none())
+            // Base controls keep their gesture unobstructed; depth drags still show their
+            // own dials. A press counts immediately, before any pointer movement.
+            .filter(|_| patching.is_none() && !self.dragging())
             .and_then(|i| {
                 let t = self.mod_target(i)?;
                 let on = self.sources_on(t);
