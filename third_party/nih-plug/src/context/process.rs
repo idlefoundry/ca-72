@@ -392,6 +392,8 @@ pub struct TestProcessContext<P: Plugin> {
     events: VecDeque<PluginNoteEvent<P>>,
     transport: Transport,
     process_mode: ProcessMode,
+    /// The API it says it is: the standalone's until told ([`Self::set_plugin_api`]).
+    plugin_api: PluginApi,
     /// The changes the plugin made itself, as the host would be told them: the parameter, its
     /// normalized value as set, and when in the block.
     pub reported: Vec<(ParamPtr, f32, u32)>,
@@ -420,13 +422,37 @@ impl<P: Plugin> TestProcessContext<P> {
             events: VecDeque::new(),
             transport: Transport::new(sample_rate),
             process_mode,
+            plugin_api: PluginApi::Standalone,
             reported: Vec::new(),
         }
+    }
+
+    /// The API the next `process()` calls say it is (a plug-in's, for what the standalone alone
+    /// does).
+    pub fn set_plugin_api(&mut self, api: PluginApi) {
+        self.plugin_api = api;
     }
 
     /// An event for the next `process()` call (or the rest of this one), after those pushed.
     pub fn push_event(&mut self, event: PluginNoteEvent<P>) {
         self.events.push_back(event);
+    }
+
+    /// The transport the next `process()` calls see, as a host reports it at a block's start:
+    /// whether it plays, the tempo, the position in quarter notes and the time signature
+    /// (numerator, denominator), from which the bar's start is found.
+    pub fn set_transport(
+        &mut self,
+        playing: bool,
+        tempo: Option<f64>,
+        beats: Option<f64>,
+        time_sig: Option<(i32, i32)>,
+    ) {
+        self.transport.playing = playing;
+        self.transport.tempo = tempo;
+        self.transport.pos_beats = beats;
+        self.transport.time_sig_numerator = time_sig.map(|t| t.0);
+        self.transport.time_sig_denominator = time_sig.map(|t| t.1);
     }
 
     /// Sets `param` to `normalized` as a host's automation is set: between `process()` calls, as
@@ -447,7 +473,7 @@ impl<P: Plugin> TestProcessContext<P> {
 
 impl<P: Plugin> ProcessContext<P> for TestProcessContext<P> {
     fn plugin_api(&self) -> PluginApi {
-        PluginApi::Standalone
+        self.plugin_api
     }
 
     fn execute_background(&self, _task: P::BackgroundTask) {}

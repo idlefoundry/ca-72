@@ -28,6 +28,7 @@ pub use drawer::{
     midi_row_centre, row_centre, search_centre, star_centre, tab_centre, tab_of, update_centre,
     update_fits,
 };
+pub(crate) use drawer::{display_glass, smooth_glass};
 
 /// The selector's height, panel units: the strip's row it shares.
 pub const BAR_H: f64 = 96.0;
@@ -151,8 +152,23 @@ pub enum BarTarget {
     Save,
     /// The settings' key, at the rail's right end (the strip's rail; the drawn bar has none).
     Settings,
-    /// Swap the extension controls and the piano.
+    /// The GLOBAL page: VOICES, STEREO and OUTPUT (decisions.md R-GLOBAL-KEY).
+    Global,
+    /// The piano, selected by KEYS, one of the three lower pages.
     Keyboard,
+    /// The arpeggiator's drawer, dropped down over the lower panel or put away (decisions.md
+    /// R-ARP); lit while the arpeggiator is on.
+    Arp,
+    /// The effects' drawer, the standalone application's alone (decisions.md R-FX-DRAWER); lit
+    /// while an effect plays.
+    Fx,
+    /// The drawer of each note's own expression (decisions.md R-MPE), dropped down over the lower
+    /// panel or put away; lit while any of its amounts is not 0.
+    Mpe,
+    /// The LFO page (decisions.md R-LFO), a lower page of its own in the keyboard's place.
+    Lfo,
+    /// The left area's macros or wheels (decisions.md R-MACROS), at the rail's far left, over it.
+    Macro,
 }
 
 /// What a pointer finds in the drawer.
@@ -258,6 +274,7 @@ pub struct DrawerScene {
     /// The list's tab: FAVORITES, MINE (neither: ALL).
     pub favourites: bool,
     pub mine: bool,
+    pub factory: bool,
     /// The tags in use, each picked as a filter or not, and the first line of them shown.
     pub chips: Vec<(String, bool)>,
     pub tags_first: usize,
@@ -300,6 +317,29 @@ pub struct BarScene {
     /// The lower panel is expanded (the PANEL toggle's active finish).
     pub panel: bool,
     pub keyboard: bool,
+    /// The arpeggiator is on (its key lit).
+    pub arp: bool,
+    /// An effect plays (the standalone's FX key lit).
+    pub fx: bool,
+    /// The standalone’s chain is locked; this preset has different effects held beneath it.
+    pub fx_locked: bool,
+    pub preset_fx: bool,
+    /// An amount of each note's own expression is not 0 (the MPE key lit).
+    pub mpe: bool,
+    /// An LFO is assigned and moves a knob (decisions.md R-LFO).
+    pub lfo: bool,
+    /// The key whose page or drawer shows (ARP, MPE, FX, LFO): lit; the others among them glow
+    /// faintly while what they open affects the sound (`arp`, `mpe`, `fx`, `lfo`), else unlit
+    /// (the owner, 2026-10-20: "some sort of illumination or little light on buttons whose
+    /// panels affect sound, so that if something is actively affecting what the user is
+    /// hearing, they know").
+    pub page: Option<BarTarget>,
+    /// The LFO page shows (its key lit; a drawer may show over it, its key lit too).
+    pub lfo_page: bool,
+    /// The left area shows the macros (the MACRO key lit; decisions.md R-MACROS).
+    pub macros: bool,
+    /// An assigned macro is above 0 (the MACRO key glowing while the wheels show).
+    pub macro_glow: bool,
 }
 
 // ---- The selector's layout (panel units across, the strip's units down).
@@ -546,9 +586,16 @@ pub fn bar_centre(t: BarTarget) -> (f64, f64) {
         BarTarget::Prev => PREV_X + STEP_W / 2.0,
         BarTarget::Name => (NAME_X + NAME_END) / 2.0,
         BarTarget::Next => NEXT_X + STEP_W / 2.0,
-        BarTarget::Save | BarTarget::Settings | BarTarget::Panel | BarTarget::Keyboard => {
-            SAVE_X + SAVE_W / 2.0
-        }
+        BarTarget::Save
+        | BarTarget::Settings
+        | BarTarget::Panel
+        | BarTarget::Global
+        | BarTarget::Keyboard
+        | BarTarget::Arp
+        | BarTarget::Fx
+        | BarTarget::Mpe
+        | BarTarget::Lfo
+        | BarTarget::Macro => SAVE_X + SAVE_W / 2.0,
     };
     (x, BAR_MID)
 }
@@ -768,6 +815,16 @@ mod png {
                         below: false,
                         hover: None,
                         panel: true,
+                        arp: false,
+                        fx: false,
+                        fx_locked: false,
+                        preset_fx: false,
+                        mpe: false,
+                        lfo: false,
+                        page: None,
+                        lfo_page: false,
+                        macros: false,
+                        macro_glow: false,
                     },
                     ..crate::strip::StripScene::default()
                 },
@@ -1057,6 +1114,16 @@ mod png {
                     below: false,
                     hover: None,
                     panel: true,
+                    arp: false,
+                    fx: false,
+                    fx_locked: false,
+                    preset_fx: false,
+                    mpe: false,
+                    lfo: false,
+                    page: None,
+                    lfo_page: false,
+                    macros: false,
+                    macro_glow: false,
                 },
                 ..crate::strip::StripScene::default()
             },

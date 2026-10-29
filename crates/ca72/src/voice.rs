@@ -30,7 +30,7 @@ use crate::a440::A440;
 use crate::contour::{ContourCircuit, Contours, Controls, Panel as ContourPanel};
 use crate::expo::Input;
 use crate::keyboard::{Keyboard, KeyboardCircuit, Load};
-use crate::modulation::{LineLoads, Modulation, mod_wheel_r, pitch_wheel_volts};
+use crate::modulation::{LineLoads, MOD_WHEEL_FULL, Modulation, mod_wheel_r, pitch_wheel_volts};
 use crate::noise::{Gauss, Noise, NoiseCircuit, NoiseLoads, NoiseOut};
 use crate::preamp::{InLoop, Preamp, PreampCircuit};
 use crate::revsaw::{RevSaw, RevSawCircuit, RevSawOut};
@@ -38,9 +38,9 @@ use crate::tuning::{
     Buses, FREQ_CENTRE, HIGH_A, LOW_A, OPEN_BUS, Osc, Range, SECOND_A, Tuning, folkman_1973_buses,
     folkman_1973_osc_buses, osc_drive_with,
 };
-use crate::vca::{Vca, VcaCircuit, VcaDrive};
+use crate::vca::{OversampledVca, Vca, VcaCircuit, VcaDrive};
 use crate::vcf::{ExpoTable, FilterExpo, Vcf};
-use crate::vco::{Vco, VcoOut};
+use crate::vco::{Timed, Vco, VcoOut};
 
 #[cfg(test)]
 mod loop_lab;
@@ -61,13 +61,159 @@ pub enum Waveform {
 impl Waveform {
     /// The width bias the switch's second pole sets (R034, R033, R032 from ground to
     /// -10 V), V.
-    fn width(self) -> f64 {
+    pub fn width(self) -> f64 {
         match self {
             Waveform::WideRectangle => -1.5,
             Waveform::NarrowRectangle => -2.5,
             _ => 0.0,
         }
     }
+}
+
+/// Whether a waveform is one of the rectangle's three positions.
+pub fn is_rectangle(w: Waveform) -> bool {
+    matches!(
+        w,
+        Waveform::Square | Waveform::WideRectangle | Waveform::NarrowRectangle
+    )
+}
+
+/// The width bias at which CONTINUOUS's travel ends (decisions.md R-CONTINUOUS-WAVE): the
+/// narrowest rectangle it gives, a little short of where the pulse stops coming (the reset
+/// no longer lifts the ramp past the comparator's rising threshold), V.
+pub const RECT_FLOOR: f64 = -3.45;
+
+/// The rectangle's stretch of the travel past SQUARE in the switch's steps: square to wide,
+/// wide to narrow, then on past narrow to the floor at the same volts a step as from wide to
+/// narrow (1 V).
+pub const RECT_STEPS: f64 = 2.0 + (-RECT_FLOOR - 2.5);
+
+/// CONTINUOUS's whole travel in the switch's steps: TRIANGLE (0), the second place (1),
+/// SAWTOOTH (2), SQUARE (3), WIDE (4), NARROW (5), then on to the floor.
+pub const SHAPE_PLACES: f64 = 3.0 + RECT_STEPS;
+
+/// An oscillator's waveform in the plug-in's CONTINUOUS mode, which the instrument does not have
+/// (decisions.md R-CONTINUOUS-WAVE): its WAVEFORM switch turned without steps through the
+/// whole travel, each shape blending into the next ([`shape_source`]) and past SQUARE the
+/// rectangle's width bias anywhere down to [`RECT_FLOOR`] (the switch's second pole's three
+/// taps a pot); with MOD, the place also moves on with the modulation line (taken through a
+/// buffer: it loads nothing). STEPPED is the instrument's switch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shape {
+    pub continuous: bool,
+    /// Where the switch is, in its steps: 0 to [`SHAPE_PLACES`].
+    pub at: f64,
+    pub modulated: bool,
+    pub direction: ModDirection,
+}
+
+impl Shape {
+    pub const STEPPED: Shape = Shape {
+        continuous: false,
+        at: 2.0,
+        modulated: false,
+        direction: ModDirection::Onward,
+    };
+}
+
+/// Which way MOD moves a CONTINUOUS shape from where its switch is (the owner, 2026-10-20: "a
+/// command click ... to reverse the direction ... and then perhaps we could even have a third
+/// mode where it travels to the left and to the right of it"): on (clockwise), back
+/// (anticlockwise), or either way about it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ModDirection {
+    #[default]
+    Onward,
+    Back,
+    Both,
+}
+
+/// The modulation line as MOD takes it, a sample's: its depth (the line's gain against its
+/// gain with the wheel fully forward, 0..1) and its swing (-1..1 over oscillator 3's
+/// triangle at MODULATION MIX's oscillator 3; the noise's beyond, now and then).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ModSwing {
+    pub depth: f64,
+    pub swing: f64,
+}
+
+impl ModSwing {
+    /// The share of the whole travel it moves a shape, signed (on is up): onward or back, as
+    /// deep as the wheel is forward, from none at the swing's bottom to the depth at its top;
+    /// either way, half that about none.
+    pub fn share(self, direction: ModDirection) -> f64 {
+        let one_way = (0.5 * self.depth * (1.0 + self.swing)).clamp(0.0, 1.0);
+        match direction {
+            ModDirection::Onward => one_way,
+            ModDirection::Back => -one_way,
+            ModDirection::Both => (0.5 * self.depth * self.swing).clamp(-0.5, 0.5),
+        }
+    }
+}
+
+impl Default for Shape {
+    fn default() -> Self {
+        Self::STEPPED
+    }
+}
+
+/// Where a CONTINUOUS switch's shape is: its place, and with MOD moved its way by the
+/// modulation's share of the whole travel, held to the travel, [`shape_snapped`].
+pub fn shape_at(s: Shape, m: ModSwing) -> f64 {
+    let at = if s.modulated {
+        s.at + m.share(s.direction) * SHAPE_PLACES
+    } else {
+        s.at
+    };
+    shape_snapped(at.clamp(0.0, SHAPE_PLACES))
+}
+
+/// A place along CONTINUOUS's travel (its steps) within a thousandth of a step of one of the
+/// switch's six places, that place exactly (a host's f32, or a preset's four decimals of the
+/// travel: three ten-thousandths of a step at most); else where it is.
+pub fn shape_snapped(at: f64) -> f64 {
+    let near = at.round();
+    if (at - near).abs() < 1e-3 && (0.0..=5.0).contains(&near) {
+        near
+    } else {
+        at
+    }
+}
+
+/// The rectangle's width bias with the switch `at` (its steps): past SQUARE, straight between
+/// the switch's own three (which it gives exactly) and on to the floor; the square's below.
+pub fn shape_bias(at: f64) -> f64 {
+    let x = (at - 3.0).clamp(0.0, RECT_STEPS);
+    if x <= 1.0 { -1.5 * x } else { -1.5 - (x - 1.0) }
+}
+
+/// Where along the travel (its steps) the rectangle has width bias `bias`: [`shape_bias`]'s
+/// inverse past SQUARE.
+pub fn bias_at(bias: f64) -> f64 {
+    let b = bias.clamp(RECT_FLOOR, 0.0);
+    3.0 + if b >= -1.5 { -b / 1.5 } else { 1.0 - 1.5 - b }
+}
+
+/// The rectangle's duty cycle (its share of a cycle high) at a width bias, as the light voice
+/// plays it (the full voice's within about a percent: decisions.md R-CONTINUOUS-WAVE).
+pub fn rect_duty(bias: f64) -> f64 {
+    f64::from(crate::light::rect_law(bias).0)
+}
+
+/// The waveform the switch's place `k` (0 to 3) is on oscillator `n` in CONTINUOUS, as its own
+/// switch names it, for what the place is made from; oscillator 3's second place, its reverse
+/// shark tooth, which the switch does not have, `None` (the owner: "position two on oscillator
+/// three would become position three and then position two would then turn into a reverse
+/// Sharktooth").
+pub fn shape_place(n: usize, k: usize) -> Option<Waveform> {
+    Some(match (k, n == 2) {
+        (0, _) => Waveform::Triangle,
+        (1, false) => Waveform::SharkTooth,
+        (1, true) => return None,
+        (2, false) => Waveform::Sawtooth,
+        (2, true) => Waveform::ReverseSawtooth,
+        _ => Waveform::Square,
+    })
 }
 
 /// A contour generator's three knobs, 0..1 (the panel's 0..10).
@@ -134,6 +280,8 @@ pub struct Panel {
     /// GLIDE (5M, a rheostat) and the left hand controller's GLIDE and DECAY switches.
     pub glide: f64,
     pub glide_on: bool,
+    /// LONG: the hold capacitor C6 five times larger (decisions.md R-GLIDE-LONG).
+    pub glide_long: bool,
     pub decay: bool,
     /// The noise's mixer switch and VOLUME, and the NOISE switch (SW14): WHITE (false) sends
     /// white noise to the mixer and pink to the modulation, PINK (true) pink to the mixer
@@ -170,6 +318,22 @@ pub struct Panel {
     /// trigger contact for [`RETRIGGER_GAP`] before it comes down, so that the contours start
     /// again even with other keys held (off: single triggering, the instrument's).
     pub retrigger: bool,
+    /// Each oscillator's waveform STEPPED (the instrument's switch) or CONTINUOUS, with or
+    /// without MOD (not the instrument's: decisions.md R-CONTINUOUS-WAVE).
+    pub shape: [Shape; 3],
+}
+
+impl Panel {
+    /// Whether oscillator `n`'s shape follows the modulation line: CONTINUOUS, its MOD on.
+    pub fn shape_mod_on(&self, n: usize) -> bool {
+        let s = self.shape[n];
+        s.continuous && s.modulated
+    }
+
+    /// Whether any oscillator's shape follows the modulation line.
+    pub fn any_shape_mod(&self) -> bool {
+        (0..3).any(|n| self.shape_mod_on(n))
+    }
 }
 
 /// TUNE's wiper voltage over half its travel: R1 spans 10 V less R22's 5.05 V.
@@ -205,6 +369,7 @@ impl Default for Panel {
             },
             glide: 0.0,
             glide_on: false,
+            glide_long: false,
             decay: true,
             noise_on: false,
             noise_volume: 0.8,
@@ -222,6 +387,7 @@ impl Default for Panel {
             quality: Quality::NoCompromises,
             priority: Priority::Low,
             retrigger: false,
+            shape: [Shape::STEPPED; 3],
         }
     }
 }
@@ -339,6 +505,36 @@ fn channel_load(volume: f64, r_series: f64) -> f64 {
     let p = volume_track(volume);
     let bottom = 25e3 * p;
     25e3 * (1.0 - p) + bottom * r_series / (bottom + r_series)
+}
+
+/// MOD's measure (decisions.md R-CONTINUOUS-WAVE): the modulation amplifier's output at the
+/// middle of oscillator 3's triangle and half its swing, MODULATION MIX at oscillator 3, the
+/// triangle at its switch's output under the mixer's channel (VOLUME at 8) and the mix's
+/// pot: the triangle's extremes over the ramp's travel, the buffer's top to the reset's
+/// threshold.
+fn mod_reference(modulation: &Modulation) -> (f64, f64) {
+    let (core, sh) = (
+        crate::vco::CoreParams::default(),
+        crate::vco::ShaperParams::default(),
+    );
+    let (top, bottom) = (
+        sh.buf_gain * core.v_top0 + sh.buf_offset,
+        sh.buf_gain * core.v_threshold + sh.buf_offset,
+    );
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for k in 0..=2000 {
+        let t = crate::vco::triangle(bottom + (top - bottom) * k as f64 / 2000.0);
+        lo = lo.min(t);
+        hi = hi.max(t);
+    }
+    let r_tri = 750.0 * 8200.0 / 8950.0;
+    let z_ch = channel_load(0.8, 33e3);
+    let (_, z_mix) = Modulation::source_loads(0.0);
+    let z = z_ch * z_mix / (z_ch + z_mix);
+    let m = modulation.mix(0.0);
+    let amp = |t: f64| m.offset + m.gain_osc3 * t * z / (r_tri + z);
+    let (a, b) = (amp(lo), amp(hi));
+    (0.5 * (a + b), 0.5 * (a - b).abs())
 }
 
 /// The noise generator's loads for the panel: the mixer's channel and the modulation mix on
@@ -569,11 +765,32 @@ fn channel(v: f64, r_src: f64, volume: f64, on: bool, r_series: f64) -> (f64, f6
     (v_w * g, g)
 }
 
-/// An oscillator's selected output as a Thevenin source (board 1's output dividers:
+/// The outputs (sawtooth, triangle, rectangle) [`waveform_source`] takes from oscillator `n`
+/// (0, 1, 2) for a waveform, which alone are band-limited in full (decisions.md R-BLEP):
+/// oscillator 3's reverse sawtooth stage takes its sawtooth; the shark tooth of oscillators
+/// 1 and 2 mixes the sawtooth and the triangle.
+fn outputs_of(w: Waveform, n: usize) -> [bool; 3] {
+    match w {
+        Waveform::Triangle => [false, true, false],
+        Waveform::Sawtooth => [true, false, false],
+        Waveform::SharkTooth | Waveform::ReverseSawtooth => [true, n != 2, false],
+        Waveform::Square | Waveform::WideRectangle | Waveform::NarrowRectangle => {
+            [false, false, true]
+        }
+    }
+}
+
+/// Front-panel R030 on drawing1448, retained at its drawn47K value.
+pub const SHARK_SAW_OHMS: f64 = 47e3;
+/// Reference-equivalent R031; the drawing/BOM is10K±5% (Table7-2).
+/// 9.53K is an inferred E96 equivalent, not a measured installed component.
+pub const SHARK_TRIANGLE_OHMS: f64 = 9.53e3;
+
+/// An oscillator's selected output as a Thevenin source (board1's output dividers:
 /// sawtooth R34/R33, triangle R28/R23 behind Q1, rectangle R22 against R13 as Q12
-/// switches), the shark tooth through R030 and R031. For oscillator 3, `rev` is its reverse
-/// sawtooth stage's (the second position, and the sawtooth as R171 loads it).
-fn waveform_source(w: Waveform, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f64) {
+/// switches), the hybrid through front-panel R030/R031. For oscillator3, `rev` is its
+/// reverse-sawtooth stage. Public so the circuit lab can check the actual source model.
+pub fn waveform_source(w: Waveform, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f64) {
     let r_saw = 4300.0 * 4700.0 / 9000.0;
     let saw = match rev {
         Some(r) => (r.saw, r_saw * 33e3 / (r_saw + 33e3)),
@@ -588,11 +805,70 @@ fn waveform_source(w: Waveform, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f6
         (Waveform::Sawtooth, _) => saw,
         (Waveform::SharkTooth | Waveform::ReverseSawtooth, Some(r)) => (r.rev, r.r_rev),
         (Waveform::SharkTooth | Waveform::ReverseSawtooth, None) => {
-            let (ga, gb) = (1.0 / (saw.1 + 47e3), 1.0 / (tri.1 + 10e3));
+            let (ga, gb) = (
+                1.0 / (saw.1 + SHARK_SAW_OHMS),
+                1.0 / (tri.1 + SHARK_TRIANGLE_OHMS),
+            );
             ((saw.0 * ga + tri.0 * gb) / (ga + gb), 1.0 / (ga + gb))
         }
         _ => rect,
     }
+}
+
+/// The outputs (sawtooth, triangle, rectangle) a CONTINUOUS shape `at` takes from oscillator
+/// `n`: a place's as the switch's own position's ([`outputs_of`]), a blend's both places'; all
+/// of them while MOD may move it anywhere.
+fn shape_outputs(n: usize, at: f64, modulated: bool) -> [bool; 3] {
+    if modulated {
+        return [true; 3];
+    }
+    let place = |k: usize| match shape_place(n, k) {
+        Some(w) => outputs_of(w, n),
+        // (The reverse shark tooth: the triangle, and the sawtooth the reverse stage takes.)
+        None => [true, true, false],
+    };
+    if at >= 3.0 {
+        return place(3);
+    }
+    let k = at.floor() as usize;
+    if at == k as f64 {
+        return place(k);
+    }
+    let (a, b) = (place(k), place(k + 1));
+    [a[0] || b[0], a[1] || b[1], a[2] || b[2]]
+}
+
+/// A CONTINUOUS shape `at` (the switch's steps) as a Thevenin source: at a place, that place's
+/// source exactly (the switch's own position's, [`waveform_source`]); between two, the two
+/// mixed in turn, as a pot between them would (decisions.md R-CONTINUOUS-WAVE); past SQUARE
+/// the rectangle. Oscillator 3's second place is a reverse shark tooth, its triangle and its
+/// reverse sawtooth through the same calibrated front-panel network
+/// ([`SHARK_TRIANGLE_OHMS`] and [`SHARK_SAW_OHMS`]); its third place is the reverse
+/// sawtooth: `rev`, which CONTINUOUS runs while it is needed.
+fn shape_source(n: usize, at: f64, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f64) {
+    let place = |k: usize| match shape_place(n, k) {
+        Some(Waveform::ReverseSawtooth) => waveform_source(Waveform::ReverseSawtooth, o, rev),
+        Some(w) => waveform_source(w, o, None),
+        None => {
+            let tri = waveform_source(Waveform::Triangle, o, None);
+            let back = rev.map_or((0.0, 1e6), |r| (r.rev, r.r_rev));
+            let (ga, gb) = (
+                1.0 / (back.1 + SHARK_SAW_OHMS),
+                1.0 / (tri.1 + SHARK_TRIANGLE_OHMS),
+            );
+            ((back.0 * ga + tri.0 * gb) / (ga + gb), 1.0 / (ga + gb))
+        }
+    };
+    if at >= 3.0 {
+        return place(3);
+    }
+    let k = at.floor() as usize;
+    let w = at - k as f64;
+    if w == 0.0 {
+        return place(k);
+    }
+    let (a, b) = (place(k), place(k + 1));
+    ((1.0 - w) * a.0 + w * b.0, (1.0 - w) * a.1 + w * b.1)
 }
 
 /// GLIDE's resistance in circuit: the 5M pot (a rheostat), shorted by the GLIDE switch
@@ -756,7 +1032,9 @@ pub struct Contacts {
 ///
 /// With them, the plug-in's ENTROPY (decisions.md; not the instrument's): each oscillator off its
 /// calibration by `detune` cents and the filter's cutoff off its by `cutoff` octaves, both
-/// 0 for the circuit as drawn (the samples then the same to the bit).
+/// 0 for the circuit as drawn (the samples then the same to the bit). And each oscillator timed
+/// (decisions.md R-OSC-TIMED; the plug-in's too): where its cycle stands on the host's clock, at
+/// its RANGE's LO; none, the circuit's own.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Jacks {
     pub ext: f64,
@@ -766,6 +1044,21 @@ pub struct Jacks {
     pub s_trig: bool,
     pub detune: [f64; 3],
     pub cutoff: f64,
+    pub timed: [Option<Timed>; 3],
+    /// The plug-in's LFOs' knobs gliding across their steps ([`Swept`]).
+    pub swept: Swept,
+}
+
+/// The plug-in's (decisions.md R-LFO-STRESS): how far the knobs an LFO moves have gone since
+/// its last step, added where the circuit reads them, so that they glide in a straight line
+/// from one step's value to the next instead of stepping: CUTOFF's wiper (a share of its
+/// track), TUNE (its -1..1) and oscillators 2's and 3's FREQUENCY wipers, after their knobs'
+/// laws. All 0: the panel's own, to the bit.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Swept {
+    pub cutoff: f64,
+    pub tune: f64,
+    pub freq: [f64; 2],
 }
 
 /// The volts an octave at a 100K input to the filter's control node, as R51 (the FILTER
@@ -804,6 +1097,10 @@ pub struct ControlPart {
     count: usize,
     env_from: (f64, f64),
     env_to: (f64, f64),
+    /// The contours' outputs of the last samples, the newest at `env_at`: each reaches what
+    /// it shapes as late as the sound does ([`contour_delays`]; decisions.md R-LATENCY).
+    env_past: [(f64, f64); ENV_PAST],
+    env_at: usize,
     noise: Noise,
     /// The ATTACK and DECAY pots' laws (filter, loudness).
     pots: [Memo<f64>; 4],
@@ -887,6 +1184,9 @@ pub struct PreampPart {
     /// oscillates low and dark inside the loop where the circuit does not.
     pub accurate: bool,
     pub in_loop: InLoop,
+    /// FEEDBACK's loop at one rate ([`tick_looped`]): the preamplifier's current into the bus
+    /// at the filter's next step, A.
+    i_fed: f64,
 }
 
 /// The mixer's own noise as a Norton current on its bus, A RMS from 0 to 24 kHz (white):
@@ -927,6 +1227,14 @@ pub struct FrontPart {
     last_i: [f64; 3],
     /// The MODULATION wheel's law.
     wheel: Memo<f64>,
+    /// The modulation amplifier's output at the middle of oscillator 3's triangle and half
+    /// its swing (MODULATION MIX at oscillator 3): what MOD's whole travel is measured
+    /// against (decisions.md R-CONTINUOUS-WAVE); and the line as MOD took it, the last sample's.
+    mod_ref: (f64, f64),
+    mod_u: ModSwing,
+    /// Each oscillator's CONTINUOUS shape where it was, the last sample's (MOD's orb on the
+    /// panel: decisions.md R-CONTINUOUS-WAVE).
+    shape_now: [Option<f64>; 3],
 }
 
 /// What the front gives the back each sample: the mixer bus's Norton current (A) and
@@ -952,11 +1260,21 @@ pub struct FrontOut {
 #[derive(Debug, Clone)]
 pub struct BackPart {
     vcf: Vcf,
-    /// The VCA's signal path ([`Vca::signal`]) on the bias [`ControlPart`] works out.
+    /// The VCA's signal path ([`Vca::signal`]) on the bias [`ControlPart`] works out: at the
+    /// sample rate, and in ULTRA at the filter's (decisions.md R-BLEP, ULTRA's VCA at 4x).
     vca: Vca,
+    vca_4x: OversampledVca,
+    /// Whether the last sample ran ULTRA's VCA, and the last output sample (V, before the
+    /// output's scale): what a switch between the two takes over.
+    ultra: bool,
+    last_out: f64,
     a440: A440,
     /// EMPHASIS's law.
     emphasis: Memo<f64>,
+    /// The output sample [`Voice::filter_pair`] worked out whole, by [`BackPart::tick`], for a
+    /// voice it does not pair (ULTRA, whose VCA takes the filter's own samples, or two voices
+    /// at different qualities), for [`Voice::after_filter`] to give.
+    ready: Option<f64>,
 }
 
 impl BackPart {
@@ -1079,6 +1397,8 @@ impl Voice {
             count: 0,
             env_from: (0.0, 0.0),
             env_to: (0.0, 0.0),
+            env_past: [(0.0, 0.0); ENV_PAST],
+            env_at: 0,
             noise,
             pots: [Memo::NEW; 4],
             last_noise: NoiseOut::default(),
@@ -1095,6 +1415,7 @@ impl Voice {
         let o = ctl.contours.tick(false, &cp);
         ctl.env_from = (o.filter, o.loudness);
         ctl.env_to = ctl.env_from;
+        ctl.env_past = [ctl.env_from; ENV_PAST];
         Voice {
             panel,
             keys: Keys {
@@ -1134,6 +1455,7 @@ impl Voice {
                     overload: 0.0,
                     overload_peak: 0.0,
                     ext_amp: 0.0,
+                    i_fed: 0.0,
                     volume: Memo::NEW,
                     accurate: false,
                     in_loop: InLoop::default(),
@@ -1147,13 +1469,16 @@ impl Voice {
                     revsaw,
                     expo: crate::filter_cal::CALIBRATED.expo(),
                     table: ExpoTable::shared(crate::filter_cal::CALIBRATED.expo(), 25.0),
-                    modulation,
+                    modulation: modulation.clone(),
                     filter_node: 0.0,
                     i0: 0.0,
                     line: 0.0,
                     last_osc3: 0.0,
                     last_i: [0.0; 3],
                     wheel: Memo::NEW,
+                    mod_ref: mod_reference(&modulation),
+                    mod_u: ModSwing::default(),
+                    shape_now: [None; 3],
                 },
                 back: BackPart {
                     vcf: {
@@ -1164,9 +1489,13 @@ impl Voice {
                         f.prepare(oversampling(Quality::Potato).1);
                         f
                     },
+                    vca_4x: OversampledVca::new(&vca, ULTRA_VCA_OVERSAMPLING),
                     vca,
+                    ultra: false,
+                    last_out: 0.0,
                     a440: A440::new(rate),
                     emphasis: Memo::NEW,
+                    ready: None,
                 },
                 last: (0.0, 0.0, 0.0),
             },
@@ -1259,6 +1588,16 @@ impl Voice {
         self.keys.gate
     }
 
+    /// Prepare a comparator component set during lab/setup, never on the audio thread.
+    pub fn prepare_pulse(
+        &mut self,
+        circuit: crate::pulse::PulseCircuit,
+    ) -> Result<(), crate::mna::NoConvergence> {
+        for v in &mut self.audio.front.vcos {
+            v.prepare_pulse(circuit)?;
+        }
+        Ok(())
+    }
     /// The last sample's keyboard voltage, V, the mixer bus's Norton current, A, and the
     /// filter's output, V.
     pub fn probe(&self) -> (f64, f64, f64) {
@@ -1271,10 +1610,28 @@ impl Voice {
         (self.audio.last.0, self.audio.front.last_i)
     }
 
+    /// Oscillator `n`'s (0, 1, 2) latest reset: how long before the latest sample, exact, and
+    /// how many it has made (a probe of the oscillators timed: decisions.md R-OSC-TIMED).
+    pub fn probe_reset_ago(&self, n: usize) -> (f64, u64) {
+        self.audio.front.vcos[n].reset_ago()
+    }
+
     /// Oscillator `n`'s (0, 1, 2) latest reset: its time in samples and how many it has
     /// made (a probe of its frequency at any pitch: the resets' spacing).
     pub fn probe_resets(&self, n: usize) -> (f64, u64) {
         self.audio.front.vcos[n].last_reset()
+    }
+
+    /// The last sample's MOD share of CONTINUOUS's travel, 0..1 (decisions.md
+    /// R-CONTINUOUS-WAVE): 0 with no oscillator's MOD on.
+    pub fn probe_shape_mod(&self) -> f64 {
+        self.audio.front.mod_u.share(ModDirection::Onward)
+    }
+
+    /// Each oscillator's CONTINUOUS shape where the last sample had it (its switch's steps), MOD
+    /// and all; `None` for a STEPPED one or one not computed.
+    pub fn probe_shapes(&self) -> [Option<f64>; 3] {
+        self.audio.front.shape_now
     }
 
     /// The last sample's contours (filter, loudness), V.
@@ -1413,7 +1770,9 @@ impl Voice {
     pub fn tick_jacks(&mut self, j: &Jacks) -> f64 {
         self.audio.pre.accurate = self.feedback > 0.0;
         self.audio.pre.in_loop = self.in_loop;
-        let y = if self.feedback > 0.0 {
+        // (At one rate the loop is closed inside the audio path: decisions.md
+        // R-FEEDBACK-LOOP.)
+        let y = if self.feedback > 0.0 && !loops(&self.panel, self.feedback) {
             self.tick_at(&Jacks {
                 ext: j.ext + self.feedback * self.fed_back,
                 ..*j
@@ -1453,7 +1812,8 @@ impl Voice {
             None => p,
         };
         let v_kbd = self.kbd.tick(&pc, c);
-        let ctl = self.ctl.tick(&pc, c);
+        // (The contours' delays follow the audio path's quality, as in `tick_at`.)
+        let ctl = self.ctl.tick_for(&pc, c, p.quality);
         self.last_ctl = (ctl.env_f, ctl.env_l);
         let d = self.bias.tick(ctl.env_l, j.loudness, p.quality);
         let i_pre = self.audio.pre.tick(&p, j.ext);
@@ -1463,22 +1823,29 @@ impl Voice {
     }
 
     /// Two voices' filters over the sample, from [`Voice::before_filter`]: solved side by
-    /// side where both play HI, else one after the other.
+    /// side where both play HI. Otherwise each voice's back runs whole, as
+    /// [`Voice::tick_jacks`] runs it (ULTRA's VCA takes the filter's own samples: decisions.md
+    /// R-BLEP), its output kept for [`Voice::after_filter`].
     pub fn filter_pair(a: &mut Voice, ha: &Halfway, b: &mut Voice, hb: &Halfway) -> (f64, f64) {
+        if !(a.pairs() && b.pairs() && ha.p.quality == hb.p.quality) {
+            let alone = |v: &mut Voice, h: &Halfway| {
+                let (y, out) = v.audio.back.tick(&h.p, &h.f, &h.d);
+                v.audio.back.ready = Some(out);
+                y
+            };
+            return (alone(a, ha), alone(b, hb));
+        }
         let _fast = crate::ulp::FastScope::new(ha.p.quality != Quality::NoCompromises);
         let x = |h: &Halfway| (h.f.i_bus, h.f.g_bus, h.f.i0);
-        if ha.p.quality != hb.p.quality {
-            let ya = a.audio.back.vcf.tick(ha.f.i_bus, ha.f.g_bus, ha.f.i0);
-            let _fast = crate::ulp::FastScope::new(hb.p.quality != Quality::NoCompromises);
-            let yb = b.audio.back.vcf.tick(hb.f.i_bus, hb.f.g_bus, hb.f.i0);
-            return (ya, yb);
-        }
         Vcf::tick_pair(&mut a.audio.back.vcf, &mut b.audio.back.vcf, x(ha), x(hb))
     }
 
     /// [`Voice::tick_jacks`] from the filter's output `y` on: the VCA; the output sample.
     pub fn after_filter(&mut self, h: &Halfway, y: f64) -> f64 {
-        let out = self.audio.back.after_filter(&h.p, y, &h.d);
+        let out = match self.audio.back.ready.take() {
+            Some(out) => out,
+            None => self.audio.back.after_filter(&h.p, y, &h.d),
+        };
         self.audio.last = (h.v_kbd, h.f.i_bus, y);
         self.fed_back = out;
         out
@@ -1494,10 +1861,15 @@ impl Voice {
             None => p,
         };
         let v_kbd = self.kbd.tick(&pc, c);
-        let ctl = self.ctl.tick(&pc, c);
+        let ctl = self.ctl.tick_for(&pc, c, p.quality);
         self.last_ctl = (ctl.env_f, ctl.env_l);
         let d = self.bias.tick(ctl.env_l, j.loudness, p.quality);
-        self.audio.tick(&p, j, v_kbd, &ctl, &d)
+        if loops(&p, self.feedback) {
+            self.audio
+                .tick_looped(&p, j, v_kbd, &ctl, &d, self.feedback)
+        } else {
+            self.audio.tick(&p, j, v_kbd, &ctl, &d)
+        }
     }
 }
 
@@ -1656,6 +2028,7 @@ impl KeyboardPart {
                 self.keyboard.set_rate(self.rate / every as f64);
             }
             self.keyboard.set_quality(p.quality);
+            self.keyboard.set_glide_long(p.glide_long);
             self.keyboard.set_glide(glide_r(p.glide, p.glide_on));
             self.keyboard.set_load(keyboard_load(p));
             self.from = self.to;
@@ -1685,7 +2058,8 @@ impl KeyboardPart {
         let target = self.step * f64::from(c.foot);
         if c.gate {
             let k = &self.keyboard.circuit;
-            let tau = (k.r61 + glide_r(p.glide, p.glide_on)) * k.c6;
+            let farads = if p.glide_long { k.c6 * 5.0 } else { k.c6 };
+            let tau = (k.r61 + glide_r(p.glide, p.glide_on)) * farads;
             let h = self.every as f64 / self.rate;
             let a = crate::ulp::exp(-h / tau);
             self.beyond = target + (self.beyond - target) * a;
@@ -1718,6 +2092,92 @@ fn oversampling(q: Quality) -> (usize, usize) {
     }
 }
 
+/// How late the voice's sound comes out at a quality, samples: the oscillators'
+/// band-limiting and decimators, and the filter's resamplers either side of it
+/// (decisions.md R-LATENCY; the circuit's own delays, the filter's phase among them, are
+/// the sound's, not this). 60.5 in Potato, 85.75 in the others.
+pub fn latency(q: Quality) -> f64 {
+    let (to_filter, out) = filter_resamplers(q);
+    oscillator_latency(q) + to_filter + out
+}
+
+/// The oscillators' outputs' delay at a quality, samples (their [`crate::vco::Vco::latency`]):
+/// 16 in Potato, 41.25 in the others.
+fn oscillator_latency(q: Quality) -> f64 {
+    use crate::resample::{BLEP_DELAY, Decimator, OSCILLATOR_LAST_HALFBAND};
+    let os = oversampling(q).0;
+    BLEP_DELAY as f64 / os as f64 + Decimator::delay_of(os, OSCILLATOR_LAST_HALFBAND)
+}
+
+/// The filter's resamplers' delays at a quality, samples (its input's interpolator, its
+/// output's decimator: [`crate::vcf::Vcf::latency`] together): 22.25 and 22.25.
+fn filter_resamplers(q: Quality) -> (f64, f64) {
+    use crate::resample::{Decimator, Interpolator, LAST_HALFBAND};
+    let os = oversampling(q).1;
+    (
+        Interpolator::delay_of(os),
+        Decimator::delay_of(os, LAST_HALFBAND),
+    )
+}
+
+/// How many samples HI's and LO's sound (Potato's and the light model's) is held back at the
+/// plug-in's output so that it comes out with ULTRA's (decisions.md R-LATENCY): ULTRA's
+/// oscillators' sound reaches the output 26.0 samples after HI's and 39.0 after LO's at
+/// 44.1, 48 and 96 kHz, measured (the plug-in's `tests/latency.rs`, which holds it): 25.25
+/// and 38.5 of it the oscillators' and the filters' resamplers ([`latency`], the light
+/// model's filter's), the rest the filters' own phase, a little less in the cheaper models.
+pub const LINE_UP: (usize, usize) = (26, 39);
+
+/// How late the contours reach what they shape, samples (decisions.md R-LATENCY), less the
+/// delay of their own sub-rate (`every` samples a tick, interpolated: `every` - 1):
+/// - the filter contour meets its sound at the filter's input: the oscillators' delayed by
+///   the filter's input resampler;
+/// - the loudness contour reaches the VCA when ULTRA's does once the output is lined up
+///   ([`LINE_UP`]): in ULTRA as late as its whole path ([`latency`]), in Potato that less the
+///   samples its output is held back. So every mode's attack comes out with ULTRA's, and
+///   each meets its sound as in the circuit (the filter's own phase still the circuit's).
+///
+/// In ULTRA the VCA's bias reaches the output [`vca_bias_latency`] later, through its VCA's
+/// decimator, so its loudness contour comes that much earlier.
+///
+/// At 48 kHz: 31.25 and 52.75 in Potato, 62.5 and 61.75 in the others.
+fn contour_delays(audio: Quality, every: usize) -> (f64, f64) {
+    let own = every as f64 - 1.0;
+    let (to_filter, _) = filter_resamplers(audio);
+    let held = if audio == Quality::Potato {
+        LINE_UP.0 as f64
+    } else {
+        0.0
+    };
+    (
+        (oscillator_latency(audio) + to_filter - own).max(0.0),
+        (latency(Quality::NoCompromises) - held - vca_bias_latency(audio) - own).max(0.0),
+    )
+}
+
+/// ULTRA's VCA's oversampling (decisions.md R-BLEP): the filter's.
+const ULTRA_VCA_OVERSAMPLING: usize = 4;
+
+/// Whether the VCA runs at the filter's rate at a quality: in ULTRA (and the lab's High
+/// Fidelity, ULTRA but for the VCA's plain solve); not in Potato (HI) or the light model (LO).
+fn vca_oversampled(q: Quality) -> bool {
+    matches!(q, Quality::NoCompromises | Quality::HighFidelity)
+}
+
+/// How much later than at the sample rate the VCA's bias reaches the output at a quality,
+/// samples: in ULTRA through its VCA's decimator ([`OversampledVca::bias_latency`], 23), so
+/// its loudness contour comes that much earlier; in the others none.
+fn vca_bias_latency(q: Quality) -> f64 {
+    if vca_oversampled(q) && oversampling(q).1 == ULTRA_VCA_OVERSAMPLING {
+        OversampledVca::bias_latency(ULTRA_VCA_OVERSAMPLING)
+    } else {
+        0.0
+    }
+}
+
+/// The contours' past outputs kept, samples (more than [`contour_delays`] in any mode).
+const ENV_PAST: usize = 128;
+
 /// The contours' sub-rate (samples a tick) in each quality mode: in Potato a quarter of the
 /// others'.
 fn contour_every(q: Quality) -> usize {
@@ -1731,6 +2191,13 @@ impl ControlPart {
     /// One sample of the contours (at their sub-rate, interpolated: a block's delay) and
     /// the noise (its loads follow the panel), for the trigger contact and EXT. S-TRIG.
     pub fn tick(&mut self, p: &Panel, c: Contacts) -> ControlOut {
+        self.tick_for(p, c, p.quality)
+    }
+
+    /// [`ControlPart::tick`] for an audio path at `audio`'s quality, which the contours'
+    /// delays follow ([`contour_delays`]), whatever quality the contours run at
+    /// ([`Voice::hold_control_quality`]).
+    pub fn tick_for(&mut self, p: &Panel, c: Contacts, audio: Quality) -> ControlOut {
         let _fast = crate::ulp::FastScope::new(p.quality != Quality::NoCompromises);
         let mut laps = crate::prof::Laps::start();
         if self.count.is_multiple_of(self.contour_every) {
@@ -1752,13 +2219,27 @@ impl ControlPart {
         let a = ((self.count - 1) % self.contour_every + 1) as f64 / self.contour_every as f64;
         let env_f = self.env_from.0 + (self.env_to.0 - self.env_from.0) * a;
         let env_l = self.env_from.1 + (self.env_to.1 - self.env_from.1) * a;
+        // Each as late as the sound it shapes (interpolated between samples).
+        self.env_at = (self.env_at + 1) % ENV_PAST;
+        self.env_past[self.env_at] = (env_f, env_l);
+        let (late_f, late_l) = contour_delays(audio, self.contour_every);
+        let at = |late: f64| {
+            let (whole, part) = (late as usize, late.fract());
+            let k = |k: usize| self.env_past[(self.env_at + ENV_PAST - k) % ENV_PAST];
+            let (e0, e1) = (k(whole), k(whole + 1));
+            (e0, e1, part)
+        };
+        let (f0, f1, part) = at(late_f);
+        let env_f = f0.0 + (f1.0 - f0.0) * part;
+        let (l0, l1, part) = at(late_l);
+        let env_l = l0.1 + (l1.1 - l0.1) * part;
         // Board 3: the noise. Not computed while nothing hears it: its mixer channel off and
         // the modulation mix taking none of it (its gain exactly 0) or neither modulation
         // switch on; it resumes where it stopped (decisions.md R11). The front then takes
         // its last outputs, which reach nothing: the channel switched off adds no current,
         // and nothing times them in the modulation mix is zero.
         let heard = p.noise_on
-            || ((p.osc_mod || p.filter_mod)
+            || ((p.osc_mod || p.filter_mod || p.any_shape_mod())
                 && self
                     .noise_gain
                     .get(p.mod_mix, |m| self.mix.mix(m).gain_noise)
@@ -1836,6 +2317,91 @@ impl AudioPart {
         self.last = (v_kbd, f.i_bus, y);
         out
     }
+
+    /// [`AudioPart::tick`] with FEEDBACK's loop closed inside it ([`tick_looped`]), where
+    /// [`loops`].
+    pub fn tick_looped(
+        &mut self,
+        p: &Panel,
+        j: &Jacks,
+        v_kbd: f64,
+        c: &ControlOut,
+        d: &VcaDrive,
+        feedback: f64,
+    ) -> f64 {
+        let (f, y, out) = tick_looped(
+            &mut self.pre,
+            &mut self.front,
+            &mut self.back,
+            (p, j, v_kbd, c, d),
+            feedback,
+        );
+        self.last = (v_kbd, f.i_bus, y);
+        out
+    }
+}
+
+/// Whether FEEDBACK's loop runs at one rate ([`tick_looped`]; decisions.md R-FEEDBACK-LOOP):
+/// in ULTRA, whose preamplifier and VCA already run at the filter's rate, FEEDBACK and the
+/// mixer's EXTERNAL INPUT on.
+pub(crate) fn loops(p: &Panel, feedback: f64) -> bool {
+    feedback > 0.0
+        && p.ext_on
+        && vca_oversampled(p.quality)
+        && oversampling(p.quality).1 == ULTRA_VCA_OVERSAMPLING
+}
+
+const _: () = assert!(crate::preamp::SUBSTEPS == ULTRA_VCA_OVERSAMPLING);
+
+/// One sample with FEEDBACK's loop closed at the filter's rate (decisions.md
+/// R-FEEDBACK-LOOP): the front without the preamplifier's current; then at each of the
+/// filter's steps the VCA on the filter's output, and the preamplifier a substep on the jack's
+/// voltage with the cable's share of the VCA's output added, its current into the bus at the
+/// filter's next step. Only that step (a quarter of a sample) lies between the output and the
+/// input, against the preamplifier's and the filter's resamplers (90 samples) when the output
+/// is fed back a sample at a time. `at` is the panel, the jacks, the keyboard's voltage, the
+/// contours and the VCA's bias, as [`AudioPart::tick`] takes them. The front's output, the
+/// filter's output (V) and the output sample.
+pub(crate) fn tick_looped(
+    pre: &mut PreampPart,
+    front: &mut FrontPart,
+    back: &mut BackPart,
+    at: (&Panel, &Jacks, f64, &ControlOut, &VcaDrive),
+    feedback: f64,
+) -> (FrontOut, f64, f64) {
+    let (p, j, v_kbd, c, d) = at;
+    let f = front.tick(p, j, v_kbd, c, 0.0);
+    let _fast = crate::ulp::FastScope::new(p.quality != Quality::NoCompromises);
+    pre.preamp.set_quality(p.quality);
+    pre.preamp.set_delayed(false);
+    let (t, r) = pre.volume.get(p.ext_volume, ext_volume);
+    pre.preamp.set_source_resistance(r);
+    let ext = pre.preamp.upsample(j.ext * INPUT_VOLTS * t);
+    back.set_filter(p);
+    let a440 = back.a440.tick(p.a440);
+    if !back.ultra {
+        back.vca_4x.take_over(&back.vca, back.last_out);
+        back.ultra = true;
+    }
+    back.vca_4x.set_a440(a440);
+    back.vca_4x.set_plain(p.quality != Quality::NoCompromises);
+    let ramp = back.vca_4x.start(d);
+    let mut out = 0.0;
+    let BackPart { vcf, vca_4x, .. } = back;
+    let preamp = &mut pre.preamp;
+    let y = vcf.tick_fed(f.i_bus, f.g_bus, f.i0, &mut pre.i_fed, |k, v| {
+        let (y, o) = vca_4x.step(&ramp, k, v);
+        if let Some(o) = o {
+            out = o;
+        }
+        preamp.fine(ext[k] + t * feedback * y)
+    });
+    let o = pre.preamp.fine_outputs();
+    pre.overload = o.lamp;
+    pre.overload_peak = pre.overload_peak.max(o.lamp);
+    pre.ext_amp = o.amp;
+    back.last_out = out;
+    (f, y, out / 5.0)
 }
 
 impl PreampPart {
@@ -1845,6 +2411,7 @@ impl PreampPart {
     pub fn tick(&mut self, p: &Panel, ext: f64) -> f64 {
         let _fast = crate::ulp::FastScope::new(p.quality != Quality::NoCompromises);
         let mut laps = crate::prof::Laps::start();
+        self.i_fed = 0.0;
         self.preamp
             .set_quality(match (self.accurate, p.quality, self.in_loop) {
                 (true, Quality::Potato, InLoop::Circuit) => Quality::HighFidelity,
@@ -1923,6 +2490,21 @@ impl FrontPart {
             // The oscillators' external control input (its jack's source holds the bus).
             ext: j.osc.unwrap_or(OPEN_BUS),
         };
+        // MOD (the plug-in's, decisions.md R-CONTINUOUS-WAVE): a share of the shape's travel,
+        // 0..1, from the line's swing about oscillator 3's triangle's middle, as deep as the
+        // line's gain against its gain with the wheel fully forward: oscillator 3's triangle,
+        // the wheel forward, sweeps the whole travel; nothing with the wheel back.
+        // (The wheel fully back shorts the line: none at all.)
+        self.mod_u = if p.any_shape_mod() && r_wheel > 0.1 {
+            let g = Modulation::line_gain(mix.r_out, r_wheel, &line_loads);
+            let g_full = Modulation::line_gain(mix.r_out, MOD_WHEEL_FULL, &line_loads);
+            ModSwing {
+                depth: g / g_full,
+                swing: (amp - self.mod_ref.0) / self.mod_ref.1,
+            }
+        } else {
+            ModSwing::default()
+        };
         // The oscillators and the mixer: each channel a Norton source onto the bus, the
         // external input switched off loads it. Oscillator 3's switch output also feeds the
         // modulation mix through R23: its node is loaded by both.
@@ -1941,44 +2523,82 @@ impl FrontPart {
             // channel's 33K then only loads the bus) and, for oscillator 3, not feeding a
             // modulation switch that is on. It resumes where it stopped (a free-running
             // oscillator's phase is arbitrary; performance).
-            if !(op.on || (n == 2 && (p.osc_mod || p.filter_mod))) {
+            if !(op.on || (n == 2 && (p.osc_mod || p.filter_mod || p.any_shape_mod()))) {
                 g_bus += 1.0 / 33e3;
                 continue;
             }
-            let osc = match n {
-                0 => Osc::One,
-                1 => Osc::Two { freq: op.freq },
-                _ => Osc::Three {
-                    freq: op.freq,
-                    control: p.osc3_control,
-                },
-            };
-            let mut tuning = self.tunings[n];
-            tuning.tune += p.tune.clamp(-1.0, 1.0) * TUNE_HALF_SPAN;
-            let mut d = osc_drive_with(osc, &tuning, v_kbd, &buses, op.range);
-            if j.detune[n] != 0.0 {
-                // ENTROPY (the plug-in's): the oscillator off its calibration, as an offset at
-                // its range tap (R43), which the octave trimmer set to an octave a step.
-                d.inputs[5].v += j.detune[n] / 1200.0 * tuning.octave_step;
-            }
-            let i_in = d.apply(&mut self.vcos[n].expo);
             self.vcos[n].set_oversample(oversampling(p.quality).0);
             self.vcos[n].table_on = p.quality == Quality::Potato;
-            let o = self.vcos[n].tick(i_in, op.waveform.width());
+            // CONTINUOUS (decisions.md R-CONTINUOUS-WAVE): where its shape is now.
+            let shape = p.shape[n];
+            let at = shape.continuous.then(|| shape_at(shape, self.mod_u));
+            self.shape_now[n] = at;
+            self.vcos[n].set_outputs(match at {
+                None => outputs_of(op.waveform, n),
+                Some(at) => shape_outputs(n, at, shape.modulated),
+            });
+            self.vcos[n].set_width_moves(shape.continuous);
+            self.vcos[n].use_width_network(true);
+            let width = at.map_or(op.waveform.width(), shape_bias);
+            let o = match j.timed[n] {
+                // An oscillator timed at LO (the plug-in's: decisions.md R-OSC-TIMED): its
+                // resets on the host's clock, none of its pitch inputs or ENTROPY in it.
+                Some(t) if op.range == Range::Lo => self.vcos[n].tick_timed(t, width),
+                _ => {
+                    // (An LFO's knobs where they have glided to since its step: R-LFO-STRESS.)
+                    let freq = match n {
+                        1 | 2 if j.swept.freq[n - 1] != 0.0 => {
+                            op.freq.clamp(0.0, 1.0) + j.swept.freq[n - 1]
+                        }
+                        _ => op.freq,
+                    };
+                    let osc = match n {
+                        0 => Osc::One,
+                        1 => Osc::Two { freq },
+                        _ => Osc::Three {
+                            freq,
+                            control: p.osc3_control,
+                        },
+                    };
+                    let mut tuning = self.tunings[n];
+                    let tune = if j.swept.tune != 0.0 {
+                        p.tune.clamp(-1.0, 1.0) + j.swept.tune
+                    } else {
+                        p.tune.clamp(-1.0, 1.0)
+                    };
+                    tuning.tune += tune * TUNE_HALF_SPAN;
+                    let mut d = osc_drive_with(osc, &tuning, v_kbd, &buses, op.range);
+                    if j.detune[n] != 0.0 {
+                        // ENTROPY (the plug-in's): the oscillator off its calibration, as an
+                        // offset at its range tap (R43), which the octave trimmer set to an
+                        // octave a step.
+                        d.inputs[5].v += j.detune[n] / 1200.0 * tuning.octave_step;
+                    }
+                    let i_in = d.apply(&mut self.vcos[n].expo);
+                    self.vcos[n].tick(i_in, width)
+                }
+            };
             self.last_i[n] = self.vcos[n].timing_current();
             // Oscillator 3's reverse sawtooth stage runs while its sawtooth or reverse
             // sawtooth is selected (R171 loads the sawtooth).
-            let second = matches!(
-                op.waveform,
-                Waveform::Sawtooth | Waveform::SharkTooth | Waveform::ReverseSawtooth
-            );
+            // In CONTINUOUS, while its shape takes in the reverse sawtooth: always with MOD.
+            let second = match at {
+                None => matches!(
+                    op.waveform,
+                    Waveform::Sawtooth | Waveform::SharkTooth | Waveform::ReverseSawtooth
+                ),
+                Some(at) => shape.modulated || (at > 0.0 && at < 3.0),
+            };
             let rev = if n == 2 && second {
                 self.revsaw.set_quality(p.quality);
                 Some(self.revsaw.tick(o.saw))
             } else {
                 None
             };
-            let (v_src, r_src) = waveform_source(op.waveform, &o, rev.as_ref());
+            let (v_src, r_src) = match at {
+                None => waveform_source(op.waveform, &o, rev.as_ref()),
+                Some(at) => shape_source(n, at, &o, rev.as_ref()),
+            };
             let (i, g) = if n == 2 {
                 // The switch's output node under its two loads.
                 let z_ch = channel_load(op.volume, 33e3);
@@ -2006,7 +2626,11 @@ impl FrontPart {
         // The filter's control node: CUTOFF, AMOUNT OF CONTOUR, KEYBOARD CONTROL 1 and 2,
         // R52 (the modulation line with FILTER MODULATION on, else grounded) and R51 (the
         // external control's jack, empty: grounded).
-        let pos = cutoff_track(p.cutoff);
+        let pos = if j.swept.cutoff != 0.0 {
+            (cutoff_track(p.cutoff) + j.swept.cutoff).clamp(0.0, 1.0)
+        } else {
+            cutoff_track(p.cutoff)
+        };
         let r_cut = 200e3 + 5e3 * pos * (1.0 - pos);
         let amt = p.contour_amount.clamp(0.0, 1.0);
         let open = Input {
@@ -2068,12 +2692,35 @@ impl BackPart {
         self.vcf.set_oversample(oversampling(p.quality).1);
         self.vcf.set_quality(p.quality);
         self.vcf.high_pass = p.filter_hi;
-        let y = self.vcf.tick(f.i_bus, f.g_bus, f.i0);
-        laps.lap(crate::prof::Part::Filter);
-        self.vca.a440 = self.a440.tick(p.a440);
-        self.vca.plain_signal = p.quality != Quality::NoCompromises;
-        let out = self.vca.signal(y, d);
+        let ultra = vca_oversampled(p.quality) && self.vcf.oversample() == ULTRA_VCA_OVERSAMPLING;
+        let a440 = self.a440.tick(p.a440);
+        if ultra != self.ultra {
+            // QUALITY switched: the other signal path carries on from this one's states.
+            if ultra {
+                self.vca_4x.take_over(&self.vca, self.last_out);
+            } else {
+                self.vca_4x.hand_over(&mut self.vca);
+            }
+            self.ultra = ultra;
+        }
+        let (y, out) = if ultra {
+            // ULTRA: the VCA at the filter's rate on the filter's own samples; the filter's
+            // decimator still gives its output (the probe's, and HI's after a switch).
+            let mut xs = [0.0f64; 8];
+            let y = self.vcf.tick_oversampled(f.i_bus, f.g_bus, f.i0, &mut xs);
+            laps.lap(crate::prof::Part::Filter);
+            self.vca_4x.set_a440(a440);
+            self.vca_4x.set_plain(p.quality != Quality::NoCompromises);
+            (y, self.vca_4x.signal(&xs, d))
+        } else {
+            let y = self.vcf.tick(f.i_bus, f.g_bus, f.i0);
+            laps.lap(crate::prof::Part::Filter);
+            self.vca.a440 = a440;
+            self.vca.plain_signal = p.quality != Quality::NoCompromises;
+            (y, self.vca.signal(y, d))
+        };
         laps.lap(crate::prof::Part::Vca);
+        self.last_out = out;
         (y, out / 5.0)
     }
 
@@ -2089,9 +2736,45 @@ impl BackPart {
     /// [`BackPart::tick`] from the filter's output `y` on: the output sample.
     fn after_filter(&mut self, p: &Panel, y: f64, d: &VcaDrive) -> f64 {
         let _fast = crate::ulp::FastScope::new(p.quality != Quality::NoCompromises);
+        // Only HI comes here (a pair): just switched from ULTRA, this path carries on from the
+        // 4x VCA's states, as in `tick`.
+        if self.ultra {
+            self.vca_4x.hand_over(&mut self.vca);
+            self.ultra = false;
+        }
         self.vca.a440 = self.a440.tick(p.a440);
         self.vca.plain_signal = p.quality != Quality::NoCompromises;
         let out = self.vca.signal(y, d);
+        self.last_out = out;
         out / 5.0
+    }
+}
+
+#[cfg(test)]
+mod waveform_source_tests {
+    use super::*;
+
+    #[test]
+    fn reverse_hybrid_obeys_the_calibrated_passive_network() {
+        for (tri, back, source_ohms) in [(1.2, -0.9, 3500.0), (-1.4, 1.1, 1200.0)] {
+            let o = VcoOut {
+                tri,
+                ..VcoOut::default()
+            };
+            let rev = RevSawOut {
+                rev: back,
+                r_rev: source_ohms,
+                ..RevSawOut::default()
+            };
+            let (volts, resistance) = shape_source(2, 1.0, &o, Some(&rev));
+            for load in [1000.0, 33000.0, 1e6] {
+                let at_load = volts * load / (load + resistance);
+                let triangle_current =
+                    (tri - at_load) / (750.0 * 8200.0 / 8950.0 + SHARK_TRIANGLE_OHMS);
+                let reverse_current = (back - at_load) / (source_ohms + SHARK_SAW_OHMS);
+                // Kirchhoff's current law at the loaded physical mix node.
+                assert!((triangle_current + reverse_current - at_load / load).abs() < 1e-12);
+            }
+        }
     }
 }

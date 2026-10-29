@@ -14,6 +14,7 @@
 pub mod compare;
 pub mod fft;
 pub mod loudness;
+pub mod matching;
 pub mod onsets;
 pub mod peak;
 pub mod pitch;

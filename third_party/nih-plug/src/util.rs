@@ -194,3 +194,8 @@ mod tests {
         }
     }
 }
+/// Run detached offline work with the same flush-to-zero setting as the live wrappers,
+/// restoring the calling thread's setting afterwards. Does not prohibit allocations.
+pub fn with_flush_to_zero<T>(f: impl FnOnce() -> T) -> T {
+    crate::wrapper::util::with_flush_to_zero(f)
+}

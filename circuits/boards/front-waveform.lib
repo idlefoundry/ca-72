@@ -1,0 +1,9 @@
+* Front-panel waveform switch, drawing1448 (circuit00), oscillators1/2.
+* The hybrid connects saw and triangle through R03047K and R03110K.
+* Table7-2 FRONT PANEL ASSEMBLY specifies both at±5%,1/2W.
+* Defaults retain the drawing/BOM. A reference calibration must pass its
+* equivalent resistance explicitly; it does not change the drawn part value.
+.subckt mm_shark_source saw tri wave params:r030=47k r031=10k
+r030 saw wave {r030}
+r031 tri wave {r031}
+.ends mm_shark_source

@@ -1,5 +1,9 @@
 # Keyboard feedback
 
+Since 2026-10-22, the rail uses the word **KEYS** in place of the piano icon
+([R-GLOBAL-KEY](../decisions.md#r-global-key-name-the-voices-stereo-and-output-page-and-give-it-a-rail-key)).
+The earlier pictures and icon descriptions below record the original implementation.
+
 Integration into current main is tracked in [standalone-integration.md](../standalone-integration.md). Earlier preview renders and test results below apply
 to their recorded source; they do not validate the integrated candidate.
 

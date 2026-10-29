@@ -62,6 +62,11 @@ pub struct Sound {
     /// (decisions.md R-AUTO-GAIN-DRIVE). None in a preset saved before.
     pub drive_curve: Option<[f32; STEPS]>,
     pub drive_curve_lo: Option<[f32; STEPS]>,
+    /// Its macros' typed names, in their order (`macro_names`, a list; empty for one without a
+    /// name; decisions.md R-MACROS). None in a preset saved before them, or naming none.
+    pub macro_names: Vec<String>,
+    /// The standalone’s effects, kept verbatim by plug-in instances (R-FX-PRESETS).
+    pub effects: Option<String>,
 }
 
 impl Sound {
@@ -121,6 +126,12 @@ pub struct Entry {
     file: Option<PathBuf>,
 }
 
+impl Entry {
+    pub(crate) fn file(&self) -> Option<&Path> {
+        self.file.as_deref()
+    }
+}
+
 fn same(a: &str, b: &str) -> bool {
     a.to_lowercase() == b.to_lowercase()
 }
@@ -173,7 +184,65 @@ fn sound_of(t: &toml::Table) -> Result<Sound, String> {
         values,
         drive_curve: curve_of(t.get("drive_curve")),
         drive_curve_lo: curve_of(t.get("drive_curve_lo")),
+        effects: None,
+        // (A list of text, else none: one not understood is left out, as a curve is.)
+        macro_names: t
+            .get("macro_names")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .map(|v| v.as_str().unwrap_or_default().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default(),
     })
+}
+
+/// An opaque section, including unknown keys, comments and the state’s exact spelling.
+/// Keep its formatting when a plug-in saves a sound it cannot host (R-FX-PRESETS).
+pub(crate) fn effects_section(text: &str) -> Option<String> {
+    // Slice the original text by the parser's header spans. Formatting it again would
+    // normalise CRLF, including mixed line endings and newlines inside saved state.
+    fn table_headers(table: &toml_edit::Table, keep: bool, out: &mut Vec<(usize, bool)>) {
+        if !table.is_implicit()
+            && !table.is_dotted()
+            && let Some(span) = table.span()
+        {
+            let start = table
+                .decor()
+                .prefix()
+                .and_then(|p| p.span())
+                .map_or(span.start, |s| s.start);
+            out.push((start, keep));
+        }
+        for (_, child) in table.iter() {
+            headers(child, keep, out);
+        }
+    }
+    fn headers(item: &toml_edit::Item, keep: bool, out: &mut Vec<(usize, bool)>) {
+        if let Some(table) = item.as_table() {
+            table_headers(table, keep, out);
+        } else if let Some(array) = item.as_array_of_tables() {
+            for table in array.iter() {
+                table_headers(table, keep, out);
+            }
+        }
+    }
+    let doc = toml_edit::Document::parse(text).ok()?;
+    doc.get("effects")?;
+    let mut starts = Vec::new();
+    for (key, item) in doc.iter() {
+        headers(item, key == "effects", &mut starts);
+    }
+    starts.sort_by_key(|(start, _)| *start);
+    starts.push((text.len(), false));
+    let mut raw = String::new();
+    for pair in starts.windows(2) {
+        if pair[0].1 {
+            raw.push_str(text.get(pair[0].0..pair[1].0)?);
+        }
+    }
+    (!raw.is_empty()).then_some(raw)
 }
 
 /// The factory presets' file, built in whole.
@@ -474,21 +543,7 @@ impl Library {
             {
                 continue;
             }
-            let read = std::fs::read_to_string(&f)
-                .map_err(|e| e.to_string())
-                .and_then(|s| s.parse::<toml::Table>().map_err(|e| e.to_string()))
-                .and_then(|t| {
-                    match t.get("format").and_then(Value::as_integer) {
-                        Some(FORMAT) | None => {}
-                        Some(other) => return Err(format!("format {other}")),
-                    }
-                    let sound = sound_of(&t)?;
-                    // A name another program wrote is checked as one typed here.
-                    check_name(&sound.name).map_err(|e| format!("{:?}: {e}", sound.name))?;
-                    let fav = t.get("favorite").and_then(Value::as_bool).unwrap_or(false);
-                    let rep = t.get("replaces").and_then(Value::as_str).map(str::to_owned);
-                    Ok((sound, fav, rep))
-                });
+            let read = read_user(&f);
             match read {
                 Ok((s, fav, rep)) => out.push((f, s, fav, rep)),
                 Err(e) => bad.push(format!("{}: {e}", f.display())),
@@ -733,8 +788,17 @@ impl Library {
         if let Some(db) = &sound.drive_curve_lo {
             t.insert("drive_curve_lo".into(), curve_value(db));
         }
+        if sound.macro_names.iter().any(|n| !n.is_empty()) {
+            t.insert("macro_names".into(), strings(&sound.macro_names));
+        }
         t.insert("values".into(), Value::Table(values));
-        self.put(file, &t)
+        let mut text = toml::to_string(&t).map_err(|e| e.to_string())?;
+        if let Some(effects) = &sound.effects {
+            text.push_str(effects);
+        }
+        let result = write_text(file, &text);
+        self.forget();
+        result
     }
 
     /// The current sound saved as `name` (`values` plain, by parameter ID): replacing the
@@ -757,6 +821,26 @@ impl Library {
         values: Vec<(String, f64)>,
         tags: Option<Vec<String>>,
         curve: Option<(bool, [f32; STEPS])>,
+    ) -> Result<Entry, String> {
+        self.save_with(
+            name,
+            values,
+            tags,
+            curve,
+            Vec::new(),
+            self.find(name).and_then(|e| e.sound.effects),
+        )
+    }
+
+    /// [`Library::save_with_curve`], with the macros' names (decisions.md R-MACROS).
+    pub fn save_with(
+        &self,
+        name: &str,
+        values: Vec<(String, f64)>,
+        tags: Option<Vec<String>>,
+        curve: Option<(bool, [f32; STEPS])>,
+        macro_names: Vec<String>,
+        effects: Option<String>,
     ) -> Result<Entry, String> {
         let name = name.trim();
         check_name(name)?;
@@ -782,6 +866,8 @@ impl Library {
             values,
             drive_curve: curve.and_then(|(lo, db)| (!lo).then_some(db)),
             drive_curve_lo: curve.and_then(|(lo, db)| lo.then_some(db)),
+            macro_names,
+            effects,
         };
         let file = self.place(name, own.as_deref())?;
         self.write_user(&file, &sound, favorite, replaces.as_deref())?;
@@ -906,6 +992,31 @@ impl Library {
     }
 }
 
+/// Read this exact user-preset file with the browser's parser, without searching its
+/// directory or resolving factory overlays or another preset with the same name.
+pub(crate) fn parse_user_sound(text: &str) -> Result<Sound, String> {
+    parse_user(text).map(|(sound, ..)| sound)
+}
+
+fn read_user(path: &Path) -> Result<(Sound, bool, Option<String>), String> {
+    let s = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    parse_user(&s)
+}
+
+fn parse_user(s: &str) -> Result<(Sound, bool, Option<String>), String> {
+    let t = s.parse::<toml::Table>().map_err(|e| e.to_string())?;
+    match t.get("format").and_then(Value::as_integer) {
+        Some(FORMAT) | None => {}
+        Some(other) => return Err(format!("format {other}")),
+    }
+    let mut sound = sound_of(&t)?;
+    sound.effects = effects_section(s);
+    check_name(&sound.name).map_err(|e| format!("{:?}: {e}", sound.name))?;
+    let fav = t.get("favorite").and_then(Value::as_bool).unwrap_or(false);
+    let rep = t.get("replaces").and_then(Value::as_str).map(str::to_owned);
+    Ok((sound, fav, rep))
+}
+
 /// The presets of `list` that match: each of `query`'s words in the name, the description or
 /// a tag (ignoring case); every one of `tags`; favourites only; the user's only (and the
 /// factory's edited).
@@ -952,6 +1063,10 @@ pub fn tags_of(list: &[Entry]) -> Vec<String> {
 /// A table written whole, then moved into place.
 pub(crate) fn write(file: &Path, t: &toml::Table) -> Result<(), String> {
     let text = toml::to_string(t).map_err(|e| e.to_string())?;
+    write_text(file, &text)
+}
+
+fn write_text(file: &Path, text: &str) -> Result<(), String> {
     if let Some(d) = file.parent() {
         std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
     }
@@ -976,10 +1091,83 @@ mod tests {
         list.iter().map(|e| e.sound.name.as_str()).collect()
     }
 
+    /// Factory sounds must work without any external plug-in installed (R-FINAL-PRESETS).
+    /// Inspect the source too: a section silently ignored by a reader must not ship either.
+    #[test]
+    fn factory_presets_never_include_hosted_effects() {
+        let raw: toml::Table = FACTORY_FILE.parse().unwrap();
+        assert!(
+            !raw.contains_key("effects"),
+            "factory-level effects section"
+        );
+        for preset in raw["preset"].as_array().unwrap() {
+            let table = preset.as_table().unwrap();
+            assert!(
+                !table.contains_key("effects"),
+                "{} includes a hosted effects section",
+                table["name"]
+            );
+        }
+        for sound in factory() {
+            assert!(sound.effects.is_none(), "{} includes effects", sound.name);
+        }
+    }
+
+    #[test]
+    fn effects_are_opaque_and_keep_every_byte_through_library_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let raw = "\n# Kept by readers that cannot host it.\n[effects] # future fields too\nchain = '{\"format\":1,\"slots\":[]}'\nunknown = 123\n\n[effects.future]\nvalue = [1, 2, 3] # exactly as written\n# The end.\n";
+        let file = dir.path().join("Opaque.toml");
+        std::fs::write(
+            &file,
+            format!("format = 1\nname = 'Opaque'\n[values]\ncutoff = 5\n{raw}"),
+        )
+        .unwrap();
+        let entry = lib.find("Opaque").unwrap();
+        assert_eq!(entry.sound.effects.as_deref(), Some(raw));
+        lib.save("Opaque", vec![("cutoff".into(), 7.0)], None)
+            .unwrap();
+        assert!(std::fs::read_to_string(&file).unwrap().ends_with(raw));
+        lib.rename("Opaque", "Renamed").unwrap();
+        let renamed = lib.find("Renamed").unwrap();
+        assert_eq!(renamed.sound.effects.as_deref(), Some(raw));
+        assert!(factory().iter().all(|s| s.effects.is_none()));
+    }
+
+    #[test]
+    fn effects_keep_mixed_line_endings_and_header_text_inside_strings() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let template = "\n# untouched\n[effects] # here\nchain = '''{\"format\":1,\"slots\":[]}'''\ntext = '''\n[values]\nnot_a_header = true\n'''\n[[effects.future]]\nvalue = 0xDEAD # as typed\n";
+        for (n, raw) in [
+            template.to_owned(),
+            template.replace('\n', "\r\n"),
+            template.replace("# here\n", "# here\r\n"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let file = dir.path().join(format!("Lines{n}.toml"));
+            let name = format!("Lines{n}");
+            std::fs::write(
+                &file,
+                format!("format = 1\nname = '{name}'\n{raw}\n[values]\ncutoff = 5\n"),
+            )
+            .unwrap();
+            let e = lib.find(&name).unwrap();
+            assert_eq!(e.sound.effects.as_deref(), Some(raw.as_str()));
+            lib.save(&name, vec![("cutoff".into(), 7.0)], None).unwrap();
+            assert!(std::fs::read_to_string(file).unwrap().ends_with(&raw));
+        }
+    }
+
     #[test]
     fn the_factory_file_is_read_whole() {
         let f = factory();
-        assert_eq!(f.len(), 19);
+        assert_eq!(f.len(), 42);
+        assert!(f.iter().any(|s| s.name == "Gatekeeper"));
+        assert!(!f.iter().any(|s| s.name == "Gated Chords"));
         assert_eq!(f[0].name, "Felt Bass");
         assert!(f.iter().all(|s| !s.values.is_empty()));
         assert!(
@@ -1085,6 +1273,8 @@ mod tests {
             values: vec![("cutoff".into(), cutoff), ("osc1_range".into(), 3.0)],
             drive_curve: None,
             drive_curve_lo: None,
+            macro_names: Vec::new(),
+            effects: None,
         };
         let pack = [sound("Old Pluck", -3.0), sound("Old Pad", 0.25)];
         assert_eq!(write_pack(dir.path(), &pack).unwrap().len(), 2);
@@ -1136,7 +1326,11 @@ mod tests {
             names(&lib.search("ROUND deep", &[], false, false)),
             Vec::<&str>::new()
         );
-        assert_eq!(names(&lib.search("deep", &[], false, false)), ["Deep Bass"]);
+        // (Deep Boom, a factory preset since 0.3.0.)
+        assert_eq!(
+            names(&lib.search("deep", &[], false, false)),
+            ["Deep Bass", "Deep Boom"]
+        );
         assert_eq!(
             names(&lib.search("", &["midnight".into()], false, false)),
             ["Deep Bass"]

@@ -29,6 +29,8 @@ cp "$bundles/CA-72.clap" CA-72.clap
 cp -R "$bundles/CA-72.vst3" CA-72.vst3
 cp "$bundles/CA-72.exe" CA-72.exe
 cp "$bundles/CA-72.ico" CA-72.ico
+# The standalone loads effects in its helper, beside it (docs/fx-host.md).
+cp "$bundles/ca72-fx-helper.exe" ca72-fx-helper.exe
 [ -f "$binary" ] || { echo "windows-zip: no $binary in $bundles" >&2; exit 1; }
 mkdir -p CA-72.vst3/Contents/Resources
 # The CLAP and the VST3 are one library (nih-plug exports both entry points).

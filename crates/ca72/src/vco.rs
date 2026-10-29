@@ -17,10 +17,13 @@
 //!   triangle is the DC transfer of Q2/Q1 tabulated from ngspice ([`crate::tables::TRI`]);
 //!   the rectangle is Q11/Q12's comparator with its hysteresis, thresholds from ngspice's
 //!   DC sweeps.
-//! - **Band-limiting**: the core runs at `oversample` times the output rate; the jumps at
-//!   the reset and the rectangle's edges get band-limited steps at their exact times; a
-//!   halfband decimator brings each output down. The triangle's fold is sampled at the
-//!   oversampled rate without correction.
+//! - **Band-limiting** (decisions.md R-BLEP): the core runs at `oversample` times the output
+//!   rate; the jumps at the reset and the rectangle's edges get band-limited steps at their
+//!   exact times, the reset's areas band-limited impulses, and the slope's jumps (the reset,
+//!   the hold's end, the triangle's fold as a rounded corner) band-limited ramps, all from one
+//!   windowed sinc ([`crate::resample::BlepLine`]); a halfband decimator brings each output
+//!   down, its last stage long enough to keep 20 Hz to 20 kHz clean at 44.1 kHz
+//!   ([`Decimator::for_oscillators`]). Only the outputs in use are corrected ([`Vco::set_outputs`]).
 //!
 //! Outputs are the board's open-circuit voltages (unloaded): the mixer's loading belongs
 //! to the mixer's model. The reset's sub-microsecond shape is represented by what it does
@@ -30,7 +33,7 @@
 //! and noise.
 
 use crate::expo::ExpoCircuit;
-use crate::resample::{BlepLine, Decimator};
+use crate::resample::{BLEP_DELAY, BlepLine, Decimator};
 use crate::tables;
 
 /// The core's reset constants (oscillator 1, 25 C).
@@ -144,7 +147,7 @@ impl Default for ShaperParams {
             rect_rise_delay: 2.74e-6,
             rect_fall_delay: 3.75e-6,
             rect_fall_overdrive: 4.94e-3,
-            tri_glitch: -3.8e-7,
+            tri_glitch: -4.02e-7,
             buf_lag: -4.8e-7,
         }
     }
@@ -160,6 +163,36 @@ pub fn triangle(buf: f64) -> f64 {
     p1 + 0.5
         * f
         * (p2 - p0 + f * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3 + f * (3.0 * (p1 - p2) + p3 - p0)))
+}
+
+/// The triangle shaper's slope against the buffer.
+fn triangle_slope(buf: f64) -> f64 {
+    const H: f64 = 1e-4;
+    (triangle(buf + H) - triangle(buf - H)) / (2.0 * H)
+}
+
+/// The triangle's fold (Q2's, [`crate::tables::TRI`]) as a rounded corner (decisions.md
+/// R-BLEP): not a sharp corner but a knee, sharp below its lowest point and rounded over
+/// about 0.2 V above. The tangents 0.16 V below its lowest point and 0.19 V above meet at
+/// its centre; it is taken as turning evenly over 0.15 V of the buffer about there (the
+/// lab's sweep of 0 to 0.3 V: as a sharp corner its correction adds a kink where sampling
+/// resolves the knee). Gives the ramp's voltage where it starts (the ramp falling), how
+/// much the slope against the buffer grows across it, and its width.
+fn fold_corner(sh: &ShaperParams) -> (f64, f64, f64) {
+    const WIDTH: f64 = 0.15;
+    let lowest = (0..tables::TRI.len())
+        .min_by(|&i, &j| tables::TRI[i].total_cmp(&tables::TRI[j]))
+        .map_or(0.0, |i| tables::TRI_MIN + i as f64 * tables::TRI_STEP);
+    let (xl, xr) = (lowest - 0.16, lowest + 0.19);
+    let (sl, sr) = (triangle_slope(xl), triangle_slope(xr));
+    let (yl, yr) = (triangle(xl), triangle(xr));
+    // Where yl + sl (x - xl) = yr + sr (x - xr).
+    let x = (yr - yl + sl * xl - sr * xr) / (sl - sr);
+    (
+        (x + 0.5 * WIDTH - sh.buf_offset) / sh.buf_gain,
+        sr - sl,
+        WIDTH,
+    )
 }
 
 /// The most timing current the converter's model gives, A: twice MIDI 127's at the panel's
@@ -179,12 +212,36 @@ pub struct VcoOut {
     pub rect: f64,
 }
 
+/// Where a timed oscillator's cycle stands (decisions.md R-OSC-TIMED): its phase at the
+/// sample (as the sample is given, the end of the time it covers), 0 where its ramp resets and
+/// 1 at the next reset, and the cycles a sample takes. The
+/// host's clock gives both, so that its resets fall on the clock's grid whatever the circuit
+/// would have made of them.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Timed {
+    pub phase: f64,
+    pub per: f64,
+}
+
+/// The timing current's slope against the ramp's voltage, a share of the current a volt: the
+/// converter's Early effect, R42's feedback amplifying it, at oscillator 3's LO currents, where
+/// it is the same from 1e-11 to 1e-5 A (`the_timed_ramp_bends_as_the_converter_does`). A timed
+/// ramp is bent by it as the circuit's is.
+pub const TIMED_EARLY: f64 = 0.014493;
+
+/// How far a timed oscillator may stand from its clock, cycles, and be brought back within its
+/// cycle (its ramp's slope chosen so that it resets on time); further (the host's place jumped:
+/// a locate, a loop, the transport started), it is put where the clock is at once.
+pub const TIMED_TOLERANCE: f64 = 0.02;
+
 /// An oscillator of board 1.
 #[derive(Debug, Clone)]
 pub struct Vco {
     pub expo: ExpoCircuit,
     pub core: CoreParams,
     pub shaper: ShaperParams,
+    pulse: std::sync::Arc<crate::pulse::PulseModel>,
+    width_network: bool,
     /// Circuit temperature, C (the converter follows it; the core's constants are 25 C's).
     pub celsius: f64,
     oversample: usize,
@@ -207,6 +264,16 @@ pub struct Vco {
     saw: BlepLine,
     tri: BlepLine,
     rect: BlepLine,
+    /// Which outputs are corrected (sawtooth, triangle, rectangle; [`Vco::set_outputs`]).
+    outputs: [bool; 3],
+    /// Whether the width may move ([`Vco::set_width_moves`]), and the last sample's (NaN
+    /// before the first and after a reset).
+    width_moves: bool,
+    last_width: f64,
+    /// The triangle's fold as a rounded corner ([`fold_corner`]): the ramp's voltage where it
+    /// starts, how much the triangle's slope against the buffer grows across it, and its
+    /// width in the buffer's volts.
+    fold: (f64, f64, f64),
     dec: [Decimator; 3],
     /// Output samples since the last `reset`, and the time of the latest ramp reset in
     /// output samples (fractional), with how many there have been.
@@ -219,6 +286,8 @@ pub struct Vco {
     /// a steady drive, whose solves settle into a fixed point or a two-cycle, is not solved
     /// again (exactly; performance).
     solved: [Option<Solved>; 2],
+    /// The comparator's delay at a timed ramp's last slope, s ([`Vco::tick_timed`]).
+    timed_delay: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -245,6 +314,9 @@ impl Vco {
             expo: ExpoCircuit::default(),
             core: CoreParams::default(),
             shaper: ShaperParams::default(),
+            pulse: crate::pulse::PulseModel::shared(crate::pulse::PulseCircuit::instrument())
+                .expect("prepared pulse comparator"),
+            width_network: false,
             celsius: 25.0,
             oversample,
             dt: 1.0 / (sample_rate * oversample as f64),
@@ -252,9 +324,9 @@ impl Vco {
             table: None,
             table_on: false,
             dec_other: [
-                Decimator::new(oversample),
-                Decimator::new(oversample),
-                Decimator::new(oversample),
+                Decimator::for_oscillators(oversample),
+                Decimator::for_oscillators(oversample),
+                Decimator::for_oscillators(oversample),
             ],
             v: CoreParams::default().v_top0,
             hold_left: 0.0,
@@ -266,16 +338,21 @@ impl Vco {
             saw: BlepLine::default(),
             tri: BlepLine::default(),
             rect: BlepLine::default(),
+            outputs: [true; 3],
+            width_moves: false,
+            last_width: f64::NAN,
+            fold: fold_corner(&ShaperParams::default()),
             dec: [
-                Decimator::new(oversample),
-                Decimator::new(oversample),
-                Decimator::new(oversample),
+                Decimator::for_oscillators(oversample),
+                Decimator::for_oscillators(oversample),
+                Decimator::for_oscillators(oversample),
             ],
             ticks: 0,
             last_reset: 0.0,
             resets: 0,
             sub: 0,
             solved: [None; 2],
+            timed_delay: CoreParams::default().delay[0],
         }
     }
 
@@ -283,7 +360,7 @@ impl Vco {
     /// plays ([`Vco::set_oversample`]) and the converter's table for its trims as they are
     /// ([`crate::expo::ConverterTable`]; not on the audio thread: both are made here).
     pub fn prepare(&mut self, oversample: usize) {
-        let d = || Decimator::new(oversample);
+        let d = || Decimator::for_oscillators(oversample);
         self.dec_other = [d(), d(), d()];
         self.other = oversample;
         // (One a process for each converter's circuit and temperature.)
@@ -309,9 +386,9 @@ impl Vco {
         self.oversample = oversample;
         self.dt = rate_dt / oversample as f64;
         self.dec.iter_mut().for_each(Decimator::reset);
-        self.saw = BlepLine::default();
-        self.tri = BlepLine::default();
-        self.rect = BlepLine::default();
+        self.saw.clear();
+        self.tri.clear();
+        self.rect.clear();
         self.sub = 0;
     }
 
@@ -321,9 +398,64 @@ impl Vco {
         (self.last_reset, self.resets)
     }
 
+    /// How long before the latest output sample the latest ramp reset was, output samples
+    /// (exact, before the output's latency), and how many resets there have been.
+    pub fn reset_ago(&self) -> (f64, u64) {
+        // (The latest sample's end, as `last_reset` counts time.)
+        let end = self.ticks as f64 - 1.0 / self.oversample as f64;
+        (end - self.last_reset, self.resets)
+    }
+
     /// The outputs' delay through band-limiting and decimation, in output samples.
     pub fn latency(&self) -> f64 {
-        self.dec[0].delay() + 1.0 / self.oversample as f64
+        self.dec[0].delay() + BLEP_DELAY as f64 / self.oversample as f64
+    }
+
+    /// Prepare a physical comparator component set during setup, never in audio processing.
+    pub fn prepare_pulse(
+        &mut self,
+        circuit: crate::pulse::PulseCircuit,
+    ) -> Result<(), crate::mna::NoConvergence> {
+        self.pulse = crate::pulse::PulseModel::shared(circuit)?;
+        Ok(())
+    }
+    /// Use the drawn10K width source (fixed taps or its continuous wiper) instead of
+    /// an ideal bench voltage. All thresholds/delays are already prepared at construction.
+    pub fn use_width_network(&mut self, on: bool) {
+        self.width_network = on;
+    }
+    fn rect_thresholds(&self, width: f64) -> (f64, f64) {
+        if self.width_network {
+            let t = self.pulse.thresholds(width);
+            (t.fall_buf, t.rise_buf)
+        } else {
+            (
+                self.shaper.rect_fall0 + self.shaper.rect_per_width * width,
+                self.shaper.rect_rise0 + self.shaper.rect_per_width * width,
+            )
+        }
+    }
+    fn rect_falling_delay(&self, slope: f64, width: f64) -> f64 {
+        if self.width_network {
+            self.pulse
+                .falling_delay(width, self.shaper.buf_gain * slope)
+        } else {
+            self.shaper.rect_fall_delay
+        }
+    }
+    fn rect_rising_delay(&self, width: f64) -> f64 {
+        if self.width_network {
+            self.pulse.rising_delay(width)
+        } else {
+            self.shaper.rect_rise_delay
+        }
+    }
+    /// Which outputs (sawtooth, triangle, rectangle) to correct from now on: the voice's
+    /// selected waveform's ([`crate::voice`]); all of them unless set. An output left out is
+    /// still made, uncorrected (it aliases): taken up again, its corrections start with the
+    /// next event (performance; decisions.md R-BLEP).
+    pub fn set_outputs(&mut self, outputs: [bool; 3]) {
+        self.outputs = outputs;
     }
 
     /// Starts again `at` (0 at the ramp's top after a reset, towards 1 at the threshold where
@@ -345,10 +477,11 @@ impl Vco {
         self.rise_in = None;
         self.fall_in = None;
         self.rect_is_low = false;
+        self.last_width = f64::NAN;
         self.guess = None;
-        self.saw = BlepLine::default();
-        self.tri = BlepLine::default();
-        self.rect = BlepLine::default();
+        self.saw.clear();
+        self.tri.clear();
+        self.rect.clear();
         self.dec.iter_mut().for_each(Decimator::reset);
         self.ticks = 0;
         self.last_reset = 0.0;
@@ -433,15 +566,138 @@ impl Vco {
         self.guess.unwrap_or(0.0)
     }
 
+    /// Whether the width may move from sample to sample (the plug-in's CONTINUOUS waveform,
+    /// decisions.md R-CONTINUOUS-WAVE): then a new width the ramp has already passed switches
+    /// the comparator at once, as the circuit's does ([`Vco::follow_width`]). Off (the
+    /// instrument's switch, which gives three fixed widths), nothing changes.
+    pub fn set_width_moves(&mut self, on: bool) {
+        self.width_moves = on;
+    }
+
     /// One output sample for a timing current given directly: `i0` at a ramp of 0 V and its
     /// slope `b` per volt (the Early effect). [`Vco::tick`] computes them from the inputs.
     pub fn tick_current(&mut self, i0: f64, b: f64, width: f64) -> VcoOut {
-        let a = i0 - self.core.i_leak;
+        self.tick_net(i0 - self.core.i_leak, b, width)
+    }
+
+    /// One output sample of the oscillator held to a clock (decisions.md R-OSC-TIMED): its
+    /// ramp's slope chosen each sample so that it reaches the threshold, and resets after the
+    /// comparator's delay, as the clock's next cycle starts (`t.phase` reaching 1); the slope
+    /// bent by the converter's Early effect as the circuit's is ([`TIMED_EARLY`]). The
+    /// converter, the pitch inputs and ENTROPY's drift have no part in it. An oscillator
+    /// further from its clock than [`TIMED_TOLERANCE`] is put where the clock is at once, its
+    /// outputs stepped, band-limited, as a reset steps them.
+    pub fn tick_timed(&mut self, t: Timed, width: f64) -> VcoOut {
+        let sample = self.dt * self.oversample as f64;
+        let per = if t.per.is_finite() {
+            t.per.clamp(1e-12, 0.25)
+        } else {
+            1e-12
+        };
+        let period = sample / per;
+        // (Where the clock was as the sample's time began.)
+        let phase = if t.phase.is_finite() {
+            (t.phase - per).rem_euclid(1.0)
+        } else {
+            0.0
+        };
+        // Where its own cycle stands (at its start while the ramp is held at its top or about
+        // to reset), and how far ahead of the clock that is.
+        let at_top = self.reset_in.is_some() || self.hold_left > 0.0;
+        let mut own = if at_top { 0.0 } else { self.ramp_phase(self.v) };
+        let mut ahead = own - phase;
+        ahead -= ahead.round();
+        if ahead.abs() > TIMED_TOLERANCE {
+            self.jump_to(phase, width);
+            own = self.ramp_phase(self.v);
+            ahead = own - phase;
+            ahead -= ahead.round();
+        }
+        // The time left in its cycle, and before its ramp falls again: then the slope that
+        // takes it to the threshold the comparator's delay before the cycle's end.
+        let end = (1.0 - own + ahead) * period;
+        let (from, wait) = match self.reset_in {
+            Some(r) => (self.core.v_top0, r + self.core.t_hold),
+            None => (self.v, self.hold_left),
+        };
+        // (Late, the ramp is sent down at once: the current the converter gives at most.)
+        let run = (end - wait - self.timed_delay).max(1e-6 * sample);
+        let c = self.core.c1 + self.core.c_par;
+        let fall = self.ramp_log(self.core.v_threshold) - self.ramp_log(from);
+        let a = (c * fall / (TIMED_EARLY * run)).clamp(1e-15, TIMING_MAX);
+        let b = TIMED_EARLY * a;
+        self.guess = Some(a + self.core.i_leak);
+        self.timed_delay = self.core.delay_at((a + b * self.core.v_threshold) / c);
+        self.tick_net(a, b, width)
+    }
+
+    /// How far down its ramp the voltage `v` is in a timed ramp's time from the top: the log
+    /// of its distance from the ramp's asymptote under [`TIMED_EARLY`] (the time is this over
+    /// the slope's share of the capacitance).
+    fn ramp_log(&self, v: f64) -> f64 {
+        let k = 1.0 / TIMED_EARLY;
+        crate::ulp::log((self.core.v_top0 + k) / (v + k))
+    }
+
+    /// The share of a timed ramp's time from its top to the threshold that has passed at `v`.
+    fn ramp_phase(&self, v: f64) -> f64 {
+        (self.ramp_log(v) / self.ramp_log(self.core.v_threshold)).clamp(0.0, 1.0)
+    }
+
+    /// Puts the ramp `phase` of the way along a timed ramp's time, at once (a timed
+    /// oscillator's clock jumped): its outputs stepped there, band-limited, the rectangle low
+    /// if the ramp is past its falling edge's threshold; no reset, hold or edge pending.
+    fn jump_to(&mut self, phase: f64, width: f64) {
+        let k = 1.0 / TIMED_EARLY;
+        // (At a cycle's very end, its next start: the ramp at its top.)
+        let f = if phase < 0.999 { phase.max(0.0) } else { 0.0 };
+        let v =
+            (self.core.v_top0 + k) * crate::ulp::exp(-f * self.ramp_log(self.core.v_threshold)) - k;
+        let sh = self.shaper;
+        let (buf0, buf1) = (
+            sh.buf_gain * self.v + sh.buf_offset,
+            sh.buf_gain * v + sh.buf_offset,
+        );
+        if self.outputs[0] {
+            self.saw.step(sh.saw_ratio * (buf1 - buf0), 1.0);
+        }
+        if self.outputs[1] {
+            self.tri.step(triangle(buf1) - triangle(buf0), 1.0);
+        }
+        let (fall_buf, _) = self.rect_thresholds(width);
+        let low = v <= (fall_buf - sh.buf_offset) / sh.buf_gain;
+        if low != self.rect_is_low && self.outputs[2] {
+            let (from, to) = if low {
+                (sh.rect_high, sh.rect_low)
+            } else {
+                (sh.rect_low, sh.rect_high)
+            };
+            self.rect.step(to - from, 1.0);
+        }
+        self.rect_is_low = low;
+        self.v = v;
+        self.hold_left = 0.0;
+        self.reset_in = None;
+        self.rise_in = None;
+        self.fall_in = None;
+    }
+
+    /// One output sample for the ramp's net current `a` at 0 V (the timing current less the
+    /// leakage) and its slope `b` a volt.
+    fn tick_net(&mut self, a: f64, b: f64, width: f64) -> VcoOut {
         let c = self.core.c1 + self.core.c_par;
         let sh = self.shaper;
-        let fall_buf = sh.rect_fall0 + sh.rect_per_width * width;
-        let rise_buf = sh.rect_rise0 + sh.rect_per_width * width;
-        let v_fall = (fall_buf - sh.buf_offset) / sh.buf_gain - sh.rect_fall_overdrive;
+        let (fall_buf, rise_buf) = self.rect_thresholds(width);
+        let overdrive = if self.width_network {
+            0.0
+        } else {
+            sh.rect_fall_overdrive
+        };
+        let v_fall = (fall_buf - sh.buf_offset) / sh.buf_gain - overdrive;
+        if self.width_moves && width != self.last_width && !self.last_width.is_nan() {
+            self.follow_width(v_fall, rise_buf, width, (a + b * self.v) / c);
+        }
+        self.last_width = width;
         let mut out = VcoOut::default();
         for k in 0..self.oversample {
             self.sub = k;
@@ -520,6 +776,10 @@ impl Vco {
             {
                 take(cross(self.v, v_fall).clamp(0.0, left), 6);
             }
+            let v_fold = self.fold.0;
+            if !holding && self.v > v_fold && v_end <= v_fold {
+                take(cross(self.v, v_fold).clamp(0.0, left), 7);
+            }
             // Move everything to it.
             if !holding {
                 self.v = advance(self.v, next);
@@ -535,6 +795,26 @@ impl Vco {
             let frac = (t / dt).clamp(1e-9, 1.0);
             let sh = self.shaper;
             match which {
+                1 => {
+                    // The hold's end: the ramp falls again, at -s1 a sample in the buffer.
+                    let s1 = (a + b * self.v) / c * dt * sh.buf_gain;
+                    let buf = sh.buf_gain * self.v + sh.buf_offset;
+                    if self.outputs[0] {
+                        self.saw.ramp(-sh.saw_ratio * s1, frac);
+                    }
+                    if self.outputs[1] {
+                        self.tri.ramp(-triangle_slope(buf) * s1, frac);
+                    }
+                }
+                7 => {
+                    // The triangle's fold: its slope against the buffer turns there, over
+                    // its width.
+                    self.v = v_fold;
+                    if self.outputs[1] {
+                        let s = (a + b * self.v) / c * dt * sh.buf_gain;
+                        self.tri.fillet(self.fold.1 * s, frac, self.fold.2 / s);
+                    }
+                }
                 2 => {
                     self.reset_in = None;
                     self.do_reset(a, b, c, frac, rise_buf);
@@ -543,14 +823,18 @@ impl Vco {
                     self.rise_in = None;
                     if self.rect_is_low {
                         self.rect_is_low = false;
-                        self.rect.step(sh.rect_high - sh.rect_low, frac);
+                        if self.outputs[2] {
+                            self.rect.step(sh.rect_high - sh.rect_low, frac);
+                        }
                     }
                 }
                 4 => {
                     self.fall_in = None;
                     if !self.rect_is_low {
                         self.rect_is_low = true;
-                        self.rect.step(sh.rect_low - sh.rect_high, frac);
+                        if self.outputs[2] {
+                            self.rect.step(sh.rect_low - sh.rect_high, frac);
+                        }
                     }
                 }
                 5 => {
@@ -560,7 +844,8 @@ impl Vco {
                 }
                 6 => {
                     self.v = v_fall;
-                    self.fall_in = Some(sh.rect_fall_delay);
+                    self.fall_in =
+                        Some(self.rect_falling_delay((a + b * self.v) / c, self.last_width));
                 }
                 _ => {}
             }
@@ -570,18 +855,48 @@ impl Vco {
         }
     }
 
+    /// The comparator against a width that has just moved: the falling ramp already past the
+    /// new falling threshold while the rectangle is high, it falls (after its delay, as from
+    /// a crossing); the buffer above the new rising threshold while it is low, it rises. The
+    /// thresholds otherwise only meet the ramp as it crosses them ([`Vco::step`]) and the
+    /// reset ([`Vco::do_reset`]), which a fixed width needs alone.
+    fn follow_width(&mut self, v_fall: f64, rise_buf: f64, width: f64, slope: f64) {
+        if self.hold_left > 0.0 {
+            return;
+        }
+        let sh = self.shaper;
+        let buf = sh.buf_gain * self.v + sh.buf_offset;
+        if !self.rect_is_low
+            && self.fall_in.is_none()
+            && self.reset_in.is_none()
+            && self.v <= v_fall
+        {
+            self.fall_in = Some(self.rect_falling_delay(slope, width));
+        } else if self.rect_is_low && self.rise_in.is_none() && buf >= rise_buf {
+            self.rise_in = Some(self.rect_rising_delay(width));
+        }
+    }
+
     fn do_reset(&mut self, a: f64, b: f64, c: f64, frac: f64, rise_buf: f64) {
         let sh = self.shaper;
         let slope = (a + b * self.v) / c;
         let v_top = self.core.v_top0 - self.core.top_per_slope * slope;
         let buf0 = sh.buf_gain * self.v + sh.buf_offset;
         let buf1 = sh.buf_gain * v_top + sh.buf_offset;
-        self.saw.step(sh.saw_ratio * (buf1 - buf0), frac);
-        self.saw.impulse(sh.saw_ratio * sh.buf_lag / self.dt, frac);
-        self.tri.step(triangle(buf1) - triangle(buf0), frac);
-        self.tri.impulse(sh.tri_glitch / self.dt, frac);
+        // The ramp stops falling and holds: the buffer's slope (a sample) goes from -s0 to 0.
+        let s0 = slope * self.dt * sh.buf_gain;
+        if self.outputs[0] {
+            self.saw.ramp(sh.saw_ratio * s0, frac);
+            self.saw.step(sh.saw_ratio * (buf1 - buf0), frac);
+            self.saw.impulse(sh.saw_ratio * sh.buf_lag / self.dt, frac);
+        }
+        if self.outputs[1] {
+            self.tri.ramp(triangle_slope(buf0) * s0, frac);
+            self.tri.step(triangle(buf1) - triangle(buf0), frac);
+            self.tri.impulse(sh.tri_glitch / self.dt, frac);
+        }
         if self.rect_is_low && buf1 >= rise_buf {
-            self.rise_in = Some(sh.rect_rise_delay);
+            self.rise_in = Some(self.rect_rising_delay(self.last_width));
         }
         // A fall still pending when the ramp resets is overtaken by the reset.
         self.fall_in = None;

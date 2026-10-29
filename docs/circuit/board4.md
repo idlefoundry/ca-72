@@ -144,7 +144,8 @@ the first pair's emitters), so the gain peaks at 5 V (+1.9 dB) and falls slightl
    output with R57 10K to -10 V. R61 200K (232K in the model: B4-8) against R62 1K,
    AC-grounded by C26 220 uF, and R63 1K close the loop on Q32's base (C21 10 pF): a gain of
    201 (233) in the audio band, 1 at DC. In ngspice from a 100K source: 37.7 dB (38.7), within 1 dB of flat from 100 Hz to 20 kHz
-   (-0.9 dB at 20 kHz, -4 dB at 50 kHz). It clips at about -7.3 and +9.9 V.
+   (-0.9 dB at 20 kHz, -4 dB at 50 kHz). It clips at about -7.3 and +9.9 V (+12.9 in the model:
+   B4-11).
 3. **The lamp driver**: Q25 (2N3392, R53 10K from the output) charges C14 .47 uF with the
    output's positive peaks; R56 100K and R48 680K divide it toward -10 V onto Q31 (TIS93),
    which follows into Q34 (TIS92), sinking the lamp B1 (from +15 V, pin 19) through R72 47
@@ -271,6 +272,21 @@ hardware reference's RANGE sits: 0.31 octave higher at a given control voltage
   and Q18's tail at full SUSTAIN 2 % higher, the 3rd harmonic of a driven VCA with it
   (docs/calibration, change 31). With EXT. LOUDNESS overdriven to 9 V and the contour at 2 V,
   ngspice now runs Q21 backwards by 1.8 uA while the VCA is off; the real-time tail stays 0.
+- **B4-11** (2026-10-23) C23 is 82 nF in the model, not the drawing's .1 uF, and the
+  preamplifier's positive supply (p10: Q32's collector, Q33's emitter, R65, C22) is +13 V,
+  not +10: the hardware reference's FEEDBACK loop alone (comparison session-001, round 053:
+  EXT. INPUT VOLUME 10, the oscillators and noise off, the internal return, A4 held) runs at
+  56.1 Hz falling to 55.5 within a second, its 2nd, 4th and 6th harmonics -10, -12 and -17
+  dB, the 3rd and 5th -15 and -30. The drawn circuit's ran at 50.9 Hz (-150 cents), its odd
+  harmonics stronger (H2 -14, H3 -11, H5 -20). The loop runs as a relaxation oscillator: its
+  rate follows C23 (0.8 of it, +150 cents; C20 and C26 a few cents), its even harmonics the
+  clip's asymmetry (the negative limit, -7.3 V, set by R57 against the load; both supplies
+  scaled together change nothing). 82 nF (E12) and +13 V leave the rate within -26 to +9
+  cents of the reference's over the hold, the harmonics within 2.3 dB RMS (6.9 before); R57
+  doubled matched the harmonics only half as well and moved the rate the other way. The
+  preamplifier now clips at +12.9 and -7.24 V (+9.9 and -7.3); its small-signal gain is
+  unchanged, and its input's high-pass at EXT. INPUT VOLUME 10 moves from 16 to 19 Hz. One
+  take, of a reference whose preamplifier is not this circuit (docs/calibration, change 34).
 - **B4-HP** (2026-10-09) FILTER MODE, which the original does not have: the hardware
   reference's switch (decisions.md R46). At HI the VCA takes the mixer's output less the
   filter's in place of the filter's: the bus's Norton current through 23.6K (the filter's

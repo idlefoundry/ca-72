@@ -9,12 +9,14 @@ use std::sync::{Arc, RwLock};
 use ca72::freq_dial::{DIAL_END, Law, Pot};
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::tuning::Range;
-use ca72::voice::{ContourKnobs, OscPanel, Panel, Priority, Quality, Waveform};
+use ca72::voice::{
+    ContourKnobs, ModDirection, OscPanel, Panel, Priority, Quality, Shape, Waveform,
+};
 use nih_plug::prelude::*;
 
 use crate::character::Placement;
 use crate::drive::Calibration;
-use crate::engine::{Controls, DOUBLE_CENTS, DRIVE_TOP, LEVEL_RANGE, POLY_VOICES};
+use crate::engine::{Controls, DOUBLE_CENTS, DRIVE_TOP, LEVEL_RANGE, POLY_VOICES, Reach};
 use crate::learn::MidiMap;
 
 /// RANGE's positions.
@@ -153,6 +155,192 @@ pub enum NoiseColor {
     Pink,
 }
 
+/// An oscillator's waveform (decisions.md R-CONTINUOUS-WAVE): STEPPED, the WAVEFORM switch as
+/// the instrument has it; CONTINUOUS, which the original does not have, the switch turned
+/// without steps through every shape, each blending into the next, and on to the narrowest
+/// pulse, with MOD.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaveMode {
+    #[id = "stepped"]
+    #[name = "Stepped"]
+    Stepped,
+    #[id = "continuous"]
+    #[name = "Continuous"]
+    Continuous,
+}
+
+/// GLIDE's range (decisions.md R-GLIDE-LONG): the circuit's hold capacitor, or five times it.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlideRange {
+    #[id = "normal"]
+    #[name = "Normal"]
+    Normal,
+    #[id = "long"]
+    #[name = "Long (×5)"]
+    Long,
+}
+
+/// Which way MOD moves a CONTINUOUS shape from its switch (its key Command-clicked).
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShapeModDirection {
+    #[id = "clockwise"]
+    #[name = "Clockwise"]
+    Clockwise,
+    #[id = "anticlockwise"]
+    #[name = "Anticlockwise"]
+    Anticlockwise,
+    #[id = "both"]
+    #[name = "Both Ways"]
+    Both,
+}
+
+impl From<ShapeModDirection> for ModDirection {
+    fn from(d: ShapeModDirection) -> ModDirection {
+        match d {
+            ShapeModDirection::Clockwise => ModDirection::Onward,
+            ShapeModDirection::Anticlockwise => ModDirection::Back,
+            ShapeModDirection::Both => ModDirection::Both,
+        }
+    }
+}
+
+/// The names of oscillator `n`'s (0 to 2) four places before the rectangle's stretch:
+/// oscillator 3's second and third its reverse shark tooth and reverse sawtooth in CONTINUOUS.
+pub fn shape_names(n: usize) -> [&'static str; 4] {
+    if n == 2 {
+        [
+            "Triangle",
+            "Reverse Shark Tooth",
+            "Reverse Sawtooth",
+            "Square",
+        ]
+    } else {
+        ["Triangle", "Shark Tooth", "Sawtooth", "Square"]
+    }
+}
+
+/// Oscillator `n`'s CONTINUOUS shape at `t` of its travel, as the host and the panel's tip show
+/// it: a place's name ("Sawtooth"); between two, both and how far ("Sawtooth to Square 40 %");
+/// past SQUARE the rectangle's duty cycle, named at the switch's own three ("Wide Rectangle"
+/// with its current circuit duty, or "Rectangle 24 %" between the places).
+pub fn shape_text(n: usize, t: f64) -> String {
+    use ca72::voice::{SHAPE_PLACES, shape_at, shape_bias};
+    let at = shape_at(
+        Shape {
+            continuous: true,
+            at: t.clamp(0.0, 1.0) * SHAPE_PLACES,
+            modulated: false,
+            direction: ModDirection::Onward,
+        },
+        Default::default(),
+    );
+    let names = shape_names(n);
+    if at >= 3.0 {
+        let duty = (100.0 * ca72::voice::rect_duty(shape_bias(at))).round();
+        let name = [
+            (3.0, "Square"),
+            (4.0, "Wide Rectangle"),
+            (5.0, "Narrow Rectangle"),
+        ]
+        .iter()
+        .find(|(place, _)| *place == at)
+        .map_or("Rectangle", |(_, name)| *name);
+        return format!("{name} {duty:.0} %");
+    }
+    let k = at.floor() as usize;
+    if at == k as f64 {
+        return names[k].to_owned();
+    }
+    let share = (100.0 * (at - k as f64)).round();
+    format!("{} to {} {share:.0} %", names[k], names[k + 1])
+}
+
+/// The travel at which the rectangle's duty cycle is `d` (held to the rectangle's stretch).
+pub fn travel_at_duty(d: f64) -> f64 {
+    use ca72::voice::{SHAPE_PLACES, rect_duty, shape_bias};
+    // (The duty falls as the travel goes on: a bisection.)
+    let (mut lo, mut hi) = (3.0, SHAPE_PLACES);
+    for _ in 0..40 {
+        let mid = 0.5 * (lo + hi);
+        if rect_duty(shape_bias(mid)) > d {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi) / SHAPE_PLACES
+}
+
+/// Inverse of the waveform's displayed names, blends and rectangle duties. Shared by
+/// oscillator and LFO host parameters; numeric input retains its existing duty-percent units.
+pub(crate) fn parse_shape_text(n: usize, text: &str) -> Option<f32> {
+    let s = text.trim().to_ascii_lowercase();
+    let names = shape_names(n).map(str::to_ascii_lowercase);
+    let places = ca72::voice::SHAPE_PLACES;
+    // Rounded blend endpoints and rectangle duties may coincide with a named place.
+    // Pick a representative inside that display bin so text -> value -> text is stable.
+    let displayed = |guess: f64| {
+        [0.0, 0.002, -0.002, 0.004, -0.004]
+            .into_iter()
+            .map(|offset| (guess + offset / places).clamp(0.0, 1.0) as f32)
+            .find(|v| shape_text(n, f64::from(*v)).eq_ignore_ascii_case(&s))
+            .unwrap_or(guess as f32)
+    };
+    let percent = |text: &str| {
+        text.trim_end_matches('%')
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && (0.0..=100.0).contains(v))
+    };
+    if let Some(k) = names.iter().position(|name| *name == s) {
+        return Some((k as f64 / places) as f32);
+    }
+    for k in 0..3 {
+        let prefix = format!("{} to {} ", names[k], names[k + 1]);
+        if let Some(share) = s.strip_prefix(&prefix) {
+            return percent(share).map(|v| displayed((k as f64 + v / 100.0) / places));
+        }
+    }
+    for (name, at) in [("wide rectangle", 4.0), ("narrow rectangle", 5.0)] {
+        if s == name {
+            return Some((at / places) as f32);
+        }
+    }
+    for (name, at) in [
+        ("square ", 3.0),
+        ("wide rectangle ", 4.0),
+        ("narrow rectangle ", 5.0),
+        ("rectangle ", 3.0),
+    ] {
+        if let Some(duty) = s.strip_prefix(name) {
+            return percent(duty).map(|v| {
+                let named = (at / places) as f32;
+                if shape_text(n, f64::from(named)).eq_ignore_ascii_case(&s) {
+                    named
+                } else {
+                    displayed(travel_at_duty(v / 100.0))
+                }
+            });
+        }
+    }
+    percent(&s).map(|v| travel_at_duty(v / 100.0) as f32)
+}
+
+/// Oscillator `n`'s CONTINUOUS shape: its travel, 0 (TRIANGLE) to 1 (the narrowest pulse), at
+/// SAWTOOTH to begin with, as WAVEFORM is; shown by [`shape_text`]; a place's name, or a duty
+/// cycle ("30 %"), typed.
+fn shape_param(name: &str, n: usize) -> FloatParam {
+    let places = ca72::voice::SHAPE_PLACES;
+    FloatParam::new(
+        name,
+        (2.0 / places) as f32,
+        FloatRange::Linear { min: 0.0, max: 1.0 },
+    )
+    .with_value_to_string(std::sync::Arc::new(move |t| shape_text(n, f64::from(t))))
+    .with_string_to_value(std::sync::Arc::new(move |s| parse_shape_text(n, s)))
+}
+
 /// FILTER MODE, which the original does not have (decisions.md R46): LO, the filter as
 /// drawn; HI, the hardware reference's high-pass (the mixer's output less the filter's).
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,12 +396,160 @@ impl From<NotePriority> for Priority {
     }
 }
 
+/// The arpeggiator's DIRECTION (decisions.md R-ARP): UP, DOWN, UP/DOWN, RANDOM or ORDER, the
+/// drawer's tabs left to right (ORDER the last, so that the others keep their saved values).
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArpDirection {
+    #[id = "up"]
+    #[name = "UP"]
+    Up,
+    #[id = "down"]
+    #[name = "DOWN"]
+    Down,
+    #[id = "up_down"]
+    #[name = "UP/DOWN"]
+    UpDown,
+    #[id = "random"]
+    #[name = "RANDOM"]
+    Random,
+    #[id = "order"]
+    #[name = "ORDER"]
+    Order,
+}
+
+impl From<ArpDirection> for crate::arp::Direction {
+    fn from(d: ArpDirection) -> crate::arp::Direction {
+        match d {
+            ArpDirection::Up => crate::arp::Direction::Up,
+            ArpDirection::Down => crate::arp::Direction::Down,
+            ArpDirection::UpDown => crate::arp::Direction::UpDown,
+            ArpDirection::Random => crate::arp::Direction::Random,
+            ArpDirection::Order => crate::arp::Direction::Order,
+        }
+    }
+}
+
+/// The arpeggiator's RATE (decisions.md R-ARP): a note value, slow to fast as its dial turns,
+/// each straight value's dotted and triplet ones between it and the next
+/// (`crate::arp::RATES`, in the same order).
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArpRate {
+    #[id = "1/2"]
+    #[name = "1/2"]
+    Half,
+    #[id = "1/4d"]
+    #[name = "1/4 dotted"]
+    QuarterDotted,
+    #[id = "1/2t"]
+    #[name = "1/2 triplet"]
+    HalfTriplet,
+    #[id = "1/4"]
+    #[name = "1/4"]
+    Quarter,
+    #[id = "1/8d"]
+    #[name = "1/8 dotted"]
+    EighthDotted,
+    #[id = "1/4t"]
+    #[name = "1/4 triplet"]
+    QuarterTriplet,
+    #[id = "1/8"]
+    #[name = "1/8"]
+    Eighth,
+    #[id = "1/16d"]
+    #[name = "1/16 dotted"]
+    SixteenthDotted,
+    #[id = "1/8t"]
+    #[name = "1/8 triplet"]
+    EighthTriplet,
+    #[id = "1/16"]
+    #[name = "1/16"]
+    Sixteenth,
+    #[id = "1/32d"]
+    #[name = "1/32 dotted"]
+    ThirtySecondDotted,
+    #[id = "1/16t"]
+    #[name = "1/16 triplet"]
+    SixteenthTriplet,
+    #[id = "1/32"]
+    #[name = "1/32"]
+    ThirtySecond,
+}
+
+/// An oscillator's DIVISION, timed (decisions.md R-OSC-TIMED): its cycle a note value, slow to
+/// fast as its dial turns, 4, 2 and 1 bars, then each straight value's dotted and triplet ones
+/// between it and the next (`crate::timed::DIVISIONS`, in the same order); its ids the
+/// arpeggiator's RATE's form.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Division {
+    #[id = "4bars"]
+    #[name = "4 bars"]
+    FourBars,
+    #[id = "2bars"]
+    #[name = "2 bars"]
+    TwoBars,
+    #[id = "1bar"]
+    #[name = "1 bar"]
+    Bar,
+    #[id = "1/2d"]
+    #[name = "1/2 dotted"]
+    HalfDotted,
+    #[id = "1/1t"]
+    #[name = "1/1 triplet"]
+    WholeTriplet,
+    #[id = "1/2"]
+    #[name = "1/2"]
+    Half,
+    #[id = "1/4d"]
+    #[name = "1/4 dotted"]
+    QuarterDotted,
+    #[id = "1/2t"]
+    #[name = "1/2 triplet"]
+    HalfTriplet,
+    #[id = "1/4"]
+    #[name = "1/4"]
+    Quarter,
+    #[id = "1/8d"]
+    #[name = "1/8 dotted"]
+    EighthDotted,
+    #[id = "1/4t"]
+    #[name = "1/4 triplet"]
+    QuarterTriplet,
+    #[id = "1/8"]
+    #[name = "1/8"]
+    Eighth,
+    #[id = "1/16d"]
+    #[name = "1/16 dotted"]
+    SixteenthDotted,
+    #[id = "1/8t"]
+    #[name = "1/8 triplet"]
+    EighthTriplet,
+    #[id = "1/16"]
+    #[name = "1/16"]
+    Sixteenth,
+    #[id = "1/32d"]
+    #[name = "1/32 dotted"]
+    ThirtySecondDotted,
+    #[id = "1/16t"]
+    #[name = "1/16 triplet"]
+    SixteenthTriplet,
+    #[id = "1/32"]
+    #[name = "1/32"]
+    ThirtySecond,
+}
+
+/// The arpeggiator's OCTAVES: 1 to 5 (the owner, 2026-10-19: "let's add 5 octaves as an
+/// option"; a value saved as 1 to 4 is the same octaves still, saved plain).
+pub const ARP_OCTAVES: (i32, i32) = (1, crate::arp::MOST_OCTAVES as i32);
+
 #[derive(Params)]
 pub struct Ca72Params {
     /// The noise generator's seed, saved with the session so that it renders the same noise
     /// again.
     #[persist = "noise_seed"]
     pub noise_seed: Arc<AtomicU64>,
+    /// The standalone's TEMPO (beats a minute, f64 bits; decisions.md R-ARP), this computer's
+    /// (`settings.rs`), the arpeggiator's while the host gives none.
+    pub tempo: Arc<AtomicU64>,
     /// The editor's width in logical pixels (its height follows the panel's proportions); 0
     /// until it is resized, when it opens at a share of the screen.
     #[persist = "editor_width"]
@@ -233,6 +569,9 @@ pub struct Ca72Params {
     /// with the session, so the bar names it again.
     #[persist = "preset"]
     pub preset: Arc<RwLock<String>>,
+    /// The selected preset’s opaque effects, carried through plug-in sessions (R-FX-PRESETS).
+    #[persist = "preset_effects"]
+    pub preset_effects: Arc<RwLock<Option<String>>>,
     /// The MIDI controllers assigned to parameters by MIDI Learn, and the learning (decisions.md
     /// R34): saved with the session (`crate::learn::Saved`), not with a sound preset.
     #[persist = "midi_map"]
@@ -247,6 +586,37 @@ pub struct Ca72Params {
     /// R54): 0 a semitone a mark, 1 the hardware's. Not the session's: a learned
     /// controller turns the knob through it ([`Ca72Params::freq_law`]).
     pub freq_law: Arc<AtomicU8>,
+    /// Where MPE's zones come from on this computer (`settings.rs`, `expression::Mode`;
+    /// decisions.md R-MPE). Not the session's.
+    pub mpe: Arc<AtomicU8>,
+    /// Where a timbre rests on this computer (`settings.rs`, `expression::TimbreRest`;
+    /// decisions.md R-MPE), read by the audio thread each block. Not the session's.
+    pub timbre_rest: Arc<AtomicU8>,
+    /// What expression has arrived, per note and on ordinary channels, counted by the audio
+    /// thread for the editor's INPUT screen (`expression::Heard`; R-MPE). Not the
+    /// session's.
+    pub heard: Arc<crate::expression::Heard>,
+
+    /// The knobs' values a preset or Init is setting, marked so the voices take them at once
+    /// instead of gliding there (`crate::smooth`; decisions.md R-KNOB-GLIDE). Not the session's.
+    pub lands: crate::smooth::Lands,
+
+    /// The LFOs' assignments and EDGES (decisions.md R-LFO): the patch's, saved with the session
+    /// and with presets (`lfoN_to_<target>`, `lfoN_edges`), not host parameters. A session or
+    /// a preset saved before has none (`Ca72::filter_state`, `presets::targets`).
+    #[persist = "lfo"]
+    pub lfo_patch: Arc<crate::lfo::Patch>,
+    /// Each LFO's present value and phase from the audio thread, for the editor (R-LFO). Not
+    /// the session's.
+    pub lfo_scope: Arc<crate::lfo::Scope>,
+    /// Whether this is the standalone application (its host's API, told at initialisation and
+    /// every block; a plug-in until then): its TEMPO a modulation target there alone
+    /// (`lfo::Target::Tempo`, decisions.md R-LFO), the plug-ins following their host's.
+    pub standalone: Arc<AtomicBool>,
+    /// TEMPO's travel as a knob's (`TEMPO_RANGE`, straight along it), for its modulation's
+    /// depths (a share of its travel: `lfo::Target::Tempo`). Not a host parameter: never
+    /// registered, its value never read.
+    pub tempo_knob: FloatParam,
 
     /// POWER off: the host's bypass, the output faded out.
     #[id = "bypass"]
@@ -449,6 +819,215 @@ pub struct Ca72Params {
     /// preset's, as NOTE PRIORITY. After it: a session or a preset saved before reads it off.
     #[id = "retrigger"]
     pub retrigger: BoolParam,
+
+    // The arpeggiator (decisions.md R-ARP), the plug-in's own, after everything else, so that
+    // no parameter before it moves. A preset's, as any sound parameter: a preset or a session
+    // saved before reads it off (`Ca72::filter_state`, `presets::targets`).
+    /// ON: the keys held played in turn (off: as played).
+    #[id = "arp_on"]
+    pub arp_on: BoolParam,
+    /// LATCH: the chord last played kept playing after its keys are let go.
+    #[id = "arp_latch"]
+    pub arp_latch: BoolParam,
+    #[id = "arp_direction"]
+    pub arp_direction: EnumParam<ArpDirection>,
+    #[id = "arp_rate"]
+    pub arp_rate: EnumParam<ArpRate>,
+    #[id = "arp_octaves"]
+    pub arp_octaves: IntParam,
+    /// GATE: each note's length, a share of what its step leaves between the shortest note and
+    /// the shortest gap ([`crate::arp::SHORTEST`], [`crate::arp::REARM`]).
+    #[id = "arp_gate"]
+    pub arp_gate: FloatParam,
+    /// SWING: every second step late, up to three quarters of the way through the pair.
+    #[id = "arp_swing"]
+    pub arp_swing: FloatParam,
+
+    // Each note's own pressure and timbre (MPE's, a host's note expressions, or every voice's
+    // alike from channel pressure and control change 74) moving its voice (decisions.md
+    // R-MPE), the plug-in's own, after everything else. A preset's, as any sound parameter: a
+    // preset or a session saved before reads them 0, not at all (`Ca72::filter_state`,
+    // `presets::targets`).
+    /// PRESSURE's reach on the voice's MODULATION wheel, -100 to 100 %: at 100 %, full pressure
+    /// moves it as a keyboard's wheel pushed fully forward does.
+    #[id = "pressure_mod"]
+    pub pressure_mod: FloatParam,
+    /// PRESSURE's reach on the voice's filter's cutoff, octaves at full pressure.
+    #[id = "pressure_filter"]
+    pub pressure_filter: FloatParam,
+    /// TIMBRE's (MPE's slide, control change 74) on the voice's MODULATION wheel.
+    #[id = "timbre_mod"]
+    pub timbre_mod: FloatParam,
+    /// TIMBRE's on the voice's filter's cutoff, octaves at its top.
+    #[id = "timbre_filter"]
+    pub timbre_filter: FloatParam,
+    // The oscillators timed (decisions.md R-OSC-TIMED), the plug-in's own, after the
+    // arpeggiator's, so that no parameter before them moves. A preset's, as any sound
+    // parameter: a preset or a session saved before reads them off (`Ca72::filter_state`,
+    // `presets::targets`).
+    /// Oscillators 2's and 3's TIMED (oscillator 1 has no FREQUENCY to turn into note values:
+    /// the owner): at its RANGE's LO, its cycle its DIVISION of the host's tempo, its resets on
+    /// the host's beats and bars, its FREQUENCY keeping its own place for when it is off; at
+    /// any other RANGE, nothing. DIVISION: the cycle's note value, a parameter of its own (not
+    /// FREQUENCY's knob read otherwise): stepped, so that automation and presets name a value,
+    /// never a place between two.
+    #[id = "osc2_timed"]
+    pub osc2_timed: BoolParam,
+    #[id = "osc2_division"]
+    pub osc2_division: EnumParam<Division>,
+    #[id = "osc3_timed"]
+    pub osc3_timed: BoolParam,
+    #[id = "osc3_division"]
+    pub osc3_division: EnumParam<Division>,
+    // Each oscillator's waveform (decisions.md R-CONTINUOUS-WAVE), the plug-in's own, after
+    // everything else, so that no parameter before it moves: STEPPED or CONTINUOUS (WAVEFORM's
+    // menu), CONTINUOUS's shape (the switch turned), its MOD key and MOD's direction (the key
+    // Command-clicked). A preset's, as any sound parameter; a preset or a session saved before
+    // reads STEPPED.
+    #[id = "osc1_shape_mode"]
+    pub osc1_shape_mode: EnumParam<WaveMode>,
+    #[id = "osc1_shape"]
+    pub osc1_shape: FloatParam,
+    #[id = "osc1_shape_mod"]
+    pub osc1_shape_mod: BoolParam,
+    #[id = "osc1_shape_mod_dir"]
+    pub osc1_shape_mod_dir: EnumParam<ShapeModDirection>,
+    #[id = "osc2_shape_mode"]
+    pub osc2_shape_mode: EnumParam<WaveMode>,
+    #[id = "osc2_shape"]
+    pub osc2_shape: FloatParam,
+    #[id = "osc2_shape_mod"]
+    pub osc2_shape_mod: BoolParam,
+    #[id = "osc2_shape_mod_dir"]
+    pub osc2_shape_mod_dir: EnumParam<ShapeModDirection>,
+    #[id = "osc3_shape_mode"]
+    pub osc3_shape_mode: EnumParam<WaveMode>,
+    #[id = "osc3_shape"]
+    pub osc3_shape: FloatParam,
+    #[id = "osc3_shape_mod"]
+    pub osc3_shape_mod: BoolParam,
+    #[id = "osc3_shape_mod_dir"]
+    pub osc3_shape_mod_dir: EnumParam<ShapeModDirection>,
+    #[id = "glide_range"]
+    pub glide_range: EnumParam<GlideRange>,
+    // The four LFOs (decisions.md R-LFO), the plug-in's own, after everything else, so that no
+    // parameter before them moves: `lfo1_waveform` to `lfo4_mono`. A preset's, as any sound
+    // parameter; a preset or a session saved before reads each at its default, none
+    // assigned, so none of them does anything.
+    #[nested(id_prefix = "lfo1", group = "LFO 1")]
+    pub lfo1: crate::lfo::LfoParams,
+    #[nested(id_prefix = "lfo2", group = "LFO 2")]
+    pub lfo2: crate::lfo::LfoParams,
+    #[nested(id_prefix = "lfo3", group = "LFO 3")]
+    pub lfo3: crate::lfo::LfoParams,
+    #[nested(id_prefix = "lfo4", group = "LFO 4")]
+    pub lfo4: crate::lfo::LfoParams,
+    // The six macros (decisions.md R-MACROS), after the LFOs, so that no parameter before them
+    // moves: 0 to 100 %, named MACRO 1 to MACRO 6 in the host whatever their typed names. A
+    // preset or a session saved before has each at 0, none assigned.
+    #[id = "macro1"]
+    pub macro1: FloatParam,
+    #[id = "macro2"]
+    pub macro2: FloatParam,
+    #[id = "macro3"]
+    pub macro3: FloatParam,
+    #[id = "macro4"]
+    pub macro4: FloatParam,
+    #[id = "macro5"]
+    pub macro5: FloatParam,
+    #[id = "macro6"]
+    pub macro6: FloatParam,
+    // Each LFO's POLARITY, REVERSE and ON (decisions.md R-LFO's corrections), after the macros,
+    // so that no parameter before them moves: `lfo1_polarity` to `lfo4_on`. A preset or a
+    // session saved before reads BI, not reversed and ON.
+    #[nested(id_prefix = "lfo1", group = "LFO 1")]
+    pub lfo1_keys: crate::lfo::LfoKeys,
+    #[nested(id_prefix = "lfo2", group = "LFO 2")]
+    pub lfo2_keys: crate::lfo::LfoKeys,
+    #[nested(id_prefix = "lfo3", group = "LFO 3")]
+    pub lfo3_keys: crate::lfo::LfoKeys,
+    #[nested(id_prefix = "lfo4", group = "LFO 4")]
+    pub lfo4_keys: crate::lfo::LfoKeys,
+    // Each LFO's LEVEL (decisions.md R-LFO's addendum), after everything, so that no parameter
+    // before it moves: `lfo1_level` to `lfo4_level`. A preset or a session saved before reads
+    // 100 %.
+    #[nested(id_prefix = "lfo1", group = "LFO 1")]
+    pub lfo1_level: crate::lfo::LfoLevel,
+    #[nested(id_prefix = "lfo2", group = "LFO 2")]
+    pub lfo2_level: crate::lfo::LfoLevel,
+    #[nested(id_prefix = "lfo3", group = "LFO 3")]
+    pub lfo3_level: crate::lfo::LfoLevel,
+    #[nested(id_prefix = "lfo4", group = "LFO 4")]
+    pub lfo4_level: crate::lfo::LfoLevel,
+    // The velocity's response (decisions.md R-VELOCITY), after everything, so that no parameter
+    // before it moves. A preset's, as any sound parameter: a preset or a session saved before
+    // reads a straight line from 0 (`Ca72::filter_state`, `presets::targets`).
+    /// CURVE: -100 % (SOFT: light notes give more) to 100 % (HARD: they give less), 0 a
+    /// straight line ([`crate::lfo::Response`]).
+    #[id = "velocity_curve"]
+    pub velocity_curve: FloatParam,
+    /// FLOOR: the least the velocity gives, the softest note's, 0 to 100 %.
+    #[id = "velocity_floor"]
+    pub velocity_floor: FloatParam,
+}
+
+/// The velocity's CURVE, -100 (SOFT) to 100 % (HARD), 0 by default.
+fn velocity_curve() -> FloatParam {
+    FloatParam::new(
+        "Velocity Curve",
+        0.0,
+        FloatRange::Linear {
+            min: -100.0,
+            max: 100.0,
+        },
+    )
+    .with_unit(" %")
+    .with_value_to_string(formatters::v2s_f32_rounded(0))
+}
+
+/// The velocity's FLOOR, 0 to 100 %, 0 by default.
+fn velocity_floor() -> FloatParam {
+    FloatParam::new(
+        "Velocity Floor",
+        0.0,
+        FloatRange::Linear {
+            min: 0.0,
+            max: 100.0,
+        },
+    )
+    .with_unit(" %")
+    .with_value_to_string(formatters::v2s_f32_rounded(0))
+}
+
+/// How far PRESSURE and TIMBRE move a voice's cutoff at most, either way, octaves.
+pub const REACH_OCTAVES: f32 = 4.0;
+
+/// A reach on the MODULATION wheel, -100 to 100 %, 0 by default.
+fn reach_mod(name: &str) -> FloatParam {
+    FloatParam::new(
+        name,
+        0.0,
+        FloatRange::Linear {
+            min: -100.0,
+            max: 100.0,
+        },
+    )
+    .with_unit(" %")
+    .with_value_to_string(formatters::v2s_f32_rounded(0))
+}
+
+/// A reach on the cutoff, octaves either way, 0 by default.
+fn reach_filter(name: &str) -> FloatParam {
+    FloatParam::new(
+        name,
+        0.0,
+        FloatRange::Linear {
+            min: -REACH_OCTAVES,
+            max: REACH_OCTAVES,
+        },
+    )
+    .with_unit(" octaves")
+    .with_value_to_string(formatters::v2s_f32_rounded(2))
 }
 
 /// DOUBLE on at DETUNE's 0, as the engine is told it: a share of DETUNE's travel so small that
@@ -565,6 +1144,7 @@ impl Default for Ca72Params {
     fn default() -> Self {
         Ca72Params {
             noise_seed: Arc::new(AtomicU64::new(fresh_seed())),
+            tempo: Arc::new(AtomicU64::new(DEFAULT_TEMPO.to_bits())),
             editor_width: Arc::new(AtomicU32::new(0)),
             editor_panel: Arc::new(AtomicBool::new(true)),
             editor_expanded: Arc::new(AtomicBool::new(true)),
@@ -572,8 +1152,29 @@ impl Default for Ca72Params {
             editor_presets: Arc::new(AtomicBool::new(false)),
             editor_resizing: Arc::default(),
             preset: Arc::new(RwLock::new(String::new())),
-            midi_map: Arc::new(MidiMap::default()),
+            preset_effects: Arc::new(RwLock::new(None)),
+            midi_map: Arc::new(if cfg!(test) {
+                MidiMap::default()
+            } else {
+                MidiMap::for_computer()
+            }),
             freq_law: Arc::new(AtomicU8::new(0)),
+            mpe: Arc::new(AtomicU8::new(0)),
+            timbre_rest: Arc::new(AtomicU8::new(0)),
+            heard: Arc::default(),
+
+            lands: crate::smooth::Lands::default(),
+            lfo_patch: Arc::default(),
+            lfo_scope: Arc::default(),
+            standalone: Arc::new(AtomicBool::new(false)),
+            tempo_knob: FloatParam::new(
+                "Tempo",
+                DEFAULT_TEMPO as f32,
+                FloatRange::Linear {
+                    min: TEMPO_RANGE.0 as f32,
+                    max: TEMPO_RANGE.1 as f32,
+                },
+            ),
             drive_curve: Calibration::default(),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             tune: dial("Tune", -2.5, 2.5, 0.0),
@@ -699,6 +1300,81 @@ impl Default for Ca72Params {
             quality: EnumParam::new("Quality", QualityMode::Lo),
             note_priority: EnumParam::new("Note Priority", NotePriority::Low),
             retrigger: BoolParam::new("Retrigger", false),
+            arp_on: BoolParam::new("Arp", false),
+            // (HOLD, once LATCH: the owner, 2026-10-19; its id kept, so that what was saved
+            // loads.)
+            arp_latch: BoolParam::new("Arp Hold", false),
+            arp_direction: EnumParam::new("Arp Direction", ArpDirection::Up),
+            arp_rate: EnumParam::new("Arp Rate", ArpRate::Sixteenth),
+            arp_octaves: IntParam::new(
+                "Arp Octaves",
+                1,
+                IntRange::Linear {
+                    min: ARP_OCTAVES.0,
+                    max: ARP_OCTAVES.1,
+                },
+            ),
+            arp_gate: FloatParam::new(
+                "Arp Gate",
+                50.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 100.0,
+                },
+            )
+            .with_unit(" %")
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
+            arp_swing: percent("Arp Swing"),
+            pressure_mod: reach_mod("Pressure to Modulation"),
+            pressure_filter: reach_filter("Pressure to Filter"),
+            timbre_mod: reach_mod("Timbre to Modulation"),
+            timbre_filter: reach_filter("Timbre to Filter"),
+            osc2_timed: BoolParam::new("Osc 2 Timed", false),
+            osc2_division: EnumParam::new("Osc 2 Division", Division::Quarter),
+            osc3_timed: BoolParam::new("Osc 3 Timed", false),
+            osc3_division: EnumParam::new("Osc 3 Division", Division::Quarter),
+            osc1_shape_mode: EnumParam::new("Osc 1 Waveform Mode", WaveMode::Stepped),
+            osc1_shape: shape_param("Osc 1 Shape", 0),
+            osc1_shape_mod: BoolParam::new("Osc 1 Shape Mod", false),
+            osc1_shape_mod_dir: EnumParam::new(
+                "Osc 1 Shape Mod Direction",
+                ShapeModDirection::Clockwise,
+            ),
+            osc2_shape_mode: EnumParam::new("Osc 2 Waveform Mode", WaveMode::Stepped),
+            osc2_shape: shape_param("Osc 2 Shape", 1),
+            osc2_shape_mod: BoolParam::new("Osc 2 Shape Mod", false),
+            osc2_shape_mod_dir: EnumParam::new(
+                "Osc 2 Shape Mod Direction",
+                ShapeModDirection::Clockwise,
+            ),
+            osc3_shape_mode: EnumParam::new("Osc 3 Waveform Mode", WaveMode::Stepped),
+            osc3_shape: shape_param("Osc 3 Shape", 2),
+            osc3_shape_mod: BoolParam::new("Osc 3 Shape Mod", false),
+            osc3_shape_mod_dir: EnumParam::new(
+                "Osc 3 Shape Mod Direction",
+                ShapeModDirection::Clockwise,
+            ),
+            glide_range: EnumParam::new("Glide Range", GlideRange::Normal),
+            lfo1: crate::lfo::LfoParams::new(1),
+            lfo2: crate::lfo::LfoParams::new(2),
+            lfo3: crate::lfo::LfoParams::new(3),
+            lfo4: crate::lfo::LfoParams::new(4),
+            macro1: crate::lfo::macro_param(1),
+            macro2: crate::lfo::macro_param(2),
+            macro3: crate::lfo::macro_param(3),
+            macro4: crate::lfo::macro_param(4),
+            macro5: crate::lfo::macro_param(5),
+            macro6: crate::lfo::macro_param(6),
+            lfo1_keys: crate::lfo::LfoKeys::new(1),
+            lfo2_keys: crate::lfo::LfoKeys::new(2),
+            lfo3_keys: crate::lfo::LfoKeys::new(3),
+            lfo4_keys: crate::lfo::LfoKeys::new(4),
+            lfo1_level: crate::lfo::LfoLevel::new(1),
+            lfo2_level: crate::lfo::LfoLevel::new(2),
+            lfo3_level: crate::lfo::LfoLevel::new(3),
+            lfo4_level: crate::lfo::LfoLevel::new(4),
+            velocity_curve: velocity_curve(),
+            velocity_floor: velocity_floor(),
         }
     }
 }
@@ -712,7 +1388,103 @@ impl std::fmt::Debug for Ca72Params {
     }
 }
 
+/// The standalone's TEMPO for a new computer (the owner, 2026-10-18: "default 120").
+pub const DEFAULT_TEMPO: f64 = 120.0;
+/// How slow and fast TEMPO goes, beats a minute.
+pub const TEMPO_RANGE: (f64, f64) = (30.0, 300.0);
+
 impl Ca72Params {
+    /// Where MPE's zones come from on this computer (decisions.md R-MPE; `settings.rs`).
+    pub fn mpe_mode(&self) -> crate::expression::Mode {
+        crate::expression::Mode::of_code(self.mpe.load(Ordering::Relaxed))
+    }
+
+    pub fn set_mpe_mode(&self, mode: crate::expression::Mode) {
+        self.mpe.store(mode.code(), Ordering::Relaxed);
+    }
+
+    /// Where a timbre rests on this computer (decisions.md R-MPE; `settings.rs`).
+    pub fn timbre_rest(&self) -> crate::expression::TimbreRest {
+        crate::expression::TimbreRest::from_index(self.timbre_rest.load(Ordering::Relaxed))
+    }
+
+    pub fn set_timbre_rest(&self, rest: crate::expression::TimbreRest) {
+        self.timbre_rest.store(rest.index(), Ordering::Relaxed);
+    }
+
+    /// The standalone's TEMPO, beats a minute.
+    pub fn tempo(&self) -> f64 {
+        let t = f64::from_bits(self.tempo.load(Ordering::Relaxed));
+        if t.is_finite() {
+            t.clamp(TEMPO_RANGE.0, TEMPO_RANGE.1)
+        } else {
+            DEFAULT_TEMPO
+        }
+    }
+
+    pub fn set_tempo(&self, bpm: f64) {
+        let t = if bpm.is_finite() {
+            bpm.clamp(TEMPO_RANGE.0, TEMPO_RANGE.1)
+        } else {
+            DEFAULT_TEMPO
+        };
+        self.tempo.store(t.to_bits(), Ordering::Relaxed);
+    }
+
+    /// Whether this is the standalone application ([`Ca72Params::standalone`]).
+    pub fn is_standalone(&self) -> bool {
+        self.standalone.load(Ordering::Relaxed)
+    }
+
+    pub fn set_standalone(&self, standalone: bool) {
+        if self.is_standalone() != standalone {
+            self.standalone.store(standalone, Ordering::Relaxed);
+        }
+    }
+
+    /// The arpeggiator's settings, as its parameters have them.
+    pub fn arp(&self) -> crate::arp::Settings {
+        crate::arp::Settings {
+            on: self.arp_on.value(),
+            latch: self.arp_latch.value(),
+            direction: self.arp_direction.value().into(),
+            step: crate::arp::RATES[self.arp_rate.value().to_index()].1,
+            octaves: self.arp_octaves.value().clamp(ARP_OCTAVES.0, ARP_OCTAVES.1) as u8,
+            gate: f64::from(self.arp_gate.value()) / 100.0,
+            swing: f64::from(self.arp_swing.value()) / 100.0,
+        }
+    }
+
+    /// Oscillators 2's and 3's TIMED, DIVISION and RANGE (decisions.md R-OSC-TIMED), by the
+    /// oscillator's index (1, 2); none for oscillator 1, which is never timed.
+    pub fn timed_params(
+        &self,
+        n: usize,
+    ) -> Option<(&BoolParam, &EnumParam<Division>, &EnumParam<Footage>)> {
+        match n {
+            1 => Some((&self.osc2_timed, &self.osc2_division, &self.osc2_range)),
+            2 => Some((&self.osc3_timed, &self.osc3_division, &self.osc3_range)),
+            _ => None,
+        }
+    }
+
+    /// Each oscillator's timed cycle, if its TIMED is on (whatever its RANGE is: the engine
+    /// applies it at LO only); never oscillator 1's.
+    pub fn timed(&self) -> [Option<crate::timed::Length>; 3] {
+        std::array::from_fn(|n| {
+            let (on, division, _) = self.timed_params(n)?;
+            on.value()
+                .then(|| crate::timed::DIVISIONS[division.value().to_index()].1)
+        })
+    }
+
+    /// Whether oscillator `n` (0, 1, 2) is timed now: its TIMED on and its RANGE at LO (at any
+    /// other RANGE it does nothing; oscillator 1, never).
+    pub fn timed_now(&self, n: usize) -> bool {
+        self.timed_params(n)
+            .is_some_and(|(on, _, range)| on.value() && range.value() == Footage::Lo)
+    }
+
     /// How the FREQUENCY knobs' dials read on this computer.
     pub fn freq_law(&self) -> Law {
         match self.freq_law.load(Ordering::Relaxed) {
@@ -733,15 +1505,94 @@ impl Ca72Params {
         self.noise_seed.load(Ordering::Relaxed)
     }
 
+    /// Oscillator `n`'s (0 to 2) waveform's parameters: STEPPED or CONTINUOUS, its shape, its
+    /// MOD and MOD's direction (decisions.md R-CONTINUOUS-WAVE).
+    pub fn shape_params(
+        &self,
+        n: usize,
+    ) -> (
+        &EnumParam<WaveMode>,
+        &FloatParam,
+        &BoolParam,
+        &EnumParam<ShapeModDirection>,
+    ) {
+        match n {
+            0 => (
+                &self.osc1_shape_mode,
+                &self.osc1_shape,
+                &self.osc1_shape_mod,
+                &self.osc1_shape_mod_dir,
+            ),
+            1 => (
+                &self.osc2_shape_mode,
+                &self.osc2_shape,
+                &self.osc2_shape_mod,
+                &self.osc2_shape_mod_dir,
+            ),
+            _ => (
+                &self.osc3_shape_mode,
+                &self.osc3_shape,
+                &self.osc3_shape_mod,
+                &self.osc3_shape_mod_dir,
+            ),
+        }
+    }
+
+    /// LFO `n`'s (0 to 3; past 3, the fourth) parameters (decisions.md R-LFO).
+    pub fn lfo(&self, n: usize) -> &crate::lfo::LfoParams {
+        match n {
+            0 => &self.lfo1,
+            1 => &self.lfo2,
+            2 => &self.lfo3,
+            _ => &self.lfo4,
+        }
+    }
+
+    /// LFO `n`'s (0 to 3; past 3, the fourth) POLARITY, REVERSE and ON (R-LFO's corrections).
+    pub fn lfo_keys(&self, n: usize) -> &crate::lfo::LfoKeys {
+        match n {
+            0 => &self.lfo1_keys,
+            1 => &self.lfo2_keys,
+            2 => &self.lfo3_keys,
+            _ => &self.lfo4_keys,
+        }
+    }
+
+    /// LFO `n`'s (0 to 3; past 3, the fourth) LEVEL (R-LFO's addendum).
+    pub fn lfo_level(&self, n: usize) -> &crate::lfo::LfoLevel {
+        match n {
+            0 => &self.lfo1_level,
+            1 => &self.lfo2_level,
+            2 => &self.lfo3_level,
+            _ => &self.lfo4_level,
+        }
+    }
+
+    /// Macro `n`'s (0 to 5; past 5, the sixth) parameter (decisions.md R-MACROS).
+    pub fn macro_param(&self, n: usize) -> &FloatParam {
+        match n {
+            0 => &self.macro1,
+            1 => &self.macro2,
+            2 => &self.macro3,
+            3 => &self.macro4,
+            4 => &self.macro5,
+            _ => &self.macro6,
+        }
+    }
+
+    /// Whether oscillator `n`'s waveform is CONTINUOUS.
+    pub fn continuous(&self, n: usize) -> bool {
+        self.shape_params(n).0.value() == WaveMode::Continuous
+    }
+
     /// The engine's controls from the parameters (dial units in, the voice's 0..1 out).
     pub fn controls(&self) -> Controls {
         self.controls_with(&|p: &FloatParam| p.value())
     }
 
     /// The engine's controls with each knob where `knob` has it (its dial's units): the
-    /// parameter's value, or for one a learned MIDI controller has just moved, where its glide
-    /// has it (`crate::learn::Dezip`; decisions.md R34). Every other conversion is
-    /// [`Ca72Params::controls`]'.
+    /// parameter's value, or where the voices have it while it glides (`crate::smooth::Smooth`;
+    /// decisions.md R34, R-KNOB-GLIDE). Every other conversion is [`Ca72Params::controls`]'.
     pub fn controls_with(&self, knob: &dyn Fn(&FloatParam) -> f32) -> Controls {
         let value = |p: &FloatParam| f64::from(knob(p));
         let ten = |p: &FloatParam| value(p) / 10.0;
@@ -789,6 +1640,7 @@ impl Ca72Params {
             },
             glide: ten(&self.glide),
             glide_on: self.glide_on.value(),
+            glide_long: self.glide_range.value() == GlideRange::Long,
             decay: self.decay_on.value(),
             noise_on: self.noise_on.value(),
             noise_volume: ten(&self.noise_volume),
@@ -806,6 +1658,15 @@ impl Ca72Params {
             quality: Quality::default(),
             priority: self.note_priority.value().into(),
             retrigger: self.retrigger.value(),
+            shape: std::array::from_fn(|n| {
+                let (mode, shape, modulated, direction) = self.shape_params(n);
+                Shape {
+                    continuous: mode.value() == WaveMode::Continuous,
+                    at: ca72::voice::shape_snapped(value(shape) * ca72::voice::SHAPE_PLACES),
+                    modulated: modulated.value(),
+                    direction: direction.value().into(),
+                }
+            }),
         };
         Controls {
             panel,
@@ -833,6 +1694,14 @@ impl Ca72Params {
             lock: self.lock.value(),
             potato: self.quality.value() == QualityMode::Lo,
             ultra: self.quality.value() == QualityMode::Ultra,
+            reach: Reach {
+                pressure_mod: value(&self.pressure_mod) / 100.0,
+                pressure_filter: value(&self.pressure_filter),
+                timbre_mod: value(&self.timbre_mod) / 100.0,
+                timbre_filter: value(&self.timbre_filter),
+            },
+            timed: self.timed(),
+            lfo: crate::lfo::controls(self, knob),
         }
     }
 }
@@ -904,6 +1773,126 @@ mod tests {
         );
         p.set_freq_law(Law::Hardware);
         assert_eq!(p.freq_law(), Law::Hardware);
+    }
+
+    /// The arpeggiator's parameters (R-ARP): their ids after every other, off by default at a
+    /// sixteenth, UP, an octave, GATE 50 % and no SWING; RATE's choices are the scheduler's
+    /// CONTINUOUS's travel as the panel draws it is the engine's (decisions.md R-CONTINUOUS-WAVE);
+    /// its shape shows its places' names, blends and duty cycles, and takes either typed; a new
+    /// instance is STEPPED, at SAWTOOTH, MOD off and clockwise.
+    #[test]
+    fn continuous_waveforms_are_off_by_default_and_their_travel_the_engines() {
+        use ca72::voice::SHAPE_PLACES;
+        assert_eq!(ca72_panel::art::RECT_STEPS, ca72::voice::RECT_STEPS);
+        let p = Ca72Params::default();
+        for n in 0..3 {
+            let (mode, shape, modulated, direction) = p.shape_params(n);
+            assert_eq!(mode.value(), WaveMode::Stepped);
+            assert!((f64::from(shape.value()) * SHAPE_PLACES - 2.0).abs() < 1e-6);
+            assert!(!modulated.value());
+            assert_eq!(direction.value(), ShapeModDirection::Clockwise);
+            assert!(!p.continuous(n));
+        }
+        assert!(p.controls().panel.shape.iter().all(|s| !s.continuous));
+        let at = |k: f64| (k / SHAPE_PLACES) as f32;
+        let (one, three) = (&p.osc1_shape, &p.osc3_shape);
+        assert_eq!(one.normalized_value_to_string(at(2.0), true), "Sawtooth");
+        assert_eq!(
+            three.normalized_value_to_string(at(2.0), true),
+            "Reverse Sawtooth"
+        );
+        assert_eq!(
+            three.normalized_value_to_string(at(1.0), true),
+            "Reverse Shark Tooth"
+        );
+        assert_eq!(
+            one.normalized_value_to_string(at(2.4), true),
+            "Sawtooth to Square 40 %"
+        );
+        assert_eq!(one.normalized_value_to_string(at(3.0), true), "Square 48 %");
+        assert_eq!(
+            one.normalized_value_to_string(at(4.0), true),
+            "Wide Rectangle 29 %"
+        );
+        // The calibrated circuit's 220 Hz MIX duty at the wide selector, not the old
+        // profile's rounded 30 %. Display rounding cannot preserve the exact selector
+        // position; typing the measured duty can (docs/calibration/pulse-source-20261022.md).
+        let t = one
+            .string_to_normalized_value("29.378574 %")
+            .expect("a duty cycle");
+        assert!((f64::from(t) * SHAPE_PLACES - 4.0).abs() < 2e-2, "{t}");
+        let t = three
+            .string_to_normalized_value("reverse sawtooth")
+            .expect("a name");
+        assert_eq!(t, at(2.0));
+    }
+
+    /// note values in order, its names a host shows.
+    #[test]
+    fn the_arpeggiator_is_off_by_default_its_ids_last() {
+        let p = Ca72Params::default();
+        let ids: Vec<String> = p.param_map().into_iter().map(|(id, ..)| id).collect();
+        let at = |id: &str| ids.iter().position(|i| i == id).expect(id);
+        for id in [
+            "arp_on",
+            "arp_latch",
+            "arp_direction",
+            "arp_rate",
+            "arp_octaves",
+            "arp_gate",
+            "arp_swing",
+        ] {
+            assert!(at(id) > at("retrigger"), "{id}");
+        }
+        let a = p.arp();
+        assert!(!a.on && !a.latch);
+        assert_eq!(a.direction, crate::arp::Direction::Up);
+        assert_eq!((a.step, a.octaves, a.gate, a.swing), (0.25, 1, 0.5, 0.0));
+        assert_eq!(ArpRate::variants().len(), crate::arp::RATES.len());
+        assert_eq!(ArpRate::variants()[1], "1/4 dotted");
+        assert_eq!(ArpRate::variants()[2], "1/2 triplet");
+        assert_eq!(
+            ArpDirection::variants(),
+            ["UP", "DOWN", "UP/DOWN", "RANDOM", "ORDER"]
+        );
+        assert_eq!(p.arp_latch.name(), "Arp Hold");
+        assert_eq!(ARP_OCTAVES, (1, 5));
+        assert_eq!(p.tempo(), DEFAULT_TEMPO);
+        p.set_tempo(1000.0);
+        assert_eq!(p.tempo(), TEMPO_RANGE.1);
+    }
+
+    /// The expression's reaches (R-MPE): their ids after every other, 0 by default (none, the
+    /// sound as before), the engine told them in its units.
+    #[test]
+    fn the_expression_reaches_are_last_and_none_by_default() {
+        let p = Ca72Params::default();
+        let ids: Vec<String> = p.param_map().into_iter().map(|(id, ..)| id).collect();
+        let at = |id: &str| ids.iter().position(|i| i == id).expect(id);
+        for id in [
+            "pressure_mod",
+            "pressure_filter",
+            "timbre_mod",
+            "timbre_filter",
+        ] {
+            assert!(at(id) > at("arp_swing"), "{id}");
+        }
+        assert_eq!(p.controls().reach, Reach::default());
+        let c = p.controls_with(&|k| {
+            if std::ptr::eq(k, &p.pressure_mod) {
+                -50.0
+            } else if std::ptr::eq(k, &p.timbre_filter) {
+                REACH_OCTAVES
+            } else {
+                k.value()
+            }
+        });
+        assert_eq!(c.reach.pressure_mod, -0.5);
+        assert_eq!(c.reach.timbre_filter, f64::from(REACH_OCTAVES));
+        let shown =
+            |q: &FloatParam, v: f32| q.normalized_value_to_string(q.preview_normalized(v), true);
+        assert_eq!(shown(&p.pressure_mod, 100.0), "100 %");
+        assert_eq!(shown(&p.pressure_filter, -1.5), "-1.50 octaves");
     }
 
     /// SCATTER's placement offers two choices, EVEN (the default) and CENTER, the strip's tabs

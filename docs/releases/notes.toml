@@ -83,3 +83,52 @@ bug_fixes = [
   "Mac: MIDI controllers plugged in while the app runs now appear.",
   "The standalone quits with Command-Q on a Mac and Ctrl+Q on Linux, saving your session.",
 ]
+
+[[release]]
+version = "0.3.0"
+features = [
+  "23 new factory presets, 42 in all: organ, bell, acid and sub basses, arpeggios, tempo gates, a drone and LFO loops.",
+  "GLOBAL, KEYS and LFO select the three lower pages; any page key shows PANEL if hidden.",
+  "An arpeggiator: press ARP on the rail for ON, HOLD, DIRECTION, RATE, OCTAVES, GATE and SWING, in time with your host.",
+  "HOLD with the arpeggiator off keeps your notes sounding as a drone until you play a new chord.",
+  "MPE: each note's pressure, timbre and bend move its own voice; press EXP on the rail to set how far.",
+  "Four LFOs: press LFO on the rail, then drag from an LFO's OUT jack to a knob to modulate it.",
+  "Each LFO's FADE knob is off at its centre: turn it right to fade the LFO in after each note, left to fade it out.",
+  "Six macros: press MACRO at the rail's left, name a macro on its screen, and drag from its jack to the knobs it should move.",
+  "Velocity: drag from the VELOCITY jack under DECAY to a knob; CURVE and FLOOR in the EXP drawer shape it.",
+  "LFOs and macros move the LFOs too: drag a cord to an LFO's RATE, PHASE, FADE or WAVEFORM, or to its OUT jack for its LEVEL, even in loops.",
+  "Standalone: LFOs and macros can move the tempo; the arpeggiator, timed LFOs and oscillators and your effects follow it.",
+  "Screens of modulated controls, and LFO scopes, show the values as they play.",
+  "GLIDE goes five times longer: right-click it and choose LONG.",
+  "Oscillators 2 and 3 at LO can be timed: a key under RANGE locks the cycle to a note value of your host's tempo.",
+  "Right-click a WAVEFORM switch and choose CONTINUOUS to sweep smoothly through every waveform to a narrow pulse, with a MOD key to modulate the shape.",
+  "Standalone: press FX for four slots of your own CLAP and VST3 effects; one that crashes never stops the synth.",
+  "Standalone: each effect’s label strip offers the control you last touched; pin it in one click, or replace a pin while keeping its LFOs, macros and MIDI Learn.",
+  "Standalone presets save effects. CHAIN > LOCK keeps yours while browsing; unlock to hear the preset's.",
+  "Standalone: FIND searches effects by name, maker or type; RECENT keeps your last six choices across launches.",
+  "Standalone: SETTINGS > AGENTS > ALLOW lets an AI agent play and set up the CA-72 through MCP, on this computer only.",
+  "Standalone: SETTINGS > AGENTS copies the setup for Claude Code or another MCP app to your clipboard.",
+  "The Left and Right arrow keys, or MIDI pads you assign, choose the previous and next preset.",
+  "Standalone: press MIDI, click a control, then move a knob or press a key on your controller to map it.",
+  "Settings > MOD WHEEL SOURCE chooses the CC or aftertouch that moves the MOD wheel.",
+  "Command-click (Ctrl-click on Windows and Linux) a knob to type an exact value.",
+  "Skin packs: the editor's looks are now packs in one open format.",
+]
+performance_improvements = [
+  "Much cleaner high notes in every QUALITY mode; ULTRA's VCA now runs at four times the sample rate.",
+  "One latency in every QUALITY mode, so switching QUALITY never shifts your timing.",
+  "Triangle and pulse waves, pink noise, contours and ULTRA's FEEDBACK calibrated closer to the hardware.",
+  "QUALITY LO shares its voices with spare processor cores on Mac and Linux, and on Windows when the computer is busy.",
+]
+bug_fixes = [
+  "Knobs move smoothly from the mouse, a trackpad and automation, in offline renders too; choosing a preset still changes the sound at once.",
+  "Drawer digits, legends and titles match the panel in both looks, with LARGE lettering too.",
+  "Fewer dropouts in POLY with DOUBLE at QUALITY HI on a busy computer.",
+  "Hosts that load the CA-72 on a smaller thread no longer crash.",
+  "Linux standalone: fewer dropouts on a busy computer; it takes real-time priority, asking RTKit if need be, and says so when it cannot.",
+  "Linux standalone: a held computer key plays its note once, and Z and X move one octave a press.",
+  "The Audio Unit no longer crashes when a host prepares it on a thread with a small stack.",
+  "A standalone left hidden on a Mac with no audio running quits cleanly, its session saved, instead of stopping at an error.",
+  "An agent that stops reading replies no longer prevents closing the standalone or switching AGENTS off.",
+  "Modulation-depth pop-ups hide when you press a main control and stay hidden while you drag it.",
+]

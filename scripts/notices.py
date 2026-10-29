@@ -32,6 +32,9 @@ PLATFORMS = [
 ]
 FONT = "third_party/urw-gothic"
 FONT_COPYRIGHT = "Copyright 2014 by (URW)++ Design & Development"
+# The TIMED keys' notes (decisions.md R-OSC-TIMED): a subset of GNU FreeFont's FreeSerif.
+NOTES = "third_party/gnu-freefont"
+NOTES_COPYRIGHT = "Copyright 2002, 2003, 2005, 2008, 2009, 2010, 2012 GNU Freefont contributors"
 # The Audio Unit's wrapper and what it is built with, vendored (VENDORED.md, PATCHES.md): the
 # name, where it is from, its licence, and the files whose text is its notice.
 AUV2 = [
@@ -74,13 +77,15 @@ def metadata(platform):
 
 
 def linked(meta):
-    """The packages `ca72-plugin` links, its own workspace's left out, and Idle Foundry's
-    plugin-kit's crates (the code the plug-ins share, under the same licence and copyright)."""
+    """The packages `ca72-plugin` and the standalone's effects' helper (`ca72-fx-helper`,
+    docs/fx-host.md) link, its own workspace's left out (DAW-v3's crates in third_party/daw-v3
+    among them: the owner's, under the same licence), and Idle Foundry's plugin-kit's crates
+    (the code the plug-ins share, under the same licence and copyright)."""
     packages = {p["id"]: p for p in meta["packages"]}
     nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
     workspace = set(meta["workspace_members"])
-    root = next(i for i in workspace if packages[i]["name"] == "ca72-plugin")
-    seen, stack = set(), [root]
+    roots = [i for i in workspace if packages[i]["name"] in ("ca72-plugin", "ca72-fx-helper")]
+    seen, stack = set(), list(roots)
     while stack:
         i = stack.pop()
         if i in seen:
@@ -99,6 +104,31 @@ def linked(meta):
         if i not in workspace and not packages[i]["name"].startswith("plugin-kit-")
     ]
 
+
+# The VST 3 SDK's interfaces (steinbergmedia/vst3_pluginterfaces, LICENSE.txt, MIT since SDK
+# 3.8), from whose headers the `vst3` crate's bindings in the effects' helper are generated.
+STEINBERG_MIT = """MIT License
+
+Copyright (c) 2026, Steinberg Media Technologies GmbH
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
 
 # The Rust project's LICENSE-MIT (rust-lang/rust): std, core, alloc and the crates the
 # standard library bundles are linked into every binary, under MIT OR Apache-2.0.
@@ -207,7 +237,10 @@ def render():
         "takes from git repositories are in each release as well,\n"
         "CA-72-<version>-git-sources.tar.gz. The macOS Audio Unit wraps the CLAP plug-in\n"
         "in clap-wrapper, built with the CLAP headers and Apple's AudioUnitSDK, whose sources are\n"
-        "in the CA-72's repository (third_party).\n"
+        "in the CA-72's repository (third_party). The standalone application's effects run in\n"
+        "its helper, ca72-fx-helper, built with the owner's DAW-v3's plug-in host (GPL-3.0 or\n"
+        "later, third_party/daw-v3) and the VST3 bindings of the vst3 crate, generated from\n"
+        "Steinberg's VST 3 SDK interfaces, whose notice follows the crates'.\n"
         "Written by scripts/notices.py from Cargo.lock: do not edit by hand.\n"
     )
     out.append("CRATES\n")
@@ -217,7 +250,9 @@ def render():
         out.append(f"  {p['name']} {p['version']}  ({expr}" + (", used under MIT)" if mit_elected(expr) and expr != "MIT" else ")"))
     out.append("")
     out.append(f"  The Rust standard library, Rust {toolchain()}  (MIT OR Apache-2.0, used under MIT)")
+    out.append(f"  The VST 3 SDK's interfaces, by Steinberg  (MIT; the effects' helper)")
     out.append(f"  URW Gothic  (AGPL-3.0 with a font exception)")
+    out.append(f"  GNU FreeFont's FreeSerif, its notes  (GPL-3.0-or-later with a font exception)")
     for name, _, expr, _ in AUV2:
         out.append(f"  {name}  ({expr}; the Audio Unit)")
     out.append("")
@@ -234,6 +269,11 @@ def render():
     out.append("-" * 78)
     out.append(RUST_MIT)
     out.append("=" * 78)
+    out.append("The VST 3 SDK's interfaces, by Steinberg (the vst3 crate's bindings; the effects' helper)")
+    out.append("  https://github.com/steinbergmedia/vst3_pluginterfaces")
+    out.append("-" * 78)
+    out.append(STEINBERG_MIT)
+    out.append("=" * 78)
     out.append("URW Gothic, the panel's lettering, by (URW)++  https://github.com/ArtifexSoftware/urw-base35-fonts")
     out.append(FONT_COPYRIGHT)
     out.append("-" * 78)
@@ -245,6 +285,19 @@ def render():
     font = os.path.join(ROOT, FONT)
     out.append(text(os.path.join(font, "LICENSE")))
     out.append(text(os.path.join(font, "COPYING")))
+    out.append("=" * 78)
+    out.append("GNU FreeFont's FreeSerif, the TIMED keys' notes (a subset)  https://www.gnu.org/software/freefont/")
+    out.append(NOTES_COPYRIGHT)
+    out.append("-" * 78)
+    out.append(
+        "Built into the plug-ins under the GNU General Public License, version 3 or later, as the\n"
+        "plug-ins are. Its licensing statement and font exception, from its README:\n"
+    )
+    readme = text(os.path.join(ROOT, NOTES, "README"))
+    start = readme.index("Free UCS scalable fonts is free software")
+    end = readme.index("Files and their suffixes")
+    out.append(readme[start:end].rstrip() + "\n")
+    out.append("Its licence is the GNU General Public License, version 3, the plug-ins' own (LICENSE).\n")
     for name, url, _, files in AUV2:
         out.append("=" * 78)
         out.append(f"{name}  {url}")

@@ -24,6 +24,12 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -n 1)"
+# A public release (CA72_PUBLIC_RELEASE=1, or the Mac's CA72_REQUIRE_NOTARIZATION=1) checks
+# the first-party key before packaging; its builds refuse an empty slot too (decisions.md
+# R-SKIN-KEYS). CI sets CA72_PUBLIC_RELEASE=1 for a version tag only, not for other changes.
+if [ "${CA72_PUBLIC_RELEASE:-0}" = 1 ] || [ "${CA72_REQUIRE_NOTARIZATION:-0}" = 1 ]; then
+    (cd "$root" && cargo run -q -p skin-pack --example check_release_key)
+fi
 bundles="$root/target/bundled"
 out="$root/target/packages"
 work="$root/target/packaging"
@@ -117,7 +123,26 @@ macos() {
             "$pkgs/$kind.pkg"
     done
     local app="$stage/Applications/CA-72.app"
+    local host="$app/Contents/Helpers/CA-72 Effects Host.app"
     docs "$app/Contents/Resources"
+    # Inside out: the effects' helper first, a bundle of its own, the only code that may load
+    # other vendors' libraries (disable-library-validation); then the application, which must
+    # not (docs/fx-host.md, R-FX-DOCK).
+    if [ -n "${CA72_MACOS_SIGN_APP:-}" ]; then
+        codesign --force --timestamp --options runtime \
+            --entitlements "$root/scripts/standalone/effects-host-entitlements.plist" \
+            --sign "$CA72_MACOS_SIGN_APP" "$host"
+    else
+        codesign --force --entitlements "$root/scripts/standalone/effects-host-entitlements.plist" \
+            --sign - "$host"
+    fi
+    codesign --verify --strict "$host"
+    # The MCP bridge is a nested executable and must be signed before its app bundle.
+    if [ -n "${CA72_MACOS_SIGN_APP:-}" ]; then
+        codesign --force --timestamp --options runtime --sign "$CA72_MACOS_SIGN_APP" "$app/Contents/MacOS/ca72-mcp"
+    else
+        codesign --force --sign - "$app/Contents/MacOS/ca72-mcp"
+    fi
     if [ -n "${CA72_MACOS_SIGN_APP:-}" ]; then
         codesign --force --timestamp --options runtime \
             --entitlements "$root/scripts/standalone/entitlements.plist" \
@@ -125,9 +150,11 @@ macos() {
     else
         codesign --force --entitlements "$root/scripts/standalone/entitlements.plist" --sign - "$app"
     fi
-    codesign --verify --strict "$app"
+    codesign --verify --deep --strict "$app"
     for arch in arm64 x86_64; do
         lipo "$app/Contents/MacOS/ca72-standalone" -verify_arch "$arch"
+        lipo "$app/Contents/MacOS/ca72-mcp" -verify_arch "$arch"
+        lipo "$host/Contents/MacOS/ca72-fx-helper" -verify_arch "$arch"
     done
     pkgbuild --analyze --root "$stage/Applications" "$work/standalone.plist" > /dev/null
     plutil -replace 0.BundleIsRelocatable -bool NO "$work/standalone.plist"
@@ -198,7 +225,7 @@ windows() {
     local stage="$work/stage"
     mkdir -p "$stage"
     cp -R "$bundles/CA-72.vst3" "$bundles/CA-72.clap" "$stage/"
-    cp "$bundles/CA-72.exe" "$bundles/CA-72.ico" "$stage/"
+    cp "$bundles/CA-72.exe" "$bundles/CA-72.ico" "$bundles/ca72-mcp.exe" "$bundles/ca72-fx-helper.exe" "$stage/"
     mkdir -p "$stage/CA-72.vst3/Contents/Resources"
     docs "$stage/CA-72.vst3/Contents/Resources"
     docs "$stage"
@@ -260,7 +287,7 @@ linux() {
     local stage="$work/$name"
     mkdir -p "$stage"
     cp -R "$bundles/CA-72.vst3" "$bundles/CA-72.clap" "$stage/"
-    cp "$bundles/ca72-standalone" "$bundles/CA-72.desktop" "$bundles/com.idlefoundry.ca72.png" "$stage/"
+    cp "$bundles/ca72-standalone" "$bundles/ca72-mcp" "$bundles/ca72-fx-helper" "$bundles/CA-72.desktop" "$bundles/com.idlefoundry.ca72.png" "$stage/"
     mkdir -p "$stage/CA-72.vst3/Contents/Resources"
     docs "$stage/CA-72.vst3/Contents/Resources"
     docs "$stage"

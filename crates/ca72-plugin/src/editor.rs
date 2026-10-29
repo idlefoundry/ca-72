@@ -15,7 +15,7 @@
 
 use std::any::Any;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -26,30 +26,48 @@ use baseview::{
     WindowEvent, WindowHandler, WindowInfo, WindowOpenOptions, WindowScalePolicy,
 };
 use ca72::freq_dial::{Law, Pot};
-use ca72_panel::art::{self, POWER};
-use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
+use ca72_panel::art;
+use ca72_panel::controls::{FEEDBACK_SILENT, Place as DrawerPlace, feedback_silent};
 use ca72_panel::fonts::Weight;
 use ca72_panel::keyboard;
 use ca72_panel::learn::{Note, Tone};
+use ca72_panel::modulation::{ModRenderer, ModScene};
 use ca72_panel::presets::{
     BarTarget, DRAWER_H, DRAWER_TOP, DrawerRenderer, DrawerTarget, PresetKey, ROW_H, drawer_hit,
     in_tags,
 };
-use ca72_panel::strip::{self, Bank, Field, Readout, StripRenderer, StripScene, StripTarget};
-use ca72_panel::{CONTROLS, Kind, Lettering, Renderer, Scene, Skin, Target, interact};
+use ca72_panel::render::TempoKeys;
+use ca72_panel::strip::arp::{self as arp_ui, ArpBank, ArpRenderer, ArpScene, ArpTarget};
+use ca72_panel::strip::fx::{self as fx_ui, FxRenderer, FxScene};
+use ca72_panel::strip::lfo::{self as lfo_ui, LfoRenderer, LfoScene};
+use ca72_panel::strip::lower as lower_ui;
+use ca72_panel::strip::macros::{self as macro_ui, MacroRenderer, MacroScene};
+use ca72_panel::strip::mpe::{self as mpe_ui, MpeRenderer, MpeScene, MpeTarget};
+use ca72_panel::strip::{self, Bank, Field, Rail, Readout, StripRenderer, StripScene, StripTarget};
+use ca72_panel::{CONTROLS, Kind, Lettering, Look, Renderer, Scene, Skin, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::editor::HostKey;
 use nih_plug::prelude::*;
 use plugin_kit_stereo::place;
 
 use crate::engine::LEVELS;
+use crate::fx_view::FxView;
 use crate::learning::{Learning, Place, Pressed};
 use crate::library::Library;
 use crate::opening::{ANIMATE_S, Motion, level_of};
-use crate::params::{Ca72Params, QualityMode, Scatter};
+use crate::params::{ArpDirection, ArpRate, Ca72Params, QualityMode, Scatter};
 use crate::presets::Browser;
-use crate::settings::{Change, Settings};
+use crate::settings::{Change, PackId, Settings};
 use crate::update::Update;
+
+mod agent;
+mod entry;
+mod fx_pins;
+mod lfo_page;
+mod macros;
+mod mapping;
+mod velocity;
+use entry::Entry;
 
 /// The share of the usable screen the editor opens at until it is resized.
 const SCREEN_SHARE: f64 = 0.8;
@@ -75,9 +93,9 @@ const SIZES: [(&str, f64); 5] = [
 const GRIP_TIP: &str = "DRAG TO RESIZE";
 
 /// Where the settings' menu and the SIZE menu open: their top right corner under the rail's
-/// settings key, at its right end.
+/// settings key, at its right end (in the same place on either rail).
 fn settings_menu_corner() -> (f64, f64) {
-    let (x, y) = strip::centre(StripTarget::Bar(BarTarget::Settings));
+    let (x, y) = strip::centre(Rail::Plugin, StripTarget::Bar(BarTarget::Settings));
     (x + strip::KEY_W / 2.0, y + strip::KEY_H / 2.0 + 6.0)
 }
 
@@ -85,23 +103,85 @@ fn settings_menu_corner() -> (f64, f64) {
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// A mouse wheel's turns are one gesture until it rests this long.
 const SCROLL_REST: Duration = Duration::from_millis(400);
-/// A trackpad's travel that makes a notch, in pixels.
-const NOTCH: f64 = 40.0;
+/// A trackpad's logical travel equivalent to one wheel line (also its old notch threshold): a
+/// continuous knob turns a notch's move (2 % of its travel) for each, a fraction for a fraction
+/// (issue #107).
+const SCROLL_PIXELS_PER_LINE: f64 = 40.0;
+/// Whether lines scrolled count as far as they go (Windows: a notch is a line, a precision
+/// touchpad's or a free-spinning wheel's `WM_MOUSEWHEEL` gives fractions of one, and a fast
+/// wheel several in one event). Elsewhere a line event is a notch whatever its size: on macOS a
+/// precise device gives points, and a wheel's lines are accelerated, a slow turn giving a
+/// fraction of a line for a notch; X11 gives only whole lines, one a notch (R-KNOB-GLIDE).
+const PRECISE_LINES: bool = cfg!(target_os = "windows");
+
+/// A scroll's vertical travel in logical pixels, [`SCROLL_PIXELS_PER_LINE`] to a notch: points
+/// (macOS's trackpad and Magic Mouse) as they come; lines with `precise_lines` (Windows) as far
+/// as they go, else a notch each, as before.
+fn scroll_travel(delta: ScrollDelta, precise_lines: bool) -> f64 {
+    match delta {
+        ScrollDelta::Pixels { y, .. } => f64::from(y),
+        ScrollDelta::Lines { y, .. } => {
+            let y = f64::from(y);
+            let lines = if precise_lines || y == 0.0 {
+                y
+            } else {
+                y.signum()
+            };
+            lines * SCROLL_PIXELS_PER_LINE
+        }
+    }
+}
 /// A control's menu's lettering, against the tip's.
 const MENU_TEXT: f64 = 1.15;
 
 /// The editor's height at `width`: the panel and the strip under it, in the drawing's
-/// proportions.
+/// proportions (the official panel's).
 pub fn height_for(width: u32) -> u32 {
-    (f64::from(width) * art::H / art::W).round() as u32
+    height_with(width, art::Panel::OFFICIAL)
 }
 
+/// The same with a panel of `panel`'s size (a skin pack's: decisions.md R-SKIN-PACKS).
+pub fn height_with(width: u32, panel: art::Panel) -> u32 {
+    (f64::from(width) * panel.drawing_h() / art::W).round() as u32
+}
+
+/// The official panel's (the tests' measure).
+#[cfg(test)]
 fn height_for_panel(width: u32, expanded: bool) -> u32 {
+    height_in(width, expanded, art::Panel::OFFICIAL)
+}
+
+/// The window's height at `width`, the lower panel shown (`expanded`) or not, the panel `panel`.
+fn height_in(width: u32, expanded: bool, panel: art::Panel) -> u32 {
     if expanded {
-        height_for(width)
+        height_with(width, panel)
     } else {
-        (f64::from(width) * DRAWER_TOP / art::W).round() as u32
+        (f64::from(width) * (DRAWER_TOP - panel.top()) / art::W).round() as u32
     }
+}
+
+/// The panel's size of the look chosen on this computer, as an editor last opened or changed
+/// to it: the window's height before an editor opens (its look is read as it opens, and the
+/// window asked to follow it if it differs). The official panel's (0) until then.
+static CHOSEN_PANEL: AtomicU64 = AtomicU64::new(0);
+
+fn chosen_panel() -> art::Panel {
+    match CHOSEN_PANEL.load(Ordering::Relaxed) {
+        0 => art::Panel::OFFICIAL,
+        bits => art::Panel {
+            wood: f64::from(f32::from_bits((bits >> 32) as u32)),
+            face: f64::from(f32::from_bits(bits as u32)),
+        },
+    }
+}
+
+fn choose_panel(p: art::Panel) {
+    let bits = if p == art::Panel::OFFICIAL {
+        0
+    } else {
+        (u64::from((p.wood as f32).to_bits()) << 32) | u64::from((p.face as f32).to_bits())
+    };
+    CHOSEN_PANEL.store(bits, Ordering::Relaxed);
 }
 
 fn clamp_width(width: u32) -> u32 {
@@ -111,8 +191,14 @@ fn clamp_width(width: u32) -> u32 {
 /// The width the editor opens at before it is resized: its share of the usable screen
 /// (logical pixels), its height kept within the same share.
 fn fitted_width(screen: Option<(f64, f64)>) -> u32 {
+    fitted_width_in(screen, chosen_panel())
+}
+
+/// [`fitted_width`] for the panel `panel` (the chosen look's is the process's, which an editor
+/// opening another look changes).
+fn fitted_width_in(screen: Option<(f64, f64)>, panel: art::Panel) -> u32 {
     screen.map_or(DEFAULT_WIDTH, |(w, h)| {
-        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / art::H);
+        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / panel.drawing_h());
         clamp_width(w.round() as u32)
     })
 }
@@ -131,7 +217,32 @@ pub struct Meters {
     levels: [AtomicU32; LEVELS],
     output: AtomicU32,
     watchers: AtomicU32,
+    /// Each oscillator's CONTINUOUS shape where the newest sounding voice has it (MOD's orbs:
+    /// decisions.md R-CONTINUOUS-WAVE), its switch's steps; NaN for none.
+    shapes: [AtomicU32; 3],
+    /// The tempo the audio thread plays at (the host's, else the standalone's TEMPO), beats a
+    /// minute; NaN before a block: the LFO page's timed scopes (decisions.md R-LFO-PAGE).
+    tempo: AtomicU32,
+    /// The strip's controls with a screen as the engine plays them, modulated (decisions.md
+    /// R-LFO): ENTROPY, WIDTH, DETUNE, DRIVE, LEVEL and INNER ([`LIVE`]'s order), the controls'
+    /// own units; NaN before a block.
+    live: [AtomicU32; LIVE.len()],
+    /// The latest note's velocity as it came, 0..1 (the left hand's meter, the drawer's LAST
+    /// NOTE: decisions.md R-VELOCITY); NaN before a note.
+    velocity: AtomicU32,
 }
+
+/// The modulation targets with a screen on the strip (decisions.md R-LFO: the owner, 2026-10-20,
+/// "if we attach a modulator to a parameter with a screen, that screen should represent where
+/// the modulator currently is"), in [`Meters`]' order. (TEMPO's screen is the tempo's.)
+const LIVE: [crate::lfo::Target; 6] = [
+    crate::lfo::Target::Entropy,
+    crate::lfo::Target::Spread,
+    crate::lfo::Target::Double,
+    crate::lfo::Target::Drive,
+    crate::lfo::Target::Level,
+    crate::lfo::Target::Inner,
+];
 
 impl Default for Meters {
     fn default() -> Self {
@@ -143,6 +254,10 @@ impl Default for Meters {
             levels: std::array::from_fn(|_| AtomicU32::new(0)),
             output: AtomicU32::new(0),
             watchers: AtomicU32::new(0),
+            shapes: std::array::from_fn(|_| AtomicU32::new(f32::NAN.to_bits())),
+            tempo: AtomicU32::new(f32::NAN.to_bits()),
+            live: std::array::from_fn(|_| AtomicU32::new(f32::NAN.to_bits())),
+            velocity: AtomicU32::new(f32::NAN.to_bits()),
         }
     }
 }
@@ -156,6 +271,68 @@ impl Meters {
         self.modulation
             .store(modulation.to_bits(), Ordering::Relaxed);
         self.voices.store(voices, Ordering::Relaxed);
+    }
+
+    /// Each oscillator's CONTINUOUS shape where the newest sounding voice has it (the audio
+    /// thread's, a block's).
+    /// The tempo a block played at (decisions.md R-LFO-PAGE).
+    pub fn publish_tempo(&self, bpm: f64) {
+        self.tempo.store((bpm as f32).to_bits(), Ordering::Relaxed);
+    }
+
+    /// The strip's screens' controls as the engine plays them now (modulated: decisions.md
+    /// R-LFO), from its controls in force.
+    pub fn publish_live(&self, c: &crate::engine::Controls) {
+        for (a, v) in self
+            .live
+            .iter()
+            .zip([c.entropy, c.spread, c.double, c.drive, c.level, c.inner])
+        {
+            a.store((v as f32).to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    /// The latest note's velocity (decisions.md R-VELOCITY), none before a note.
+    pub fn publish_velocity(&self, velocity: Option<f32>) {
+        let v = velocity.unwrap_or(f32::NAN);
+        self.velocity.store(v.to_bits(), Ordering::Relaxed);
+    }
+
+    /// [`Meters::publish_velocity`]'s.
+    pub(crate) fn velocity(&self) -> Option<f64> {
+        let v = f64::from(f32::from_bits(self.velocity.load(Ordering::Relaxed)));
+        v.is_finite().then_some(v)
+    }
+
+    /// [`Meters::publish_live`]'s, by [`LIVE`]'s order; none before a block.
+    fn live(&self) -> [Option<f64>; LIVE.len()] {
+        self.live.each_ref().map(|a| {
+            let v = f64::from(f32::from_bits(a.load(Ordering::Relaxed)));
+            v.is_finite().then_some(v)
+        })
+    }
+
+    /// The tempo the audio thread last played at, if it has played.
+    fn tempo(&self) -> Option<f64> {
+        let t = f64::from(f32::from_bits(self.tempo.load(Ordering::Relaxed)));
+        (t.is_finite() && t > 0.0).then_some(t)
+    }
+
+    pub fn publish_shapes(&self, shapes: [Option<f64>; 3]) {
+        for (a, at) in self.shapes.iter().zip(shapes) {
+            a.store(
+                at.map_or(f32::NAN, |at| at as f32).to_bits(),
+                Ordering::Relaxed,
+            );
+        }
+    }
+
+    /// Each oscillator's CONTINUOUS shape where the voices have it, if any.
+    fn shapes(&self) -> [Option<f64>; 3] {
+        self.shapes.each_ref().map(|a| {
+            let at = f64::from(f32::from_bits(a.load(Ordering::Relaxed)));
+            at.is_finite().then_some(at)
+        })
     }
 
     /// Whether an editor watches the levels (the audio thread measures the output's then).
@@ -241,6 +418,25 @@ impl FreqKnob {
         }
     }
 
+    /// Its oscillator's index (1, 2).
+    fn oscillator(&self) -> usize {
+        match self.pot {
+            Pot::Two => 1,
+            Pot::Three => 2,
+        }
+    }
+
+    /// Its oscillator's DIVISION while it is timed (its TIMED on, its RANGE at LO): what the
+    /// knob turns then, a value of its own, so that FREQUENCY's place is kept for when it is off
+    /// (decisions.md R-OSC-TIMED).
+    fn division(&self) -> Option<&EnumParam<crate::params::Division>> {
+        let n = self.oscillator();
+        if !self.params.timed_now(n) {
+            return None;
+        }
+        self.params.timed_params(n).map(|(_, d, _)| d)
+    }
+
     /// The knob at `knob` of its travel: its pot's position.
     fn wiper(&self, knob: f32) -> f32 {
         self.pot.wiper_at(self.params.freq_law(), f64::from(knob)) as f32
@@ -253,23 +449,128 @@ impl FreqKnob {
 
 impl Operated for FreqKnob {
     fn value(&self) -> f32 {
+        if let Some(d) = self.division() {
+            return d.unmodulated_normalized_value();
+        }
         self.knob(self.param().unmodulated_normalized_value())
     }
     fn default(&self) -> f32 {
+        if let Some(d) = self.division() {
+            return d.default_normalized_value();
+        }
         self.knob(self.param().default_normalized_value())
     }
     fn text(&self, knob: f32) -> String {
+        if let Some(d) = self.division() {
+            return d.normalized_value_to_string(knob, true);
+        }
         self.param()
             .normalized_value_to_string(self.wiper(knob), true)
     }
     fn begin(&self, s: &ParamSetter<'_>) {
-        s.begin_set_parameter(self.param());
+        match self.division() {
+            Some(d) => s.begin_set_parameter(d),
+            None => s.begin_set_parameter(self.param()),
+        }
     }
     fn set(&self, s: &ParamSetter<'_>, knob: f32) {
-        s.set_parameter_normalized(self.param(), self.wiper(knob));
+        match self.division() {
+            Some(d) => s.set_parameter_normalized(d, knob),
+            None => s.set_parameter_normalized(self.param(), self.wiper(knob)),
+        }
     }
     fn end(&self, s: &ParamSetter<'_>) {
-        s.end_set_parameter(self.param());
+        match self.division() {
+            Some(d) => s.end_set_parameter(d),
+            None => s.end_set_parameter(self.param()),
+        }
+    }
+}
+
+/// An oscillator's WAVEFORM switch (decisions.md R-CONTINUOUS-WAVE): its WAVEFORM parameter
+/// while it is STEPPED; CONTINUOUS, its SHAPE (one position along the switch's whole travel,
+/// [`interact::CONTINUOUS_PLACES`] of its steps), WAVEFORM following it to the nearest of the
+/// switch's own positions (what STEPPED plays if it is switched back; oscillator 3's reverse
+/// shark tooth and reverse sawtooth its REVERSE SAWTOOTH).
+struct WaveformSwitch {
+    params: Arc<Ca72Params>,
+    /// Its oscillator, 0 to 2.
+    n: usize,
+}
+
+impl WaveformSwitch {
+    fn waveform(&self) -> &dyn Operated {
+        match self.n {
+            0 => &self.params.osc1_waveform,
+            1 => &self.params.osc2_waveform,
+            _ => &self.params.osc3_waveform,
+        }
+    }
+
+    fn shape(&self) -> &FloatParam {
+        self.params.shape_params(self.n).1
+    }
+
+    fn continuous(&self) -> bool {
+        self.params.continuous(self.n)
+    }
+
+    /// WAVEFORM's place (0..5) at its normalized value.
+    fn place(normalized: f32) -> usize {
+        ca72_panel::art::position(f64::from(normalized))
+    }
+
+    /// WAVEFORM's position nearest a CONTINUOUS shape `at` (the switch's steps).
+    fn nearest(&self, at: f64) -> usize {
+        let k = (at.round().max(0.0) as usize).min(5);
+        if self.n == 2 && (k == 1 || k == 2) {
+            // (Its reverse shark tooth and reverse sawtooth: REVERSE SAWTOOTH.)
+            1
+        } else {
+            k
+        }
+    }
+}
+
+impl Operated for WaveformSwitch {
+    fn value(&self) -> f32 {
+        if !self.continuous() {
+            return self.waveform().value();
+        }
+        self.shape().unmodulated_normalized_value()
+    }
+    fn default(&self) -> f32 {
+        if !self.continuous() {
+            return self.waveform().default();
+        }
+        self.shape().default_normalized_value()
+    }
+    fn text(&self, normalized: f32) -> String {
+        if !self.continuous() {
+            return self.waveform().text(normalized);
+        }
+        crate::params::shape_text(self.n, f64::from(normalized))
+    }
+    fn begin(&self, s: &ParamSetter<'_>) {
+        self.waveform().begin(s);
+        if self.continuous() {
+            s.begin_set_parameter(self.shape());
+        }
+    }
+    fn set(&self, s: &ParamSetter<'_>, normalized: f32) {
+        if !self.continuous() {
+            self.waveform().set(s, normalized);
+            return;
+        }
+        let at = f64::from(normalized) * interact::CONTINUOUS_PLACES;
+        self.waveform().set(s, self.nearest(at) as f32 / 5.0);
+        s.set_parameter_normalized(self.shape(), normalized);
+    }
+    fn end(&self, s: &ParamSetter<'_>) {
+        self.waveform().end(s);
+        if self.continuous() {
+            s.end_set_parameter(self.shape());
+        }
     }
 }
 
@@ -322,6 +623,13 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "decay_on" => &p.decay_on,
         "note_priority" => &p.note_priority,
         "retrigger" => &p.retrigger,
+        // Oscillators 2's and 3's TIMED keys (decisions.md R-OSC-TIMED).
+        "osc2_timed" => &p.osc2_timed,
+        "osc3_timed" => &p.osc3_timed,
+        // Each oscillator's MOD key (decisions.md R-CONTINUOUS-WAVE).
+        "osc1_shape_mod" => &p.osc1_shape_mod,
+        "osc2_shape_mod" => &p.osc2_shape_mod,
+        "osc3_shape_mod" => &p.osc3_shape_mod,
         "pitch_wheel" => &p.pitch_wheel,
         "mod_wheel" => &p.mod_wheel,
         // The strip's knobs (A6).
@@ -332,8 +640,156 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "double" => &p.double,
         "drive" => &p.drive,
         "level" => &p.level,
-        _ => return None,
+        // The arpeggiator's drawer's (decisions.md R-ARP).
+        "arp_rate" => &p.arp_rate,
+        "arp_octaves" => &p.arp_octaves,
+        "arp_gate" => &p.arp_gate,
+        "arp_swing" => &p.arp_swing,
+        // Each note's own expression's drawer's (decisions.md R-MPE).
+        "pressure_mod" => &p.pressure_mod,
+        "pressure_filter" => &p.pressure_filter,
+        "timbre_mod" => &p.timbre_mod,
+        "timbre_filter" => &p.timbre_filter,
+        // Its second row, the velocity's (decisions.md R-VELOCITY).
+        "velocity_curve" => &p.velocity_curve,
+        "velocity_floor" => &p.velocity_floor,
+        // The macros' (decisions.md R-MACROS).
+        id if crate::lfo::macro_of_id(id).is_some() => {
+            p.macro_param(crate::lfo::macro_of_id(id).unwrap_or(0))
+        }
+        // The LFO page's (decisions.md R-LFO; its RATE and WAVEFORM operated through
+        // `lfo_page::LfoRate` and `LfoWave`).
+        id => {
+            let (n, part) = lfo_page::lfo_part(id)?;
+            return lfo_page::lfo_param(p, n, part);
+        }
     })
+}
+
+/// A readout a value is typed into (decisions.md R52): the strip's, the arpeggiator's drawer's
+/// (RATE, OCTAVES, GATE, SWING; R-ARP), or the expression drawer's (PRESSURE's MODULATION and
+/// CUTOFF, TIMBRE's; R-MPE).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Typed {
+    Strip(Readout),
+    Arp(usize),
+    Mpe(usize),
+    /// The standalone's TEMPO screen.
+    Tempo,
+}
+
+/// The arpeggiator's drawer's readout (RATE, OCTAVES, GATE, SWING) of control `i`, if it is
+/// one of the drawer's knobs.
+fn arp_readout(i: usize) -> Option<usize> {
+    let c = &CONTROLS[i];
+    (c.place == ca72_panel::controls::Place::Arp)
+        .then(|| arp_ui::KNOB_PARAMS.iter().position(|id| *id == c.param))?
+}
+
+/// The expression drawer's readout of control `i`, if it is one of the drawer's knobs
+/// (decisions.md R-MPE).
+fn mpe_readout(i: usize) -> Option<usize> {
+    let c = &CONTROLS[i];
+    (c.place == ca72_panel::controls::Place::Mpe)
+        .then(|| mpe_ui::KNOB_PARAMS.iter().position(|id| *id == c.param))?
+}
+
+/// How long INPUT reads what came in last after it stops (decisions.md R-MPE): long enough for a
+/// held note's pressure at rest between a controller's messages.
+const HEARD_FOR: Duration = Duration::from_secs(3);
+
+/// Logical pixels a beat a minute while the TEMPO screen is dragged (with SHIFT, four times
+/// as many), and a trackpad's travel a beat a minute.
+const TEMPO_DRAG: f64 = 2.0;
+const TEMPO_SCROLL: f64 = 8.0;
+
+/// The drawers dropped from the rail: the arpeggiator's (decisions.md R-ARP), the standalone's
+/// effects' (R-FX-DRAWER), and each note's own expression's (R-MPE).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Lower {
+    #[default]
+    Arp,
+    Fx,
+    Mpe,
+}
+
+impl Lower {
+    /// How deep it is.
+    fn depth(self) -> f64 {
+        match self {
+            Lower::Arp => arp_ui::DEPTH,
+            Lower::Fx => fx_ui::DEPTH,
+            Lower::Mpe => mpe_ui::DEPTH,
+        }
+    }
+}
+
+/// The drawer dropped from the rail, one at a time: which, open or not, and its slide, as the
+/// presets' drawer's (`presets::SLIDE`).
+#[derive(Debug, Default)]
+struct Dropped {
+    which: Lower,
+    open: bool,
+    slide: Option<(Instant, bool)>,
+}
+
+impl Dropped {
+    /// `which` opened or put away, sliding there; another open put away for it at once (it
+    /// drops from the rail anew).
+    fn show(&mut self, which: Lower, on: bool) {
+        if !on {
+            if self.which == which && self.open {
+                self.open = false;
+                self.slide = Some((Instant::now(), false));
+            }
+            return;
+        }
+        if self.open && self.which == which {
+            return;
+        }
+        self.which = which;
+        self.open = true;
+        self.slide = Some((Instant::now(), true));
+    }
+
+    /// Whether `which` is open (or opening).
+    fn is_open(&self, which: Lower) -> bool {
+        self.open && self.which == which
+    }
+
+    /// Put away at once (the lower panel hidden).
+    fn shut(&mut self) {
+        self.open = false;
+        self.slide = None;
+    }
+
+    /// How far down it is, 0 to 1.
+    fn reveal(&self) -> f64 {
+        match self.slide {
+            Some((t0, opening)) => {
+                let k = (t0.elapsed().as_secs_f64() / crate::presets::SLIDE.as_secs_f64()).min(1.0);
+                let k = 1.0 - (1.0 - k) * (1.0 - k);
+                if opening { k } else { 1.0 - k }
+            }
+            None => f64::from(u8::from(self.open)),
+        }
+    }
+
+    fn sliding(&self) -> bool {
+        self.slide
+            .is_some_and(|(t0, _)| t0.elapsed() < crate::presets::SLIDE)
+    }
+
+    fn tick(&mut self) {
+        if self.slide.is_some() && !self.sliding() {
+            self.slide = None;
+        }
+    }
+
+    /// Open and still: its parts answer the pointer.
+    fn settled(&self) -> bool {
+        self.open && self.slide.is_none()
+    }
 }
 
 /// The editor, as the plug-in hands it to the host.
@@ -359,6 +815,7 @@ pub struct Ca72Editor {
 #[derive(Debug, Default)]
 pub struct HostKeys {
     holding: AtomicBool,
+    navigation: AtomicBool,
     queue: Mutex<Vec<KeyboardEvent>>,
     overflow: AtomicBool,
 }
@@ -367,10 +824,13 @@ impl HostKeys {
     /// A key the host gave: taken while the editor holds the keyboard (every key then, so that
     /// none is the host's key command meanwhile), else the host's.
     pub fn offer(&self, k: HostKey) -> bool {
-        if !self.holding.load(Ordering::Acquire) {
+        let event = host_key_event(k);
+        let navigation = self.navigation.load(Ordering::Acquire)
+            && event.as_ref().is_some_and(|e| preset_arrow(e).is_some());
+        if !self.holding.load(Ordering::Acquire) && !navigation {
             return false;
         }
-        if let Some(e) = host_key_event(k)
+        if let Some(e) = event
             && let Ok(mut q) = self.queue.lock()
         {
             if q.len() < 64 {
@@ -674,7 +1134,7 @@ impl Editor for Ca72Editor {
         } else {
             self.params.editor_expanded.load(Ordering::Relaxed)
         };
-        (width, height_for_panel(width, expanded))
+        (width, height_in(width, expanded, chosen_panel()))
     }
 
     fn resize_request(&self) -> (u64, (u32, u32)) {
@@ -735,6 +1195,7 @@ struct Scroll {
     control: usize,
     value: f64,
     last: Instant,
+    /// A discrete control's travel not yet a whole notch, in logical scroll pixels.
     travel: f64,
 }
 
@@ -746,6 +1207,9 @@ struct PanelWindow {
     logical: (u32, u32),
     /// When the frame was last shown on the window (none since it opened or resized).
     shown: Option<Instant>,
+    /// Until when the frame is shown again at every frame, after it was first shown at a size
+    /// ([`SETTLE`]).
+    settle: Option<Instant>,
     /// When the frame was last drawn while the window could not be seen ([`HIDDEN_DRAW`]).
     hidden_drawn: Option<Instant>,
     editing: Editing,
@@ -850,6 +1314,70 @@ impl GuiContext for Watched {
 }
 
 /// The panel being operated: what the pointer does to the parameters, and the scene drawn.
+/// The folder skin packs are installed in (decisions.md R-SKIN-PACKS): the shared folder's
+/// `Skins`, a folder each, for every Idle Foundry plug-in (each pack names the one it is for).
+#[cfg(not(test))]
+fn packs_dir() -> std::path::PathBuf {
+    crate::library::shared_dir().join("Skins")
+}
+
+/// An installed skin pack, as the settings' menu lists it: its name, and its look if it can be
+/// used (else its folder's name, and why not in the log).
+#[derive(Clone, Debug)]
+struct Installed {
+    name: String,
+    look: Option<Look>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The packs a test has installed (none of the user's are read in the tests).
+    static TEST_PACKS: std::cell::RefCell<Vec<Installed>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The skin packs installed on this computer, each read and checked (in the tests, the test's).
+fn installed() -> Vec<Installed> {
+    #[cfg(test)]
+    {
+        TEST_PACKS.with(|p| p.borrow().clone())
+    }
+    #[cfg(not(test))]
+    {
+        ca72_panel::look::discover(&packs_dir())
+            .into_iter()
+            .map(|found| match found {
+                Ok(look) => Installed {
+                    name: look.menu_name(),
+                    look: Some(look),
+                },
+                Err((folder, report)) => {
+                    nih_log!("The skin pack in {folder} cannot be used:\n{report}");
+                    Installed {
+                        name: folder,
+                        look: None,
+                    }
+                }
+            })
+            .collect()
+    }
+}
+
+/// The look the settings choose: the pack chosen, if it is installed and can be used, else the
+/// built-in look (the pack's base, kept with it). A pack missing or refused changes nothing
+/// but the look: the sound, presets, automation and the session are not the look's.
+fn chosen_look(settings: &Settings, installed: &[Installed]) -> Look {
+    settings
+        .pack
+        .and_then(|id| {
+            installed
+                .iter()
+                .filter_map(|p| p.look.as_ref())
+                .find(|l| l.id == id.as_str())
+                .cloned()
+        })
+        .unwrap_or_else(|| Look::of(settings.skin))
+}
+
 struct Editing {
     context: Arc<dyn GuiContext>,
     params: Arc<Ca72Params>,
@@ -859,6 +1387,9 @@ struct Editing {
     width: u32,
     physical_width: u32,
     renderer: Renderer,
+    /// The skin packs installed, as last looked for (as the editor opened, if one is chosen, and
+    /// as the settings' menu opens).
+    installed: Vec<Installed>,
     scene: Scene,
     /// The strip's own parts (over the drawing's strip): their renderer and scene, and
     /// ENTROPY's, WIDTH's, DETUNE's and INNER's last amount but 0 (their switches, and SCATTER |
@@ -870,12 +1401,56 @@ struct Editing {
     /// window's frame: the panel's, the strip's parts under its foot, the drawer over them.
     drawer: DrawerRenderer,
     pub(crate) browser: Browser,
+    /// The arpeggiator's drawer (decisions.md R-ARP): its renderer, what it shows. The drawer
+    /// dropped from the rail: which, whether it is open, and how far down it was in the last frame
+    /// composed (and which it was).
+    arp: ArpRenderer,
+    arp_scene: ArpScene,
+    lower: Dropped,
+    lower_shown: (f64, Lower),
+    last_arp_press: Option<(Instant, ArpTarget)>,
+    /// Each note's own expression's drawer (decisions.md R-MPE): its renderer, what it shows, its
+    /// readouts' last press (for a double click), and what INPUT heard: the audio thread's counts
+    /// as last seen, and when each last changed.
+    mpe: MpeRenderer,
+    mpe_scene: MpeScene,
+    last_mpe_press: Option<(Instant, MpeTarget)>,
+    heard: ((u32, u32), Option<Instant>, Option<Instant>),
+    /// The standalone's effects' drawer (decisions.md R-FX-DRAWER): the chain as it shows it and
+    /// what a pointer does there, its renderer (none without a chain), what it shows; the rail's
+    /// keys (its FX key with a chain).
+    fx_view: FxView,
+    fx: Option<FxRenderer>,
+    fx_scene: FxScene,
+    fx_pin_drag: Option<fx_pins::PinDrag>,
+    rail: Rail,
+    /// The standalone's TEMPO screen (decisions.md R-ARP): dragged (from where, logical pixels
+    /// down, at what tempo, SHIFT held; the tempo the drag began at), its last press (for a
+    /// double click), and a trackpad's travel over it not yet a beat a minute.
+    tempo_drag: Option<(f64, f64, bool, u16)>,
+    last_tempo_press: Option<Instant>,
+    /// The standalone's TYPING, PANIC or MIDI key under the pointer, and PANIC held down (lit
+    /// while it is: decisions.md R-TEMPO-CORNER).
+    tempo_hover: Option<art::TempoKey>,
+    panic_held: bool,
+    /// The standalone's MIDI map mode (decisions.md R-MIDI-MAP).
+    mapping: mapping::Mapping,
+    /// The screens' controls as the engine plays them, modulated ([`Meters::publish_live`]),
+    /// and the moving tempo, read at most 30 times a second while a source moves one of them
+    /// (decisions.md R-LFO), and when they are next due.
+    live: [Option<f64>; LIVE.len()],
+    live_tempo: Option<f64>,
+    live_due: Option<Instant>,
+    tempo_travel: f64,
     composed: Option<ca72_panel::Pixmap>,
     /// Where the window's frame changed in the last `draw` that changed it (pixels: left,
     /// top, right, bottom), or none when it may have changed anywhere (decisions.md R58).
     damage: Option<Vec<[i32; 4]>>,
     /// A size asked of the window.
     resizing_window: bool,
+    /// The window to be asked to follow the look's panel's size (it opened at the size last
+    /// chosen, and the look read as it opened has another).
+    panel_due: bool,
     /// The drawer placed for its opening (below the strip or over the panel), asked once.
     placed: bool,
     /// The update check in the drawer; dropped with the editor, it ends a check under way.
@@ -888,6 +1463,9 @@ struct Editing {
     hover: Option<Target>,
     drag: Option<Drag>,
     scroll: Option<Scroll>,
+    /// Whether a control takes lines scrolled as far as they go ([`PRECISE_LINES`]: this
+    /// system's reading; a test's to choose).
+    precise_lines: bool,
     /// The presets' list's scrolling not yet a whole row, in rows (+ up).
     list_travel: f64,
     last_press: Option<(Instant, Target)>,
@@ -930,15 +1508,60 @@ struct Editing {
     /// A value being typed into a readout (decisions.md R52): which, and what so far; the
     /// keyboard wanted for it, asked once; the strip's last press (where, when, and the amount
     /// a switch had before it), for a double click.
-    typing: Option<(Readout, String)>,
+    typing: Option<(Typed, String)>,
+    knob_entry: Option<Entry>,
     typing_keys: bool,
     last_strip_press: Option<(Instant, StripTarget, f32)>,
     /// Oscillators 2 and 3's FREQUENCY knobs, through the computer's law.
     freq_knobs: [FreqKnob; 2],
+    waveforms: [WaveformSwitch; 3],
+    /// The LFO page (decisions.md R-LFO): its renderer and what it shows; the knobs' rings, a
+    /// dragged assignment and the hover pop-up over the panel, and what they show; the editor's
+    /// modulation state; each LFO's RATE (Hz or timed) and WAVEFORM as operated.
+    lfo: LfoRenderer,
+    lfo_scene: LfoScene,
+    modulation: ModRenderer,
+    mod_scene: ModScene,
+    modulating: lfo_page::Modulating,
+    lfo_rates: [lfo_page::LfoRate; 4],
+    lfo_waves: [lfo_page::LfoWave; 4],
+    /// The macros (decisions.md R-MACROS): the left area's renderer, what it shows, and the
+    /// editor's state of them (a name typed, the part under the pointer).
+    macros: MacroRenderer,
+    macro_scene: MacroScene,
+    macro_view: macros::MacroView,
     playing: Playing,
     #[cfg(feature = "standalone-production")]
     standalone_dialog: Option<crate::standalone_settings::Dialog>,
+    /// AI agents operating the editor through MCP, while allowed (`editor/agent.rs`;
+    /// decisions.md R-MCP).
+    agents: agent::Agents,
+    /// The standalone's audio threads not real-time, said (decisions.md R-RTKIT).
+    realtime: Realtime,
 }
+
+/// What the standalone's editor says of its audio threads' priority (decisions.md R-RTKIT): read
+/// from the audio side's atomics at each frame (`read`: the tests give their own), the warning
+/// while one is due, and when the walnut began saying it ([`REALTIME_NOTICE`], once).
+#[derive(Debug)]
+struct Realtime {
+    read: fn() -> (ca72_rt::Standing, ca72_rt::Standing),
+    warning: Option<crate::audio_thread::Warning>,
+    since: Option<Instant>,
+}
+
+impl Default for Realtime {
+    fn default() -> Self {
+        Self {
+            read: crate::audio_thread::standing,
+            warning: None,
+            since: None,
+        }
+    }
+}
+
+/// How long the walnut says, once, that the standalone's audio is not real-time.
+const REALTIME_NOTICE: Duration = Duration::from_secs(15);
 
 impl PanelWindow {
     /// The editor's window: `width` logical pixels wide, `dpr` physical pixels a logical one,
@@ -954,7 +1577,11 @@ impl PanelWindow {
         library: Library,
         host_keys: Arc<HostKeys>,
     ) -> Self {
-        let height = height_for_panel(width, params.editor_panel.load(Ordering::Relaxed));
+        let height = height_in(
+            width,
+            params.editor_panel.load(Ordering::Relaxed),
+            chosen_panel(),
+        );
         let physical = (
             (f64::from(width) * dpr).round() as u32,
             (f64::from(height) * dpr).round() as u32,
@@ -965,6 +1592,7 @@ impl PanelWindow {
             physical,
             logical: (width, height),
             shown: None,
+            settle: None,
             hidden_drawn: None,
             editing: Editing::new(
                 context,
@@ -985,8 +1613,9 @@ impl PanelWindow {
     /// window's size and keyboard following.
     fn key(&mut self, window: &mut Window<'_>, k: &KeyboardEvent) -> bool {
         let taken = self.editing.keyed(k);
-        self.follow(window);
+        let height_changed = self.follow(window);
         self.keyboard(window);
+        self.repaint_height_change(window, height_changed);
         taken
     }
 
@@ -1011,17 +1640,39 @@ impl PanelWindow {
 
     /// The window resized to what the editor asks (the grip, the drawer below the bar),
     /// when it asked: on macOS baseview reports no resize of its own making, so the frames
-    /// follow here; elsewhere the report that follows finds the size already taken.
-    fn follow(&mut self, window: &mut Window<'_>) {
+    /// follow here; elsewhere the report that follows finds the size already taken. Whether
+    /// the window took a new height at the width it had.
+    fn follow(&mut self, window: &mut Window<'_>) -> bool {
         if !std::mem::take(&mut self.editing.resizing_window) {
-            return;
+            return false;
         }
         let want = (self.editing.width, self.editing.window_height());
-        if want != self.logical {
-            let size = Size::new(f64::from(want.0), f64::from(want.1));
-            window.resize(size);
-            self.resized(&WindowInfo::from_logical_size(size, self.editing.dpr));
+        if want == self.logical {
+            return false;
         }
+        let height_only = want.0 == self.logical.0;
+        let size = Size::new(f64::from(want.0), f64::from(want.1));
+        window.resize(size);
+        self.resized(&WindowInfo::from_logical_size(size, self.editing.dpr));
+        height_only
+    }
+
+    /// On X11 the next frame can be 15 ms away: a height the window has just taken (PANEL,
+    /// the drawer) is drawn and shown whole at the end of the event that took it, not left
+    /// to the compositor as the old image (decisions.md R-LINUX-PANEL-REPAINT). Outside
+    /// `resized` and `draw`: a draw can reconcile a host's delayed refusal, which the
+    /// window follows before anything is shown. The grip's widths keep the frames' pace.
+    fn repaint_height_change(&mut self, window: &mut Window<'_>, height_changed: bool) {
+        if !cfg!(target_os = "linux") || !height_changed {
+            return;
+        }
+        self.editing.draw();
+        self.follow(window);
+        self.keyboard(window);
+        self.present(false);
+        let now = Instant::now();
+        self.shown = Some(now);
+        self.settle = SETTLE.map(|for_| now + for_);
     }
 
     /// The pointer's look: the resize arrows over the grip and while it is dragged (R-SIZE),
@@ -1057,18 +1708,12 @@ impl PanelWindow {
                 self.keys = had;
             }
         }
-        let learning = self
-            .editing
-            .learning
-            .holds_keys(&self.editing.params.midi_map);
-        let holding = self.editing.browser.open
-            || learning
-            || self.editing.typing.is_some()
-            || self.editing.note_typing_allowed()
-            || self.editing.standalone_dialog_open()
-            || self.editing.whats_new.is_some();
+        let holding = self.editing.holds_keys();
         // (And the keys the host gives the view: the editor's while it holds them.)
         self.host_keys.holding.store(holding, Ordering::Release);
+        self.host_keys
+            .navigation
+            .store(self.editing.preset_keys_allowed(), Ordering::Release);
         // Every key while it holds them, those a host's dialog keeps for itself too (Windows:
         // in REAPER's FX window an arrow moved REAPER's focus to one of its own buttons); the
         // host's again once it lets them go (decisions.md R34).
@@ -1121,7 +1766,17 @@ impl Editing {
         } else {
             Settings::load()
         };
+        let installed = if settings.pack.is_some() {
+            installed()
+        } else {
+            Vec::new()
+        };
         params.set_freq_law(settings.frequency);
+        params.midi_map.set_wheel_source(settings.mod_wheel_source);
+        params.set_tempo(f64::from(settings.tempo));
+        // (MPE's, as another editor may have chosen them since: decisions.md R-MPE.)
+        params.set_mpe_mode(settings.mpe);
+        params.set_timbre_rest(settings.timbre_rest);
         let standalone = context.plugin_api() == PluginApi::Standalone;
         let mut playing = Playing::default();
         playing.standalone = standalone;
@@ -1132,29 +1787,80 @@ impl Editing {
             params: Arc::clone(&params),
             pot,
         });
+        let waveforms = [0, 1, 2].map(|n| WaveformSwitch {
+            params: Arc::clone(&params),
+            n,
+        });
+        let lfo_rates = [0, 1, 2, 3].map(|n| lfo_page::LfoRate {
+            params: Arc::clone(&params),
+            n,
+        });
+        let lfo_waves = [0, 1, 2, 3].map(|n| lfo_page::LfoWave {
+            params: Arc::clone(&params),
+            n,
+        });
         let watched = Watched::new(Arc::clone(&context), &params);
-        Editing {
+        // The standalone's effects (decisions.md R-FX-DRAWER): the plug-ins have none.
+        let effects = if standalone {
+            crate::fx_view::installed()
+        } else {
+            None
+        };
+        let mut editing = Editing {
             context,
             params,
             meters,
             dpr,
             width,
             physical_width,
-            renderer: Renderer::with_look(
-                settings.skin,
+            renderer: Renderer::with_pack(
+                chosen_look(&settings, &installed),
                 settings.lettering,
                 f64::from(physical_width) / art::W,
                 dpr,
             ),
+            installed,
             scene: Scene::default(),
             strip: StripRenderer::new(f64::from(physical_width) / art::W),
             strip_scene: StripScene::default(),
             last: [0.5; 4],
             drawer: DrawerRenderer::new(f64::from(physical_width) / art::W),
             browser: Browser::new(library),
+            arp: ArpRenderer::new(
+                f64::from(physical_width) / art::W,
+                settings.skin,
+                settings.lettering,
+            ),
+            arp_scene: ArpScene::default(),
+            lower: Dropped::default(),
+            lower_shown: (0.0, Lower::Arp),
+            last_arp_press: None,
+            mpe: MpeRenderer::new(
+                f64::from(physical_width) / art::W,
+                settings.skin,
+                settings.lettering,
+            ),
+            mpe_scene: MpeScene::default(),
+            last_mpe_press: None,
+            heard: ((0, 0), None, None),
+            fx_view: FxView::new(None),
+            fx: None,
+            fx_scene: FxScene::default(),
+            fx_pin_drag: None,
+            rail: Rail::Plugin,
+            tempo_drag: None,
+            last_tempo_press: None,
+            tempo_hover: None,
+            panic_held: false,
+            mapping: mapping::Mapping::default(),
+            live: [None; LIVE.len()],
+            live_tempo: None,
+            live_due: None,
+            tempo_travel: 0.0,
             composed: None,
             damage: None,
             resizing_window: false,
+            panel_due: false,
             placed: false,
             update: Update::default(),
             learning: Learning::default(),
@@ -1162,6 +1868,7 @@ impl Editing {
             hover: None,
             drag: None,
             scroll: None,
+            precise_lines: PRECISE_LINES,
             list_travel: 0.0,
             last_press: None,
             resizing: None,
@@ -1180,19 +1887,136 @@ impl Editing {
             whats_new: None,
             whats_new_checked: false,
             typing: None,
+            knob_entry: None,
             typing_keys: false,
             last_strip_press: None,
             freq_knobs,
+            waveforms,
+            lfo: LfoRenderer::new(
+                f64::from(physical_width) / art::W,
+                settings.skin,
+                settings.lettering,
+            ),
+            lfo_scene: LfoScene::default(),
+            modulation: ModRenderer::new(f64::from(physical_width) / art::W),
+            mod_scene: ModScene::default(),
+            modulating: lfo_page::Modulating::default(),
+            lfo_rates,
+            lfo_waves,
+            macros: MacroRenderer::new(),
+            macro_scene: MacroScene::default(),
+            macro_view: macros::MacroView::default(),
             playing,
             #[cfg(feature = "standalone-production")]
             standalone_dialog: None,
+            agents: agent::Agents::default(),
+            realtime: Realtime::default(),
+        };
+        editing.use_effects(FxView::new(effects));
+        editing.opened().listening()
+    }
+
+    /// The effects' drawer for `view`'s chain: with one, its renderer (its still parts begun on
+    /// their thread) and the rail's FX key; without, the plug-ins' rail.
+    fn use_effects(&mut self, view: FxView) {
+        self.rail = if view.available() {
+            Rail::Effects
+        } else {
+            Rail::Plugin
+        };
+        self.fx = view.available().then(|| {
+            FxRenderer::new(
+                self.renderer.scale(),
+                self.renderer.skin(),
+                self.renderer.lettering(),
+            )
+        });
+        self.browser.effects = view.effects();
+        if let Some(effects) = &self.browser.effects
+            && !self
+                .params
+                .preset
+                .read()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+        {
+            effects.observe_preset(
+                self.params
+                    .preset_effects
+                    .read()
+                    .map(|s| s.clone())
+                    .unwrap_or_default(),
+            );
         }
-        .opened()
+        self.fx_view = view;
+        self.strip.set_rail(self.rail);
+        self.learning.rail = self.rail;
+        self.composed = None;
+    }
+
+    /// The settings' menu, dropping down from under the rail's settings key to its left.
+    fn open_settings(&mut self) {
+        let size = self.renderer.text_size() * MENU_TEXT;
+        // The packs installed now (one may have been added since the editor opened).
+        self.installed = installed();
+        let packs: Vec<(String, bool)> = self
+            .installed
+            .iter()
+            .map(|p| (p.name.clone(), p.look.is_some()))
+            .collect();
+        let shown = &self.renderer.look().id;
+        let pack = self
+            .installed
+            .iter()
+            .position(|p| p.look.as_ref().is_some_and(|l| &l.id == shown));
+        let agents = self.agents_menu();
+        self.learning.open_settings_menu(
+            self.renderer.fonts(),
+            settings_menu_corner(),
+            size,
+            (
+                self.settings.skin,
+                self.settings.lettering,
+                self.settings.frequency,
+                self.params.midi_map.wheel_source(),
+                agents,
+                self.settings.hover_cables,
+            ),
+            (&packs, pack),
+            self.realtime.warning.as_ref().map(|w| w.row),
+        );
+    }
+
+    /// Listening for agents if they are allowed.
+    fn listening(mut self) -> Self {
+        self.sync_agents();
+        self
+    }
+
+    /// Agents allowed or not from now on (SETTINGS: AGENTS), on this computer; off, for this
+    /// session too (`--agents`).
+    fn set_agents(&mut self, on: bool) {
+        self.keep_settings(Change::Agents(on));
+        if !on {
+            crate::agent::force(false);
+        }
+        self.agents.stop = false;
+        self.agents.error = None;
+        self.sync_agents();
     }
 
     /// As it opens: what QUALITY's setting shows up in its opening, not moving (the hamster
     /// asleep); it watches the levels, and the voices' peaks held while it was shut are let go.
     fn opened(mut self) -> Self {
+        // The window opened at the panel's size last chosen; the look's may differ.
+        self.strip.set_look(self.renderer.look());
+        self.drawer.set_look(self.renderer.look());
+        self.dress_drawers();
+        self.strip.set_under_top(self.renderer.top_px());
+        if self.panel() != chosen_panel() {
+            choose_panel(self.panel());
+            self.panel_due = true;
+        }
         self.meters.watchers.fetch_add(1, Ordering::Relaxed);
         let _ = self.meters.take_levels();
         self.motion = Motion::at(self.params.quality.value(), 0.0);
@@ -1231,11 +2055,82 @@ impl Editing {
     /// panel's renderer made again in it (its pictures decoded as it first draws).
     fn set_look(&mut self, skin: Skin) {
         self.keep_settings(Change::Skin(skin));
-        if self.renderer.skin() != skin {
-            let lettering = self.renderer.lettering();
-            self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
-            self.composed = None;
+        let look = Look::of(skin);
+        if self.renderer.look().id != look.id {
+            self.draw_in(look);
         }
+    }
+
+    /// The editor drawn in installed pack `i`'s look from now on, on this computer
+    /// (decisions.md R-SKIN-PACKS).
+    fn set_pack(&mut self, i: usize) {
+        let Some(look) = self.installed.get(i).and_then(|p| p.look.clone()) else {
+            return;
+        };
+        if let Some(id) = PackId::new(&look.id) {
+            self.keep_settings(Change::Pack(id, look.base));
+        }
+        if self.renderer.look().id != look.id {
+            self.draw_in(look);
+        }
+    }
+
+    /// The panel's renderer made again in `look` (its pictures decoded as it first draws).
+    ///
+    /// A look whose panel is another size than the one shown asks the window to follow it, its
+    /// width kept (decisions.md R-SKIN-PACKS); the host refusing, the look shown stays.
+    fn draw_in(&mut self, look: Look) {
+        let lettering = self.renderer.lettering();
+        let before = self.panel();
+        let renderer = Renderer::with_pack(look, lettering, self.renderer.scale(), self.dpr);
+        let was = std::mem::replace(&mut self.renderer, renderer);
+        if self.panel() != before {
+            if !self.ask_resize(self.width) {
+                self.renderer = was;
+                return;
+            }
+            choose_panel(self.panel());
+            self.resizing_window = true;
+        }
+        self.strip.set_look(self.renderer.look());
+        self.drawer.set_look(self.renderer.look());
+        self.dress_drawers();
+        self.strip.set_under_top(self.renderer.top_px());
+        self.composed = None;
+    }
+
+    /// The drawers dropped from the rail (the arpeggiator's, the effects' and the expression's)
+    /// drawn in the look's base skin and lettering: a pack's look dresses none (decisions.md
+    /// R-SKIN-PACKS), so they draw its base's built-in artwork.
+    fn dress_drawers(&mut self) {
+        let (skin, lettering) = (self.renderer.skin(), self.renderer.lettering());
+        self.arp.set_look(skin, lettering);
+        self.mpe.set_look(skin, lettering);
+        self.lfo.set_look(skin, lettering);
+        if let Some(fx) = &mut self.fx {
+            fx.set_look(skin, lettering);
+        }
+    }
+
+    /// The window asked to follow the look's panel as it opened; the host refusing, the look's
+    /// base drawn instead (its panel the official one, as the window is).
+    fn follow_panel(&mut self) {
+        if !std::mem::take(&mut self.panel_due) {
+            return;
+        }
+        if self.ask_resize(self.width) {
+            self.resizing_window = true;
+        } else {
+            let base = Look::of(self.renderer.look().base);
+            let lettering = self.renderer.lettering();
+            self.renderer = Renderer::with_pack(base, lettering, self.renderer.scale(), self.dpr);
+            choose_panel(self.panel());
+            self.strip.set_look(self.renderer.look());
+            self.drawer.set_look(self.renderer.look());
+            self.dress_drawers();
+        }
+        self.strip.set_under_top(self.renderer.top_px());
+        self.composed = None;
     }
 
     /// The SIZE menu's sizes (R-SIZE): [`SIZES`], then FIT TO SCREEN, the size the editor
@@ -1247,7 +2142,7 @@ impl Editing {
         let expanded = self.expanded();
         let fits = |w: u32| {
             screen.is_none_or(|(sw, sh)| {
-                f64::from(w) <= sw && f64::from(height_for_panel(w, expanded)) <= sh
+                f64::from(w) <= sw && f64::from(height_in(w, expanded, self.panel())) <= sh
             })
         };
         let mut sizes: Vec<_> = SIZES
@@ -1267,8 +2162,9 @@ impl Editing {
     fn set_lettering(&mut self, lettering: Lettering) {
         self.keep_settings(Change::Lettering(lettering));
         if self.renderer.lettering() != lettering {
-            let skin = self.renderer.skin();
-            self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
+            let look = self.renderer.look().clone();
+            self.renderer = Renderer::with_pack(look, lettering, self.renderer.scale(), self.dpr);
+            self.dress_drawers();
             self.composed = None;
         }
     }
@@ -1296,14 +2192,64 @@ impl Editing {
         }
     }
 
+    fn preset_keys_allowed(&self) -> bool {
+        self.playing.focused
+            && !self.browser.open
+            && self.typing.is_none()
+            && self.macro_view.typing.is_none()
+            && self.knob_entry.is_none()
+            && !self.learning.holds_keys(&self.params.midi_map)
+            && !self.fx_view.list_open()
+            && !self.standalone_dialog_open()
+            && self.whats_new.is_none()
+    }
+
+    fn holds_keys(&self) -> bool {
+        self.browser.open
+            || self.learning.holds_keys(&self.params.midi_map)
+            || self.mapping_on()
+            || self.typing.is_some()
+            || self.macro_view.typing.is_some()
+            || self.knob_entry.is_some()
+            || self.fx_view.list_open()
+            || self.note_typing_allowed()
+            || self.standalone_dialog_open()
+            || self.whats_new.is_some()
+    }
+
     fn note_typing_allowed(&self) -> bool {
         self.playing.holds_keys()
             && !self.browser.open
             && !self.browser.sliding()
             && self.typing.is_none()
+            && self.macro_view.typing.is_none()
+            && self.knob_entry.is_none()
             && !self.learning.holds_keys(&self.params.midi_map)
+            && !self.fx_view.list_open()
             && !self.standalone_dialog_open()
             && self.whats_new.is_none()
+    }
+
+    /// What moves the MOD wheel from now on, on this computer (R-MODWHEEL-SOURCE): learning
+    /// ends, the wheel's CC is reserved, and the setting kept.
+    fn set_wheel_source(&mut self, source: crate::mod_wheel::Source) {
+        self.params.midi_map.cancel();
+        self.params.midi_map.set_wheel_source(source);
+        self.keep_settings(Change::ModWheelSource(source));
+    }
+
+    /// MPE's zones from `mode` from now on, on this computer (decisions.md R-MPE): the
+    /// controller's MPE Configuration Message (AUTO), a lower zone of fifteen channels, or none.
+    fn set_mpe_input(&mut self, mode: crate::expression::Mode) {
+        self.keep_settings(Change::Mpe(mode));
+        self.params.set_mpe_mode(mode);
+    }
+
+    /// Timbre (CC 74, a host's brightness) resting at `rest` from now on, on this computer
+    /// (decisions.md R-MPE).
+    fn set_timbre_rest(&mut self, rest: crate::expression::TimbreRest) {
+        self.keep_settings(Change::TimbreRest(rest));
+        self.params.set_timbre_rest(rest);
     }
 
     /// The FREQUENCY knobs read through `law` from now on, on this computer (decisions.md
@@ -1320,6 +2266,16 @@ impl Editing {
         self.settings.apply(change);
         if let Some(path) = &self.settings_file {
             let _ = Settings::keep(path, change);
+        }
+    }
+
+    fn poll_midi_learn(&mut self) {
+        if self
+            .learning
+            .poll(&self.params.midi_map)
+            .is_some_and(|a| a.param == crate::learn::MOD_WHEEL)
+        {
+            self.keep_settings(Change::ModWheelSource(self.params.midi_map.wheel_source()));
         }
     }
 
@@ -1392,9 +2348,11 @@ impl Editing {
             lines,
         };
         let (w, h) = note.extent(self.renderer.fonts());
-        // (Its box's right edge a little left of the lamp's column, its top at the lamp's.)
-        note.x = art::COL + 2940.0 - w / 2.0;
-        note.y = art::TOP + 40.0 + h + size * 0.4;
+        // (Its box's right edge a little left of the lamp's column, its top at the lamp's: where
+        // the layout has QUALITY's opening.)
+        let (ux, uy) = self.renderer.arrangement().ultra;
+        note.x = art::COL + ux - 83.0 - w / 2.0;
+        note.y = art::TOP + uy - 52.0 + h + size * 0.4;
         note
     }
 
@@ -1432,7 +2390,14 @@ impl Editing {
         let scale = f64::from(physical_width) / art::W;
         self.renderer.rescale(scale, dpr);
         self.strip.rescale(scale);
+        self.strip.set_under_top(self.renderer.top_px());
         self.drawer.rescale(scale);
+        self.arp.rescale(scale);
+        self.mpe.rescale(scale);
+        self.lfo.rescale(scale);
+        if let Some(fx) = &mut self.fx {
+            fx.rescale(scale);
+        }
         self.composed = None;
     }
 
@@ -1443,13 +2408,14 @@ impl Editing {
     /// The pointer's place in the drawing.
     fn in_drawing(&self, (x, y): (f64, f64)) -> (f64, f64) {
         let k = self.dpr / self.renderer.scale();
-        (x * k, y * k)
+        (x * k, y * k + self.renderer.top())
     }
 
     /// The compact view's grip is on the rail; controls outside the view cannot be hit.
     fn hit(&self, x: f64, y: f64) -> Option<Target> {
         if !self.expanded() {
-            let bottom = f64::from(self.physical_height()) / self.renderer.scale();
+            let bottom =
+                f64::from(self.physical_height()) / self.renderer.scale() + self.renderer.top();
             if !(0.0..bottom).contains(&y) {
                 return None;
             }
@@ -1460,7 +2426,35 @@ impl Editing {
                 return None;
             }
         }
-        interact::hit(self.renderer.layout(), x, y)
+        // (The macros' knobs while they show, in the wheels' place: decisions.md R-MACROS.)
+        if self.macros_show()
+            && let Some(t) = interact::hit_macro(x, y)
+        {
+            return Some(t);
+        }
+        // (A control off the panel is not there to find.)
+        interact::hit(self.renderer.layout(), self.renderer.arrangement(), x, y)
+            .filter(|t| !matches!(t, Target::Control(i) if self.off_panel(*i)))
+    }
+
+    /// Whether control `i` is off the panel now: a TIMED key away from its RANGE's LO
+    /// (decisions.md R-OSC-TIMED; the owner: "they should disappear ... if it's not on low
+    /// mode"), or a MOD key while its oscillator's waveform is STEPPED (R-CONTINUOUS-WAVE). It is
+    /// neither drawn nor found by the pointer (no press, wheel, tip or menu), nor ringed while
+    /// MIDI Learn learns it from the list.
+    fn off_panel(&self, i: usize) -> bool {
+        CONTROLS.get(i).is_some_and(|c| {
+            let at = |keys: &[&str]| keys.iter().position(|k| *k == c.param);
+            // (The LFO page's while it does not show: R-LFO.)
+            (c.place == DrawerPlace::Lfo && !self.page_shows())
+                // (The wheels and their switches while the macros show in their place, and the
+                // macros while they do not: R-MACROS.)
+                || (c.place == DrawerPlace::Column && self.macros_show())
+                || (c.place == DrawerPlace::Macro && !self.macros_show())
+                || at(&ca72_panel::render::TIMED_KEYS)
+                    .is_some_and(|k| timed_inert(&self.params, k + 1))
+                || at(&ca72_panel::render::MOD_KEYS).is_some_and(|n| !self.params.continuous(n))
+        })
     }
 
     /// The drawer's top now (drawing units) and where it is cut off, while it shows: dropping
@@ -1479,13 +2473,66 @@ impl Editing {
         (y >= from && y < to).then_some((x, y - top))
     }
 
+    /// The drawer dropped from the rail: its top now (drawing units), while it shows, dropping
+    /// down from under the rail, over the lower page.
+    fn lower_depth(&self) -> f64 {
+        if self.lower.which == Lower::Fx {
+            self.fx_scene.depth()
+        } else {
+            self.lower.which.depth()
+        }
+    }
+
+    fn lower_top(&self) -> Option<f64> {
+        let k = self.lower.reveal();
+        (k > 0.0 && self.expanded()).then_some(lower_ui::TOP - (1.0 - k) * self.lower_depth())
+    }
+
+    /// Whether the pointer (the drawing's units) is over the drawer dropped from the rail, as much
+    /// of it as shows, or the effects' list hanging from it (the presets' drawer, over it, apart).
+    fn in_lower(&self, (x, y): (f64, f64)) -> bool {
+        self.lower_top().is_some_and(|top| {
+            let plate = (lower_ui::LEFT..lower_ui::RIGHT).contains(&x)
+                && y >= DRAWER_TOP
+                && y < top + self.lower_depth();
+            let list = self.lower.which == Lower::Fx
+                && self.lower.settled()
+                && self
+                    .fx_scene
+                    .list
+                    .as_ref()
+                    .is_some_and(|l| fx_ui::list_hit(l, x, y).is_some());
+            plate || list
+        }) && self.in_drawer((x, y)).is_none()
+    }
+
+    /// Whether the pointer is over the arpeggiator's drawer.
+    fn in_arp(&self, at: (f64, f64)) -> bool {
+        self.lower.which == Lower::Arp && self.in_lower(at)
+    }
+
+    /// Whether the pointer is over the expression drawer.
+    fn in_mpe(&self, at: (f64, f64)) -> bool {
+        self.lower.which == Lower::Mpe && self.in_lower(at)
+    }
+
+    /// Whether the pointer is over the effects' drawer or its list.
+    fn in_fx(&self, at: (f64, f64)) -> bool {
+        self.lower.which == Lower::Fx && self.in_lower(at)
+    }
+
     fn expanded(&self) -> bool {
         self.params.editor_expanded.load(Ordering::Relaxed)
     }
 
     /// The window's height (logical pixels): the synth and rail, with the lower panel shown.
     fn window_height(&self) -> u32 {
-        height_for_panel(self.width, self.expanded())
+        height_in(self.width, self.expanded(), self.panel())
+    }
+
+    /// The panel's size, its look's.
+    fn panel(&self) -> art::Panel {
+        self.renderer.arrangement().panel
     }
 
     fn resize_view(&self) -> crate::resizing::View {
@@ -1510,7 +2557,7 @@ impl Editing {
             let physical = WindowInfo::from_logical_size(
                 Size::new(
                     f64::from(view.width),
-                    f64::from(height_for_panel(view.width, view.expanded)),
+                    f64::from(height_in(view.width, view.expanded, self.panel())),
                 ),
                 self.dpr,
             )
@@ -1539,13 +2586,14 @@ impl Editing {
             }
             self.playing.wants_keys = self.playing.holds_keys();
             self.typing = None;
+            self.knob_entry = None;
             self.hover = None;
             self.strip_scene.hover = None;
             self.learning.fit_menu(
                 self.renderer.fonts(),
                 [
                     0.0,
-                    0.0,
+                    self.renderer.top(),
                     art::W,
                     if view.expanded { art::H } else { DRAWER_TOP },
                 ],
@@ -1559,7 +2607,7 @@ impl Editing {
         let request = self
             .params
             .editor_resizing
-            .issue((width, height_for_panel(width, self.expanded())));
+            .issue((width, height_in(width, self.expanded(), self.panel())));
         let accepted = self.context.request_resize();
         if !accepted || !self.context.resize_response_will_follow() {
             self.params.editor_resizing.answer(request, accepted);
@@ -1608,7 +2656,12 @@ impl Editing {
         self.params
             .editor_panel_applied
             .store(expanded, Ordering::Relaxed);
+        if !expanded {
+            self.lower.shut();
+            self.fx_view.close_list();
+        }
         self.typing = None;
+        self.knob_entry = None;
         self.hover = None;
         self.strip_scene.hover = None;
         self.browser.show(false, &self.params);
@@ -1650,17 +2703,50 @@ impl Editing {
 
     /// The rail's part under the pointer (the drawing's units), if it is over one.
     fn on_rail(&self, (x, y): (f64, f64)) -> Option<BarTarget> {
-        match strip::hit(x, y) {
+        match strip::hit(self.rail, x, y) {
             Some(StripTarget::Bar(t)) => Some(t),
             _ => None,
         }
+    }
+
+    /// Control `i`'s kind as it is operated now: as the panel's layout places it, an
+    /// oscillator's FREQUENCY stepped through its DIVISION's note values while it is timed
+    /// (decisions.md R-OSC-TIMED).
+    fn kind_of(&self, i: usize) -> Kind {
+        let kind = self.renderer.arrangement().control(i).kind;
+        match (kind, self.timed_dial(i)) {
+            (Kind::Knob { big, .. }, true) => Kind::Knob {
+                dial: ca72_panel::controls::Dial::Timed,
+                big,
+            },
+            _ => kind,
+        }
+    }
+
+    /// Whether control `i` is oscillator 2's or 3's FREQUENCY knob, timed now.
+    fn timed_dial(&self, i: usize) -> bool {
+        CONTROLS.get(i).is_some_and(|c| match c.param {
+            "osc2_frequency" => self.params.timed_now(1),
+            "osc3_frequency" => self.params.timed_now(2),
+            _ => false,
+        }) || self.lfo_timed(i)
     }
 
     fn operated(&self, control: usize) -> Option<&dyn Operated> {
         match CONTROLS.get(control)?.param {
             "osc2_frequency" => Some(&self.freq_knobs[0]),
             "osc3_frequency" => Some(&self.freq_knobs[1]),
-            id => param(&self.params, id),
+            "osc1_waveform" => Some(&self.waveforms[0]),
+            "osc2_waveform" => Some(&self.waveforms[1]),
+            "osc3_waveform" => Some(&self.waveforms[2]),
+            // An LFO's (decisions.md R-LFO): its RATE in Hz or timed, its WAVEFORM STEPPED or
+            // CONTINUOUS, its others its parameters.
+            id => match lfo_page::lfo_part(id) {
+                Some((n, "rate")) => Some(&self.lfo_rates[n]),
+                Some((n, "waveform")) => Some(&self.lfo_waves[n]),
+                Some((n, part)) => lfo_page::lfo_param(&self.params, n, part),
+                None => param(&self.params, id),
+            },
         }
     }
 
@@ -1683,14 +2769,143 @@ impl Editing {
     /// ([`voices_inert`]), their knobs doing nothing either.
     fn start_typing(&mut self, r: Readout) {
         self.playing.release();
+        self.knob_entry = None;
         if !r.typed()
             || (r == Readout::Detune && !self.params.doubled.value())
             || (r == Readout::Voices && voices_inert(&self.params))
         {
             return;
         }
-        self.typing = Some((r, String::new()));
+        self.typing = Some((Typed::Strip(r), String::new()));
         self.typing_keys = true;
+    }
+
+    /// A value to be typed into the arpeggiator's drawer's readout `i` (RATE, OCTAVES, GATE,
+    /// SWING; decisions.md R-ARP).
+    fn start_arp_typing(&mut self, i: usize) {
+        self.playing.release();
+        self.knob_entry = None;
+        self.typing = Some((Typed::Arp(i.min(3)), String::new()));
+        self.typing_keys = true;
+    }
+
+    /// A value to be typed into the expression drawer's readout `i` (decisions.md R-MPE).
+    fn start_mpe_typing(&mut self, i: usize) {
+        self.playing.release();
+        self.knob_entry = None;
+        self.typing = Some((Typed::Mpe(i.min(mpe_ui::UNIT_COUNT - 1)), String::new()));
+        self.typing_keys = true;
+    }
+
+    /// The standalone's TEMPO set to `bpm` (within 30 to 300, whole beats), the arpeggiator's at
+    /// once, and this computer's: written now if `kept`, else when the gesture ends.
+    fn set_tempo(&mut self, bpm: f64, kept: bool) {
+        if !bpm.is_finite() {
+            return;
+        }
+        let bpm = crate::settings::tempo_within(bpm.round().clamp(0.0, 1000.0) as u16);
+        self.params.set_tempo(f64::from(bpm));
+        if kept {
+            self.keep_settings(Change::Tempo(bpm));
+        } else {
+            self.settings.apply(Change::Tempo(bpm));
+        }
+    }
+
+    /// The tempo as the screen reads it.
+    fn tempo_now(&self) -> f64 {
+        self.params.tempo().round()
+    }
+
+    /// What the TEMPO screen reads: the tempo the sources have it at, while one moves it
+    /// (decisions.md R-LFO), else as it is set, and as set while it is dragged or typed into.
+    fn tempo_shown(&self) -> f64 {
+        match self.live_tempo {
+            Some(t)
+                if self.tempo_drag.is_none() && !matches!(self.typing, Some((Typed::Tempo, _))) =>
+            {
+                t.round()
+            }
+            _ => self.tempo_now(),
+        }
+    }
+
+    /// Whether a source moves target `t` (an assignment of a depth other than 0).
+    fn source_moves(&self, t: crate::lfo::Target) -> bool {
+        self.sources_on(t).iter().any(|(_, d)| *d != 0.0)
+    }
+
+    /// Whether control `i` is being operated or typed into now (its screen then reads its own
+    /// value).
+    fn operated_now(&self, i: usize) -> bool {
+        self.drag.as_ref().is_some_and(|d| d.control == i)
+            || self.scroll.as_ref().is_some_and(|s| s.control == i)
+            || self.knob_entry.as_ref().is_some_and(|e| e.is_value_of(i))
+    }
+
+    /// The live values read again (at most 30 times a second, and only while a source moves a
+    /// screen's control: decisions.md R-LFO); none for the rest.
+    fn read_live(&mut self, now: Instant) {
+        let tempo = self.playing.standalone && self.source_moves(crate::lfo::Target::Tempo);
+        let any = tempo || LIVE.iter().any(|&t| self.source_moves(t));
+        if !any {
+            (self.live, self.live_tempo, self.live_due) = ([None; LIVE.len()], None, None);
+            return;
+        }
+        if self.live_due.is_some_and(|d| now < d) {
+            return;
+        }
+        let live = self.meters.live();
+        self.live = std::array::from_fn(|k| live[k].filter(|_| self.source_moves(LIVE[k])));
+        self.live_tempo = self.meters.tempo().filter(|_| tempo);
+        // (A thirtieth after it was due, never before now: the first a thirtieth from now.)
+        let next = self.live_due.map_or(now, |d| d.max(now - LIVE_FRAME)) + LIVE_FRAME;
+        self.live_due = Some(next);
+    }
+
+    /// The live values the strip's screens read now: a control's while a source moves it and it
+    /// is not operated or typed into.
+    fn live_shown(&self) -> [Option<f64>; LIVE.len()] {
+        std::array::from_fn(|k| {
+            let i = lfo_page::control_of(LIVE[k])?;
+            let typed =
+                matches!(self.typing, Some((Typed::Strip(r), _)) if readout_of(LIVE[k]) == Some(r));
+            self.live[k].filter(|_| !self.operated_now(i) && !typed)
+        })
+    }
+
+    /// A press on the TEMPO screen: a drag begun, or, the second of a double click, a tempo
+    /// typed into it.
+    fn tempo_press(&mut self, modifiers: Modifiers) {
+        let now = Instant::now();
+        if self
+            .last_tempo_press
+            .is_some_and(|at| now - at < DOUBLE_CLICK)
+        {
+            self.last_tempo_press = None;
+            self.tempo_drag = None;
+            self.playing.release();
+            self.knob_entry = None;
+            self.typing = Some((Typed::Tempo, String::new()));
+            self.typing_keys = true;
+            return;
+        }
+        self.last_tempo_press = Some(now);
+        self.tempo_drag = Some((
+            self.pointer.1,
+            self.tempo_now(),
+            modifiers.contains(Modifiers::SHIFT),
+            self.settings.tempo,
+        ));
+    }
+
+    /// The TEMPO screen's drag ended: its tempo, if it moved, kept for this computer.
+    fn tempo_let_go(&mut self) {
+        if let Some((.., began)) = self.tempo_drag.take()
+            && self.settings.tempo != began
+        {
+            self.keep_settings(Change::Tempo(self.settings.tempo));
+        }
     }
 
     /// A key while a value is typed: a digit, the point or the sign added where they fit, the
@@ -1707,12 +2922,29 @@ impl Editing {
             Key::Character(c) => {
                 for ch in c.chars() {
                     let cells = text.chars().filter(|c| *c != '.').count();
-                    let fits = match ch {
-                        '0'..='9' => cells < 3,
-                        '.' => !text.contains('.') && cells < 3,
-                        '-' => text.is_empty() && matches!(r, Readout::Level),
+                    let digits = text.chars().filter(char::is_ascii_digit).count();
+                    // (RATE's note value: dotted with a point after it, a triplet with a T;
+                    // OCTAVES one digit.)
+                    let ended = text.ends_with(['.', 't']);
+                    let fits = match (*r, ch) {
+                        (Typed::Arp(0), '0'..='9') => cells < 2 && !ended,
+                        (Typed::Arp(0), '.') => cells > 0 && !ended,
+                        (Typed::Arp(0), 't' | 'T') => cells > 0 && !ended,
+                        (Typed::Arp(1), '0'..='9') => cells < 1,
+                        (Typed::Arp(1), _) => false,
+                        // (MODULATION's -100 to 100, CUTOFF's -4 to 4 with a point.)
+                        (Typed::Mpe(_), '0'..='9') => digits < 3,
+                        (Typed::Mpe(i), '.') => i % 2 == 1 && i < 4 && !text.contains('.'),
+                        (Typed::Mpe(_), '-') => text.is_empty(),
+                        (Typed::Mpe(_), _) => false,
+                        (Typed::Tempo, '0'..='9') => cells < 3,
+                        (Typed::Tempo, _) => false,
+                        (_, '0'..='9') => cells < 3,
+                        (_, '.') => !text.contains('.') && cells < 3,
+                        (Typed::Strip(r), '-') => text.is_empty() && matches!(r, Readout::Level),
                         _ => false,
                     };
+                    let ch = ch.to_ascii_lowercase();
                     if fits {
                         text.push(ch);
                     }
@@ -1724,7 +2956,16 @@ impl Editing {
             Key::Enter => {
                 let (r, text) = (*r, text.clone());
                 self.typing = None;
-                self.set_typed(r, &text);
+                match r {
+                    Typed::Strip(r) => self.set_typed(r, &text),
+                    Typed::Arp(i) => self.set_arp_typed(i, &text),
+                    Typed::Mpe(i) => self.set_mpe_typed(i, &text),
+                    Typed::Tempo => {
+                        if let Ok(bpm) = text.parse::<f64>() {
+                            self.set_tempo(bpm, true);
+                        }
+                    }
+                }
             }
             Key::Escape => self.typing = None,
             _ => {}
@@ -1736,7 +2977,7 @@ impl Editing {
     /// WIDTH and INNER percent, DETUNE cents, DRIVE and LEVEL dB), within its knob's travel, a
     /// gesture of its own; nothing for what is not a number.
     fn set_typed(&mut self, r: Readout, text: &str) {
-        let Ok(v) = text.parse::<f64>() else {
+        let Ok(v) = text.trim().parse::<f64>() else {
             return;
         };
         if !v.is_finite() {
@@ -1764,6 +3005,140 @@ impl Editing {
         if let Some(i) = ca72_panel::controls::index(id) {
             self.set_once(i, f64::from(normalized.clamp(0.0, 1.0)));
         }
+    }
+
+    /// The value typed into the arpeggiator's drawer's readout `i` set, as it reads it: RATE a
+    /// note value (16, 16. dotted, 16t a triplet: one of its thirteen), OCTAVES 1 to 5, GATE and
+    /// SWING percent; nothing for what is not one.
+    fn set_arp_typed(&mut self, i: usize, text: &str) {
+        let p = &self.params;
+        let normalized = match i {
+            0 => {
+                let Some(k) = crate::arp::RATES.iter().position(|(t, _)| *t == text) else {
+                    return;
+                };
+                p.arp_rate.preview_normalized(ArpRate::from_index(k))
+            }
+            1 => {
+                let Ok(v) = text.parse::<i32>() else { return };
+                p.arp_octaves.preview_normalized(
+                    v.clamp(crate::params::ARP_OCTAVES.0, crate::params::ARP_OCTAVES.1),
+                )
+            }
+            _ => {
+                let Ok(v) = text.parse::<f32>() else { return };
+                if !v.is_finite() {
+                    return;
+                }
+                let q = if i == 2 { &p.arp_gate } else { &p.arp_swing };
+                q.preview_normalized(v.clamp(0.0, 100.0))
+            }
+        };
+        if let Some(c) = ca72_panel::controls::index(arp_ui::KNOB_PARAMS[i.min(3)]) {
+            self.set_once(c, f64::from(normalized.clamp(0.0, 1.0)));
+        }
+    }
+
+    /// The value typed into the expression drawer's readout `i` set, as it reads it (decisions.md
+    /// R-MPE): MODULATION's percent, CUTOFF's octaves, within the knob's travel; nothing for what
+    /// is not a number.
+    fn set_mpe_typed(&mut self, i: usize, text: &str) {
+        let Ok(v) = text.trim().parse::<f32>() else {
+            return;
+        };
+        if !v.is_finite() {
+            return;
+        }
+        let i = i.min(mpe_ui::UNIT_COUNT - 1);
+        let p = &self.params;
+        let q = [
+            &p.pressure_mod,
+            &p.pressure_filter,
+            &p.timbre_mod,
+            &p.timbre_filter,
+            &p.velocity_curve,
+            &p.velocity_floor,
+        ][i];
+        let normalized = q.preview_normalized(v);
+        if let Some(c) = ca72_panel::controls::index(mpe_ui::KNOB_PARAMS[i]) {
+            self.set_once(c, f64::from(normalized.clamp(0.0, 1.0)));
+        }
+    }
+
+    /// A press on the expression drawer's readouts (decisions.md R-MPE): one double-clicked typed
+    /// into.
+    fn mpe_press(&mut self, t: MpeTarget) {
+        let now = Instant::now();
+        let double = self
+            .last_mpe_press
+            .is_some_and(|(at, last)| last == t && now - at < DOUBLE_CLICK);
+        self.last_mpe_press = Some((now, t));
+        let MpeTarget::Readout(i) = t;
+        if double {
+            self.last_mpe_press = None;
+            self.start_mpe_typing(i);
+        }
+    }
+
+    /// A press on the arpeggiator's drawer's tabs and readouts (decisions.md R-ARP): ON and
+    /// HOLD each switched, DIRECTION's choice set, a readout double-clicked typed into.
+    fn arp_press(&mut self, t: ArpTarget) {
+        let now = Instant::now();
+        let double = self
+            .last_arp_press
+            .is_some_and(|(at, last)| last == t && now - at < DOUBLE_CLICK);
+        self.last_arp_press = Some((now, t));
+        let p = &self.params;
+        match t {
+            ArpTarget::Tab(ArpBank::Arp, 0) => self.set_switch(&p.arp_on, !p.arp_on.value()),
+            ArpTarget::Tab(ArpBank::Arp, _) => {
+                self.set_switch(&p.arp_latch, !p.arp_latch.value());
+            }
+            ArpTarget::Tab(ArpBank::Direction, i) => {
+                let q = &p.arp_direction;
+                let last = ArpDirection::variants().len() - 1;
+                let to = q.preview_normalized(ArpDirection::from_index(i.min(last)));
+                if q.unmodulated_normalized_value() != to {
+                    let s = self.setter();
+                    s.begin_set_parameter(q);
+                    s.set_parameter_normalized(q, to);
+                    s.end_set_parameter(q);
+                }
+            }
+            ArpTarget::Readout(i) => {
+                if double {
+                    self.last_arp_press = None;
+                    self.start_arp_typing(i);
+                }
+            }
+        }
+    }
+
+    /// The rail's ARP or MPE key, or the standalone's FX key: its drawer dropped down over the lower
+    /// page (the other's put away for it), or put away (the presets' drawer, if open, shut for it;
+    /// the lower panel shown if hidden).
+    fn toggle_lower(&mut self, which: Lower) {
+        if !self.expanded() {
+            self.toggle_panel();
+            if !self.expanded() {
+                return;
+            }
+            self.lower.show(which, true);
+        } else if self.browser.open {
+            self.browser.show(false, &self.params);
+            self.follow_drawer();
+            self.lower.show(which, true);
+        } else {
+            self.lower.show(which, !self.lower.is_open(which));
+        }
+        self.typing = None;
+        self.hover = None;
+        self.strip_scene.hover = None;
+        self.arp_scene.hover = None;
+        self.fx_view.hover = None;
+        self.fx_view.cancel_press();
+        self.fx_view.close_list();
+        self.composed = None;
     }
 
     fn set_power(&self, on: bool) {
@@ -1805,13 +3180,85 @@ impl Editing {
         s.end_set_parameter(p);
     }
 
+    /// Oscillator `n`'s waveform made STEPPED or CONTINUOUS (its WAVEFORM switch's menu,
+    /// decisions.md R-CONTINUOUS-WAVE), one gesture: made CONTINUOUS, its shape put at the switch's
+    /// own position exactly first, so that the sound does not move (oscillator 3's sawtooth at
+    /// its reverse sawtooth's place, CONTINUOUS's third); made STEPPED, WAVEFORM as it followed
+    /// the shape, the switch's position nearest.
+    fn set_wave_mode(&self, n: usize, continuous: bool) {
+        let (mode, shape, ..) = self.params.shape_params(n);
+        let to = if continuous {
+            crate::params::WaveMode::Continuous
+        } else {
+            crate::params::WaveMode::Stepped
+        };
+        if mode.value() == to {
+            return;
+        }
+        let s = self.setter();
+        if continuous {
+            let k = WaveformSwitch::place(self.waveforms[n].waveform().value());
+            let at = match (n, k) {
+                // (Oscillator 3's reverse sawtooth and sawtooth: its reverse sawtooth's place.)
+                (2, 1 | 2) => 2,
+                _ => k,
+            };
+            let t = at as f64 / interact::CONTINUOUS_PLACES;
+            s.begin_set_parameter(shape);
+            s.set_parameter_normalized(shape, t as f32);
+            s.end_set_parameter(shape);
+        }
+        s.begin_set_parameter(mode);
+        s.set_parameter(mode, to);
+        s.end_set_parameter(mode);
+    }
+
+    /// Oscillator `n`'s MOD turned to its next way (its key Command-clicked: clockwise,
+    /// anticlockwise, both ways, round again), a gesture of its own.
+    fn next_mod_way(&self, n: usize) {
+        use crate::params::ShapeModDirection as D;
+        let p = self.params.shape_params(n).3;
+        let next = match p.value() {
+            D::Clockwise => D::Anticlockwise,
+            D::Anticlockwise => D::Both,
+            D::Both => D::Clockwise,
+        };
+        let s = self.setter();
+        s.begin_set_parameter(p);
+        s.set_parameter(p, next);
+        s.end_set_parameter(p);
+    }
+
+    /// Whether control `i` is a WAVEFORM switch whose waveform is CONTINUOUS (decisions.md
+    /// R-CONTINUOUS-WAVE): operated along its whole travel ([`WaveformSwitch`]).
+    fn continuous_switch(&self, i: usize) -> bool {
+        CONTROLS.get(i).is_some_and(|c| {
+            ca72_panel::render::WAVEFORMS
+                .iter()
+                .position(|w| *w == c.param)
+                .is_some_and(|n| self.params.continuous(n))
+        }) || self.lfo_continuous(i)
+    }
+
     /// Whether control `i` answers the pointer: all but DETUNE in SCATTER (the owner: "make that
-    /// knob unresponsive unless the user is in double mode") and VOICES where it does nothing
-    /// ([`voices_inert`]), each drawn dimmed then.
+    /// knob unresponsive unless the user is in double mode"), VOICES where it does nothing
+    /// ([`voices_inert`]), a TIMED key away from LO and OSC. 3 CONTROL while oscillator 3 is
+    /// timed ([`osc3_control_inert`]), each drawn dimmed then; and a MOD key while its
+    /// oscillator's waveform is STEPPED, not on the panel then.
     fn operable(&self, i: usize) -> bool {
         CONTROLS.get(i).is_none_or(|c| match c.param {
             "double" => self.params.doubled.value(),
             "voices" => !voices_inert(&self.params),
+            // A TIMED key away from its RANGE's LO (R-OSC-TIMED).
+            "osc2_timed" => !timed_inert(&self.params, 1),
+            "osc3_timed" => !timed_inert(&self.params, 2),
+            // A MOD key while its oscillator's waveform is STEPPED: not on the panel
+            // (R-CONTINUOUS-WAVE).
+            "osc1_shape_mod" => self.params.continuous(0),
+            "osc2_shape_mod" => self.params.continuous(1),
+            "osc3_shape_mod" => self.params.continuous(2),
+            // OSC. 3 CONTROL while oscillator 3 is timed.
+            "osc3_control" => !osc3_control_inert(&self.params),
             _ => true,
         })
     }
@@ -1856,6 +3303,11 @@ impl Editing {
         self.last_strip_press = Some((now, t, before));
         match t {
             StripTarget::Bar(BarTarget::Panel) => self.toggle_panel(),
+            StripTarget::Bar(BarTarget::Arp) => self.toggle_lower(Lower::Arp),
+            StripTarget::Bar(BarTarget::Mpe) => self.toggle_lower(Lower::Mpe),
+            StripTarget::Bar(BarTarget::Fx) if self.fx_view.available() => {
+                self.toggle_lower(Lower::Fx);
+            }
             StripTarget::Readout(_) => {}
             StripTarget::Switch(a) => {
                 let on = self.amount(a).0.unmodulated_normalized_value() <= 0.0;
@@ -1894,29 +3346,15 @@ impl Editing {
                 let on = !self.params.auto_gain.value();
                 self.set_switch(&self.params.auto_gain, on);
             }
-            // The settings' key: its menu, dropping down from under it to its left.
-            StripTarget::Bar(BarTarget::Keyboard) => {
-                self.playing.release_pointer();
-                self.playing.visible = !self.playing.visible;
-                self.keep_settings(Change::Keyboard(self.playing.visible));
-                self.playing.wants_keys = self.playing.holds_keys();
-                self.hover = None;
-                self.strip_scene.hover = None;
-                self.composed = None;
+            StripTarget::Bar(t @ (BarTarget::Global | BarTarget::Keyboard | BarTarget::Lfo)) => {
+                self.show_lower_page(t);
             }
+            StripTarget::Bar(BarTarget::Macro) => self.toggle_macros(),
+            // The settings' key: its menu, dropping down from under it to its left.
             StripTarget::Bar(BarTarget::Settings) => {
                 self.playing.release();
-                let size = self.renderer.text_size() * MENU_TEXT;
-                self.learning.open_settings_menu(
-                    self.renderer.fonts(),
-                    settings_menu_corner(),
-                    size,
-                    (
-                        self.settings.skin,
-                        self.settings.lettering,
-                        self.settings.frequency,
-                    ),
-                );
+                self.agents.copied = None;
+                self.open_settings();
             }
             StripTarget::Bar(b) => {
                 if matches!(
@@ -1953,12 +3391,45 @@ impl Editing {
         if !self.expanded() && y >= DRAWER_TOP {
             return;
         }
-        // A press on the readout a value is being typed into leaves it typed into; anywhere
-        // else ends the typing, nothing set (decisions.md R52).
-        if let Some((r, _)) = self.typing
-            && matches!(strip::hit(x, y), Some(StripTarget::Switch(t) | StripTarget::Readout(t)) if t == r)
+        // A lit page key is inert before the usual press cancels typing or ends a gesture.
+        // Modal notes and menus still own their presses.
+        if self.expanded()
+            && !self.ultra_note
+            && !self.learning.menu_open()
+            && let Some(key @ (BarTarget::Global | BarTarget::Keyboard | BarTarget::Lfo)) =
+                self.on_rail((x, y))
+            && key == self.lower_page()
         {
             return;
+        }
+        // The field keeps a press inside it. Elsewhere cancels it, consuming that press.
+        if let Some(entry) = &self.knob_entry {
+            if !self.entry_field(entry).contains(x, y) {
+                self.knob_entry = None;
+                self.last_press = None;
+            }
+            return;
+        }
+        // A press on the readout a value is being typed into leaves it typed into; anywhere
+        // else ends the typing, nothing set (decisions.md R52).
+        if let Some((r, _)) = self.typing {
+            let on_it = match r {
+                Typed::Strip(r) => {
+                    !self.in_arp((x, y))
+                        && !self.in_mpe((x, y))
+                        && matches!(strip::hit(self.rail, x, y), Some(StripTarget::Switch(t) | StripTarget::Readout(t)) if t == r)
+                }
+                Typed::Arp(i) => {
+                    self.in_arp((x, y)) && arp_ui::hit(x, y) == Some(ArpTarget::Readout(i))
+                }
+                Typed::Mpe(i) => {
+                    self.in_mpe((x, y)) && mpe_ui::hit(x, y) == Some(MpeTarget::Readout(i))
+                }
+                Typed::Tempo => art::tempo_hit(self.renderer.arrangement(), x, y),
+            };
+            if on_it {
+                return;
+            }
         }
         // A wheel's gesture still waiting for its rest, or a drag whose release never came
         // (its window lost the pointer): ended before anything else begins.
@@ -1994,12 +3465,80 @@ impl Editing {
                 self.set_frequency_dials(law);
                 return;
             }
+            Pressed::WheelMenu(range) => {
+                self.learning.open_wheel_menu(
+                    self.renderer.fonts(),
+                    settings_menu_corner(),
+                    self.renderer.text_size() * MENU_TEXT,
+                    self.params.midi_map.wheel_source(),
+                    range,
+                );
+                return;
+            }
+            Pressed::WheelSource(source) => {
+                self.set_wheel_source(source);
+                return;
+            }
+            Pressed::MpeMenu => {
+                self.learning.open_mpe_menu(
+                    self.renderer.fonts(),
+                    settings_menu_corner(),
+                    self.renderer.text_size() * MENU_TEXT,
+                    (self.params.mpe_mode(), self.params.timbre_rest()),
+                );
+                return;
+            }
+            Pressed::MpeInput(mode) => {
+                self.set_mpe_input(mode);
+                return;
+            }
+            Pressed::TimbreRest(rest) => {
+                self.set_timbre_rest(rest);
+                return;
+            }
+            Pressed::GlideRange(long) => {
+                let p = &self.params.glide_range;
+                let s = self.setter();
+                s.begin_set_parameter(p);
+                s.set_parameter(
+                    p,
+                    if long {
+                        crate::params::GlideRange::Long
+                    } else {
+                        crate::params::GlideRange::Normal
+                    },
+                );
+                s.end_set_parameter(p);
+                return;
+            }
+            Pressed::Rect(n, variable) => {
+                self.set_wave_mode(n, variable);
+                return;
+            }
             Pressed::Look(skin) => {
                 self.set_look(skin);
                 return;
             }
+            Pressed::Pack(i) => {
+                self.set_pack(i);
+                return;
+            }
             Pressed::Lettering(lettering) => {
                 self.set_lettering(lettering);
+                return;
+            }
+            Pressed::HoverCables(on) => {
+                self.keep_settings(Change::HoverCables(on));
+                return;
+            }
+            Pressed::Agents(on) => {
+                self.set_agents(on);
+                return;
+            }
+            Pressed::Setup(setup) => {
+                self.copy_setup(setup);
+                // (Open again, to say it was copied.)
+                self.open_settings();
                 return;
             }
             Pressed::SizeMenu => {
@@ -2023,6 +3562,50 @@ impl Editing {
                 self.show_midi_list(chosen);
                 return;
             }
+            Pressed::Fx(a) => {
+                self.fx_view.act(a);
+                return;
+            }
+            Pressed::Mod(m) => {
+                self.mod_item(m);
+                return;
+            }
+        }
+        // The effects' list open: a press elsewhere puts it away, and is its own.
+        if self.fx_view.list_open() && !self.in_fx((x, y)) {
+            self.fx_view.close_list();
+            return;
+        }
+        // The MIDI map mode: a click chooses a control and operates nothing (decisions.md
+        // R-MIDI-MAP); its MIDI key, TYPING, PANIC, the rail's keys and the drawer as ever.
+        if self.mapping_on() && self.map_press((x, y)) {
+            return;
+        }
+        // The standalone's TEMPO screen, on the wood above the panel (R-ARP): Alt/Option, the
+        // last touched source's depth on it, as a knob's (R-LFO).
+        if self.playing.standalone && art::tempo_hit(self.renderer.arrangement(), x, y) {
+            if !(modifiers.contains(Modifiers::ALT) && self.mod_press((x, y), modifiers)) {
+                self.tempo_press(modifiers);
+            }
+            return;
+        }
+        // Its TYPING and PANIC keys after it (decisions.md R-TEMPO-CORNER).
+        if self.playing.standalone
+            && let Some(k) = art::tempo_key_hit(self.renderer.arrangement(), x, y)
+        {
+            match k {
+                art::TempoKey::Typing => {
+                    self.playing.release();
+                    self.playing.typing = !self.playing.typing;
+                    self.playing.wants_keys = self.playing.typing;
+                }
+                art::TempoKey::Panic => {
+                    self.panic();
+                    self.panic_held = true;
+                }
+                art::TempoKey::Midi => self.toggle_mapping(),
+            }
+            return;
         }
         if let Some((dx, dy)) = self.in_drawer((x, y)) {
             match drawer_hit(&self.browser.drawer, dx, dy) {
@@ -2041,40 +3624,80 @@ impl Editing {
                 Some(t) => {
                     self.learning.list = false;
                     let setter = ParamSetter::new(self.context.as_ref());
+                    // (A field's caret where its look's typeface sets the characters.)
+                    let dx = self.drawer.press_x(&self.browser.drawer, t, dx);
                     self.browser.drawer_press(t, dx, &self.params, &setter);
                 }
             }
             self.follow_drawer();
             return;
         }
-        if self.playing.visible
-            && let Some(target) = keyboard::hit(self.playing.root, x, y, self.playing.standalone)
+        // The arpeggiator's drawer, over the lower page: its own parts only, and while it slides
+        // nothing.
+        if self.in_arp((x, y)) {
+            if !self.lower.settled() {
+                return;
+            }
+            if let Some(t) = arp_ui::hit(x, y) {
+                self.arp_press(t);
+            } else if let Some(target) = interact::hit_arp(x, y) {
+                self.press_target(target, modifiers);
+            }
+            return;
+        }
+        // The expression drawer, as the arpeggiator's (decisions.md R-MPE).
+        if self.in_mpe((x, y)) {
+            if !self.lower.settled() {
+                return;
+            }
+            if let Some(t) = mpe_ui::hit(x, y) {
+                self.mpe_press(t);
+            } else if let Some(target) = interact::hit_drawer(DrawerPlace::Mpe, x, y) {
+                self.press_target(target, modifiers);
+            }
+            return;
+        }
+        // The effects' drawer and its list (decisions.md R-FX-DRAWER).
+        if self.in_fx((x, y)) {
+            if self.lower.settled() && !self.fx_pin_press((x, y), modifiers) {
+                self.fx_view.press(x, y);
+            }
+            return;
+        }
+        // A name typed is kept as a press goes elsewhere (decisions.md R-MACROS).
+        let on_macros = self.macros_show() && macro_ui::inside(x, y);
+        if !on_macros {
+            self.end_rename(true);
+        }
+        // Modulation over the panel: a pop-up's dial, a ring's end, Alt/Option on a knob
+        // (decisions.md R-LFO).
+        if self.mod_press((x, y), modifiers) {
+            return;
+        }
+        // The macros, in the left area (R-MACROS).
+        if on_macros && self.macro_press((x, y), modifiers) {
+            return;
+        }
+        // The left hand's VELOCITY jack, with the wheels: an assignment dragged (R-VELOCITY).
+        if self.velocity_press((x, y)) {
+            return;
+        }
+        // The LFO page, in the lower page's place.
+        if self.page_shows() && lfo_ui::inside(x, y) {
+            self.page_press((x, y), modifiers);
+            return;
+        }
+        if self.keyboard_shown()
+            && let Some(target) = keyboard::hit(self.playing.root, x, y)
         {
             match target {
-                keyboard::Target::Note(note) => self.playing.press(note),
+                keyboard::Target::Note(note) => {
+                    let v = velocity::key_velocity(self.playing.root, note, y);
+                    self.playing.press_at(note, v);
+                }
                 keyboard::Target::Down | keyboard::Target::Up => {
                     self.playing.shift(target == keyboard::Target::Up);
                     self.keep_settings(Change::KeyboardRoot(self.playing.root));
-                }
-                keyboard::Target::Type => {
-                    self.playing.release();
-                    self.playing.typing = !self.playing.typing;
-                    self.playing.wants_keys = self.playing.typing;
-                }
-                keyboard::Target::Panic => {
-                    #[cfg(feature = "standalone-production")]
-                    if let Some(app) = plugin_kit_standalone::AppHandle::current() {
-                        let token = self.playing.panic_standalone();
-                        let accepted = app.panic_tagged(token);
-                        debug_assert!(
-                            accepted,
-                            "local panic tokens are nonzero and fit in 63 bits"
-                        );
-                    } else {
-                        self.playing.panic();
-                    }
-                    #[cfg(not(feature = "standalone-production"))]
-                    self.playing.panic();
                 }
                 keyboard::Target::Back => {}
             }
@@ -2082,13 +3705,49 @@ impl Editing {
             self.strip_scene.hover = None;
             return;
         }
-        if let Some(t) = strip::hit(x, y) {
+        if let Some(t) = strip::hit(self.rail, x, y) {
             self.strip_press(t);
             return;
         }
         let Some(target) = self.hit(x, y) else {
             return;
         };
+        self.press_target(target, modifiers);
+    }
+
+    /// A press on a control (the panel's, the strip's knobs, the arpeggiator's drawer's), on
+    /// POWER or the grip.
+    fn press_target(&mut self, target: Target, modifiers: Modifiers) {
+        if entry::shortcut(modifiers)
+            && !self.learning.holds_keys(&self.params.midi_map)
+            && let Target::Control(i) | Target::Legend(i, _) = target
+        {
+            // The arpeggiator's knobs take their values in their drawer's readouts, in its
+            // units, as a double click there (R-KNOB-ENTRY with R-ARP).
+            if let Some(r) = arp_readout(i) {
+                if self.operable(i) {
+                    self.start_arp_typing(r);
+                    return;
+                }
+            } else if let Some(r) = mpe_readout(i) {
+                // (The expression drawer's the same, R-MPE.)
+                self.start_mpe_typing(r);
+                return;
+            } else if let Some(n) = CONTROLS.get(i).and_then(|c| {
+                ca72_panel::render::MOD_KEYS
+                    .iter()
+                    .position(|k| *k == c.param)
+            }) {
+                // A MOD key: its next way (R-CONTINUOUS-WAVE; the owner: "the ability to command
+                // click on that, so that they could reverse the direction").
+                if self.operable(i) {
+                    self.next_mod_way(n);
+                }
+                return;
+            } else if self.start_knob_entry(i) {
+                return;
+            }
+        }
         let now = Instant::now();
         let double = self
             .last_press
@@ -2099,8 +3758,9 @@ impl Editing {
                 if !self.operable(i) {
                     return;
                 }
-                let kind = CONTROLS[i].kind;
-                if double && !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. }) {
+                let kind = self.kind_of(i);
+                if double && !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. } | Kind::Key)
+                {
                     if let Some(p) = self.operated(i) {
                         self.set_once(i, f64::from(p.default()));
                     }
@@ -2108,7 +3768,7 @@ impl Editing {
                     return;
                 }
                 let value = self.value_of(i);
-                if !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. })
+                if !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. } | Kind::Key)
                     && let Some(p) = self.operated(i)
                 {
                     p.begin(&self.setter());
@@ -2131,6 +3791,24 @@ impl Editing {
         }
     }
 
+    /// PANIC: every note off, from every source, and the controllers reset (the keyboard's
+    /// button, and an agent's).
+    fn panic(&mut self) {
+        #[cfg(feature = "standalone-production")]
+        if let Some(app) = plugin_kit_standalone::AppHandle::current() {
+            let token = self.playing.panic_standalone();
+            let accepted = app.panic_tagged(token);
+            debug_assert!(
+                accepted,
+                "local panic tokens are nonzero and fit in 63 bits"
+            );
+        } else {
+            self.playing.panic();
+        }
+        #[cfg(not(feature = "standalone-production"))]
+        self.playing.panic();
+    }
+
     /// A right click: the menu of the control under the pointer (MIDI Learn: decisions.md R34),
     /// on the panel or the strip; elsewhere none.
     fn context_menu(&mut self) {
@@ -2139,21 +3817,96 @@ impl Editing {
         }
         self.playing.release();
         self.end_gestures();
+        // (A knob's pop-up gives way to its menu.)
+        self.modulating.popup = None;
         let (x, y) = self.in_drawing(self.pointer);
         if !self.expanded() && y >= DRAWER_TOP {
             return;
         }
         let size = self.renderer.text_size() * MENU_TEXT;
-        let map = &self.params.midi_map;
-        if self.playing.visible && keyboard::inside(x, y) {
+        let params = Arc::clone(&self.params);
+        let map = &params.midi_map;
+        // (A drawer dropped from the rail is over the keyboard's top: its own menus.)
+        if self.keyboard_shown() && keyboard::inside(x, y) && !self.in_lower((x, y)) {
             self.learning.close_menu();
+            return;
+        }
+        if let Some(t @ (BarTarget::Prev | BarTarget::Next)) = self.on_rail((x, y)) {
+            self.learning.open_menu(
+                self.renderer.fonts(),
+                map,
+                Some(Place::Preset(t)),
+                None,
+                (x, y),
+                size,
+            );
             return;
         }
         if self.in_drawer((x, y)).is_some() || self.on_rail((x, y)).is_some() {
             self.learning.close_menu();
             return;
         }
-        if let Some(t) = strip::hit(x, y) {
+        // The arpeggiator's drawer: a knob's menu, as the panel's (its tabs are learned from the
+        // presets' drawer's MIDI list).
+        if self.in_arp((x, y)) || self.in_mpe((x, y)) {
+            let place = if self.in_mpe((x, y)) {
+                DrawerPlace::Mpe
+            } else {
+                DrawerPlace::Arp
+            };
+            match interact::hit_drawer(place, x, y).filter(|_| self.lower.settled()) {
+                Some(target @ Target::Control(i)) => self.learning.open_menu(
+                    self.renderer.fonts(),
+                    map,
+                    Some(Place::Panel(i)),
+                    Some(target),
+                    (x, y),
+                    size,
+                ),
+                _ => self.learning.close_menu(),
+            }
+            return;
+        }
+        // An effects' slot: what its state offers (R-FX-SAFETY), REPLACE… and REMOVE.
+        if self.in_fx((x, y)) {
+            if self.fx_pin_menu((x, y)) {
+                return;
+            }
+            match self
+                .fx_view
+                .menu_for(x, y)
+                .filter(|_| self.lower.settled() && !self.fx_view.list_open())
+            {
+                Some((name, items)) => {
+                    self.learning
+                        .open_fx_menu(self.renderer.fonts(), (x, y), size, &name, &items);
+                }
+                None => self.learning.close_menu(),
+            }
+            return;
+        }
+        // The left hand's VELOCITY jack's: what it modulates (decisions.md R-VELOCITY).
+        if self.velocity_menu((x, y)) {
+            return;
+        }
+        // The macros': a knob's, else its macro's colour and RENAME… (decisions.md R-MACROS).
+        if self.macros_show() && macro_ui::inside(x, y) {
+            if !self.macro_menu((x, y)) {
+                self.learning.close_menu();
+            }
+            return;
+        }
+        // The LFO page's: a control's, else its LFO's colour and EDGES (decisions.md R-LFO).
+        if self.page_shows() && lfo_ui::inside(x, y) {
+            self.page_menu((x, y));
+            return;
+        }
+        // The standalone's TEMPO screen: what moves it, and the sources that can (R-LFO).
+        if self.tempo_hovered((x, y)) {
+            self.open_tempo_menu((x, y));
+            return;
+        }
+        if let Some(t) = strip::hit(self.rail, x, y) {
             // A tab's menu (the strip's knobs' are the panel's), above it.
             match t.control() {
                 Some(c) => {
@@ -2188,8 +3941,21 @@ impl Editing {
             Some(Target::Control(i) | Target::Legend(i, _)) => Some(Place::Panel(i)),
             _ => None,
         };
-        self.learning
-            .open_menu(self.renderer.fonts(), map, place, target, (x, y), size);
+        // (Each source on a knob a head with DEPTH… and REMOVE; a strip knob's LFO head:
+        // decisions.md R-LFO.)
+        let rows = match target {
+            Some(Target::Control(i) | Target::Legend(i, _)) => self.knob_rows(i),
+            _ => Vec::new(),
+        };
+        self.learning.open_menu_with(
+            self.renderer.fonts(),
+            &self.params.midi_map,
+            place,
+            target,
+            (x, y),
+            size,
+            rows,
+        );
     }
 
     /// The drawer opened on its MIDI list, `chosen` in view.
@@ -2206,21 +3972,64 @@ impl Editing {
         if self.standalone_dialog_open() || self.whats_new.is_some() {
             return;
         }
-        let (x, y) = self.in_drawing(self.pointer);
-        if self.playing.dragging() {
-            let target = keyboard::hit(self.playing.root, x, y, self.playing.standalone);
-            self.playing.drag(match target {
-                Some(keyboard::Target::Note(note)) => Some(note),
-                _ => None,
-            });
+        if let Some((from, bpm, fine, _)) = &mut self.tempo_drag {
+            // (SHIFT pressed or let go mid-drag: on from here, at the other pace.)
+            let now = modifiers.contains(Modifiers::SHIFT);
+            if now != *fine {
+                (*from, *bpm, *fine) = (self.pointer.1, self.params.tempo().round(), now);
+            }
+            let per = if *fine { 4.0 * TEMPO_DRAG } else { TEMPO_DRAG };
+            let to = *bpm + (*from - self.pointer.1) / per;
+            self.set_tempo(to, false);
             return;
         }
-        self.playing.hover =
-            if self.expanded() && self.playing.visible && self.in_drawer((x, y)).is_none() {
-                keyboard::hit(self.playing.root, x, y, self.playing.standalone)
-            } else {
-                None
-            };
+        let (x, y) = self.in_drawing(self.pointer);
+        self.tempo_hover = if self.playing.standalone {
+            art::tempo_key_hit(self.renderer.arrangement(), x, y)
+        } else {
+            None
+        };
+        if self.playing.dragging() {
+            let target = keyboard::hit(self.playing.root, x, y);
+            match target {
+                Some(keyboard::Target::Note(note)) => {
+                    let v = velocity::key_velocity(self.playing.root, note, y);
+                    self.playing.drag_at(Some(note), v);
+                }
+                _ => self.playing.drag(None),
+            }
+            return;
+        }
+        if self.fx_pin_moved(modifiers) {
+            return;
+        }
+        // An assignment or a depth dragged (decisions.md R-LFO).
+        if self.mod_moved((x, y)) {
+            return;
+        }
+        if !self.dragging()
+            && !self.learning.menu_open()
+            && self
+                .mod_scene
+                .popup
+                .as_ref()
+                .is_some_and(|p| ca72_panel::modulation::on_popup(p, x, y))
+        {
+            self.follow_popup((x, y));
+            self.playing.hover = None;
+            return;
+        }
+        self.playing.hover = if self.expanded()
+            && self.keyboard_shown()
+            && self.in_drawer((x, y)).is_none()
+            && !self.in_lower((x, y))
+            && !self.fx_view.pressing()
+            && !self.learning.over_menu(self.renderer.fonts(), (x, y))
+        {
+            keyboard::hit(self.playing.root, x, y)
+        } else {
+            None
+        };
         if self.playing.hover.is_some() {
             self.hover = None;
             self.strip_scene.hover = None;
@@ -2234,6 +4043,12 @@ impl Editing {
         }
         let fine = modifiers.contains(Modifiers::SHIFT);
         let pointer = self.pointer;
+        // (The control dragged's kind as it is operated now: a timed FREQUENCY steps.)
+        let dragged_kind = self.drag.as_ref().map(|d| self.kind_of(d.control));
+        let dragged_variable = self
+            .drag
+            .as_ref()
+            .is_some_and(|d| self.continuous_switch(d.control));
         let Some(d) = &mut self.drag else {
             let at = self.in_drawing(pointer);
             let (x, y) = at;
@@ -2249,10 +4064,61 @@ impl Editing {
             let over_drawer = self.in_drawer(at);
             self.browser.drawer.hover =
                 over_drawer.and_then(|(dx, dy)| drawer_hit(&self.browser.drawer, dx, dy));
+            if self.in_arp(at) {
+                let settled = self.lower.settled();
+                self.arp_scene.hover = arp_ui::hit(x, y).filter(|_| settled);
+                self.hover = interact::hit_arp(x, y).filter(|_| settled);
+                self.strip_scene.hover = None;
+                self.browser.bar.hover = None;
+                return;
+            }
+            self.arp_scene.hover = None;
+            if self.in_mpe(at) {
+                let settled = self.lower.settled();
+                self.hover = interact::hit_drawer(DrawerPlace::Mpe, x, y).filter(|_| settled);
+                self.strip_scene.hover = None;
+                self.browser.bar.hover = None;
+                return;
+            }
+            // The effects' drawer: a slot carried, the part under the pointer.
+            if self.in_fx(at) || self.fx_view.pressing() {
+                if self.lower.settled() {
+                    self.fx_view.moved(x, y);
+                }
+                self.hover = self
+                    .fx_pin_hit(at)
+                    .map(|t| Target::Control(fx_pins::FIRST + t));
+                self.strip_scene.hover = None;
+                self.browser.bar.hover = None;
+                self.follow_popup(at);
+                return;
+            }
+            self.fx_view.hover = None;
+            // The macros: their knobs, else their names and jacks (decisions.md R-MACROS).
+            if self.macros_show() && macro_ui::inside(x, y) && over_drawer.is_none() {
+                self.macro_hover((x, y));
+                return;
+            }
+            self.macro_view.hover = None;
+            // The LFO page: its controls, else its parts (decisions.md R-LFO).
+            if self.page_shows() && lfo_ui::inside(x, y) && over_drawer.is_none() {
+                self.hover = interact::hit_lfo(self.renderer.layout(), x, y);
+                self.modulating.hover = if self.hover.is_none() {
+                    lfo_ui::hit(x, y)
+                } else {
+                    None
+                };
+                self.strip_scene.hover = None;
+                self.browser.bar.hover = None;
+                // (Its knobs and jacks take sources too, with their pop-ups: R-LFO's addendum.)
+                self.follow_popup(at);
+                return;
+            }
+            self.modulating.hover = None;
             let on_strip = if over_drawer.is_some() {
                 None
             } else {
-                strip::hit(x, y)
+                strip::hit(self.rail, x, y)
             };
             self.browser.bar.hover = match on_strip {
                 Some(StripTarget::Bar(t)) => Some(t),
@@ -2265,12 +4131,17 @@ impl Editing {
             } else {
                 (self.hit(x, y), None)
             };
+            // A modulated knob's pop-up, kept while the pointer is over it.
+            self.follow_popup(at);
             return;
         };
         if (pointer.0 - d.from.0).abs() + (pointer.1 - d.from.1).abs() > 3.0 {
             d.moved = true;
         }
-        if !d.moved {
+        let Some(kind) = dragged_kind else { return };
+        // The click threshold belongs to switches and selectors. A continuous control
+        // follows even a sub-pixel movement from the press, with no initial jump.
+        if !d.moved && !kind.is_continuous() {
             return;
         }
         if fine != d.fine {
@@ -2278,14 +4149,14 @@ impl Editing {
             d.at = pointer;
             d.fine = fine;
         }
-        let kind = CONTROLS[d.control].kind;
-        if let Some(v) = interact::drag(
-            &kind,
-            d.base,
-            pointer.0 - d.at.0,
-            pointer.1 - d.at.1,
-            d.fine,
-        ) && v != d.value
+        let (dx, dy) = (pointer.0 - d.at.0, pointer.1 - d.at.1);
+        let moved_to = if dragged_variable {
+            Some(interact::continuous_drag(d.base, dx, dy, d.fine))
+        } else {
+            interact::drag(&kind, d.base, dx, dy, d.fine)
+        };
+        if let Some(v) = moved_to
+            && v != d.value
         {
             d.value = v;
             let (i, v) = (d.control, v);
@@ -2295,13 +4166,25 @@ impl Editing {
         }
     }
 
-    /// Whether a press is being held: a control or the grip dragged.
+    /// Whether a press is being held: a control, an effects' slot or the grip dragged.
     fn dragging(&self) -> bool {
-        self.drag.is_some() || self.resizing.is_some() || self.playing.dragging()
+        self.drag.is_some()
+            || self.resizing.is_some()
+            || self.playing.dragging()
+            || self.fx_view.pressing()
+            || self.fx_pin_drag.is_some()
+            || self.tempo_drag.is_some()
     }
 
     fn released(&mut self) {
+        self.panic_held = false;
         self.playing.release_pointer();
+        self.fx_pin_drag = None;
+        self.fx_view.released();
+        self.tempo_let_go();
+        if self.mod_released() {
+            return;
+        }
         if self.resizing.take().is_some() {
             return;
         }
@@ -2314,10 +4197,18 @@ impl Editing {
     /// before another begins, as the editor closes and as its window loses the focus or the
     /// pointer's capture. A gesture never begins inside another (decisions.md R18).
     fn end_gestures(&mut self) {
+        self.panic_held = false;
         self.playing.release_pointer();
+        self.fx_view.cancel_press();
+        self.fx_pin_drag = None;
+        self.tempo_let_go();
         self.typing = None;
+        self.knob_entry = None;
         self.end_scroll();
         self.resizing = None;
+        // (An assignment dragged is dropped nowhere; a depth's drag ends where it is.)
+        self.modulating.patching = None;
+        self.mod_released();
         if let Some(d) = self.drag.take() {
             self.let_go(d, false);
         }
@@ -2326,15 +4217,22 @@ impl Editing {
     /// A drag over, its gesture ended: `released` by the pointer (a press that did not move
     /// then picks what it pressed), else cut short.
     fn let_go(&mut self, d: Drag, released: bool) {
-        let kind = CONTROLS[d.control].kind;
+        let placed = *self.renderer.arrangement().control(d.control);
+        let kind = self.kind_of(d.control);
         let mut v = d.value;
         if released && !d.moved {
+            let variable = self.continuous_switch(d.control);
             let picked = match d.pressed {
+                Target::Legend(_, k) if variable => Some(interact::continuous_legend(k)),
                 Target::Legend(_, k) => Some(k as f64 / 5.0),
                 _ => {
-                    let (cx, cy) = CONTROLS[d.control].centre();
+                    let (cx, cy) = placed.centre();
                     let (x, y) = self.in_drawing(d.from);
-                    interact::click(&kind, v, x - cx, y - cy)
+                    if variable {
+                        Some(interact::continuous_click(v, x - cx))
+                    } else {
+                        interact::click(&kind, v, x - cx, y - cy)
+                    }
                 }
             };
             if let Some(p) = picked {
@@ -2346,7 +4244,7 @@ impl Editing {
             return;
         };
         let s = self.setter();
-        if matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. }) {
+        if matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. } | Kind::Key) {
             if v != d.value {
                 p.begin(&s);
                 p.set(&s, v as f32);
@@ -2383,14 +4281,38 @@ impl Editing {
             }
             return;
         }
-        if self.standalone_dialog_open() {
+        if self.standalone_dialog_open() || self.knob_entry.is_some() {
             return;
         }
         if self.drag.is_some() {
             return;
         }
         let (x, y) = self.in_drawing(self.pointer);
-        if self.playing.visible && keyboard::inside(x, y) {
+        // The MIDI map mode turns nothing (decisions.md R-MIDI-MAP): the presets' drawer and the
+        // effects' list scroll as ever.
+        if self.mapping_on() && self.in_drawer((x, y)).is_none() && !self.fx_view.list_open() {
+            return;
+        }
+        // The TEMPO screen: a beat a minute a notch (up faster), or a trackpad's travel.
+        if self.playing.standalone && art::tempo_hit(self.renderer.arrangement(), x, y) {
+            let beats = match delta {
+                ScrollDelta::Lines { y, .. } => f64::from(y.signum()),
+                ScrollDelta::Pixels { y, .. } => {
+                    if f64::from(y) * self.tempo_travel < 0.0 {
+                        self.tempo_travel = 0.0;
+                    }
+                    self.tempo_travel += f64::from(y) / TEMPO_SCROLL;
+                    let whole = self.tempo_travel.trunc();
+                    self.tempo_travel -= whole;
+                    whole
+                }
+            };
+            if beats != 0.0 {
+                self.set_tempo(self.tempo_now() + beats, true);
+            }
+            return;
+        }
+        if self.keyboard_shown() && keyboard::inside(x, y) && !self.in_lower((x, y)) {
             return;
         }
         if let Some((dx, dy)) = self.in_drawer((x, y)) {
@@ -2424,40 +4346,69 @@ impl Editing {
         if !self.expanded() && y >= DRAWER_TOP {
             return;
         }
-        if strip::hit(x, y).is_some() {
+        // The effects' list scrolls a row for each row's travel, as the presets' list does.
+        if self.in_fx((x, y)) {
+            if let Some(t) = self.fx_pin_hit((x, y)) {
+                let value = self.fx_view.pin_info(t).map_or(0.0, |p| p.value);
+                let step = self
+                    .fx_view
+                    .pin_info(t)
+                    .filter(|p| p.steps > 0)
+                    .map_or(0.01, |p| 1.0 / f64::from(p.steps));
+                let amount = match delta {
+                    ScrollDelta::Lines { y, .. } => f64::from(y),
+                    ScrollDelta::Pixels { y, .. } => f64::from(y) / 40.0,
+                };
+                self.fx_view.set_pin_value(t, value + amount * step);
+                return;
+            }
+            if self.fx_view.list_open() {
+                let rows = match delta {
+                    ScrollDelta::Lines { y, .. } => f64::from(y),
+                    ScrollDelta::Pixels { y, .. } => {
+                        f64::from(y) * self.dpr / self.renderer.scale() / fx_ui::LINE
+                    }
+                };
+                if rows * self.list_travel < 0.0 {
+                    self.list_travel = 0.0;
+                }
+                self.list_travel += rows;
+                let whole = self.list_travel.trunc();
+                if whole != 0.0 {
+                    self.fx_view.scroll(-(whole as i32));
+                    self.list_travel -= whole;
+                }
+            }
             return;
         }
-        let Some(Target::Control(i) | Target::Legend(i, _)) = self.hit(x, y) else {
+        let over = if self.in_arp((x, y)) {
+            interact::hit_arp(x, y).filter(|_| self.lower.settled())
+        } else if self.in_mpe((x, y)) {
+            interact::hit_drawer(DrawerPlace::Mpe, x, y).filter(|_| self.lower.settled())
+        } else if self.page_shows() && lfo_ui::inside(x, y) {
+            // The LFO page's (decisions.md R-LFO), its column's LFO the last touched.
+            let t = interact::hit_lfo(self.renderer.layout(), x, y);
+            if let Some(Target::Control(i) | Target::Legend(i, _)) = t
+                && let Some((n, _)) = lfo_page::lfo_part(CONTROLS[i].param)
+            {
+                self.modulating.last = Some(crate::lfo::Source::Lfo(n));
+            }
+            t
+        } else if strip::hit(self.rail, x, y).is_some() {
+            return;
+        } else {
+            self.hit(x, y)
+        };
+        let Some(Target::Control(i) | Target::Legend(i, _)) = over else {
             return;
         };
         if !self.operable(i) {
             return;
         }
-        let (notches, travel) = match delta {
-            ScrollDelta::Lines { y, .. } => (
-                if y > 0.0 {
-                    1.0
-                } else if y < 0.0 {
-                    -1.0
-                } else {
-                    0.0
-                },
-                0.0,
-            ),
-            ScrollDelta::Pixels { y, .. } => {
-                let travel = self
-                    .scroll
-                    .as_ref()
-                    .filter(|s| s.control == i)
-                    .map_or(0.0, |s| s.travel)
-                    + f64::from(y);
-                if travel.abs() < NOTCH {
-                    (0.0, travel)
-                } else {
-                    (travel.signum(), 0.0)
-                }
-            }
-        };
+        let travel = scroll_travel(delta, self.precise_lines);
+        if !travel.is_finite() || travel == 0.0 {
+            return;
+        }
         if self.scroll.as_ref().is_some_and(|s| s.control != i) {
             self.end_scroll();
         }
@@ -2473,17 +4424,31 @@ impl Editing {
                 travel: 0.0,
             });
         }
-        let kind = CONTROLS[i].kind;
+        let kind = self.kind_of(i);
         let Some(s) = &mut self.scroll else { return };
         s.last = Instant::now();
-        s.travel = travel;
+        let notches = if kind.is_continuous() {
+            travel / SCROLL_PIXELS_PER_LINE
+        } else {
+            // Only discrete options wait for a whole notch. Keep excess travel, and start
+            // afresh when the direction changes so the old fraction cannot eat a step.
+            if travel * s.travel < 0.0 {
+                s.travel = 0.0;
+            }
+            s.travel += travel;
+            let whole = (s.travel / SCROLL_PIXELS_PER_LINE).trunc();
+            s.travel -= whole * SCROLL_PIXELS_PER_LINE;
+            whole
+        };
+        let variable = self.continuous_switch(i);
+        let Some(s) = &mut self.scroll else { return };
         if notches != 0.0 {
-            let v = interact::step(
-                &kind,
-                s.value,
-                notches > 0.0,
-                modifiers.contains(Modifiers::SHIFT),
-            );
+            let fine = modifiers.contains(Modifiers::SHIFT);
+            let v = if variable {
+                interact::continuous_scroll(s.value, notches, fine)
+            } else {
+                interact::scroll(&kind, s.value, notches, fine)
+            };
             if v != s.value {
                 s.value = v;
                 if let Some(p) = self.operated(i) {
@@ -2495,7 +4460,7 @@ impl Editing {
 
     fn end_scroll(&mut self) {
         let Some(s) = self.scroll.take() else { return };
-        let kind = CONTROLS[s.control].kind;
+        let kind = self.kind_of(s.control);
         let v = interact::release(&kind, s.value);
         if let Some(p) = self.operated(s.control) {
             let setter = self.setter();
@@ -2538,16 +4503,32 @@ impl Editing {
             && !self.note_typing_allowed()
             && (self.browser.open
                 || self.typing.is_some()
+                || self.macro_view.typing.is_some()
+                || self.knob_entry.is_some()
                 || self.learning.holds_keys(&self.params.midi_map)
+                || self.fx_view.list_open()
                 || self.standalone_dialog_open())
         {
             self.playing.release();
         }
         for (i, c) in CONTROLS.iter().enumerate() {
+            // A WAVEFORM switch CONTINUOUS: where its WAVEFORM is (its pointer where its shape is,
+            // `scene.shape`), the parameters following a drag as it goes.
+            if self.continuous_switch(i)
+                && let Some(n) = ca72_panel::render::WAVEFORMS
+                    .iter()
+                    .position(|w| *w == c.param)
+            {
+                self.scene.values[i] = f64::from(self.waveforms[n].waveform().value());
+                continue;
+            }
             self.scene.values[i] = match (&self.drag, &self.scroll) {
                 (Some(d), _)
                     if d.control == i
-                        && !matches!(c.kind, Kind::Rocker { .. } | Kind::Toggle { .. }) =>
+                        && !matches!(
+                            c.kind,
+                            Kind::Rocker { .. } | Kind::Toggle { .. } | Kind::Key
+                        ) =>
                 {
                     d.value
                 }
@@ -2558,39 +4539,310 @@ impl Editing {
         self.scene.power = !self.params.bypass.value();
         self.scene.detune_off = !self.params.doubled.value();
         self.scene.voices_off = voices_inert(&self.params);
+        self.scene.osc3_control_off = osc3_control_inert(&self.params);
+        // Oscillators 2's and 3's timed keys and dials (decisions.md R-OSC-TIMED).
+        self.scene.timed = timed_scene(&self.params);
+        self.scene.glide_long = self.params.glide_range.value() == crate::params::GlideRange::Long;
+        self.learning.glide_long = self.scene.glide_long;
+        // Each oscillator's waveform: CONTINUOUS's arc, its MOD key in its way's colour, its
+        // switch where its shape is, MOD's orb where the voices have the shape (decisions.md
+        // R-CONTINUOUS-WAVE).
+        let orbs = self.meters.shapes();
+        self.scene.shape = std::array::from_fn(|n| {
+            use crate::params::ShapeModDirection as D;
+            let (_, shape, modulated, direction) = self.params.shape_params(n);
+            let continuous = self.params.continuous(n);
+            ca72_panel::render::Shaped {
+                continuous,
+                at: f64::from(shape.unmodulated_normalized_value()) * interact::CONTINUOUS_PLACES,
+                way: match direction.value() {
+                    D::Clockwise => ca72_panel::art::ModWay::Clockwise,
+                    D::Anticlockwise => ca72_panel::art::ModWay::Anticlockwise,
+                    D::Both => ca72_panel::art::ModWay::Both,
+                },
+                orb: orbs[n].filter(|_| continuous && modulated.value()),
+            }
+        });
+        self.learning.variable = std::array::from_fn(|n| self.params.continuous(n));
+        self.learning.timed = [self.params.timed_now(1), self.params.timed_now(2)];
+        self.learning.lfo_timed = std::array::from_fn(|n| self.params.lfo(n).timed.value());
         self.scene.overload = Meters::load(&self.meters.overload);
+        // (Dark until the velocity moves something: decisions.md R-VELOCITY.)
+        self.scene.velocity_lit = if self.params.lfo_patch.count(crate::lfo::Source::Velocity) > 0 {
+            ca72_panel::strip::velocity::lit(self.meters.velocity())
+        } else {
+            0
+        };
         self.move_opening(Instant::now(), self.params.quality.value());
         self.scene.midi = (
             Meters::load(&self.meters.bend),
             Meters::load(&self.meters.modulation),
         );
+        self.read_realtime(Instant::now());
         self.scene.tip = self.tip();
+        self.scene.entry = self
+            .knob_entry
+            .as_ref()
+            .map(|entry| self.entry_field(entry));
+        if self.scene.entry.is_some() {
+            self.scene.tip = None;
+        }
+        // The screens of the controls a source moves read where it has them (decisions.md
+        // R-LFO), the TEMPO screen the moving tempo; each its control's own while that is
+        // operated or typed into.
+        self.read_live(Instant::now());
+        self.scene.tempo = self
+            .playing
+            .standalone
+            .then(|| format!("{} BPM", self.tempo_shown()));
+        self.scene.tempo_keys = self.playing.standalone.then_some(TempoKeys {
+            typing: self.playing.typing,
+            panic: self.panic_held,
+            midi: self.mapping_on(),
+            hover: self.tempo_hover,
+        });
+        let live = self.live_shown();
         self.strip_scene = strip_scene(
             &self.params,
             self.meters.voices.load(Ordering::Relaxed),
             (&self.levels, self.output),
+            &live,
             std::mem::take(&mut self.strip_scene),
         );
-        self.strip_scene.keyboard = self.playing.scene(self.renderer.skin());
-        self.browser.bar.keyboard = self.playing.visible;
+        // (The LFO page in the keyboard's place while it shows: decisions.md R-LFO.)
+        self.strip_scene.keyboard = if self.modulating.open {
+            None
+        } else {
+            self.playing.scene(self.renderer.skin())
+        };
+        self.strip_scene.lfo = self.modulating.open;
+        self.browser.bar.keyboard = self.keyboard_shown();
         self.browser.bar.panel = self.expanded();
+        self.browser.bar.arp = self.params.arp_on.value();
+        // The effects' (decisions.md R-FX-DRAWER): the chain read when it is free; the FX key lit
+        // while one plays.
+        self.fx_view.poll(Instant::now());
+        self.browser.bar.fx = self.fx_view.active();
+        self.fx_scene = self.fx_scene_now();
+        self.learning.fx_pins = self.fx_view.pins().to_vec();
+        self.arp_scene = arp_scene(
+            &self.params,
+            &self.scene.values,
+            std::mem::take(&mut self.arp_scene),
+        );
+        // Each note's own expression's (decisions.md R-MPE): the MPE key lit while an amount is
+        // not 0; INPUT reading what the audio thread heard in the last few seconds.
+        self.browser.bar.mpe = reaching(&self.params);
+        // The rail's page keys (decisions.md R-LFO): a page's or a drawer's lit while it shows,
+        // the others glowing faintly while what they open affects the sound (an LFO assigned and
+        // moving its knob).
+        self.browser.bar.lfo = self.params.lfo_scope.any_moving();
+        self.browser.bar.lfo_page = self.page_shows();
+        // The MACRO key's (decisions.md R-MACROS): lit while the macros show, glowing while the
+        // wheels do and an assigned macro is above 0.
+        self.browser.bar.macros = self.macros_show();
+        self.browser.bar.macro_glow = self.macro_glow();
+        self.browser.bar.page =
+            (self.lower.open && self.expanded()).then_some(match self.lower.which {
+                Lower::Arp => BarTarget::Arp,
+                Lower::Mpe => BarTarget::Mpe,
+                Lower::Fx => BarTarget::Fx,
+            });
+        // The LFO page's (its orbs at most 30 times a second) and the knobs' rings, cord and
+        // pop-up.
+        self.read_lfos(Instant::now());
+        if self.page_shows() {
+            self.lfo_scene = self.lfo_scene_now();
+        }
+        self.mod_scene = self.mod_scene_now();
+        if self.macros_show() {
+            self.macro_scene = self.macro_scene_now();
+        }
+        let now = Instant::now();
+        let counts = self.params.heard.counts();
+        let (was, per_note, channel) = self.heard;
+        self.heard = (
+            counts,
+            if counts.0 != was.0 {
+                Some(now)
+            } else {
+                per_note
+            },
+            if counts.1 != was.1 {
+                Some(now)
+            } else {
+                channel
+            },
+        );
+        let recent = |t: Option<Instant>| t.is_some_and(|t| now - t < HEARD_FOR);
+        let input = if recent(self.heard.1) {
+            mpe_ui::Input::Mpe
+        } else if recent(self.heard.2) {
+            mpe_ui::Input::Channel
+        } else {
+            mpe_ui::Input::None
+        };
+        self.mpe_scene = mpe_scene(
+            &self.params,
+            &self.scene.values,
+            input,
+            self.meters.velocity(),
+            self.playing.standalone,
+        );
         // A value being typed: what is typed so far, lit, the next digit's place marked while
         // there is room for one.
-        if let Some((r, text)) = &self.typing
-            && let Some(i) = Readout::ALL.iter().position(|x| x == r)
-        {
+        if let Some((r, text)) = &self.typing {
             let cells = text.chars().filter(|c| *c != '.').count();
-            let shown = if cells < 3 {
+            let room = match r {
+                Typed::Arp(0) => cells < 2 && !text.ends_with(['.', 't']),
+                Typed::Arp(1) => cells < 1,
+                Typed::Mpe(_) => text.chars().filter(char::is_ascii_digit).count() < 3,
+                _ => cells < 3,
+            };
+            let shown = if room {
                 format!("{text}_")
             } else {
                 text.clone()
             };
-            self.strip_scene.readouts[i] = (shown, true);
+            match r {
+                Typed::Strip(r) => {
+                    if let Some(i) = Readout::ALL.iter().position(|x| x == r) {
+                        self.strip_scene.readouts[i] = (shown, true);
+                    }
+                }
+                Typed::Arp(i) => self.arp_scene.readouts[(*i).min(3)] = (shown, true),
+                Typed::Mpe(i) => {
+                    self.mpe_scene.readouts[(*i).min(mpe_ui::UNIT_COUNT - 1)] = (shown, true);
+                }
+                Typed::Tempo => self.scene.tempo = Some(format!("{shown} BPM")),
+            }
         }
     }
 
-    /// The tip: over the control operated, else over the one under the pointer.
+    /// The tip: over the control operated, else over the one under the pointer (an effects'
+    /// slot's: its effect's whole name and maker); else, for a while once, the standalone's
+    /// audio not real-time, on the walnut (decisions.md R-RTKIT).
     fn tip(&self) -> Option<(String, f64, f64)> {
+        self.pointed_tip().or_else(|| self.realtime_tip())
+    }
+
+    /// The standalone's audio threads' priority read (at each frame, from the audio side's
+    /// atomics): the warning while one is due, and the walnut's notice begun the first time.
+    fn read_realtime(&mut self, now: Instant) {
+        if !self.playing.standalone {
+            return;
+        }
+        let (audio, workers) = (self.realtime.read)();
+        self.realtime.warning =
+            crate::audio_thread::warning(audio, workers, cfg!(target_os = "linux"));
+        if self.realtime.warning.is_some() && self.realtime.since.is_none() {
+            self.realtime.since = Some(now);
+        }
+    }
+
+    /// The walnut's notice that the standalone's audio is not real-time, after its TYPING, MIDI
+    /// and PANIC keys as their tips are: for [`REALTIME_NOTICE`] once, while nothing else's
+    /// tip is shown.
+    fn realtime_tip(&self) -> Option<(String, f64, f64)> {
+        let since = self.realtime.since?;
+        if since.elapsed() >= REALTIME_NOTICE {
+            return None;
+        }
+        let text = self.realtime.warning.as_ref()?.tip.clone();
+        let b = art::tip_bounds(self.renderer.fonts(), &text, self.renderer.text_size());
+        let (px, py) = art::tempo_key_at(self.renderer.arrangement(), art::TempoKey::LAST);
+        let left = px + art::TEMPO_KEY.0 / 2.0 + 12.0;
+        Some((text, left - b[0], py - (b[1] + b[3]) / 2.0))
+    }
+
+    /// The tip of what the pointer is on or operates.
+    fn pointed_tip(&self) -> Option<(String, f64, f64)> {
+        if let Some(t) = self.fx_pin_tip() {
+            return Some(t);
+        }
+        if self.drag.is_none()
+            && let Some(t) = self.macro_tip()
+        {
+            return Some(t);
+        }
+        if self.drag.is_none()
+            && let Some(t) = self.velocity_tip()
+        {
+            return Some(t);
+        }
+        if self.drag.is_none()
+            && let Some(t) = self.page_tip()
+        {
+            return Some(self.clear_of_scopes(t));
+        }
+        if self.lower.which == Lower::Fx
+            && self.lower.settled()
+            && self.drag.is_none()
+            && let Some(t) = self.fx_view.tip()
+        {
+            return Some(t);
+        }
+        // The standalone's TEMPO screen with a source on it: its tempo as set, and the depths
+        // (R-LFO; it reads the moving tempo).
+        if self.drag.is_none()
+            && self.tempo_drag.is_none()
+            && self.tempo_hovered(self.in_drawing(self.pointer))
+            && !self.sources_on(crate::lfo::Target::Tempo).is_empty()
+        {
+            // (Beside the screen, to its right: above it there is no room in the window.)
+            let (_, y, _, h) = art::tempo_window(self.renderer.arrangement().plate_at());
+            let text = format!(
+                "TEMPO: {} BPM{}",
+                self.tempo_now(),
+                self.depths_tip(lfo_page::TEMPO_CONTROL)
+            );
+            let b = art::tip_bounds(self.renderer.fonts(), &text, self.renderer.text_size());
+            // (After its TYPING, PANIC and MIDI keys: decisions.md R-TEMPO-CORNER.)
+            let (px, _) = art::tempo_key_at(self.renderer.arrangement(), art::TempoKey::LAST);
+            let left = px + art::TEMPO_KEY.0 / 2.0 + 12.0;
+            return Some((text, left - b[0], y + h / 2.0 - (b[1] + b[3]) / 2.0));
+        }
+        // TYPING's key is a picture: its tip says what it does, after the keys, as TEMPO's; and
+        // MIDI's what its mode is (decisions.md R-MIDI-MAP).
+        let tempo_tip = match self.tempo_hover {
+            Some(art::TempoKey::Typing) => Some("TYPING: PLAY FROM THE COMPUTER KEYBOARD"),
+            Some(art::TempoKey::Midi) => Some(mapping::KEY_TIP),
+            _ => None,
+        };
+        if self.drag.is_none()
+            && let Some(text) = tempo_tip
+        {
+            let b = art::tip_bounds(self.renderer.fonts(), text, self.renderer.text_size());
+            let (px, py) = art::tempo_key_at(self.renderer.arrangement(), art::TempoKey::LAST);
+            let left = px + art::TEMPO_KEY.0 / 2.0 + 12.0;
+            return Some((text.into(), left - b[0], py - (b[1] + b[3]) / 2.0));
+        }
+        let (px, py) = self.in_drawing(self.pointer);
+        let (nx, ny, nw, nh) = self.rail.name();
+        if self.browser.bar.preset_fx
+            && (nx + nw - 140.0..nx + nw - 52.0).contains(&px)
+            && (ny..ny + nh).contains(&py)
+        {
+            return Some((
+                "This preset has its own effects. Unlock to hear them.".into(),
+                nx + nw - 95.0,
+                ny - 12.0,
+            ));
+        }
+        if self.drag.is_none()
+            && let Some(key) = self.on_rail((px, py))
+        {
+            let text = match key {
+                BarTarget::Global => Some("GLOBAL: VOICES, STEREO AND OUTPUT"),
+                BarTarget::Keyboard => Some("KEYS: PLAYABLE PIANO"),
+                BarTarget::Lfo => Some("LFO: MODULATION SOURCES"),
+                _ => None,
+            };
+            if let Some(text) = text {
+                let (x, y) = strip::centre(self.rail, StripTarget::Bar(key));
+                return Some((text.into(), x, y - strip::KEY_H / 2.0 - 12.0));
+            }
+        }
         let operated = self
             .drag
             .as_ref()
@@ -2601,21 +4853,55 @@ impl Editing {
             None => self.hover?,
         };
         match target {
+            // (None for a control gone from the panel under a pointer still: R-OSC-TIMED.)
+            Target::Control(i) | Target::Legend(i, _)
+                if self.off_panel(i) || fx_pins::target(i).is_some() =>
+            {
+                None
+            }
             Target::Control(i) | Target::Legend(i, _) => {
-                let c = &CONTROLS[i];
+                let c = *self.renderer.arrangement().control(i);
                 let p = self.operated(i)?;
                 let (x, y) = c.centre();
                 let top = art::bounds(&c.kind)[1];
+                let named = macros::macro_of_control(i).map(|n| self.macro_title(n));
                 let label = if c.param == "feedback" && feedback_silent(&self.scene.values) {
                     FEEDBACK_SILENT
+                } else if let Some(name) = &named {
+                    name
                 } else {
-                    c.label
+                    timed_label(&self.params, c.param)
+                        .or_else(|| mod_label(&self.params, c.param))
+                        .unwrap_or(c.label)
                 };
-                Some((
-                    format!("{label}: {}", p.text(self.scene.values[i] as f32)),
+                // (A CONTINUOUS switch's shape, which its scene's value, WAVEFORM's, is not.)
+                let v = if self.continuous_switch(i) {
+                    p.value()
+                } else {
+                    self.scene.values[i] as f32
+                };
+                let range = if c.param == "glide" && self.scene.glide_long {
+                    " · LONG"
+                } else {
+                    ""
+                };
+                // (An LFO's OUT jack is its LEVEL's: what the jack does after: R-LFO's
+                // addendum.)
+                let jack = match lfo_page::level_of_control(i) {
+                    Some(n) => format!(" \u{b7} LFO {} OUT: DRAG TO A KNOB TO MODULATE IT", n + 1),
+                    None => String::new(),
+                };
+                // (The sources on it and their depths: decisions.md R-LFO.)
+                let tip = (
+                    format!("{label}: {}{range}{}{jack}", p.text(v), self.depths_tip(i)),
                     x,
                     y + top,
-                ))
+                );
+                Some(if c.place == DrawerPlace::Lfo {
+                    self.clear_of_scopes(tip)
+                } else {
+                    tip
+                })
             }
             Target::Power => {
                 let state = if self.params.bypass.value() {
@@ -2625,8 +4911,8 @@ impl Editing {
                 };
                 Some((
                     format!("POWER: {state}"),
-                    art::COL + POWER.0,
-                    art::TOP + POWER.1 - 64.0,
+                    self.renderer.arrangement().power_at().0,
+                    self.renderer.arrangement().power_at().1 - 64.0,
                 ))
             }
             Target::Grip => {
@@ -2640,7 +4926,8 @@ impl Editing {
                 let top = if self.expanded() {
                     art::GRIP[1]
                 } else {
-                    f64::from(self.physical_height()) / self.renderer.scale() - COMPACT_GRIP
+                    f64::from(self.physical_height()) / self.renderer.scale() + self.renderer.top()
+                        - COMPACT_GRIP
                 };
                 Some((GRIP_TIP.to_owned(), art::W - 8.0 - w / 2.0, top))
             }
@@ -2655,6 +4942,7 @@ impl Editing {
     /// Brings the frame up to the parameters and the gestures: whether it changed.
     fn draw(&mut self) -> bool {
         self.reconcile_resize();
+        self.follow_panel();
         let preference = self.params.editor_panel.load(Ordering::Relaxed);
         let applied = self.params.editor_panel_applied.load(Ordering::Relaxed);
         if preference != applied {
@@ -2671,11 +4959,12 @@ impl Editing {
         }
         #[cfg(feature = "standalone-production")]
         {
-            if let Some(dialog) = crate::standalone_settings::take_requested()
+            if let Some(mut dialog) = crate::standalone_settings::take_requested()
                 && self.standalone_dialog.is_none()
             {
                 self.playing.release();
                 self.end_gestures();
+                dialog.set_tempo(self.settings.tempo);
                 self.standalone_dialog = Some(dialog);
                 self.playing.wants_keys = true;
                 self.composed = None;
@@ -2684,6 +4973,15 @@ impl Editing {
                 && dialog.frame()
             {
                 self.composed = None;
+            }
+            // TEMPO changed there: the arpeggiator's at once, and this computer's (R-ARP).
+            if let Some(bpm) = self
+                .standalone_dialog
+                .as_mut()
+                .and_then(crate::standalone_settings::Dialog::take_tempo)
+            {
+                self.keep_settings(Change::Tempo(bpm));
+                self.params.set_tempo(f64::from(bpm));
             }
         }
         let requested_height = self.params.editor_panel.load(Ordering::Relaxed)
@@ -2706,15 +5004,22 @@ impl Editing {
         // MIDI Learn: what the audio thread caught assigned; the ring, the note and the menu;
         // the drawer's list (the presets again once the drawer has shut). A tip gives way to a
         // note or a menu.
+        self.poll_midi_learn();
         let map = &self.params.midi_map;
-        self.learning.poll(map);
         let bottom = if self.expanded() { art::H } else { DRAWER_TOP };
-        self.learning
-            .fit_menu(self.renderer.fonts(), [0.0, 0.0, art::W, bottom]);
+        self.learning.fit_menu(
+            self.renderer.fonts(),
+            [0.0, self.renderer.top(), art::W, bottom],
+        );
         let (note, ring, strip_ring, menu) = self.learning.scene(map, self.renderer.text_size());
         let note = note.or_else(|| self.ultra_note.then(|| self.ultra_note()));
+        // (The MIDI map mode's marks ring the control waiting themselves: R-MIDI-MAP.)
+        let mapping = self.mapping_on();
+        let ring = ring.filter(|&i| !self.off_panel(i) && !mapping);
         (self.scene.note, self.scene.learning, self.scene.menu) = (note, ring, menu);
-        self.strip_scene.learning = strip_ring.filter(|_| !self.playing.visible);
+        // The MIDI map mode's marks, over everything the controls are on (R-MIDI-MAP).
+        self.scene.marks = self.map_marks();
+        self.strip_scene.learning = strip_ring.filter(|_| self.strip_scene.extension() && !mapping);
         if self.scene.note.is_some() || self.scene.menu.is_some() {
             self.scene.tip = None;
         }
@@ -2734,7 +5039,7 @@ impl Editing {
         // (The strip's parts drawn again over the panel's frame where it changed there: the
         // panel's places that reach the strip, not QUALITY's opening above it as well.)
         // (The drops move on with QUALITY's opening, on its clock: the two in one frame.)
-        let foot = (art::PANEL_H * self.renderer.scale()).round() as i32;
+        let foot = self.renderer.strip_row();
         let under = self
             .renderer
             .damages()
@@ -2755,6 +5060,35 @@ impl Editing {
             under,
             self.motion_at.unwrap_or_else(Instant::now),
         );
+        // The LFO page over the lower page while it shows (decisions.md R-LFO; its controls drawn
+        // as the panel's renderer draws controls), and modulation's rings, cord and pop-up over
+        // the panel.
+        let page_shown = self.page_shows();
+        let page = page_shown && self.lfo.render(&self.lfo_scene, &mut self.renderer);
+        // The macros in the left area while they show (decisions.md R-MACROS), on the strip's
+        // bare face there, their knobs and jacks drawn as the panel's renderer draws them.
+        // (Their still made on a thread of their own as the editor opens or its look changes.)
+        self.macros.prepare(&self.renderer);
+        let macros_shown = self.macros_show();
+        let macros = macros_shown && self.macros.render(&self.macro_scene, &mut self.renderer);
+        self.modulation
+            .rescale(self.renderer.scale(), self.renderer.top_px());
+        let mods = self.modulation.render(&self.mod_scene);
+        // The drawer dropped from the rail over the lower page while it shows: the arpeggiator's
+        // (decisions.md R-ARP; its knobs drawn as the panel's renderer draws controls) or the
+        // effects' (R-FX-DRAWER).
+        self.lower.tick();
+        let which = self.lower.which;
+        let lower_k = self.lower_top().map_or(0.0, |_| self.lower.reveal());
+        let lower_moved = (lower_k, which) != self.lower_shown;
+        let lower = lower_k > 0.0
+            && (match (which, &mut self.fx) {
+                (Lower::Fx, Some(fx)) => fx.render(&self.fx_scene),
+                (Lower::Mpe, _) => self.mpe.render(&self.mpe_scene, &mut self.renderer),
+                _ => self.arp.render(&self.arp_scene, &mut self.renderer),
+            } || self.lower.sliding()
+                || lower_moved);
+        let lower_shut = lower_k <= 0.0 && lower_moved;
         // The drawer over the strip, dropping down from under the rail, while it shows.
         let k = self.browser.reveal();
         // (Its place changed since the frame last shown is a change too: the slide's last frame
@@ -2763,10 +5097,21 @@ impl Editing {
         let drawer = k > 0.0
             && (self.drawer.render(&self.browser.drawer) || self.browser.sliding() || moved);
         let shut = k <= 0.0 && moved;
-        if !(panel || strip || drawer || shut || self.composed.is_none()) {
+        if !(panel
+            || strip
+            || drawer
+            || shut
+            || lower
+            || lower_shut
+            || page
+            || macros
+            || mods
+            || self.composed.is_none())
+        {
             return false;
         }
         self.reveal_shown = k;
+        self.lower_shown = (lower_k, which);
         // The places that changed, the panel's and the strip's, put together again alone and
         // so shown (decisions.md R58); all of the frame while the drawer moves, something
         // floats over everything, or there is no frame of this size to change.
@@ -2775,9 +5120,11 @@ impl Editing {
             .composed
             .as_ref()
             .is_some_and(|c| (c.width(), c.height()) == (self.physical_width, height));
+        let lower_moving = lower_moved || lower_shut || self.lower.sliding();
         self.damage = (kept
             && !(drawer
                 || shut
+                || lower_moving
                 || self.renderer.floating()
                 || self.standalone_dialog_open()
                 || self.whats_new.is_some()))
@@ -2785,6 +5132,33 @@ impl Editing {
             let mut places = self.renderer.damages().to_vec();
             if let Some([x0, y0, x1, y1]) = self.strip.damage() {
                 places.push([x0, foot + y0, x1, foot + y1]);
+            }
+            let lower_damage = match (which, &self.fx) {
+                (Lower::Fx, Some(fx)) => fx.damage(),
+                (Lower::Mpe, _) => self.mpe.damage(),
+                _ => self.arp.damage(),
+            };
+            if page {
+                // (Its rows the drawing's from its top; the frame's begin at the panel's top.)
+                let top = lfo_ui::top_px(self.renderer.scale()) - self.renderer.top_px();
+                for &[x0, y0, x1, y1] in self.lfo.damages() {
+                    places.push([x0, top + y0, x1, top + y1]);
+                }
+            }
+            if macros {
+                // (Its pixels the frame's from the area's top left corner.)
+                let r = self.renderer.left_rect();
+                for &[x0, y0, x1, y1] in self.macros.damages() {
+                    places.push([x0 + r[0], y0 + r[1], x1 + r[0], y1 + r[1]]);
+                }
+            }
+            if mods {
+                places.extend_from_slice(self.modulation.damages());
+            }
+            if lower && let Some([x0, y0, x1, y1]) = lower_damage {
+                // (Its rows the drawing's; the frame's begin at the panel's top.)
+                let top = lower_ui::top_px(self.renderer.scale()) - self.renderer.top_px();
+                places.push([x0, top + y0, x1, top + y1]);
             }
             if !self.expanded() {
                 let side = (30.0 * self.renderer.scale()).ceil() as i32;
@@ -2798,11 +5172,21 @@ impl Editing {
             places
         });
         let expanded = self.expanded();
+        let lower_top = self.lower_top();
+        let scale = self.renderer.scale();
         compose(
             &mut self.composed,
             &self.renderer,
             self.strip.frame(),
+            lower_top.map(|top| {
+                lower_frame(which, top, (&self.arp, &self.mpe), self.fx.as_ref(), scale)
+            }),
             (k > 0.0).then(|| (self.drawer.frame(), DRAWER_TOP - (1.0 - k) * DRAWER_H)),
+            (
+                page_shown.then(|| self.lfo.frame()),
+                macros_shown.then(|| (self.macros.frame(), self.renderer.left_rect())),
+                &self.modulation,
+            ),
             self.damage.as_deref(),
             expanded,
             (self.physical_width, height),
@@ -2848,6 +5232,7 @@ impl Editing {
             MouseEvent::CursorLeft => {
                 self.playing.drag(None);
                 self.playing.hover = None;
+                self.tempo_hover = None;
                 if self.drag.is_none() {
                     self.hover = None;
                 }
@@ -2859,16 +5244,25 @@ impl Editing {
 }
 
 /// The window's frame: the panel's renderer's (the whole drawing), the strip's parts over its
-/// strip (`strip`, from the panel's foot down), the drawer over that from `drawer`'s top
+/// strip (`strip`, from the panel's foot down), the arpeggiator's drawer over that from its top
+/// (drawing units, its plate alone, cut off at the rail's foot) with its shadow laid over what is
+/// under its foot, the presets' drawer over everything from `drawer`'s top
 /// (drawing units, cut off at the rail's foot), and over everything what floats (MIDI Learn's
 /// ring, a tip, a note, a menu); in the places `only` alone (pixels: left, top, right,
 /// bottom) when given. (The places, not the rows they span: QUALITY's opening at the panel's
 /// top and the strip's drops at its foot put together the whole frame between them.)
+#[allow(clippy::too_many_arguments)]
 fn compose(
     composed: &mut Option<ca72_panel::Pixmap>,
     renderer: &Renderer,
     strip: &ca72_panel::Pixmap,
+    lower: Option<LowerFrame<'_>>,
     drawer: Option<(&ca72_panel::Pixmap, f64)>,
+    (page, macros, mods): (
+        Option<&ca72_panel::Pixmap>,
+        Option<Placed<'_>>,
+        &ModRenderer,
+    ),
     only: Option<&[[i32; 4]]>,
     expanded: bool,
     (width, height): (u32, u32),
@@ -2887,14 +5281,64 @@ fn compose(
         _ => composed.insert(ca72_panel::Pixmap::new(width, height).expect("a frame")),
     };
     let s = renderer.scale();
-    let top = (art::PANEL_H * s).round() as i32;
-    let rail = (DRAWER_TOP * s).round() as i32;
+    // (The frame begins at the panel's top, the drawing's row `origin`.)
+    let origin = renderer.top_px();
+    let top = renderer.strip_row();
+    let rail = (DRAWER_TOP * s).round() as i32 - origin;
+    let (left, right) = (
+        (lower_ui::LEFT * s).round() as i32,
+        (lower_ui::RIGHT * s).round() as i32,
+    );
     for &[x0, y0, x1, y1] in places {
         paste(c, frame, 0, [x0, y0, x1, y1]);
         paste(c, strip, top, [x0, y0, x1, y1]);
-        if let Some((d, at)) = drawer {
-            paste(c, d, (at * s).round() as i32, [x0, y0.max(rail), x1, y1]);
+        // The macros in the left area, over the wheels (decisions.md R-MACROS).
+        if let Some((m, r)) = macros {
+            paste_at(
+                c,
+                m,
+                (r[0], r[1]),
+                [x0.max(r[0]), y0.max(r[1]), x1.min(r[2]), y1.min(r[3])],
+            );
         }
+        // The LFO page in the lower page's place (decisions.md R-LFO), and the knobs' rings.
+        if let Some(p) = page {
+            let at = lfo_ui::top_px(s) - origin;
+            paste(c, p, at, [x0.max(left), y0.max(rail), x1.min(right), y1]);
+        }
+        mods.lay_rings_where(c, [x0, y0, x1, y1], |i| fx_pins::target(i).is_none());
+        if let Some(l) = &lower {
+            // (Its frame's rows the drawing's from `top_px` down, open; moved up as it slides.)
+            let at = lower_ui::top_px(s) - ((lower_ui::TOP - l.top) * s).round() as i32 - origin;
+            let place = [x0.max(left), y0.max(rail), x1.min(right), y1];
+            paste(
+                c,
+                l.frame,
+                at,
+                [
+                    place[0],
+                    place[1],
+                    place[2],
+                    place[3].min(at + (l.depth * s).round() as i32),
+                ],
+            );
+            if lower.as_ref().is_some_and(|l| l.depth == fx_ui::PIN_DEPTH) {
+                mods.lay_rings_where(c, [x0, y0, x1, y1], |i| fx_pins::target(i).is_some());
+            }
+            for &(p, px, py) in &l.under {
+                shade(c, p, (px, at + py), place);
+            }
+        }
+        if let Some((d, at)) = drawer {
+            paste(
+                c,
+                d,
+                (at * s).round() as i32 - origin,
+                [x0, y0.max(rail), x1, y1],
+            );
+        }
+        // A dragged assignment's cord and the hover pop-up over everything but what floats.
+        mods.lay_over(c, [x0, y0, x1, y1]);
     }
     // Logical height is rounded before the host applies DPI scaling. If that adds a row
     // beyond the artwork, extend its last row rather than leave an unpainted viewport edge.
@@ -2918,6 +5362,112 @@ fn compose(
     }
 }
 
+/// A frame laid at a place of the window's (its top left corner, its right and bottom, in the
+/// window's pixels): the macros' area (decisions.md R-MACROS).
+type Placed<'a> = (&'a ca72_panel::Pixmap, [i32; 4]);
+
+/// A drawer dropped from the rail as [`compose`] lays it: its frame (its plate alone shown,
+/// `lower::LEFT` to `RIGHT`), how deep it is, its top now (drawing units), and what hangs under
+/// it, each premultiplied with its top left corner in the frame's pixels (its shadow; the effects'
+/// list).
+struct LowerFrame<'a> {
+    frame: &'a ca72_panel::Pixmap,
+    depth: f64,
+    top: f64,
+    under: Vec<(&'a ca72_panel::Pixmap, i32, i32)>,
+}
+
+/// The drawer `which` as [`compose`] lays it, its top at `top` (drawing units).
+fn lower_frame<'a>(
+    which: Lower,
+    top: f64,
+    (arp, mpe): (&'a ArpRenderer, &'a MpeRenderer),
+    fx: Option<&'a FxRenderer>,
+    scale: f64,
+) -> LowerFrame<'a> {
+    match (which, fx) {
+        (Lower::Mpe, _) => LowerFrame {
+            frame: mpe.frame(),
+            depth: mpe_ui::DEPTH,
+            top,
+            under: mpe
+                .shadow()
+                .map(|p| (p, 0, (mpe_ui::DEPTH * scale).round() as i32))
+                .into_iter()
+                .collect(),
+        },
+        (Lower::Fx, Some(fx)) => LowerFrame {
+            frame: fx.frame(),
+            depth: fx.depth(),
+            top,
+            under: fx.under(),
+        },
+        _ => LowerFrame {
+            frame: arp.frame(),
+            depth: arp_ui::DEPTH,
+            top,
+            under: arp
+                .shadow()
+                .map(|p| (p, 0, (arp_ui::DEPTH * scale).round() as i32))
+                .into_iter()
+                .collect(),
+        },
+    }
+}
+
+/// `p` (premultiplied, partly clear) laid over the frame `c` with its top left corner at
+/// (`left`, `top`), inside `place` (left, top, right, bottom) only: what hangs under a drawer
+/// dropped from the rail.
+fn shade(
+    c: &mut ca72_panel::Pixmap,
+    p: &ca72_panel::Pixmap,
+    (left, top): (i32, i32),
+    place: [i32; 4],
+) {
+    let (w, h) = (c.width() as i32, c.height() as i32);
+    let (pw, ph) = (p.width() as i32, p.height() as i32);
+    let (x0, x1) = (place[0].max(0).max(left), place[2].min(w).min(left + pw));
+    let (y0, y1) = (place[1].max(top).max(0), place[3].min(top + ph).min(h));
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    for y in y0..y1 {
+        let src = (((y - top) * pw + x0 - left) * 4) as usize;
+        let dst = ((y * w + x0) * 4) as usize;
+        let n = (x1 - x0) as usize * 4;
+        let (s, d) = (&p.data()[src..src + n], &mut c.data_mut()[dst..dst + n]);
+        for (d, s) in d.chunks_exact_mut(4).zip(s.chunks_exact(4)) {
+            let keep = 255 - u16::from(s[3]);
+            for j in 0..4 {
+                d[j] = (u16::from(s[j]) + (u16::from(d[j]) * keep + 127) / 255).min(255) as u8;
+            }
+        }
+    }
+}
+
+/// `p` put in the frame `c` with its top left corner at (`left`, `top`), inside `place` (left,
+/// top, right, bottom) only.
+fn paste_at(
+    c: &mut ca72_panel::Pixmap,
+    p: &ca72_panel::Pixmap,
+    (left, top): (i32, i32),
+    place: [i32; 4],
+) {
+    let (w, h) = (c.width() as i32, c.height() as i32);
+    let (pw, ph) = (p.width() as i32, p.height() as i32);
+    let (x0, x1) = (place[0].max(left).max(0), place[2].min(left + pw).min(w));
+    let (y0, y1) = (place[1].max(top).max(0), place[3].min(top + ph).min(h));
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let n = (x1 - x0) as usize * 4;
+    for y in y0..y1 {
+        let src = (((y - top) * pw + x0 - left) * 4) as usize;
+        let dst = ((y * w + x0) * 4) as usize;
+        c.data_mut()[dst..dst + n].copy_from_slice(&p.data()[src..src + n]);
+    }
+}
+
 /// `p` put in the frame `c` with its top at row `top`, inside `place` (left, top, right,
 /// bottom) only.
 fn paste(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i32, place: [i32; 4]) {
@@ -2936,6 +5486,170 @@ fn paste(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i32, place: [i
     }
 }
 
+/// What the arpeggiator's drawer shows (decisions.md R-ARP), from the parameters and the
+/// controls' values as the panel shows them (a knob dragged where the drag has it), and the scene
+/// before (its hover is set elsewhere).
+fn arp_scene(p: &Ca72Params, values: &[f64; CONTROLS.len()], was: ArpScene) -> ArpScene {
+    let knob = |id: &str| ca72_panel::controls::index(id).map_or(0.0, |i| values[i]);
+    let rate = crate::arp::RATES[p.arp_rate.value().to_index()].0;
+    ArpScene {
+        on: p.arp_on.value(),
+        latch: p.arp_latch.value(),
+        direction: p.arp_direction.value().to_index(),
+        readouts: [
+            (rate.to_owned(), true),
+            (p.arp_octaves.value().to_string(), true),
+            (format!("{:.0}", p.arp_gate.value()), true),
+            (format!("{:.0}", p.arp_swing.value()), true),
+        ],
+        knobs: arp_ui::KNOB_PARAMS.map(knob),
+        hover: was.hover,
+    }
+}
+
+/// Whether an amount of each note's own expression is not 0 (decisions.md R-MPE): the rail's MPE
+/// key lit, as ARP's while the arpeggiator runs.
+fn reaching(p: &Ca72Params) -> bool {
+    [
+        &p.pressure_mod,
+        &p.pressure_filter,
+        &p.timbre_mod,
+        &p.timbre_filter,
+    ]
+    .iter()
+    .any(|q| q.value() != 0.0)
+}
+
+/// What the expression drawer shows (decisions.md R-MPE): the readouts in the knobs' units
+/// (MODULATION's whole percent, CUTOFF's octaves to a tenth), the knobs as the panel shows them
+/// (a knob dragged where the drag has it), and what INPUT heard.
+/// Its second row the velocity's (decisions.md R-VELOCITY): the latest note's (`velocity`, 0..1)
+/// on LAST NOTE and the RESPONSE screen, what it moves on MODULATES, CURVE's and FLOOR's percent.
+fn mpe_scene(
+    p: &Ca72Params,
+    values: &[f64; CONTROLS.len()],
+    input: mpe_ui::Input,
+    velocity: Option<f64>,
+    standalone: bool,
+) -> MpeScene {
+    let knob = |id: &str| ca72_panel::controls::index(id).map_or(0.5, |i| values[i]);
+    // (No "-0".)
+    let shown = |v: f32, places: usize| {
+        let t = format!("{v:.places$}");
+        if t.trim_start_matches('-')
+            .chars()
+            .all(|c| c == '0' || c == '.')
+        {
+            t.trim_start_matches('-').to_owned()
+        } else {
+            t
+        }
+    };
+    MpeScene {
+        input,
+        readouts: [
+            (shown(p.pressure_mod.value(), 0), true),
+            (shown(p.pressure_filter.value(), 1), true),
+            (shown(p.timbre_mod.value(), 0), true),
+            (shown(p.timbre_filter.value(), 1), true),
+            (shown(p.velocity_curve.value(), 0), true),
+            (shown(p.velocity_floor.value(), 0), true),
+        ],
+        knobs: mpe_ui::KNOB_PARAMS.map(knob),
+        last: velocity.map_or(String::new(), |v| {
+            format!("{}", (v.clamp(0.0, 1.0) * 127.0).round())
+        }),
+        modulates: lfo_page::source_screen_text(
+            &p.lfo_patch,
+            crate::lfo::Source::Velocity,
+            standalone,
+        ),
+        response: {
+            let r = crate::lfo::response(p);
+            mpe_ui::Response {
+                curve: f64::from(r.curve),
+                floor: f64::from(r.floor),
+                point: velocity,
+            }
+        },
+    }
+}
+
+/// Whether oscillator `n`'s (1, 2) TIMED key does nothing: its RANGE away from LO (decisions.md
+/// R-OSC-TIMED). It is off the panel then, whatever it holds ([`Editing::off_panel`]), and does
+/// not answer the pointer.
+fn timed_inert(p: &Ca72Params, n: usize) -> bool {
+    p.timed_params(n)
+        .is_some_and(|(_, _, range)| range.value() != crate::params::Footage::Lo)
+}
+
+/// Oscillators 2's and 3's timed keys as the panel shows them: each one's division (its sign) and
+/// whether it is inert (off the panel).
+fn timed_scene(p: &Ca72Params) -> [ca72_panel::render::Timed; 2] {
+    std::array::from_fn(|k| {
+        let n = k + 1;
+        ca72_panel::render::Timed {
+            division: p
+                .timed_params(n)
+                .map_or(crate::timed::DEFAULT_DIVISION, |(_, d, _)| {
+                    d.value().to_index()
+                }),
+            inert: timed_inert(p, n),
+        }
+    })
+}
+
+/// A tip's name for a control in timed mode (R-OSC-TIMED): a FREQUENCY knob turning its
+/// DIVISION.
+fn timed_label(p: &Ca72Params, param: &str) -> Option<&'static str> {
+    Some(match param {
+        "osc2_frequency" if p.timed_now(1) => "OSCILLATOR-2 DIVISION",
+        "osc3_frequency" if p.timed_now(2) => "OSCILLATOR-3 DIVISION",
+        _ => return None,
+    })
+}
+
+/// A tip's name for a MOD key (R-CONTINUOUS-WAVE): its way with it.
+fn mod_label(p: &Ca72Params, param: &str) -> Option<&'static str> {
+    use crate::params::ShapeModDirection as D;
+    let n = ca72_panel::render::MOD_KEYS
+        .iter()
+        .position(|k| *k == param)?;
+    let names = [
+        [
+            "OSCILLATOR-1 MOD, CLOCKWISE",
+            "OSCILLATOR-1 MOD, ANTICLOCKWISE",
+            "OSCILLATOR-1 MOD, BOTH WAYS",
+        ],
+        [
+            "OSCILLATOR-2 MOD, CLOCKWISE",
+            "OSCILLATOR-2 MOD, ANTICLOCKWISE",
+            "OSCILLATOR-2 MOD, BOTH WAYS",
+        ],
+        [
+            "OSCILLATOR-3 MOD, CLOCKWISE",
+            "OSCILLATOR-3 MOD, ANTICLOCKWISE",
+            "OSCILLATOR-3 MOD, BOTH WAYS",
+        ],
+    ];
+    Some(
+        names[n][match p.shape_params(n).3.value() {
+            D::Clockwise => 0,
+            D::Anticlockwise => 1,
+            D::Both => 2,
+        }],
+    )
+}
+
+/// Whether OSC. 3 CONTROL does nothing: oscillator 3 timed (its key on, its RANGE at LO;
+/// decisions.md R-OSC-TIMED), its cycle kept to the clock whatever the keys play. Then it is
+/// dimmed and does not answer the pointer, as VOICES where it does nothing, and keeps its value,
+/// never switched off (the owner, 2026-10-20: "Okay, that's fine. Do it that way."); the host's
+/// automation and an agent still set it, to count when oscillator 3 follows the keys again.
+fn osc3_control_inert(p: &Ca72Params) -> bool {
+    p.timed_now(2)
+}
+
 /// Whether VOICES does nothing (the owner, 2026-10-11, of a MONO preset's VOICES 4: "I don't
 /// think those 4 voices do anything"; decisions.md R64): in MONO (neither POLY nor UNISON)
 /// with DOUBLE, whose one pair has no place among others, or scattering with WIDTH at 0, where
@@ -2947,6 +5661,24 @@ fn voices_inert(p: &Ca72Params) -> bool {
     !c.poly && !c.unison && (p.doubled.value() || c.spread <= 0.0)
 }
 
+/// How often the screens of modulated controls are read again: at most 30 times a second, as
+/// the LFO page's orbs (decisions.md R-LFO).
+const LIVE_FRAME: Duration = Duration::from_millis(33);
+
+/// The strip's readout showing target `t`, if one does.
+fn readout_of(t: crate::lfo::Target) -> Option<Readout> {
+    use crate::lfo::Target as T;
+    Some(match t {
+        T::Entropy => Readout::Entropy,
+        T::Spread => Readout::Width,
+        T::Double => Readout::Detune,
+        T::Drive => Readout::Drive,
+        T::Level => Readout::Level,
+        T::Inner => Readout::Inner,
+        _ => return None,
+    })
+}
+
 /// What the strip shows, from the parameters, the voices sounding (a bit a voice), their levels
 /// (0 to 1, by voice) and the output's, and the scene before (its rail, hover and MIDI Learn's
 /// ring are set elsewhere).
@@ -2954,9 +5686,25 @@ fn strip_scene(
     p: &Ca72Params,
     sounding: u32,
     (levels, output): (&[f64], f64),
+    live: &[Option<f64>; LIVE.len()],
     was: StripScene,
 ) -> StripScene {
     let c = p.controls();
+    // (The screens of the controls a source moves: where the engine has them, modulated, in
+    // their own units; lit as those values are. The rest of the strip as set: R-LFO.)
+    let mut r = c;
+    for (t, v) in LIVE.iter().zip(live) {
+        if let Some(v) = *v {
+            match t {
+                crate::lfo::Target::Entropy => r.entropy = v,
+                crate::lfo::Target::Spread => r.spread = v,
+                crate::lfo::Target::Double => r.double = v,
+                crate::lfo::Target::Drive => r.drive = v,
+                crate::lfo::Target::Level => r.level = v,
+                _ => r.inner = v,
+            }
+        }
+    }
     let unison = c.unison;
     let poly = c.poly && !unison;
     let mono = !poly && !unison;
@@ -2984,28 +5732,29 @@ fn strip_scene(
             "OFF".to_owned()
         }
     };
-    let auto = if c.auto_gain && c.drive > 0.0 {
+    // (AUTO GAIN's at DRIVE as it plays: the engine reads its curve there.)
+    let auto = if c.auto_gain && r.drive > 0.0 {
         let curve = crate::drive::Curve(p.drive_curve.saved().db);
-        (num3(curve.at(c.drive, crate::engine::DRIVE_TOP)), true)
+        (num3(curve.at(r.drive, crate::engine::DRIVE_TOP)), true)
     } else {
         (String::new(), false)
     };
     let readouts = [
         (format!("{voices}"), !voices_inert(p)),
-        (percent(c.entropy), c.entropy > 0.0),
-        (percent(c.spread), c.spread > 0.0),
+        (percent(r.entropy), r.entropy > 0.0),
+        (percent(r.spread), r.spread > 0.0),
         (
             if doubled {
-                crate::params::cents(c.double * crate::engine::DOUBLE_CENTS)
+                crate::params::cents(r.double * crate::engine::DOUBLE_CENTS)
             } else {
                 "OFF".to_owned()
             },
             doubled,
         ),
         auto,
-        (num3(c.drive), c.drive > 0.0),
-        (num3(c.level), true),
-        (percent(c.inner), c.inner > 0.0 && c.spread > 0.0),
+        (num3(r.drive), r.drive > 0.0),
+        (num3(r.level), true),
+        (percent(r.inner), r.inner > 0.0 && r.spread > 0.0),
     ];
     let on = |k: usize| sounding & (1 << k) != 0;
     // Where they sound: in MONO with DOUBLE the one pair, all of WIDTH's way out; else each of
@@ -3062,6 +5811,23 @@ fn strip_scene(
     }
 }
 
+/// Modified arrows remain host shortcuts. TYPE uses letters and Z/X, so leaves these free.
+fn preset_arrow(k: &KeyboardEvent) -> Option<i32> {
+    if k.modifiers
+        .intersects(Modifiers::SHIFT | Modifiers::CONTROL | Modifiers::ALT | Modifiers::META)
+        || k.is_composing
+    {
+        return None;
+    }
+    match k.key {
+        // Left and right only, as the rail's ‹ › keys (the owner, 2026-10-19); up and down
+        // stay free.
+        Key::ArrowLeft => Some(-1),
+        Key::ArrowRight => Some(1),
+        _ => None,
+    }
+}
+
 impl Editing {
     /// A key: whether the drawer took it (else it is the host's).
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
@@ -3112,13 +5878,22 @@ impl Editing {
         }
         // MIDI Learn first (decisions.md R34): Escape closes a control's menu, the drawer's MIDI
         // list takes the keys it shows, and Escape cancels learning.
+        if self.macro_view.typing.is_some() {
+            return self.rename_key(k);
+        }
         if self.typing.is_some() {
             return self.type_key(k);
+        }
+        if self.knob_entry.is_some() {
+            return self.knob_key(k);
         }
         let map = std::sync::Arc::clone(&self.params.midi_map);
         let down = k.state == KeyState::Down && !modifier(&k.key);
         if down && k.key == Key::Escape && self.learning.menu_open() {
             self.learning.close_menu();
+            return true;
+        }
+        if self.fx_view.key(k) || self.fx_view.list_key(k) {
             return true;
         }
         if self.browser.open && self.learning.list {
@@ -3130,8 +5905,24 @@ impl Editing {
             }
             return taken;
         }
+        if self.map_key(k) {
+            return true;
+        }
         if down && k.key == Key::Escape && map.armed().is_some() {
             self.learning.cancel(&map);
+            return true;
+        }
+        if self.learning.holds_keys(&map) {
+            return false;
+        }
+        if self.preset_keys_allowed()
+            && let Some(by) = preset_arrow(k)
+        {
+            if down {
+                self.end_gestures();
+                let setter = ParamSetter::new(self.context.as_ref());
+                self.browser.step(by, &self.params, &setter);
+            }
             return true;
         }
         // A key the drawer acts on may set the parameters (the arrows choose presets): no
@@ -3152,7 +5943,13 @@ impl Drop for Editing {
     // else nothing is (decisions.md R34). It no longer watches the levels (the audio thread
     // stops measuring them when no editor does).
     fn drop(&mut self) {
-        self.learning.close(&self.params.midi_map);
+        if self
+            .learning
+            .close(&self.params.midi_map)
+            .is_some_and(|a| a.param == crate::learn::MOD_WHEEL)
+        {
+            self.keep_settings(Change::ModWheelSource(self.params.midi_map.wheel_source()));
+        }
         self.end_gestures();
         self.meters.watchers.fetch_sub(1, Ordering::Relaxed);
     }
@@ -3162,8 +5959,10 @@ impl Drop for Editing {
 /// to a window not yet on screen (a host maps the editor's window after its first frame:
 /// Bitwig on Linux showed it black until the pointer changed something) and, without a
 /// compositor, what a covering window hid; baseview reports neither. So on Linux the last
-/// frame is shown again at this pace, unchanged (a copy, no rendering; decisions.md R19).
-/// macOS keeps a window's pixels; Windows asks for them again (`WindowEvent::Damaged`, R28).
+/// frame is shown again at this pace, unchanged (a copy, no rendering; decisions.md R19), and
+/// at every frame for a while after a size is first shown ([`SETTLE`]). macOS keeps a window's
+/// pixels; Windows asks for them again (`WindowEvent::Damaged`, R28), as X11 does as a window is
+/// mapped or resized (baseview's change 12).
 const REPAINT: Option<Duration> = if cfg!(target_os = "linux") {
     Some(Duration::from_millis(250))
 } else {
@@ -3182,9 +5981,25 @@ static DRAWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0
 #[cfg(test)]
 static SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// How long after a frame is first shown at a size (the window opened, PANEL, SIZE, the grip)
+/// it is shown again at every frame, on X11: what is shown before the host's window has taken
+/// that size, or before the host has put it on screen, is lost. Bitwig 5.2.7 on Linux grows its
+/// window after the editor's and puts it on screen late: the editor's first frame after it
+/// reopened was lost, and the window stayed black until the next showing (decisions.md
+/// R-LINUX-RESIZE). A copy a frame, no drawing; 250 ms is the [`REPAINT`] it would wait for.
+const SETTLE: Option<Duration> = if cfg!(target_os = "linux") {
+    Some(Duration::from_millis(250))
+} else {
+    None
+};
+
 /// Whether the frame must be shown again though nothing in it changed: not yet shown since
-/// the window opened or resized, or (Linux) shown longer ago than [`REPAINT`].
-fn repaint_due(shown: Option<Instant>, now: Instant) -> bool {
+/// the window opened or resized, (Linux) settling until `settle`, or (Linux) shown longer ago
+/// than [`REPAINT`].
+fn repaint_due(shown: Option<Instant>, settle: Option<Instant>, now: Instant) -> bool {
+    if settle.is_some_and(|until| now < until) {
+        return true;
+    }
     match (shown, REPAINT) {
         (None, _) => true,
         (Some(at), Some(every)) => now.saturating_duration_since(at) >= every,
@@ -3210,6 +6025,11 @@ impl WindowHandler for PanelWindow {
         if self.editing.dragging() && window::lost_capture(window) {
             self.editing.end_gestures();
             self.editing.playing.release_pointer();
+        }
+        // What agents ask, carried out as the player's edits are, before the frame is drawn.
+        if self.editing.serve_agents() {
+            self.follow(window);
+            self.keyboard(window);
         }
         // The grip's width, asked of the host once a frame.
         self.editing.grip();
@@ -3252,10 +6072,13 @@ impl WindowHandler for PanelWindow {
         // host now, not at the editor's next event; decisions.md R34.)
         self.keyboard(window);
         // (Shown again whole when due: X11 may have dropped any of it.)
-        let due = repaint_due(self.shown, now);
+        let due = repaint_due(self.shown, self.settle, now);
         if seen && (changed || due) {
             #[cfg(test)]
             SHOWN.fetch_add(1, Ordering::Relaxed);
+            if self.shown.is_none() {
+                self.settle = SETTLE.map(|for_| now + for_);
+            }
             self.present(changed && !due);
             self.shown = Some(now);
         }
@@ -3268,9 +6091,11 @@ impl WindowHandler for PanelWindow {
                 self.resized(&info);
                 EventStatus::Captured
             }
-            // Windows repainting the window (a host's window painted its background over it):
-            // the last frame shown, again at once, unless none has been since it opened or
-            // resized (the next frame shows one). Not drawn afresh (decisions.md R28).
+            // Windows repainting the window (a host's window painted its background over it),
+            // or the X server asking for it (the window mapped or at a new size: baseview's
+            // change 12, decisions.md R-LINUX-RESIZE): the last frame shown, again at once,
+            // unless none has been since it opened or resized (the next frame shows one). Not
+            // drawn afresh (decisions.md R28).
             Event::Window(WindowEvent::Damaged) => {
                 if self.shown.is_some() {
                     self.present(false);
@@ -3305,9 +6130,10 @@ impl WindowHandler for PanelWindow {
                 // The drawer opening or shutting below the bar: the window follows (the
                 // owner, 2026-10-02: on macOS it had stayed drawn at the old size until
                 // reopened).
-                self.follow(window);
+                let height_changed = self.follow(window);
                 self.keyboard(window);
                 self.cursor(window);
+                self.repaint_height_change(window, height_changed);
                 status
             }
             // The drawer, while open, takes the keys (the host keeps its shortcuts).
@@ -4027,6 +6853,11 @@ pub(crate) mod window {
             s
         }
 
+        #[cfg(all(test, target_os = "linux"))]
+        pub fn presented(&self) -> bool {
+            self.whole
+        }
+
         pub fn resize(&mut self, (w, h): (u32, u32)) {
             self.whole = false;
             if let (Some((_, surface)), Some(w), Some(h)) =
@@ -4110,7 +6941,7 @@ fn ultra_note_lines(splits: bool) -> Vec<(&'static str, Tone)> {
     let mut lines = vec![
         ("ULTRA · NO COMPROMISES", Tone::Accent),
         (
-            "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SIX TIMES THE WORK OF HI.",
+            "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SEVEN TIMES THE WORK OF HI.",
             Tone::Plain,
         ),
     ];
@@ -4160,6 +6991,7 @@ fn ultra_note_lines(splits: bool) -> Vec<(&'static str, Tone)> {
 
 #[cfg(test)]
 mod tests {
+    mod fx_pins;
     use std::sync::Mutex;
 
     use baseview::Point;
@@ -4167,6 +6999,7 @@ mod tests {
     use nih_plug::wrapper::state::PluginState;
 
     use super::*;
+    use ca72_panel::art::POWER;
     use ca72_panel::presets::{self as presets_ui, BarTarget, DrawerTarget, FieldId, PresetKey};
     use ca72_panel::ultra;
 
@@ -4708,7 +7541,7 @@ mod tests {
     }
 
     #[test]
-    fn panel_hide_and_view_swap_preserve_type_notes_and_the_current_height() {
+    fn panel_hide_and_page_selection_preserve_type_notes() {
         let (mut e, _, _) = editing_standalone();
         e.playing.visible = true;
         e.playing.typing = true;
@@ -4730,15 +7563,13 @@ mod tests {
             "held key does not retrigger"
         );
         let compact_height = e.window_height();
-        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        e.strip_press(StripTarget::Bar(BarTarget::Global));
         assert!(!e.playing.visible);
-        assert!(e.note_typing_allowed(), "extra controls preserve TYPE");
+        assert!(e.note_typing_allowed(), "GLOBAL preserves TYPE");
         assert_eq!(e.playing.notes.generation(), generation);
-        assert_eq!(e.window_height(), compact_height);
+        assert!(e.window_height() > compact_height);
         e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
         assert!(e.playing.visible);
-        assert_eq!(e.window_height(), compact_height);
-        e.toggle_panel();
         assert!(e.expanded());
         assert!(e.note_typing_allowed());
         let mut up = key.clone();
@@ -4770,7 +7601,10 @@ mod tests {
             host.calls.lock().unwrap().is_empty(),
             "hidden controls cannot gesture"
         );
-        let p = at(&e, (keyboard::TYPING_X, keyboard::HEADER));
+        let p = at(
+            &e,
+            art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Typing),
+        );
         go(&mut e, p);
         press(&mut e);
         release(&mut e);
@@ -4795,7 +7629,7 @@ mod tests {
         e.strip_press(StripTarget::Bar(BarTarget::Settings));
         assert!(!e.note_typing_allowed());
         e.learning.close_menu();
-        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        e.strip_press(StripTarget::Bar(BarTarget::Global));
         assert!(!e.playing.visible);
         assert_eq!((e.width, e.window_height()), (width, height));
     }
@@ -4967,6 +7801,78 @@ mod tests {
         }
     }
 
+    /// The standalone's TEMPO screen (decisions.md R-ARP; the owner's option D): it reads the
+    /// tempo, and is set as the readouts are: dragged up and down, a beat a minute a notch of
+    /// the wheel, a tempo typed after a double click, 30 to 300; Escape leaves it as it was. In
+    /// a plug-in there is none (the host gives the tempo) and the wood does nothing.
+    #[test]
+    fn the_standalone_s_tempo_screen_sets_the_tempo() {
+        let (mut e, _, params) = editing_standalone();
+        e.update_scene();
+        assert_eq!(e.scene.tempo.as_deref(), Some("120 BPM"));
+        let (x, y, w, h) = art::TEMPO_SCREEN;
+        let p = at(&e, (x + w / 2.0, y + h / 2.0));
+        // Dragged up 20 logical pixels: ten beats a minute faster; let go, kept.
+        go(&mut e, p);
+        press(&mut e);
+        for dy in 1..=20 {
+            go(&mut e, below(p, -f64::from(dy)));
+        }
+        release(&mut e);
+        assert_eq!(params.tempo(), 130.0);
+        assert_eq!(e.settings.tempo, 130);
+        // Down past the slowest: 30 (a press of its own, not a double click's second).
+        e.last_tempo_press = None;
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, 1000.0));
+        release(&mut e);
+        assert_eq!(params.tempo(), 30.0);
+        // The wheel: a beat a minute a notch.
+        go(&mut e, p);
+        wheel(&mut e, 1.0);
+        wheel(&mut e, 1.0);
+        assert_eq!(params.tempo(), 32.0);
+        wheel(&mut e, -1.0);
+        assert_eq!(params.tempo(), 31.0);
+        e.update_scene();
+        assert_eq!(e.scene.tempo.as_deref(), Some("31 BPM"));
+        // Typed: double-clicked, 96, Enter; 999 is the fastest, 300; Escape leaves it.
+        let typed = |e: &mut Editing, text: &str, end: Key| {
+            e.last_tempo_press = None;
+            click(e, p);
+            click(e, p);
+            assert_eq!(e.typing.as_ref().map(|t| t.0), Some(Typed::Tempo), "{text}");
+            e.update_scene();
+            assert_eq!(e.scene.tempo.as_deref(), Some("_ BPM"));
+            for c in text.chars() {
+                keyed(e, Key::Character(c.to_string()));
+            }
+            keyed(e, end);
+        };
+        typed(&mut e, "96", Key::Enter);
+        assert_eq!((params.tempo(), e.settings.tempo), (96.0, 96));
+        typed(&mut e, "999", Key::Enter);
+        assert_eq!(params.tempo(), 300.0);
+        typed(&mut e, "12", Key::Enter);
+        assert_eq!(params.tempo(), 30.0);
+        typed(&mut e, "150", Key::Escape);
+        assert_eq!(params.tempo(), 30.0);
+        assert!(e.typing.is_none());
+        // A plug-in: no screen; the wood there does nothing.
+        let (mut e, host, params) = editing();
+        e.update_scene();
+        assert_eq!(e.scene.tempo, None);
+        let p = at(&e, (x + w / 2.0, y + h / 2.0));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -40.0));
+        release(&mut e);
+        wheel(&mut e, 1.0);
+        assert_eq!(params.tempo(), 120.0);
+        assert!(host.take().is_empty());
+    }
+
     #[test]
     fn keyboard_type_and_panic_are_only_available_in_standalone() {
         for api in [PluginApi::Clap, PluginApi::Vst3, PluginApi::Standalone] {
@@ -4984,7 +7890,10 @@ mod tests {
             assert_eq!(scene.standalone, standalone);
             assert_eq!(scene.typing, standalone);
             e.playing.typing = false;
-            let type_button = at(&e, (keyboard::TYPING_X, keyboard::HEADER));
+            let type_button = at(
+                &e,
+                art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Typing),
+            );
             go(&mut e, type_button);
             press(&mut e);
             release(&mut e);
@@ -5009,7 +7918,10 @@ mod tests {
             assert!(e.playing.key(&key, true));
             assert!(e.playing.notes.pop().expect("local attack").on);
             let generation = e.playing.notes.generation();
-            let panic_button = at(&e, (keyboard::PANIC_X, keyboard::HEADER));
+            let panic_button = at(
+                &e,
+                art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Panic),
+            );
             go(&mut e, panic_button);
             press(&mut e);
             release(&mut e);
@@ -5020,6 +7932,720 @@ mod tests {
             );
             e.playing.release();
         }
+    }
+
+    /// TYPING and PANIC on the walnut after the TEMPO screen (decisions.md R-TEMPO-CORNER):
+    /// pressed from any lower page, the KEYS page's header no longer theirs; TYPING lit while
+    /// on, PANIC while held, each lightened under the pointer; none in a plug-in.
+    #[test]
+    fn typing_and_panic_sit_beside_tempo_and_work_from_every_page() {
+        let (mut e, _, _) = editing_for_api(
+            Ca72Params::default(),
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+            PluginApi::Standalone,
+        );
+        e.playing.visible = true;
+        // Each change drawn in places as it is drawn whole, and only there (R58).
+        let shown_whole = |e: &mut Editing, what: &str| {
+            e.draw();
+            assert!(e.damage.is_some(), "{what}: drawn in places");
+            let mut whole = None;
+            compose(
+                &mut whole,
+                &e.renderer,
+                e.strip.frame(),
+                lower_of(e),
+                None,
+                (
+                    e.page_shows().then(|| e.lfo.frame()),
+                    e.macros_show()
+                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                    &e.modulation,
+                ),
+                None,
+                true,
+                (e.physical_width, e.physical_height()),
+            );
+            assert!(e.composed == whole, "{what}: not as put together whole");
+        };
+        // GLOBAL's page shows, not the piano's.
+        e.strip_press(StripTarget::Bar(BarTarget::Global));
+        e.draw();
+        e.update_scene();
+        assert_eq!(
+            e.scene.tempo_keys,
+            Some(TempoKeys::default()),
+            "the keys with the TEMPO screen"
+        );
+        let typing = at(
+            &e,
+            art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Typing),
+        );
+        go(&mut e, typing);
+        e.update_scene();
+        assert_eq!(
+            e.scene.tempo_keys.map(|k| k.hover),
+            Some(Some(art::TempoKey::Typing))
+        );
+        assert!(
+            e.scene
+                .tip
+                .as_ref()
+                .is_some_and(|t| t.0.starts_with("TYPING"))
+        );
+        press(&mut e);
+        release(&mut e);
+        // (Off TYPING, whose tip floats over everything and so is shown whole.)
+        let panic = at(
+            &e,
+            art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Panic),
+        );
+        go(&mut e, panic);
+        shown_whole(&mut e, "TYPING on");
+        e.update_scene();
+        assert!(e.playing.typing && e.note_typing_allowed());
+        assert!(e.scene.tempo_keys.is_some_and(|k| k.typing && !k.panic));
+        // PANIC lit while it is held, every note let go.
+        let key = KeyboardEvent {
+            key: Key::Character("a".into()),
+            ..Default::default()
+        };
+        assert!(e.keyed(&key));
+        assert!(e.playing.notes.pop().expect("typed attack").on);
+        let generation = e.playing.notes.generation();
+        press(&mut e);
+        e.update_scene();
+        assert!(e.scene.tempo_keys.is_some_and(|k| k.panic));
+        assert!(e.playing.notes.generation() > generation, "PANIC");
+        shown_whole(&mut e, "PANIC held");
+        release(&mut e);
+        shown_whole(&mut e, "PANIC let go");
+        e.update_scene();
+        assert!(e.scene.tempo_keys.is_some_and(|k| !k.panic && k.typing));
+        // TYPING pressed again: off.
+        go(&mut e, typing);
+        press(&mut e);
+        release(&mut e);
+        assert!(!e.playing.typing);
+        // A plug-in's walnut is bare.
+        let (mut p, _, _) = editing_for_api(
+            Ca72Params::default(),
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+            PluginApi::Clap,
+        );
+        p.update_scene();
+        assert_eq!(p.scene.tempo_keys, None);
+    }
+
+    /// Where control `param` is in this editor's arrangement, in the window.
+    fn control_at(e: &Editing, param: &str) -> Point {
+        let i = ca72_panel::controls::index(param).expect("a control");
+        at(e, e.renderer.arrangement().control(i).centre())
+    }
+
+    /// Control `param` clicked where this editor has it.
+    fn click_on(e: &mut Editing, param: &str) {
+        let p = control_at(e, param);
+        click(e, p);
+    }
+
+    /// The learnable controls the MIDI map mode marks now.
+    fn marked(e: &Editing) -> Vec<usize> {
+        e.map_places().into_iter().map(|(k, _)| k).collect()
+    }
+
+    /// The standalone's MIDI map mode (decisions.md R-MIDI-MAP): MIDI between TYPING and PANIC turns it on
+    /// (lit, its tip) and off; every learnable control in view is marked, its controller in small
+    /// print; a click chooses a control without operating it (no value, no gesture, no drag, no
+    /// wheel), MIDI Learn waits on it, the next controller is its own and the mode stays on;
+    /// another click moves the waiting; Delete takes the chosen control's controller away;
+    /// Escape stops the waiting, then ends the mode. The rail's page keys work in it, and their
+    /// pages' controls are marked. A plug-in has no MIDI key.
+    #[test]
+    fn midi_map_mode_chooses_a_control_learns_it_and_stays_on() {
+        let (mut e, host, params) = editing_standalone();
+        let map = Arc::clone(&params.midi_map);
+        let page = |e: &mut Editing, t: BarTarget| {
+            let p = at(e, strip::centre(e.rail, StripTarget::Bar(t)));
+            click(e, p);
+            e.draw();
+        };
+        page(&mut e, BarTarget::Global);
+        assert!(e.scene.marks.is_empty(), "off: no marks");
+        assert_eq!(e.scene.tempo_keys.map(|k| k.midi), Some(false));
+        // MIDI between TYPING and PANIC, the rail's gap either side (the owner: "keyboard-midi-
+        // panic"); its tip after PANIC.
+        let (tx, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Typing);
+        let (mx, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Midi);
+        let (px, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Panic);
+        assert_eq!(mx - tx, art::TEMPO_KEY.0 + 14.0);
+        assert_eq!(px - mx, art::TEMPO_KEY.0 + 14.0);
+        assert_eq!(art::TempoKey::LAST, art::TempoKey::Panic);
+        let midi = at(
+            &e,
+            art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Midi),
+        );
+        go(&mut e, midi);
+        e.update_scene();
+        assert_eq!(
+            e.scene.tip.as_ref().map(|t| t.0.as_str()),
+            Some(mapping::KEY_TIP)
+        );
+        click(&mut e, midi);
+        assert!(e.mapping_on() && e.holds_keys());
+        e.draw();
+        assert_eq!(e.scene.tempo_keys.map(|k| k.midi), Some(true));
+        // GLOBAL's knobs and tabs, the panel's, the preset arrows; not the wheels.
+        let m = marked(&e);
+        for id in [
+            "cutoff",
+            "osc1_on",
+            "glide_on",
+            "entropy",
+            "poly",
+            "unison",
+            "doubled",
+            "auto_gain",
+            "previous_preset",
+            "next_preset",
+        ] {
+            assert!(m.contains(&learnable(id)), "{id} marked");
+        }
+        assert!(!m.contains(&crate::learn::MOD_WHEEL));
+        assert!(
+            !m.contains(&learnable("lfo1_rate")),
+            "the LFO page is not shown"
+        );
+        assert_eq!(e.scene.marks.len(), m.len());
+        assert!(e.scene.marks.iter().all(|m| m.label.is_none()));
+        assert!(e.renderer.floating(), "the marks float over everything");
+        // Every mark is found where it is drawn.
+        for (k, r) in e.map_places() {
+            assert_eq!(
+                e.map_at(((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0))
+                    .map(|f| f.0),
+                Some(k),
+                "{}",
+                crate::learn::LEARNABLE[k].id
+            );
+        }
+        // A click on CUTOFF chooses it: it waits; nothing set, no gesture.
+        let cutoff = learnable("cutoff");
+        let before = params.cutoff.unmodulated_normalized_value();
+        click_on(&mut e, "cutoff");
+        assert_eq!(map.armed(), Some(cutoff));
+        e.draw();
+        assert_eq!(note_lines(&e)[0], "MIDI LEARN: CUTOFF FREQUENCY");
+        assert_eq!(e.scene.marks.iter().filter(|m| m.waiting).count(), 1);
+        // The next controller is its own; the mode stays on, CUTOFF chosen.
+        assert_eq!(map.incoming(0, 74), crate::learn::Incoming::Caught);
+        e.draw();
+        assert_eq!(
+            map.assignment(cutoff),
+            Some(crate::learn::Cc { channel: 0, cc: 74 })
+        );
+        assert!(e.mapping_on() && map.armed().is_none());
+        assert!(
+            e.scene
+                .marks
+                .iter()
+                .any(|m| m.chosen && m.label.as_deref() == Some("CC 74"))
+        );
+        // Another control, then another: the waiting moves. A drag and the wheel turn nothing.
+        click_on(&mut e, "emphasis");
+        assert_eq!(map.armed(), Some(learnable("emphasis")));
+        let glide = control_at(&e, "glide");
+        let glide_was = params.glide.unmodulated_normalized_value();
+        go(&mut e, glide);
+        press(&mut e);
+        go(&mut e, below(glide, -120.0));
+        release(&mut e);
+        wheel(&mut e, 4.0);
+        assert_eq!(map.armed(), Some(learnable("glide")));
+        assert_eq!(params.glide.unmodulated_normalized_value(), glide_was);
+        // A switch and a tab are chosen, not flipped.
+        let poly = params.poly.value();
+        let tab = at(&e, strip::centre(e.rail, StripTarget::Tab(Bank::Mode, 1)));
+        click(&mut e, tab);
+        assert_eq!(map.armed(), Some(learnable("poly")));
+        assert_eq!(params.poly.value(), poly);
+        let osc1 = params.osc1_on.value();
+        click_on(&mut e, "osc1_on");
+        assert_eq!(params.osc1_on.value(), osc1);
+        // A switch waiting takes a note (not played: lib.rs), shown by its number.
+        assert_eq!(
+            map.incoming_note(0, 36, true),
+            crate::learn::Incoming::Caught
+        );
+        e.draw();
+        assert_eq!(
+            map.binding(learnable("osc1_on")),
+            Some(crate::learn::Binding::Note {
+                channel: 0,
+                note: 36
+            })
+        );
+        assert!(
+            e.scene
+                .marks
+                .iter()
+                .any(|m| m.label.as_deref() == Some("NOTE 36"))
+        );
+        assert_eq!(params.cutoff.unmodulated_normalized_value(), before);
+        assert!(host.take().is_empty(), "no gesture");
+        // Delete: CUTOFF chosen again (waiting), its controller taken away.
+        click_on(&mut e, "cutoff");
+        assert!(keyed(&mut e, Key::Delete));
+        assert_eq!(map.assignment(cutoff), None);
+        // The LFO page by its key, in the mode: its knobs marked and chosen.
+        page(&mut e, BarTarget::Lfo);
+        assert!(e.page_shows() && e.mapping_on());
+        assert!(marked(&e).contains(&learnable("lfo1_rate")));
+        assert!(!marked(&e).contains(&learnable("entropy")));
+        click_on(&mut e, "lfo2_rate");
+        assert_eq!(map.armed(), Some(learnable("lfo2_rate")));
+        // The macros by MACRO.
+        page(&mut e, BarTarget::Macro);
+        assert!(e.macros_show());
+        assert!(marked(&e).contains(&learnable("macro1")));
+        click_on(&mut e, "macro3");
+        assert_eq!(map.armed(), Some(learnable("macro3")));
+        // Escape: the waiting stops, the mode stays; Escape again: off.
+        assert!(keyed(&mut e, Key::Escape));
+        assert_eq!(map.armed(), None);
+        assert!(e.mapping_on());
+        assert!(keyed(&mut e, Key::Escape));
+        assert!(!e.mapping_on());
+        e.draw();
+        assert!(e.scene.marks.is_empty());
+        assert_eq!(e.scene.tempo_keys.map(|k| k.midi), Some(false));
+        // MIDI on, a control waiting, MIDI off: the waiting stops too. Off, a click operates.
+        click(&mut e, midi);
+        click_on(&mut e, "lfo1_rate");
+        assert!(map.armed().is_some());
+        click(&mut e, midi);
+        assert!(!e.mapping_on() && map.armed().is_none());
+        assert_eq!(
+            map.assignment(learnable("osc1_on")),
+            None,
+            "a note, not a CC"
+        );
+        assert!(map.binding(learnable("osc1_on")).is_some(), "kept");
+        // A plug-in's walnut is bare: no MIDI key, no mode.
+        let (mut p, _, _) = editing();
+        let at_key = at(
+            &p,
+            art::tempo_key_at(p.renderer.arrangement(), art::TempoKey::Midi),
+        );
+        click(&mut p, at_key);
+        p.draw();
+        assert!(!p.mapping_on());
+        assert!(p.scene.tempo_keys.is_none() && p.scene.marks.is_empty());
+    }
+
+    /// The arpeggiator's drawer in the mode: its knobs and its ON, HOLD and DIRECTION (until
+    /// now learned only from the list) are marked and chosen, ON's note over its tab; the
+    /// controls under the drawer are not marked, those below it are.
+    #[test]
+    fn midi_map_mode_reaches_the_arpeggiators_drawer() {
+        let (mut e, _host, params) = editing_standalone();
+        let map = Arc::clone(&params.midi_map);
+        let page = at(
+            &e,
+            strip::centre(e.rail, StripTarget::Bar(BarTarget::Global)),
+        );
+        click(&mut e, page);
+        e.toggle_mapping();
+        e.draw();
+        assert!(marked(&e).contains(&learnable("poly")));
+        let arp = at(&e, strip::centre(e.rail, StripTarget::Bar(BarTarget::Arp)));
+        click(&mut e, arp);
+        assert!(e.lower.open, "the ARP key works in the mode");
+        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        e.draw();
+        let m = marked(&e);
+        for id in [
+            "arp_on",
+            "arp_latch",
+            "arp_direction",
+            "arp_rate",
+            "arp_gate",
+        ] {
+            assert!(m.contains(&learnable(id)), "{id}");
+        }
+        assert!(
+            !m.contains(&learnable("poly")),
+            "MODE's tabs under the drawer"
+        );
+        assert!(m.contains(&learnable("entropy")), "ENTROPY below it");
+        let on = at(&e, ArpBank::Arp.tab(0));
+        click(&mut e, on);
+        assert_eq!(map.armed(), Some(learnable("arp_on")));
+        assert!(!params.arp_on.value());
+        e.draw();
+        let n = e.scene.note.as_ref().expect("a note over ON");
+        assert_eq!(n.lines[0].0, "MIDI LEARN: ARP ON");
+        assert!(n.lines[1].0.contains("PRESS A NOTE"));
+        assert!((n.x - ArpBank::Arp.tab(0).0).abs() < 1.0);
+    }
+
+    /// The MIDI map mode for looking at (decisions.md R-MIDI-MAP), written to
+    /// `$CA72_MIDI_MAP_PNG`, the folder, at `$CA72_MIDI_MAP_DPR` (2 by default) the window's
+    /// 1720 logical pixels: the standalone with the mode off (`1-off.png`), on over GLOBAL's page
+    /// with some controls learned (`2-on-global.png`), a control waiting (`3-waiting.png`), the
+    /// LFO page and the macros (`4-lfo-macros.png`), the arpeggiator's drawer
+    /// (`4b-arp.png`), and a plug-in's bare walnut (`5-plugin.png`); and the walnut's keys close
+    /// up, off and on (`0-keys-off.png`, `0-keys-on.png`).
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_midi_map_pngs() {
+        let Some(out) = std::env::var_os("CA72_MIDI_MAP_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        let dpr: f64 = std::env::var("CA72_MIDI_MAP_DPR")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2.0);
+        let width = 1720;
+        let sized = |e: &mut Editing| {
+            e.fit(dpr, width, (f64::from(width) * dpr).round() as u32);
+            e.draw();
+        };
+        let away = |e: &mut Editing| {
+            go(e, Point { x: 2.0, y: 2.0 });
+        };
+        let save = |e: &mut Editing, name: &str| {
+            e.composed = None;
+            window_frame(e).save_png(out.join(name)).unwrap();
+        };
+        // The walnut's keys close up: the TEMPO screen to past MIDI's tip.
+        let keys = |e: &mut Editing, name: &str| {
+            e.composed = None;
+            let s = e.renderer.scale();
+            let top = e.renderer.top();
+            let (x, y, _, h) = art::tempo_window(e.renderer.arrangement().plate_at());
+            let (mx, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Midi);
+            let f = window_frame(e);
+            let x0 = ((x - 40.0) * s) as u32;
+            let x1 = (((mx + 900.0) * s) as u32).min(f.width());
+            let y0 = ((y - 60.0 - top) * s).max(0.0) as u32;
+            let y1 = (((y + h + 60.0 - top) * s) as u32).min(f.height());
+            let (w, hh) = (x1 - x0, y1 - y0);
+            let mut c = ca72_panel::Pixmap::new(w, hh).unwrap();
+            for row in 0..hh {
+                let from = ((y0 + row) * f.width() + x0) as usize * 4;
+                let to = (row * w) as usize * 4;
+                c.data_mut()[to..to + w as usize * 4]
+                    .copy_from_slice(&f.data()[from..from + w as usize * 4]);
+            }
+            c.save_png(out.join(name)).unwrap();
+        };
+        let (mut e, _, params) = editing_standalone();
+        let map = Arc::clone(&params.midi_map);
+        sized(&mut e);
+        let global = at(
+            &e,
+            strip::centre(e.rail, StripTarget::Bar(BarTarget::Global)),
+        );
+        click(&mut e, global);
+        away(&mut e);
+        save(&mut e, "1-off.png");
+        keys(&mut e, "0-keys-off.png");
+        // On, some controls learned: knobs' controllers, a switch's note, a tab's.
+        let cc = |channel, cc| crate::learn::Cc { channel, cc };
+        map.assign(learnable("cutoff"), cc(0, 74));
+        map.assign(learnable("emphasis"), cc(0, 71));
+        map.assign(learnable("loudness_decay"), cc(0, 75));
+        map.assign(learnable("entropy"), cc(1, 20));
+        map.assign(
+            learnable("osc3_on"),
+            crate::learn::Binding::Note {
+                channel: 0,
+                note: 36,
+            },
+        );
+        map.assign(learnable("poly"), cc(0, 80));
+        map.assign(learnable("next_preset"), cc(0, 91));
+        let midi = at(
+            &e,
+            art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::Midi),
+        );
+        go(&mut e, midi);
+        e.update_scene();
+        keys(&mut e, "0-keys-on-hover.png");
+        click(&mut e, midi);
+        away(&mut e);
+        save(&mut e, "2-on-global.png");
+        keys(&mut e, "0-keys-on.png");
+        // A control waiting.
+        click_on(&mut e, "contour_amount");
+        away(&mut e);
+        save(&mut e, "3-waiting.png");
+        // The LFO page and the macros, some learned; LFO 2's RATE waiting.
+        map.assign(learnable("lfo1_rate"), cc(0, 21));
+        map.assign(learnable("lfo1_phase"), cc(0, 22));
+        map.assign(learnable("macro1"), cc(0, 16));
+        map.assign(learnable("macro2"), cc(0, 17));
+        for t in [BarTarget::Lfo, BarTarget::Macro] {
+            let p = at(&e, strip::centre(e.rail, StripTarget::Bar(t)));
+            click(&mut e, p);
+        }
+        click_on(&mut e, "lfo2_rate");
+        away(&mut e);
+        save(&mut e, "4-lfo-macros.png");
+        // The arpeggiator's drawer over GLOBAL's page, its ON waiting for a note.
+        for t in [BarTarget::Macro, BarTarget::Global, BarTarget::Arp] {
+            let p = at(&e, strip::centre(e.rail, StripTarget::Bar(t)));
+            click(&mut e, p);
+        }
+        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        map.assign(
+            learnable("arp_latch"),
+            crate::learn::Binding::Note {
+                channel: 0,
+                note: 37,
+            },
+        );
+        let on = at(&e, ArpBank::Arp.tab(0));
+        click(&mut e, on);
+        away(&mut e);
+        save(&mut e, "4b-arp.png");
+        // A plug-in's walnut: bare.
+        let (mut p, _, _) = editing();
+        sized(&mut p);
+        away(&mut p);
+        save(&mut p, "5-plugin.png");
+        keys(&mut p, "0-keys-plugin.png");
+    }
+
+    /// The audio threads' standings the tests give the editor (decisions.md R-RTKIT): none
+    /// asked, one waiting for RTKit, both refused with RTKit absent, the audio thread refused by
+    /// RTKit with the workers real-time, two of six workers refused by RTKit, every one through
+    /// RTKit.
+    #[cfg(target_os = "linux")]
+    mod stood {
+        use ca72_rt::{Standing, Why};
+        const fn s(
+            direct: u32,
+            rtkit: u32,
+            waiting: u32,
+            ordinary: u32,
+            why: Option<Why>,
+        ) -> Standing {
+            Standing {
+                direct,
+                rtkit,
+                waiting,
+                ordinary,
+                why,
+            }
+        }
+        pub fn asking() -> (Standing, Standing) {
+            (s(0, 0, 1, 0, None), s(0, 0, 6, 0, None))
+        }
+        pub fn no_rtkit() -> (Standing, Standing) {
+            (
+                s(0, 0, 0, 1, Some(Why::NoRtkit)),
+                s(0, 0, 0, 6, Some(Why::NoRtkit)),
+            )
+        }
+        pub fn audio_refused() -> (Standing, Standing) {
+            (s(0, 0, 0, 1, Some(Why::RtkitRefused)), s(6, 0, 0, 0, None))
+        }
+        pub fn workers_partly() -> (Standing, Standing) {
+            (s(0, 1, 0, 0, None), s(0, 4, 0, 2, Some(Why::RtkitRefused)))
+        }
+        pub fn through_rtkit() -> (Standing, Standing) {
+            (s(0, 1, 0, 0, None), s(0, 6, 0, 0, None))
+        }
+    }
+
+    /// The standalone's audio not real-time (decisions.md R-RTKIT): said once on the walnut
+    /// after its keys, for a while, while nothing else's tip is; nothing while RTKit has yet to
+    /// answer or every thread is real-time; never in a plug-in.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_standalone_says_once_that_its_audio_is_not_real_time() {
+        let (mut e, _, _) = editing_standalone();
+        e.fit(1.0, 1720, 1720);
+        go(&mut e, Point { x: 2.0, y: 2.0 });
+        e.realtime.read = stood::asking;
+        e.update_scene();
+        assert!(e.tip().is_none(), "said before RTKit answered");
+        e.realtime.read = stood::through_rtkit;
+        e.update_scene();
+        assert!(e.tip().is_none() && e.realtime.warning.is_none());
+        e.realtime.read = stood::no_rtkit;
+        e.update_scene();
+        let (t, x, _) = e.tip().expect("the walnut's notice");
+        assert_eq!(
+            t,
+            "AUDIO NOT REAL-TIME: MAY DROP OUT · INSTALL RTKIT OR JOIN THE REALTIME OR AUDIO GROUP, THEN LOG IN AGAIN"
+        );
+        let (px, _) = art::tempo_key_at(e.renderer.arrangement(), art::TempoKey::LAST);
+        assert!(x > px + art::TEMPO_KEY.0 / 2.0, "after the walnut's keys");
+        assert_eq!(e.scene.tip.as_ref().map(|t| &t.0), Some(&t));
+        // A control under the pointer has its own tip meanwhile.
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.update_scene();
+        assert!(e.tip().expect("CUTOFF's tip").0.starts_with("CUTOFF"));
+        go(&mut e, Point { x: 2.0, y: 2.0 });
+        e.update_scene();
+        assert!(e.tip().is_some(), "the notice back while its while lasts");
+        // Once: past its while, not again; the warning itself stays (SETTINGS, AUDIO & MIDI).
+        e.realtime.since = Some(Instant::now() - REALTIME_NOTICE);
+        e.update_scene();
+        assert!(e.tip().is_none());
+        e.realtime.read = stood::workers_partly;
+        e.update_scene();
+        assert!(e.tip().is_none(), "said again");
+        let w = e.realtime.warning.as_ref().expect("the warning");
+        assert!(w.tip.starts_with("POLY'S THREADS"), "{}", w.tip);
+        assert_eq!(w.row, "NOT REAL-TIME: SEE AUDIO & MIDI…");
+        // A plug-in's: never.
+        let (mut p, _, _) = editing();
+        p.realtime.read = stood::no_rtkit;
+        p.update_scene();
+        assert!(p.realtime.warning.is_none() && p.tip().is_none());
+    }
+
+    /// The standalone's audio not real-time (decisions.md R-RTKIT) for looking at, written to
+    /// `$CA72_RTKIT_PNG`, the folder, at `$CA72_RTKIT_DPR` (2 by default) the window's 1720
+    /// logical pixels: the window with the walnut's notice (`1-window.png`); the walnut close up
+    /// for each case (`2-walnut-<case>.png`: both refused with RTKit absent, the audio thread
+    /// refused by RTKit, two workers of six refused) and in the classic look and LARGE lettering
+    /// (`3-walnut-<look>.png`); SETTINGS opened, its STANDALONE at the foot (`4-settings.png`);
+    /// AUDIO & MIDI with the warning (`5-audio-midi.png`) and real-time through RTKit
+    /// (`5-audio-midi-rtkit.png`).
+    #[cfg(all(target_os = "linux", feature = "standalone-production"))]
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_realtime_warning_pngs() {
+        let Some(out) = std::env::var_os("CA72_RTKIT_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        let dpr: f64 = std::env::var("CA72_RTKIT_DPR")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2.0);
+        let width = 1720;
+        let sized = |e: &mut Editing| {
+            e.fit(dpr, width, (f64::from(width) * dpr).round() as u32);
+            e.draw();
+        };
+        let away = |e: &mut Editing| go(e, Point { x: 2.0, y: 2.0 });
+        let save = |e: &mut Editing, name: &str| {
+            e.composed = None;
+            window_frame(e).save_png(out.join(name)).unwrap();
+        };
+        // The top walnut, the window's width, from its top to the panel.
+        let walnut = |e: &mut Editing, name: &str| {
+            e.composed = None;
+            let s = e.renderer.scale();
+            let top = e.renderer.top();
+            let (_, y, _, h) = art::tempo_window(e.renderer.arrangement().plate_at());
+            let f = window_frame(e);
+            let y1 = (((y + h + 60.0 - top) * s) as u32).min(f.height());
+            let w = f.width();
+            let mut c = ca72_panel::Pixmap::new(w, y1).unwrap();
+            let n = (w * y1) as usize * 4;
+            c.data_mut().copy_from_slice(&f.data()[..n]);
+            c.save_png(out.join(name)).unwrap();
+        };
+        let fresh = |read: fn() -> (ca72_rt::Standing, ca72_rt::Standing)| {
+            let (mut e, _, _) = editing_standalone();
+            e.realtime.read = read;
+            sized(&mut e);
+            away(&mut e);
+            e.update_scene();
+            e
+        };
+        let mut e = fresh(stood::no_rtkit);
+        save(&mut e, "1-window.png");
+        walnut(&mut e, "2-walnut-no-rtkit.png");
+        let mut e = fresh(stood::audio_refused);
+        walnut(&mut e, "2-walnut-audio-rtkit-refused.png");
+        let mut e = fresh(stood::workers_partly);
+        walnut(&mut e, "2-walnut-workers-partly.png");
+        for (name, skin, lettering) in [
+            ("classic", Skin::Drawn, Lettering::Standard),
+            ("large", Skin::Worn, Lettering::Large),
+        ] {
+            let mut e = fresh(stood::no_rtkit);
+            e.set_look(skin);
+            e.set_lettering(lettering);
+            sized(&mut e);
+            away(&mut e);
+            e.update_scene();
+            walnut(&mut e, &format!("3-walnut-{name}.png"));
+        }
+        // SETTINGS and AUDIO & MIDI need the standalone's host: one without devices.
+        let directory = tempfile::tempdir().expect("a state folder");
+        let mut runtime = plugin_kit_standalone::spawn(
+            Box::new(NoAudio),
+            None,
+            plugin_kit_standalone::AppOptions {
+                app_id: "ca72-rtkit-review".into(),
+                state_dir: directory.path().to_owned(),
+                device_access: false,
+            },
+        )
+        .expect("a host without devices");
+        runtime
+            .wait_ready(Duration::from_secs(2))
+            .expect("the host ready");
+        plugin_kit_standalone::AppHandle::install_current(&runtime.handle());
+        let mut e = fresh(stood::no_rtkit);
+        e.realtime.since = Some(Instant::now() - REALTIME_NOTICE);
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        assert!(
+            menu_items(&e)
+                .iter()
+                .any(|(t, on)| t == "NOT REAL-TIME: SEE AUDIO & MIDI…" && !on),
+            "{:?}",
+            menu_items(&e)
+        );
+        // (Its foot in view: the menu is taller than the window.)
+        let m = e.learning.menu().expect("the menu").clone();
+        let foot = at(&e, m.item_at(m.items.len() - 1));
+        go(&mut e, foot);
+        for _ in 0..40 {
+            wheel(&mut e, -3.0);
+        }
+        save(&mut e, "4-settings.png");
+        for (name, read) in [
+            ("5-audio-midi.png", stood::no_rtkit as fn() -> _),
+            ("5-audio-midi-rtkit.png", stood::through_rtkit),
+        ] {
+            let mut e = fresh(read);
+            crate::standalone_settings::request_open();
+            e.draw();
+            e.standalone_dialog
+                .as_mut()
+                .expect("AUDIO & MIDI open")
+                .review(read());
+            save(&mut e, name);
+        }
+        let _ = runtime.shutdown();
+    }
+
+    /// A processor that plays nothing, for a standalone host without devices.
+    #[cfg(all(target_os = "linux", feature = "standalone-production"))]
+    struct NoAudio;
+
+    #[cfg(all(target_os = "linux", feature = "standalone-production"))]
+    impl plugin_kit_standalone::AudioProcessor for NoAudio {
+        fn prepare(&mut self, _: plugin_kit_standalone::ProcessConfig) -> Result<(), String> {
+            Ok(())
+        }
+        fn process(&mut self, _: plugin_kit_standalone::AudioBlock<'_>) {}
+        fn deactivate(&mut self) {}
     }
 
     fn editing_for_api(
@@ -5581,6 +9207,390 @@ mod tests {
         assert!(!Readout::Auto.typed());
     }
 
+    fn entry_click(e: &mut Editing, id: &str) {
+        let p = at(e, centre(id));
+        go(e, p);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: if cfg!(target_os = "macos") {
+                Modifiers::META
+            } else {
+                Modifiers::CONTROL
+            },
+        });
+        release(e);
+    }
+
+    #[test]
+    fn knob_entry_opens_every_operable_knob_and_selector_without_a_gesture() {
+        let (mut e, host, _) = editing_poly();
+        // (The drawers' knobs take theirs in their readouts:
+        // `the_arp_drawer_takes_knob_entry_in_its_readouts`, `the_mpe_drawer_operates_its_parameters`.)
+        for c in CONTROLS.iter().filter(|c| {
+            matches!(c.kind, Kind::Knob { .. } | Kind::Selector(_)) && !c.place.drawn_apart()
+        }) {
+            let i = ca72_panel::controls::index(c.param).expect("a control");
+            if !e.operable(i) {
+                continue;
+            }
+            entry_click(&mut e, c.param);
+            assert!(e.knob_entry.is_some(), "{} opens", c.param);
+            e.update_scene();
+            let field = e.scene.entry.as_ref().expect("shown");
+            assert!(!field.text.is_empty(), "{} shows its value", c.param);
+            assert!(field.selected);
+            assert!(e.typing_keys, "asks for the host's keyboard");
+            keyed(&mut e, Key::Enter);
+            assert!(e.knob_entry.is_none());
+        }
+        assert!(
+            host.take().is_empty(),
+            "opening and unchanged Enter set nothing"
+        );
+    }
+
+    #[test]
+    fn knob_entry_sets_one_host_gesture_and_reuses_the_strip_units() {
+        let (mut e, host, params) = editing_poly();
+        for (id, text, ptr, value) in [
+            ("cutoff", "-2.5", params.cutoff.as_ptr(), 0.25),
+            ("filter_attack", "1 s", params.filter_attack.as_ptr(), 0.6),
+            ("osc1_range", "4", params.osc1_range.as_ptr(), 0.8),
+            ("osc3_waveform", "6", params.osc3_waveform.as_ptr(), 1.0),
+            ("voices", "99", params.voices.as_ptr(), 1.0),
+            (
+                "entropy",
+                "25",
+                params.entropy.as_ptr(),
+                params.entropy.preview_normalized(25.0),
+            ),
+            ("spread", "-10", params.spread.as_ptr(), 0.0),
+            ("inner", "999", params.inner.as_ptr(), 1.0),
+            (
+                "drive",
+                "8.4",
+                params.drive.as_ptr(),
+                params.drive.preview_normalized(8.4),
+            ),
+            (
+                "level",
+                "-6",
+                params.level.as_ptr(),
+                params.level.preview_normalized(-6.0),
+            ),
+        ] {
+            entry_click(&mut e, id);
+            keyed(&mut e, Key::Character(text.into()));
+            assert!(host.take().is_empty(), "{id} waits for Enter");
+            keyed(&mut e, Key::Enter);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(ptr), Call::Set(ptr, value), Call::End(ptr)],
+                "{id}"
+            );
+        }
+        // DETUNE is only operable in DOUBLE, still typed in cents rather than its percentage.
+        let p = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            Arc::clone(&params) as Arc<dyn Params>,
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        assert!(p.automate(params.doubled.as_ptr(), 1.0));
+        entry_click(&mut e, "double");
+        keyed(&mut e, Key::Character("50".into()));
+        keyed(&mut e, Key::Enter);
+        let ptr = params.double.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(ptr),
+                Call::Set(
+                    ptr,
+                    params
+                        .double
+                        .preview_normalized((50.0 / crate::engine::DOUBLE_CENTS * 100.0) as f32)
+                ),
+                Call::End(ptr)
+            ]
+        );
+    }
+
+    #[test]
+    fn knob_entry_frequency_uses_the_chosen_law_through_the_host() {
+        let (mut e, host, params) = editing();
+        for law in [Law::Semitones, Law::Hardware] {
+            params.set_freq_law(law);
+            for (id, pot, ptr) in [
+                ("osc2_frequency", Pot::Two, params.osc2_frequency.as_ptr()),
+                ("osc3_frequency", Pot::Three, params.osc3_frequency.as_ptr()),
+            ] {
+                entry_click(&mut e, id);
+                keyed(&mut e, Key::Character("5".into()));
+                keyed(&mut e, Key::Enter);
+                let wiper = pot.wiper_at(law, (5.0 + 7.5) / 15.0) as f32;
+                assert_eq!(
+                    host.take(),
+                    vec![Call::Begin(ptr), Call::Set(ptr, wiper), Call::End(ptr)]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn knob_entry_cancels_without_changes_and_keeps_keys_from_the_host() {
+        let (mut e, host, _) = editing_standalone();
+        e.playing.typing = true;
+        for cancel in [Key::Escape, Key::Enter] {
+            entry_click(&mut e, "cutoff");
+            assert!(!e.note_typing_allowed());
+            for key in [
+                Key::ArrowUp,
+                Key::Tab,
+                Key::Character("a".into()),
+                Key::Character("2x".into()),
+            ] {
+                assert!(keyed(&mut e, key));
+            }
+            assert!(!e.playing.active(), "typing values plays no notes");
+            assert!(e.keyed(&KeyboardEvent {
+                key: Key::Character("2".into()),
+                state: KeyState::Up,
+                ..Default::default()
+            }));
+            keyed(&mut e, cancel);
+            assert!(e.knob_entry.is_none());
+            assert!(host.take().is_empty());
+        }
+        entry_click(&mut e, "cutoff");
+        keyed(&mut e, Key::Character("3".into()));
+        let p = at(&e, centre("volume"));
+        click(&mut e, p);
+        assert!(e.knob_entry.is_none());
+        assert!(
+            host.take().is_empty(),
+            "outside press cancels and does not operate another knob"
+        );
+        entry_click(&mut e, "cutoff");
+        let p = at(&e, centre("cutoff"));
+        click(&mut e, p);
+        assert!(e.knob_entry.is_some(), "inside press keeps typing");
+        e.end_gestures();
+        assert!(e.knob_entry.is_none(), "focus/capture loss cancels");
+        assert!(host.take().is_empty());
+    }
+
+    #[test]
+    fn knob_entry_preserves_reset_alt_click_and_midi_learning() {
+        let (mut e, host, params) = editing();
+        let p = at(&e, centre("cutoff"));
+        go(&mut e, p);
+        e.press(Modifiers::ALT);
+        release(&mut e);
+        assert!(e.knob_entry.is_none());
+        click(&mut e, p);
+        let calls = host.take();
+        assert_eq!(calls.last(), Some(&Call::End(params.cutoff.as_ptr())));
+        assert!(calls.contains(&Call::Set(
+            params.cutoff.as_ptr(),
+            params.cutoff.default_normalized_value()
+        )));
+        well_formed(&calls);
+        e.learning.learn(&params.midi_map, learnable("cutoff"));
+        entry_click(&mut e, "cutoff");
+        assert!(e.knob_entry.is_none(), "MIDI Learn keeps its click path");
+        assert_eq!(params.midi_map.armed(), Some(learnable("cutoff")));
+        e.end_gestures();
+        well_formed(&host.take());
+        e.learning.cancel(&params.midi_map);
+        entry_click(&mut e, "double");
+        assert!(e.knob_entry.is_none(), "inert DETUNE takes no value");
+    }
+
+    #[test]
+    fn knob_entry_editing_and_hosts_keypad_keys_set_only_valid_complete_numbers() {
+        let (mut e, host, params) = editing();
+        for text in [
+            "NaN",
+            "inf",
+            "2x",
+            "--2",
+            "1..2",
+            "2½",
+            "000000000000000000000000000000001x",
+        ] {
+            entry_click(&mut e, "cutoff");
+            keyed(&mut e, Key::Character(text.into()));
+            keyed(&mut e, Key::Enter);
+            assert!(host.take().is_empty(), "invalid {text}");
+        }
+        entry_click(&mut e, "cutoff");
+        keyed(&mut e, Key::Character("123".into()));
+        assert!(e.keyed(&KeyboardEvent {
+            key: Key::Character("a".into()),
+            modifiers: if cfg!(target_os = "macos") {
+                Modifiers::META
+            } else {
+                Modifiers::CONTROL
+            },
+            ..Default::default()
+        }));
+        keyed(&mut e, Key::Delete);
+        let keys = HostKeys::default();
+        keys.holding.store(e.holds_keys(), Ordering::Release);
+        for code in [37, 26, 38, 29, 19] {
+            // Keypad minus, 2, point, 5, Enter (VST3).
+            assert!(keys.offer(HostKey {
+                character: None,
+                key_code: code,
+                modifiers: 0,
+                down: true
+            }));
+        }
+        for k in keys.take() {
+            assert!(e.keyed(&k));
+        }
+        let p = params.cutoff.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(p), Call::Set(p, 0.25), Call::End(p)]
+        );
+        assert!(e.knob_entry.is_none());
+        keys.holding.store(e.holds_keys(), Ordering::Release);
+        assert!(
+            !keys.offer(HostKey {
+                character: Some('7'),
+                key_code: 0,
+                modifiers: 0,
+                down: true
+            }),
+            "the host gets keys back after Enter"
+        );
+    }
+
+    #[test]
+    fn knob_entry_initial_text_follows_host_automation() {
+        let (mut e, host, params) = editing();
+        let ptr = params.drive.as_ptr();
+        let context = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            Arc::clone(&params) as Arc<dyn Params>,
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        for value in [0.0, 0.25, 0.7532, 1.0] {
+            assert!(context.automate(ptr, value));
+            entry_click(&mut e, "drive");
+            e.update_scene();
+            let shown: f32 = e.scene.entry.as_ref().unwrap().text.parse().unwrap();
+            assert!((shown - params.drive.unmodulated_plain_value()).abs() < 0.0001);
+            keyed(&mut e, Key::Enter);
+        }
+        assert!(host.take().is_empty());
+    }
+
+    #[test]
+    fn knob_entry_fits_and_repaints_in_both_looks_sizes_and_lettering() {
+        let output = std::env::var_os("CA72_KNOB_ENTRY_PNG").map(std::path::PathBuf::from);
+        if let Some(out) = &output {
+            std::fs::create_dir_all(out).unwrap();
+        }
+        let (mut e, host, _) = editing_poly();
+        for skin in [Skin::Drawn, Skin::Worn] {
+            e.set_look(skin);
+            for lettering in [Lettering::Standard, Lettering::Large] {
+                e.set_lettering(lettering);
+                for width in [MIN_WIDTH, DEFAULT_WIDTH] {
+                    for expanded in [true, false] {
+                        e.params.editor_panel.store(expanded, Ordering::Relaxed);
+                        e.params
+                            .editor_panel_applied
+                            .store(expanded, Ordering::Relaxed);
+                        e.set_panel_height(expanded);
+                        e.fit(1.0, width, width);
+                        e.hover = None;
+                        e.draw();
+                        for id in ["tune", "filter_attack", "osc1_range", "volume", "level"] {
+                            if id == "level" && !expanded {
+                                continue;
+                            }
+                            entry_click(&mut e, id);
+                            assert!(e.draw());
+                            let field = e.scene.entry.as_ref().expect("drawn");
+                            let [x0, y0, x1, y1] = field.bounds;
+                            let height = f64::from(e.physical_height()) / e.renderer.scale();
+                            assert!(
+                                x0 >= 2.0 && y0 >= 2.0 && x1 <= art::W - 2.0 && y1 <= height - 2.0,
+                                "{id}: {:?}",
+                                field.bounds
+                            );
+                            let mut whole = None;
+                            compose(
+                                &mut whole,
+                                &e.renderer,
+                                e.strip.frame(),
+                                None,
+                                None,
+                                (
+                                    e.page_shows().then(|| e.lfo.frame()),
+                                    e.macros_show()
+                                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                                    &e.modulation,
+                                ),
+                                None,
+                                expanded,
+                                (e.physical_width, e.physical_height()),
+                            );
+                            assert!(
+                                e.composed == whole,
+                                "{skin:?} {lettering:?} {width} {expanded} {id}: composed whole with its field, actual expanded {}",
+                                e.expanded()
+                            );
+                            if let Some(out) = &output
+                                && width == DEFAULT_WIDTH
+                                && expanded
+                            {
+                                e.composed
+                                    .as_ref()
+                                    .unwrap()
+                                    .save_png(out.join(format!("{skin:?}-{lettering:?}-{id}.png")))
+                                    .unwrap();
+                            }
+                            keyed(
+                                &mut e,
+                                Key::Character("99999999999999999999999999999999".into()),
+                            );
+                            assert!(e.draw(), "edited text redraws");
+                            keyed(&mut e, Key::Escape);
+                            assert!(e.draw(), "cancel redraws");
+                            assert!(e.scene.entry.is_none());
+                            let mut whole = None;
+                            compose(
+                                &mut whole,
+                                &e.renderer,
+                                e.strip.frame(),
+                                None,
+                                None,
+                                (
+                                    e.page_shows().then(|| e.lfo.frame()),
+                                    e.macros_show()
+                                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                                    &e.modulation,
+                                ),
+                                None,
+                                expanded,
+                                (e.physical_width, e.physical_height()),
+                            );
+                            assert!(
+                                e.composed == whole,
+                                "{id}: no field left in a partial repaint"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert!(host.take().is_empty());
+    }
+
     /// ENTROPY's new reading and OFF/recall use the entire travel, including below 5 %.
     #[test]
     fn entropy_displays_the_new_amount_and_recalls_it_after_off() {
@@ -5653,7 +9663,13 @@ mod tests {
         let m = e.learning.menu().expect("a menu");
         let (w, h) = m.extent(e.renderer.fonts());
         assert!(m.x >= 0.0 && m.x + w <= art::W && m.y + h <= art::H);
-        assert!(m.y > strip::centre(StripTarget::Bar(BarTarget::Settings)).1);
+        // (Under the key where there is room; else, as with MPE's group at this size, its foot
+        // at the window's, over the rail: decisions.md R-MPE.)
+        if settings_menu_corner().1 + h <= art::H {
+            assert!(m.y > strip::centre(Rail::Plugin, StripTarget::Bar(BarTarget::Settings)).1);
+        } else {
+            assert!((m.y + h - art::H).abs() < 1e-6);
+        }
         menu_item(&mut e, "CLASSIC");
         assert_eq!(
             (e.settings.skin, e.renderer.skin()),
@@ -5681,6 +9697,82 @@ mod tests {
             Some(format!("SETTINGS · CA-72 {}", crate::Ca72::VERSION).as_str())
         );
         assert_eq!(e.update.scene().text, "COULD NOT CHECK");
+    }
+
+    /// Installed skin packs (decisions.md R-SKIN-PACKS) under LOOK, after the built-in two, one
+    /// that cannot be used shown so and not to be chosen. Choosing one draws the editor in it,
+    /// a click finding each control where its layout has it; nothing but the look changes (not
+    /// one parameter is set); and the pack gone, the editor falls back to the pack's base look.
+    #[test]
+    fn the_settings_key_chooses_an_installed_pack() {
+        let starter = Look::open(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/skin-packs/starter"
+        )))
+        .unwrap_or_else(|r| panic!("{r}"));
+        TEST_PACKS.with(|p| {
+            *p.borrow_mut() = vec![
+                Installed {
+                    name: starter.menu_name(),
+                    look: Some(starter.clone()),
+                },
+                Installed {
+                    name: "broken-pack".into(),
+                    look: None,
+                },
+            ]
+        });
+        let (mut e, host, _) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        assert_eq!(
+            menu_items(&e)[..5],
+            [
+                ("LOOK".to_owned(), false),
+                ("REALISTIC".to_owned(), false),
+                ("CLASSIC".to_owned(), true),
+                ("STARTER (UNSIGNED)".to_owned(), true),
+                ("broken-pack (CANNOT BE USED)".to_owned(), false),
+            ]
+        );
+        host.take();
+        menu_item(&mut e, "STARTER (UNSIGNED)");
+        assert_eq!(e.renderer.look().id, starter.id);
+        assert_eq!(
+            (
+                e.settings.skin,
+                e.settings.pack.map(|p| p.as_str().to_owned())
+            ),
+            (Skin::Drawn, Some(starter.id.clone()))
+        );
+        assert!(host.take().is_empty(), "a look set a parameter");
+        e.draw();
+        // A click finds TUNE where the pack has it, not where the official panel does.
+        let tune = ca72_panel::controls::index("tune").expect("a control");
+        let moved = e.renderer.arrangement().control(tune).centre();
+        assert_ne!(moved, CONTROLS[tune].centre());
+        assert_eq!(e.hit(moved.0, moved.1), Some(Target::Control(tune)));
+        // Marked in the menu, as the look shown.
+        click(&mut e, key);
+        assert_eq!(e.learning.menu().map(|m| m.marked[0]), Some(3));
+        menu_item(&mut e, "REALISTIC");
+        assert_eq!(e.settings.pack, None);
+        // The pack chosen, then gone: its base look, the setting kept for when it is back.
+        let mut settings = Settings::default();
+        settings.apply(Change::Pack(
+            PackId::new(&starter.id).expect("an id"),
+            Skin::Drawn,
+        ));
+        assert_eq!(chosen_look(&settings, &[]).id, ca72_panel::look::CLASSIC);
+        let refused = Installed {
+            name: "STARTER".into(),
+            look: None,
+        };
+        assert_eq!(
+            chosen_look(&settings, &[refused]).id,
+            ca72_panel::look::CLASSIC
+        );
+        TEST_PACKS.with(|p| p.borrow_mut().clear());
     }
 
     /// The settings key's LETTERING (R-LETTERING): STANDARD by default, marked and not to be
@@ -5743,7 +9835,8 @@ mod tests {
         e.draw();
         let m = e.learning.menu().expect("a menu");
         let (_, h) = m.extent(e.renderer.fonts());
-        assert!(m.y >= 0.0 && m.y + h <= DRAWER_TOP, "{} + {h}", m.y);
+        // (Shrunk to fit, its foot the drawer's top to a rounding.)
+        assert!(m.y >= 0.0 && m.y + h <= DRAWER_TOP + 1e-9, "{} + {h}", m.y);
         menu_item(&mut e, "STANDARD");
         assert_eq!(
             (
@@ -5779,7 +9872,8 @@ mod tests {
             e.learning
                 .menu()
                 .map(|m| (m.heads.clone(), m.marked.clone())),
-            Some((vec![0, 3, 6, 9], vec![1, 4, 7]))
+            // (WINDOW's HOVER CABLES row before MOD WHEEL SOURCE: R-VELOCITY.)
+            Some((vec![0, 3, 6, 9, 13, 15], vec![1, 4, 7]))
         );
         // Oscillator 2 at +5 semitones, oscillator 3's pot at its clockwise end (+8.22).
         let ps: Arc<dyn Params> = params.clone();
@@ -6101,7 +10195,14 @@ mod tests {
                 &mut whole,
                 &e.renderer,
                 e.strip.frame(),
+                lower_of(&e),
                 None,
+                (
+                    e.page_shows().then(|| e.lfo.frame()),
+                    e.macros_show()
+                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                    &e.modulation,
+                ),
                 None,
                 true,
                 (e.physical_width, e.physical_height()),
@@ -6144,12 +10245,1243 @@ mod tests {
             &mut whole,
             &e.renderer,
             e.strip.frame(),
+            None,
             Some((e.drawer.frame(), DRAWER_TOP)),
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
             None,
             true,
             (e.physical_width, e.physical_height()),
         );
         assert!(e.composed == whole, "the drawer where its slide ended");
+    }
+
+    /// The drawer dropped from the rail as the editor lays it.
+    fn lower_of(e: &Editing) -> Option<LowerFrame<'_>> {
+        e.lower_top().map(|top| {
+            lower_frame(
+                e.lower.which,
+                top,
+                (&e.arp, &e.mpe),
+                e.fx.as_ref(),
+                e.renderer.scale(),
+            )
+        })
+    }
+
+    /// The arpeggiator's drawer opened by the rail's ARP key and slid all the way down.
+    fn arp_open(e: &mut Editing) {
+        e.draw();
+        let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Arp)));
+        click(e, p);
+        assert!(e.lower.open);
+        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        e.draw();
+        assert!(e.lower.settled());
+    }
+
+    /// A skin pack's taller panel (decisions.md R-SKIN-PACKS) begins the frame above the
+    /// drawing's top: the arpeggiator's drawer (R-ARP) is still laid under the rail, the frame
+    /// shown the frame put together whole, its plate where it is drawn, its knobs found and
+    /// turned there; the standalone's TEMPO screen mirrors the pack's name plate, on the taller
+    /// panel's wood, and is found there.
+    #[test]
+    fn a_taller_packs_panel_keeps_the_arp_drawer_and_the_tempo_screen_in_place() {
+        let starter = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/skin-packs/starter");
+        let dir = tempfile::tempdir().expect("a pack's folder");
+        std::fs::create_dir(dir.path().join("art")).expect("its art's folder");
+        for f in ["skin.toml", "LICENSE.txt", "README.md", "art/panel.svg"] {
+            std::fs::copy(format!("{starter}/{f}"), dir.path().join(f)).expect("copied");
+        }
+        let layout = std::fs::read_to_string(format!("{starter}/layout.toml")).expect("a layout");
+        std::fs::write(
+            dir.path().join("layout.toml"),
+            layout.replacen("[fixtures]", "[panel]\nface = 1000\n\n[fixtures]", 1),
+        )
+        .expect("written");
+        let tall = Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"));
+        let (mut e, host, params) = editing_standalone();
+        e.playing.visible = false;
+        e.draw_in(tall);
+        let (s, origin, top) = (e.renderer.scale(), e.renderer.top_px(), e.renderer.top());
+        assert!(origin < 0, "a taller panel");
+        // A point of the drawing in the window, whose frame begins at the panel's top.
+        let at_tall = |e: &Editing, (x, y): (f64, f64)| at(e, (x, y - top));
+        e.draw();
+        let p = at_tall(&e, strip_at(StripTarget::Bar(BarTarget::Arp)));
+        click(&mut e, p);
+        assert!(e.lower.open);
+        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        e.draw();
+        assert!(e.lower.settled());
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "the drawer as put together whole");
+        let c = e.composed.as_ref().expect("a frame");
+        let px = |p: &ca72_panel::Pixmap, x: usize, y: i32| {
+            let i = (y as usize * p.width() as usize + x) * 4;
+            p.data()[i..i + 4].to_vec()
+        };
+        let (x, y) = (
+            (2000.0 * s) as usize,
+            ((arp_ui::TOP + 200.0) * s).round() as i32,
+        );
+        assert_eq!(
+            px(c, x, y - origin),
+            px(e.arp.frame(), x, y - arp_ui::top_px(s))
+        );
+        // GATE turned where it is drawn.
+        host.take();
+        let gate = params.arp_gate.as_ptr();
+        let p = at_tall(&e, centre("arp_gate"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -30.0));
+        release(&mut e);
+        let calls = host.take();
+        assert!(calls.contains(&Call::Begin(gate)), "{calls:?}");
+        // The TEMPO screen as far down the taller panel's wood as the official one is down its.
+        let plate = e.renderer.arrangement().plate_at();
+        let (x, y, w, h) = art::tempo_window(plate);
+        assert_eq!(y - art::TEMPO_SCREEN.1, plate.1 - art::PLATE_Y);
+        assert!(top < y && y + h < top + art::TOP, "on the wood: {y}");
+        e.update_scene();
+        assert_eq!(e.scene.tempo.as_deref(), Some("120 BPM"));
+        let p = at_tall(&e, (x + w / 2.0, y + h / 2.0));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -10.0));
+        release(&mut e);
+        assert_eq!(params.tempo(), 125.0);
+    }
+
+    /// The rail's ARP key drops the arpeggiator's drawer over the lower page, inside the window
+    /// (its size kept), and puts it away; it is lit while the arpeggiator is on. Open, the
+    /// drawer is what the pointer finds there: the strip's tabs and knobs and the keyboard's
+    /// buttons under it do nothing; below it, the page answers as before. The frame shown is its
+    /// frame put together whole, the drawer's shadow over the page; and the presets' drawer, opened,
+    /// is over it.
+    #[test]
+    fn the_arp_key_drops_its_drawer_over_the_lower_page() {
+        let (mut e, host, _) = editing_standalone();
+        e.playing.visible = false;
+        let size = (e.width, e.window_height());
+        arp_open(&mut e);
+        assert_eq!((e.width, e.window_height()), size);
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "the drawer as put together whole");
+        // Its plate in the frame, row for row.
+        let c = e.composed.as_ref().expect("a frame");
+        let s = e.renderer.scale();
+        let (x, y) = ((2000.0 * s) as usize, (arp_ui::TOP + 200.0) * s);
+        let y = y.round() as usize;
+        let row = arp_ui::top_px(s) as usize;
+        let px = |p: &ca72_panel::Pixmap, x: usize, y: usize| {
+            let i = (y * p.width() as usize + x) * 4;
+            p.data()[i..i + 4].to_vec()
+        };
+        assert_eq!(px(c, x, y), px(e.arp.frame(), x, y - row));
+        // The strip's controls under it do nothing: AUTO GAIN's tab (its top, clear of GATE's
+        // readout over the rest of it), VOICES's knob's top.
+        let auto = strip::Bank::Auto.tab(0);
+        for (x, y) in [
+            (auto.0, auto.1 - 26.0),
+            (centre("voices").0, arp_ui::TOP + arp_ui::DEPTH - 20.0),
+        ] {
+            assert_eq!((arp_ui::hit(x, y), interact::hit_arp(x, y)), (None, None));
+            let p = at(&e, (x, y));
+            go(&mut e, p);
+            press(&mut e);
+            go(&mut e, below(p, -40.0));
+            release(&mut e);
+        }
+        assert!(host.take().is_empty(), "nothing under the drawer");
+        // The keyboard's header under it, the keyboard shown.
+        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        e.draw();
+        let root = e.playing.root;
+        let p = at(&e, (keyboard::UP_X, keyboard::HEADER));
+        click(&mut e, p);
+        assert_eq!(e.playing.root, root, "OCTAVE under the drawer");
+        // A key below it plays.
+        let p = at(&e, (1000.0, art::H - 60.0));
+        go(&mut e, p);
+        press(&mut e);
+        assert!(e.playing.dragging(), "a key below the drawer");
+        release(&mut e);
+        // The ARP key lit while the arpeggiator is on.
+        e.update_scene();
+        assert!(!e.browser.bar.arp);
+        // The presets' drawer over it; ARP again puts the presets away and shows it.
+        e.strip_press(StripTarget::Bar(BarTarget::Name));
+        assert!(e.browser.open && e.lower.open);
+        e.strip_press(StripTarget::Bar(BarTarget::Arp));
+        assert!(!e.browser.open && e.lower.open);
+        e.strip_press(StripTarget::Bar(BarTarget::Arp));
+        assert!(!e.lower.open);
+        e.lower.slide = None;
+        e.draw();
+        assert_eq!(e.lower_top(), None);
+        // PANEL hiding the lower panel puts it away at once.
+        arp_open(&mut e);
+        e.toggle_panel();
+        assert!(!e.lower.open && e.lower_top().is_none());
+    }
+
+    /// ⌘-click (Ctrl-click) on the drawer's knobs types into its readouts, in their units, as a
+    /// double click there does (R-KNOB-ENTRY with R-ARP): no panel field opens.
+    #[test]
+    fn the_arp_drawer_takes_knob_entry_in_its_readouts() {
+        let (mut e, host, params) = editing();
+        arp_open(&mut e);
+        host.take();
+        for (i, id) in arp_ui::KNOB_PARAMS.iter().enumerate() {
+            entry_click(&mut e, id);
+            assert!(e.knob_entry.is_none(), "{id}: no panel field");
+            assert_eq!(e.typing.as_ref().map(|t| t.0), Some(Typed::Arp(i)), "{id}");
+            assert!(!e.preset_keys_allowed() && !e.note_typing_allowed(), "{id}");
+            keyed(&mut e, Key::Escape);
+            assert!(e.typing.is_none(), "{id}");
+        }
+        assert!(
+            host.take().is_empty(),
+            "nothing set by the clicks or Escape"
+        );
+        entry_click(&mut e, "arp_gate");
+        for c in "25".chars() {
+            keyed(&mut e, Key::Character(c.to_string()));
+        }
+        keyed(&mut e, Key::Enter);
+        let gate = params.arp_gate.as_ptr();
+        assert!(
+            host.take()
+                .iter()
+                .any(|c| matches!(c, Call::Set(q, v) if *q == gate && (*v - params.arp_gate.preview_normalized(25.0)).abs() < 1e-6)),
+            "GATE typed in percent"
+        );
+    }
+
+    /// The effects' list (the FX drawer's, R-FX-DRAWER) holds the keys while it is open: the
+    /// arrows choose no preset and TYPING plays no note under it (R-PRESET-KEYS); Escape
+    /// closes it, and they are the arrows' again.
+    #[test]
+    fn the_effects_list_holds_the_keys_while_open() {
+        let (mut e, _, _) = editing_standalone();
+        e.playing.focused = true;
+        e.playing.visible = true;
+        e.playing.typing = true;
+        assert!(e.preset_keys_allowed() && e.note_typing_allowed());
+        e.fx_view.open_list(0, false);
+        assert!(e.fx_view.list_open());
+        assert!(e.holds_keys());
+        assert!(!e.preset_keys_allowed() && !e.note_typing_allowed());
+        keyed(&mut e, Key::Escape);
+        assert!(!e.fx_view.list_open());
+        assert!(e.preset_keys_allowed() && e.note_typing_allowed());
+    }
+
+    /// The drawer's tabs and knobs operate the arpeggiator's parameters, each a gesture: ON and
+    /// HOLD switched, DIRECTION's choice set; RATE and OCTAVES dragged from position to
+    /// position, never between; GATE turned; a readout double-clicked takes a value typed (RATE
+    /// a note value, 8t a triplet, 16. dotted; OCTAVES a digit; GATE percent).
+    #[test]
+    fn the_arp_drawer_operates_its_parameters() {
+        let (mut e, host, params) = editing();
+        arp_open(&mut e);
+        host.take();
+        let tab = |e: &mut Editing, b: ArpBank, i: usize| {
+            let p = at(e, arp_ui::centre(ArpTarget::Tab(b, i)));
+            click(e, p);
+        };
+        let (on, latch, dir) = (
+            params.arp_on.as_ptr(),
+            params.arp_latch.as_ptr(),
+            params.arp_direction.as_ptr(),
+        );
+        tab(&mut e, ArpBank::Arp, 0);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(on), Call::Set(on, 1.0), Call::End(on)]
+        );
+        tab(&mut e, ArpBank::Arp, 1);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(latch), Call::Set(latch, 1.0), Call::End(latch)]
+        );
+        tab(&mut e, ArpBank::Direction, 3);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(dir), Call::Set(dir, 0.75), Call::End(dir)]
+        );
+        tab(&mut e, ArpBank::Direction, 4);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(dir), Call::Set(dir, 1.0), Call::End(dir)]
+        );
+        tab(&mut e, ArpBank::Direction, 0);
+        assert!(host.take().is_empty(), "UP already");
+        // RATE dragged: positions only.
+        let rate = params.arp_rate.as_ptr();
+        let p = at(&e, centre("arp_rate"));
+        go(&mut e, p);
+        press(&mut e);
+        for dy in 1..60 {
+            go(&mut e, below(p, -f64::from(dy)));
+        }
+        release(&mut e);
+        let calls = host.take();
+        well_formed(&calls);
+        assert!(calls.len() > 3);
+        for c in &calls {
+            if let Call::Set(q, v) = *c {
+                assert_eq!(q, rate);
+                assert!(
+                    (v * 12.0 - (v * 12.0).round()).abs() < 1e-5,
+                    "between at {v}"
+                );
+            }
+        }
+        e.update_scene();
+        assert!(
+            e.scene
+                .tip
+                .as_ref()
+                .is_some_and(|t| t.0.starts_with("RATE: "))
+        );
+        // Typed.
+        let double = |e: &mut Editing, i: usize| {
+            let p = at(e, arp_ui::centre(ArpTarget::Readout(i)));
+            click(e, p);
+            click(e, p);
+        };
+        let typed = |e: &mut Editing, text: &str| {
+            for c in text.chars() {
+                keyed(e, Key::Character(c.to_string()));
+            }
+            keyed(e, Key::Enter);
+        };
+        for (i, text, ptr, want) in [
+            (
+                0,
+                "8t",
+                rate,
+                params.arp_rate.preview_normalized(ArpRate::EighthTriplet),
+            ),
+            (
+                0,
+                "16.",
+                rate,
+                params.arp_rate.preview_normalized(ArpRate::SixteenthDotted),
+            ),
+            (
+                1,
+                "3",
+                params.arp_octaves.as_ptr(),
+                params.arp_octaves.preview_normalized(3),
+            ),
+            (
+                1,
+                "5",
+                params.arp_octaves.as_ptr(),
+                params.arp_octaves.preview_normalized(5),
+            ),
+            (
+                2,
+                "25",
+                params.arp_gate.as_ptr(),
+                params.arp_gate.preview_normalized(25.0),
+            ),
+        ] {
+            double(&mut e, i);
+            assert!(e.typing.is_some(), "{text}");
+            e.draw();
+            assert_eq!(e.arp_scene.readouts[i], ("_".to_owned(), true));
+            typed(&mut e, text);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(ptr), Call::Set(ptr, want), Call::End(ptr)],
+                "{text}"
+            );
+        }
+        // Not a note value: nothing.
+        double(&mut e, 0);
+        typed(&mut e, "5");
+        assert!(host.take().is_empty());
+        // A knob turned: the frame shown is the frame put together whole.
+        let p = at(&e, centre("arp_gate"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -30.0));
+        assert!(e.draw());
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "a knob turned in the drawer");
+        release(&mut e);
+    }
+
+    /// The expression drawer opened by the rail's MPE key and slid all the way down.
+    fn mpe_open(e: &mut Editing) {
+        e.draw();
+        let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Mpe)));
+        click(e, p);
+        assert!(e.lower.is_open(Lower::Mpe));
+        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        e.draw();
+        assert!(e.lower.settled());
+    }
+
+    /// The rail's MPE key (the owner's A, 2026-10-20; decisions.md R-MPE) drops the expression
+    /// drawer over the lower page, inside the window (its size kept), one drawer at a time with
+    /// ARP's; the frame shown is its frame put together whole. The strip under it does nothing.
+    /// The key is lit while any of its four amounts is not 0.
+    #[test]
+    fn the_mpe_key_drops_its_drawer_one_at_a_time() {
+        let (mut e, host, params) = editing();
+        e.playing.visible = false;
+        let size = (e.width, e.window_height());
+        mpe_open(&mut e);
+        assert_eq!((e.width, e.window_height()), size);
+        assert_eq!(Lower::Mpe.depth(), mpe_ui::DEPTH);
+        assert_eq!(e.lower_depth(), mpe_ui::DEPTH);
+        assert_eq!(lower_of(&e).expect("MPE's frame").depth, mpe_ui::DEPTH);
+        assert!(e.in_mpe((2000.0, mpe_ui::TOP + arp_ui::DEPTH + 20.0)));
+        assert!(!e.in_lower((2000.0, mpe_ui::TOP + mpe_ui::DEPTH + 1.0)));
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "the drawer as put together whole");
+        let c = e.composed.as_ref().expect("a frame");
+        let s = e.renderer.scale();
+        let (x, y) = (
+            (2000.0 * s) as usize,
+            ((mpe_ui::TOP + mpe_ui::DEPTH - 20.0) * s).round() as usize,
+        );
+        let row = mpe_ui::top_px(s) as usize;
+        let px = |p: &ca72_panel::Pixmap, x: usize, y: usize| {
+            let i = (y * p.width() as usize + x) * 4;
+            p.data()[i..i + 4].to_vec()
+        };
+        assert_eq!(px(c, x, y), px(e.mpe.frame(), x, y - row));
+        // VOICES's knob's top, under it, does nothing.
+        let (x, y) = (centre("voices").0, mpe_ui::TOP + mpe_ui::DEPTH - 20.0);
+        assert_eq!(
+            (
+                mpe_ui::hit(x, y),
+                interact::hit_drawer(DrawerPlace::Mpe, x, y)
+            ),
+            (None, None)
+        );
+        let p = at(&e, (x, y));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -40.0));
+        release(&mut e);
+        assert!(host.take().is_empty(), "nothing under the drawer");
+        // ARP puts it away for its own, MPE again the arpeggiator's for it, and again puts it
+        // away.
+        e.strip_press(StripTarget::Bar(BarTarget::Arp));
+        assert!(e.lower.is_open(Lower::Arp) && !e.lower.is_open(Lower::Mpe));
+        e.strip_press(StripTarget::Bar(BarTarget::Mpe));
+        assert!(e.lower.is_open(Lower::Mpe) && !e.lower.is_open(Lower::Arp));
+        e.strip_press(StripTarget::Bar(BarTarget::Mpe));
+        assert!(!e.lower.open);
+        // Lit while an amount is not 0, each of the four.
+        let p = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            Arc::clone(&params) as Arc<dyn Params>,
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        e.update_scene();
+        assert!(!e.browser.bar.mpe);
+        for q in [
+            &params.pressure_mod,
+            &params.pressure_filter,
+            &params.timbre_mod,
+            &params.timbre_filter,
+        ] {
+            assert!(p.automate(q.as_ptr(), 0.6));
+            e.update_scene();
+            assert!(e.browser.bar.mpe, "{}", q.name());
+            assert!(p.automate(q.as_ptr(), 0.5));
+            e.update_scene();
+            assert!(!e.browser.bar.mpe, "{}", q.name());
+        }
+    }
+
+    /// INPUT (decisions.md R-MPE) reads MPE while each note's own expression came in the last
+    /// 3 s, else CHANNEL while ordinary channel pressure or CC 74 did, else is dark; and the
+    /// drawer's frame follows it.
+    #[test]
+    fn the_mpe_drawers_input_reads_what_came_in_lately() {
+        use mpe_ui::Input;
+        let (mut e, _, params) = editing();
+        mpe_open(&mut e);
+        e.update_scene();
+        assert_eq!(e.mpe_scene.input, Input::None);
+        params.heard.channel();
+        e.update_scene();
+        assert_eq!(e.mpe_scene.input, Input::Channel);
+        params.heard.note();
+        e.update_scene();
+        assert_eq!(e.mpe_scene.input, Input::Mpe);
+        assert!(e.draw());
+        // Each note's own, quiet for longer than 3 s: the channel's, heard since, shows.
+        params.heard.channel();
+        e.update_scene();
+        let long_ago = Instant::now() - HEARD_FOR - Duration::from_millis(10);
+        e.heard.1 = Some(long_ago);
+        e.update_scene();
+        assert_eq!(e.mpe_scene.input, Input::Channel);
+        e.heard.2 = Some(long_ago);
+        e.update_scene();
+        assert_eq!(e.mpe_scene.input, Input::None);
+        assert!(e.draw());
+    }
+
+    /// The drawer's knobs operate the expression's four amounts (decisions.md R-MPE): turned,
+    /// each a gesture; a readout double-clicked, or a knob ⌘-clicked (R-KNOB-ENTRY), takes a
+    /// value typed in its units (MODULATION percent with its sign, CUTOFF octaves with a
+    /// point); the readouts read the amounts (no "-0"); the frame shown with a knob turned is
+    /// the frame put together whole.
+    #[test]
+    fn the_mpe_drawer_operates_its_parameters() {
+        let (mut e, host, params) = editing();
+        mpe_open(&mut e);
+        host.take();
+        for (i, id) in mpe_ui::KNOB_PARAMS.iter().enumerate() {
+            entry_click(&mut e, id);
+            assert!(e.knob_entry.is_none(), "{id}: no panel field");
+            assert_eq!(e.typing.as_ref().map(|t| t.0), Some(Typed::Mpe(i)), "{id}");
+            keyed(&mut e, Key::Escape);
+            assert!(e.typing.is_none(), "{id}");
+        }
+        assert!(
+            host.take().is_empty(),
+            "nothing set by the clicks or Escape"
+        );
+        let double = |e: &mut Editing, i: usize| {
+            let p = at(e, mpe_ui::centre(MpeTarget::Readout(i)));
+            click(e, p);
+            click(e, p);
+        };
+        let typed = |e: &mut Editing, text: &str| {
+            for c in text.chars() {
+                keyed(e, Key::Character(c.to_string()));
+            }
+            keyed(e, Key::Enter);
+        };
+        for (i, text, q, want) in [
+            (0, "-50", &params.pressure_mod, -50.0),
+            (1, "2.5", &params.pressure_filter, 2.5),
+            (2, "100", &params.timbre_mod, 100.0),
+            (3, "-1.25", &params.timbre_filter, -1.25),
+            // (Past the knob's travel: its end.)
+            (0, "-300", &params.pressure_mod, -100.0),
+        ] {
+            double(&mut e, i);
+            assert!(e.typing.is_some(), "{text}");
+            e.draw();
+            assert_eq!(e.mpe_scene.readouts[i], ("_".to_owned(), true));
+            typed(&mut e, text);
+            let ptr = q.as_ptr();
+            assert_eq!(
+                host.take(),
+                vec![
+                    Call::Begin(ptr),
+                    Call::Set(ptr, q.preview_normalized(want)),
+                    Call::End(ptr)
+                ],
+                "{text}"
+            );
+        }
+        // (A letter is not taken: nothing typed, nothing set.)
+        double(&mut e, 1);
+        typed(&mut e, "x");
+        assert!(host.take().is_empty(), "not a number");
+        // The readouts as the amounts read.
+        let p = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            Arc::clone(&params) as Arc<dyn Params>,
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        assert!(p.automate(params.pressure_mod.as_ptr(), 0.0));
+        assert!(p.automate(params.pressure_filter.as_ptr(), 0.5));
+        assert!(p.automate(params.timbre_mod.as_ptr(), 0.65));
+        assert!(p.automate(params.timbre_filter.as_ptr(), 0.4375));
+        e.update_scene();
+        assert_eq!(
+            e.mpe_scene.readouts.clone().map(|r| r.0),
+            ["-100", "0.0", "30", "-0.5", "0", "0"].map(str::to_owned)
+        );
+        // A knob turned: a gesture, and the frame shown the frame put together whole.
+        let ptr = params.timbre_filter.as_ptr();
+        let at_knob = at(&e, centre("timbre_filter"));
+        go(&mut e, at_knob);
+        press(&mut e);
+        go(&mut e, below(at_knob, -30.0));
+        assert!(e.draw());
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "a knob turned in the drawer");
+        e.update_scene();
+        assert!(
+            e.scene
+                .tip
+                .as_ref()
+                .is_some_and(|t| t.0.starts_with("TIMBRE CUTOFF: ")),
+            "{:?}",
+            e.scene.tip
+        );
+        release(&mut e);
+        let calls = host.take();
+        well_formed(&calls);
+        assert!(
+            calls
+                .iter()
+                .any(|c| matches!(c, Call::Set(q, _) if *q == ptr))
+        );
+    }
+
+    /// The settings' MPE (decisions.md R-MPE): one item, INPUT & TIMBRE…, opening a menu of its
+    /// own (the settings' is already taller than the window at its opening size), where MPE
+    /// INPUT (AUTO by default) and TIMBRE REST (CENTERED ON 64 by default) are chosen for this
+    /// computer, each group's choice marked.
+    #[test]
+    fn the_settings_mpe_menu_chooses_the_input_and_the_timbre_rest() {
+        use crate::expression::{Mode, TimbreRest};
+        let (mut e, _, params) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        let open = |e: &mut Editing| {
+            click(e, key);
+            menu_item(e, "INPUT & TIMBRE…");
+        };
+        click(&mut e, key);
+        let items = menu_items(&e);
+        let at_head = items
+            .iter()
+            .position(|(t, _)| t == "MPE")
+            .expect("an MPE head");
+        assert_eq!(items[at_head + 1], ("INPUT & TIMBRE…".to_owned(), true));
+        e.learning.close_menu();
+        open(&mut e);
+        assert_eq!(
+            menu_items(&e),
+            [
+                ("MPE INPUT", false),
+                ("AUTO", false),
+                ("LOWER ZONE", true),
+                ("OFF", true),
+                ("TIMBRE REST", false),
+                ("CENTERED ON 64", false),
+                ("FROM 0", true),
+                ("FROM THE NOTE'S START", true),
+            ]
+            .map(|(t, on)| (t.to_owned(), on))
+        );
+        let m = e.learning.menu().expect("a menu");
+        assert_eq!(m.title, "MPE");
+        assert_eq!(m.marked, vec![1, 5]);
+        assert_eq!(m.heads, vec![0, 4]);
+        menu_item(&mut e, "LOWER ZONE");
+        assert_eq!(
+            (params.mpe_mode(), e.settings.mpe),
+            (Mode::Lower, Mode::Lower)
+        );
+        open(&mut e);
+        menu_item(&mut e, "FROM THE NOTE'S START");
+        assert_eq!(
+            (params.timbre_rest(), e.settings.timbre_rest),
+            (TimbreRest::NoteStart, TimbreRest::NoteStart)
+        );
+        open(&mut e);
+        assert_eq!(e.learning.menu().expect("a menu").marked, vec![2, 7]);
+        menu_item(&mut e, "OFF");
+        assert_eq!(params.mpe_mode(), Mode::Off);
+        open(&mut e);
+        menu_item(&mut e, "FROM 0");
+        assert_eq!(params.timbre_rest(), TimbreRest::Zero);
+    }
+
+    /// The standalone's editor with a chain for its effects' drawer (`fx_view::fake`): two
+    /// effects in it, three to be found.
+    fn editing_effects() -> (Editing, Arc<crate::fx_view::fake::Fake>) {
+        let (mut e, _, _) = editing_standalone();
+        let fake = crate::fx_view::fake::Fake::with(
+            &["Chorus", "Hall Reverb"],
+            &["Delay", "Plate", "Flanger"],
+        );
+        e.use_effects(FxView::new(Some(fake.clone())));
+        assert!(
+            e.playing.visible,
+            "the standalone's keyboard shown, under the drawer"
+        );
+        (e, fake)
+    }
+
+    /// What the chain was asked to do, once the drawer's threads have done it (`n` of them).
+    fn effects_done(e: &mut Editing, fake: &crate::fx_view::fake::Fake, n: usize) -> Vec<String> {
+        let t0 = Instant::now();
+        while fake.done.lock().map_or(0, |d| d.len()) < n && t0.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        // (The chain read again at once: something done there has finished.)
+        std::thread::sleep(Duration::from_millis(5));
+        e.update_scene();
+        fake.take()
+    }
+
+    /// The drawer dropped from the rail opened by `key` and slid all the way down.
+    fn lower_open(e: &mut Editing, rail: Rail, key: BarTarget) {
+        e.draw();
+        let p = at(e, strip::centre(rail, StripTarget::Bar(key)));
+        click(e, p);
+        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        e.draw();
+        assert!(e.lower.settled());
+    }
+
+    #[test]
+    fn the_chain_lock_and_held_signs_follow_the_preset_with_the_drawer_open_or_shut() {
+        let (mut e, fake) = editing_effects();
+        e.draw();
+        assert!(!e.browser.bar.fx_locked && !e.browser.bar.preset_fx);
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        let lock = at(&e, fx_ui::lock_tab());
+        click(&mut e, lock);
+        e.draw();
+        assert!(e.fx_scene.locked && e.browser.bar.fx_locked);
+        assert!(!e.browser.bar.preset_fx);
+        fake.preset.lock().unwrap().held = Some([
+            "VintageVerb".into(),
+            "RC-20".into(),
+            "OTT".into(),
+            "–".into(),
+        ]);
+        e.draw();
+        assert!(e.browser.bar.preset_fx && e.fx_scene.held.is_some());
+        let (x, y, w, h) = e.rail.name();
+        let tag = at(&e, (x + w - 95.0, y + h / 2.0));
+        go(&mut e, tag);
+        assert_eq!(
+            e.tip().map(|t| t.0),
+            Some("This preset has its own effects. Unlock to hear them.".into())
+        );
+        let key = at(&e, strip::centre(e.rail, StripTarget::Bar(BarTarget::Fx)));
+        click(&mut e, key);
+        e.lower.slide = None;
+        e.draw();
+        assert!(!e.lower.is_open(Lower::Fx));
+        assert!(e.browser.bar.fx_locked && e.browser.bar.preset_fx);
+        fake.preset.lock().unwrap().held = None;
+        e.draw();
+        assert!(e.browser.bar.fx_locked && !e.browser.bar.preset_fx);
+    }
+
+    /// The agreed LOCK and its signs, drawn by the editor for visual review.
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_fx_lock_pngs() {
+        let out =
+            std::path::PathBuf::from(std::env::var_os("CA72_FX_LOCK_PNG").expect("output folder"));
+        std::fs::create_dir_all(&out).unwrap();
+        for scale in [0.44, 1.0] {
+            for skin in [Skin::Worn, Skin::Drawn] {
+                for lettering in [Lettering::Standard, Lettering::Large] {
+                    let (mut e, fake) = editing_effects();
+                    let width = (art::W * scale).round() as u32;
+                    e.fit(1.0, width, width);
+                    e.set_look(skin);
+                    e.set_lettering(lettering);
+                    *e.params.preset.write().unwrap() = "Felt Bass".into();
+                    e.browser.reread(&e.params);
+                    lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+                    let save = |e: &mut Editing, state: &str| {
+                        window_frame(e)
+                            .save_png(
+                                out.join(format!("{skin:?}-{lettering:?}-{scale}-{state}.png")),
+                            )
+                            .unwrap();
+                    };
+                    save(&mut e, "unlocked");
+                    fake.preset.lock().unwrap().locked = true;
+                    save(&mut e, "locked");
+                    fake.preset.lock().unwrap().held = Some([
+                        "VintageVerb".into(),
+                        "RC-20".into(),
+                        "OTT".into(),
+                        "–".into(),
+                    ]);
+                    save(&mut e, "held");
+                    e.lower.shut();
+                    save(&mut e, "closed");
+                }
+            }
+        }
+    }
+
+    /// The standalone's rail has the FX key after ARP, the name's display a key shorter for it;
+    /// the plug-ins' has neither, and no effects' drawer. The FX key drops the effects' drawer
+    /// over the lower page inside the window (its size kept), and puts it away; ARP's drawer and
+    /// FX's are never open together, each key putting the other's away for its own. The key is lit
+    /// while an effect plays; the frame shown is its frame put together whole.
+    #[test]
+    fn the_fx_key_drops_its_drawer_one_drawer_at_a_time() {
+        let (plugin, _, _) = editing();
+        assert_eq!((plugin.rail, plugin.fx.is_none()), (Rail::Plugin, true));
+        let (standalone, _, _) = editing_standalone();
+        assert_eq!(standalone.rail, Rail::Plugin, "no chain: no FX key");
+        let (fx_key, arp_key) = (
+            strip::centre(Rail::Effects, StripTarget::Bar(BarTarget::Fx)),
+            strip::centre(Rail::Effects, StripTarget::Bar(BarTarget::Arp)),
+        );
+        assert_eq!(
+            strip::hit(Rail::Plugin, fx_key.0, fx_key.1),
+            Some(StripTarget::Bar(BarTarget::Arp)),
+            "the plug-ins' ARP where the standalone's FX is"
+        );
+        let (mut e, fake) = editing_effects();
+        assert_eq!(e.rail, Rail::Effects);
+        assert_eq!(
+            strip::hit(e.rail, fx_key.0, fx_key.1),
+            Some(StripTarget::Bar(BarTarget::Fx))
+        );
+        assert_eq!(
+            strip::hit(e.rail, arp_key.0, arp_key.1),
+            Some(StripTarget::Bar(BarTarget::Arp))
+        );
+        let size = (e.width, e.window_height());
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        assert!(e.lower.is_open(Lower::Fx));
+        assert_eq!((e.width, e.window_height()), size);
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "the drawer as put together whole");
+        // ARP puts it away for its own; FX again puts that away for the effects'.
+        e.strip_press(StripTarget::Bar(BarTarget::Arp));
+        assert!(e.lower.is_open(Lower::Arp) && !e.lower.is_open(Lower::Fx));
+        e.strip_press(StripTarget::Bar(BarTarget::Fx));
+        assert!(e.lower.is_open(Lower::Fx) && !e.lower.is_open(Lower::Arp));
+        e.strip_press(StripTarget::Bar(BarTarget::Fx));
+        assert!(!e.lower.open);
+        // The key lit while an effect plays.
+        e.update_scene();
+        assert!(e.browser.bar.fx);
+        for s in fake.slots.lock().expect("slots").iter_mut() {
+            s.bypass = true;
+        }
+        e.fx_view.poll(Instant::now() + Duration::from_secs(1));
+        e.update_scene();
+        assert!(!e.browser.bar.fx, "nothing plays");
+        // PANEL hiding the lower panel puts it away at once.
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        e.toggle_panel();
+        assert!(!e.lower.open && e.lower_top().is_none());
+    }
+
+    /// The effects' drawer operates the chain: a name clicked opens its effect's window, a tab
+    /// bypasses its effect, a name dragged onto another slot moves it there (shown carried over
+    /// it meanwhile); "+ ADD EFFECT" drops the list of the effects found (and SCAN AGAIN), a row
+    /// chosen adds its effect; a right click offers REPLACE… (the list again, to put another in
+    /// its place) and REMOVE. Under the drawer the page does nothing; the frame shown with the list
+    /// open is the frame put together whole.
+    #[test]
+    fn the_fx_drawer_operates_the_chain() {
+        let (mut e, fake) = editing_effects();
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        let name = |e: &Editing, i: usize| at(e, fx_ui::centre(fx_ui::FxTarget::Name(i)));
+        // A name clicked: its effect's window.
+        let p = name(&e, 0);
+        click(&mut e, p);
+        assert_eq!(effects_done(&mut e, &fake, 1), ["window 0"]);
+        // A tab: its effect bypassed.
+        let p = at(&e, fx_ui::centre(fx_ui::FxTarget::Tab(1)));
+        click(&mut e, p);
+        assert_eq!(effects_done(&mut e, &fake, 1), ["bypass 1 true"]);
+        assert!(!e.fx_scene.slots[1].lit && e.fx_scene.slots[0].lit);
+        // A name dragged onto another's.
+        let (from, to) = (name(&e, 0), name(&e, 1));
+        go(&mut e, from);
+        press(&mut e);
+        for k in 1..=10 {
+            let t = f64::from(k) / 10.0;
+            go(
+                &mut e,
+                Point {
+                    x: from.x + (to.x - from.x) * t,
+                    y: from.y,
+                },
+            );
+        }
+        e.update_scene();
+        assert_eq!(e.fx_scene.drag, Some((0, Some(1))));
+        release(&mut e);
+        assert_eq!(effects_done(&mut e, &fake, 1), ["move 0 1"]);
+        assert_eq!(e.fx_scene.slots[0].text, "Hall Reverb");
+        // "+ ADD EFFECT": the list; a row chosen.
+        assert_eq!(e.fx_scene.slots[2].text, "+ ADD EFFECT");
+        let p = name(&e, 2);
+        click(&mut e, p);
+        e.update_scene();
+        let list = e.fx_scene.list.clone().expect("the list");
+        let names: Vec<&str> = list.rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["Delay", "Flanger", "Plate", "SCAN AGAIN"]);
+        assert_eq!(list.title, "ADD TO SLOT 3");
+        e.draw();
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "the list as put together whole");
+        // (The wheel over it scrolls it; three effects and SCAN AGAIN all show, so it stays.)
+        let p = at(&e, fx_ui::row_centre(&list, 2));
+        go(&mut e, p);
+        wheel(&mut e, -2.0);
+        e.update_scene();
+        assert_eq!(e.fx_scene.list.as_ref().map(|l| l.first), Some(0));
+        click(&mut e, p);
+        assert!(!e.fx_view.list_open());
+        assert_eq!(effects_done(&mut e, &fake, 1), ["add Plate"]);
+        assert_eq!(e.fx_scene.slots[2].text, "Plate");
+        assert_eq!(e.fx_scene.slots[3].text, "+ ADD EFFECT");
+        // A right click: REPLACE… and REMOVE.
+        let p = name(&e, 0);
+        right_click(&mut e, p);
+        assert_eq!(
+            menu_items(&e),
+            [
+                ("PARAMETERS…".to_owned(), true),
+                ("REPLACE\u{2026}".to_owned(), true),
+                ("REMOVE".into(), true)
+            ]
+        );
+        menu_item(&mut e, "REPLACE\u{2026}");
+        e.update_scene();
+        let list = e.fx_scene.list.clone().expect("the list");
+        assert_eq!(list.title, "REPLACE SLOT 1");
+        let p = at(&e, fx_ui::row_centre(&list, 1));
+        click(&mut e, p);
+        assert_eq!(effects_done(&mut e, &fake, 1), ["replace 0 Flanger"]);
+        let p = name(&e, 1);
+        right_click(&mut e, p);
+        menu_item(&mut e, "REMOVE");
+        assert_eq!(effects_done(&mut e, &fake, 1), ["remove 1"]);
+        assert_eq!(e.fx_scene.slots[1].text, "Plate");
+        // The list put away by a press elsewhere, which does nothing else.
+        let p = name(&e, 2);
+        click(&mut e, p);
+        e.update_scene();
+        assert!(e.fx_view.list_open());
+        let p = at(&e, (200.0, 300.0));
+        click(&mut e, p);
+        assert!(!e.fx_view.list_open());
+        // Under the drawer: AUTO GAIN's tab does nothing.
+        let (x, y) = strip::Bank::Auto.tab(0);
+        assert!(fx_ui::inside(x, y));
+        let before = e.params.auto_gain.value();
+        let p = at(&e, (x, y));
+        click(&mut e, p);
+        assert_eq!(
+            e.params.auto_gain.value(),
+            before,
+            "nothing under the drawer"
+        );
+        assert!(fake.take().is_empty());
+    }
+
+    #[test]
+    fn the_fx_chooser_takes_typing_and_arrows_and_escape_clears_before_closing() {
+        let (mut e, fake) = editing_effects();
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        e.playing.typing = true;
+        e.fx_view.open_list(2, false);
+        let preset = e.browser.bar.name.clone();
+        for c in ["l", "a", "t"] {
+            assert!(keyed(&mut e, Key::Character(c.into())));
+        }
+        assert!(keyed(&mut e, Key::ArrowLeft));
+        assert!(keyed(&mut e, Key::ArrowRight));
+        assert!(!e.playing.active());
+        e.update_scene();
+        assert_eq!(
+            e.fx_scene.list.as_ref().expect("list").rows[0].name,
+            "Plate"
+        );
+        assert_eq!(e.browser.bar.name, preset);
+        assert!(keyed(&mut e, Key::Escape));
+        e.update_scene();
+        assert!(e.fx_view.list_open());
+        assert!(
+            e.fx_scene
+                .list
+                .as_ref()
+                .expect("list")
+                .query
+                .text
+                .is_empty()
+        );
+        assert!(keyed(&mut e, Key::Escape));
+        assert!(!e.fx_view.list_open());
+        e.fx_view.open_list(2, false);
+        assert!(keyed(&mut e, Key::Character("lat".into())));
+        assert!(keyed(&mut e, Key::Enter));
+        assert_eq!(effects_done(&mut e, &fake, 1), ["add Plate"]);
+    }
+
+    /// A slot's name clicked again opens its effect's window again (decisions.md R-FX-MAC): after
+    /// the window it opened took the focus and was closed, and while it is still open (brought
+    /// forward). Each click is a job of its own; the helper shows the window in front.
+    #[test]
+    fn a_slots_name_clicked_again_opens_its_window_again() {
+        let (mut e, fake) = editing_effects();
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        let p = at(&e, fx_ui::centre(fx_ui::FxTarget::Name(0)));
+        for _ in 0..3 {
+            click(&mut e, p);
+            assert_eq!(effects_done(&mut e, &fake, 1), ["window 0"]);
+            // (The effect's window took the focus: the editor's lost it.)
+            e.end_gestures();
+        }
+    }
+
+    /// Effects turned off, and a safe start, in the drawer (decisions.md R-FX-SAFETY): a slot
+    /// turned off after it crashed or stopped responding reads CRASHED or NOT RESPONDING under its
+    /// dimmed name, the key unlit; its tip says why; its menu offers LOAD WITHOUT ITS SETTINGS
+    /// first when its settings are the cause, else TRY AGAIN first; a click tries it again. One
+    /// running without its settings offers TRY ITS OLD SETTINGS, and says FAILED, its name lit,
+    /// when they still crash it. After a safe start each reads OFF, its tip says why, its menu
+    /// offers TURN EFFECTS BACK ON and TURN THIS ONE ON, and a click turns them all on.
+    #[test]
+    fn the_fx_drawer_says_why_an_effect_is_off_and_tries_it_again() {
+        use crate::fx_view::{Health, SafeStart};
+        let (mut e, fake) = editing_effects();
+        {
+            let mut s = fake.slots.lock().expect("slots");
+            s[0].health = Health::Crashed;
+            s[0].by_settings = true;
+            s[1].health = Health::NotResponding;
+        }
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        e.fx_view.poll(Instant::now() + Duration::from_secs(1));
+        e.update_scene();
+        let words = |e: &Editing| {
+            e.fx_scene
+                .slots
+                .iter()
+                .map(|s| (s.word, s.dim))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            words(&e)[..2],
+            [
+                (Some(fx_ui::FxWord::Crashed), true),
+                (Some(fx_ui::FxWord::NotResponding), true)
+            ]
+        );
+        assert!(!e.browser.bar.fx, "nothing plays: the key unlit");
+        let name = |e: &Editing, i: usize| at(e, fx_ui::centre(fx_ui::FxTarget::Name(i)));
+        let p = name(&e, 0);
+        go(&mut e, p);
+        let tip = e.fx_view.tip().map(|t| t.0).unwrap_or_default();
+        assert!(tip.contains("saved settings crash it"), "{tip}");
+        let items = |e: &Editing| {
+            menu_items(e)
+                .into_iter()
+                .map(|(t, _)| t)
+                .collect::<Vec<_>>()
+        };
+        right_click(&mut e, p);
+        assert_eq!(
+            items(&e),
+            [
+                "LOAD WITHOUT ITS SETTINGS",
+                "TRY AGAIN",
+                "PARAMETERS…",
+                "REPLACE\u{2026}",
+                "REMOVE"
+            ]
+        );
+        menu_item(&mut e, "LOAD WITHOUT ITS SETTINGS");
+        assert_eq!(effects_done(&mut e, &fake, 1), ["without settings 0"]);
+        let p = name(&e, 1);
+        right_click(&mut e, p);
+        assert_eq!(
+            items(&e),
+            [
+                "TRY AGAIN",
+                "LOAD WITHOUT ITS SETTINGS",
+                "PARAMETERS…",
+                "REPLACE\u{2026}",
+                "REMOVE"
+            ]
+        );
+        e.learning.close_menu();
+        click(&mut e, p);
+        assert_eq!(effects_done(&mut e, &fake, 1), ["retry 1"]);
+        // Running without its settings: its old ones offered back; still crashing it, FAILED.
+        let p = name(&e, 0);
+        right_click(&mut e, p);
+        assert_eq!(
+            items(&e),
+            [
+                "TRY ITS OLD SETTINGS",
+                "PARAMETERS…",
+                "REPLACE\u{2026}",
+                "REMOVE"
+            ]
+        );
+        menu_item(&mut e, "TRY ITS OLD SETTINGS");
+        assert_eq!(effects_done(&mut e, &fake, 1), ["old settings 0"]);
+        assert_eq!(words(&e)[0], (Some(fx_ui::FxWord::Failed), false));
+        assert!(e.browser.bar.fx, "it plays on: the key lit");
+        // A safe start.
+        for s in fake.slots.lock().expect("slots").iter_mut() {
+            s.health = Health::Off;
+            s.try_failed = false;
+        }
+        *fake.safe.lock().expect("safe") = Some(SafeStart::DidNotClose);
+        e.fx_view.poll(Instant::now() + Duration::from_secs(2));
+        e.update_scene();
+        assert_eq!(
+            words(&e)[..2],
+            [
+                (Some(fx_ui::FxWord::Off), true),
+                (Some(fx_ui::FxWord::Off), true)
+            ]
+        );
+        assert!(!e.browser.bar.fx);
+        let p = name(&e, 1);
+        go(&mut e, p);
+        let tip = e.fx_view.tip().map(|t| t.0).unwrap_or_default();
+        assert!(tip.contains("did not close properly"), "{tip}");
+        right_click(&mut e, p);
+        assert_eq!(
+            items(&e),
+            [
+                "TURN EFFECTS BACK ON",
+                "TURN THIS ONE ON",
+                "PARAMETERS…",
+                "REPLACE\u{2026}",
+                "REMOVE"
+            ]
+        );
+        menu_item(&mut e, "TURN THIS ONE ON");
+        assert_eq!(effects_done(&mut e, &fake, 1), ["retry 1"]);
+        let p = name(&e, 0);
+        click(&mut e, p);
+        assert_eq!(effects_done(&mut e, &fake, 1), ["turn on"]);
+        assert!(e.fx_scene.slots.iter().all(|s| s.word.is_none()));
+        assert!(e.browser.bar.fx, "they play: the key lit");
     }
 
     /// Every gesture well formed: a parameter's begin only while it has none open, its
@@ -6274,6 +11606,156 @@ mod tests {
             key: k,
             ..KeyboardEvent::default()
         })
+    }
+
+    #[test]
+    fn preset_arrows_respect_keyboard_takeovers_and_typing_octaves() {
+        let (mut e, _, params) = editing_standalone();
+        e.draw();
+        let current = || params.preset.read().unwrap().clone();
+        let before = current();
+        assert!(keyed(&mut e, Key::ArrowRight));
+        assert_ne!(current(), before);
+        let before = current();
+        assert!(keyed(&mut e, Key::ArrowLeft));
+        assert_ne!(current(), before);
+        // Up and down never step presets (the owner: left and right, as the rail's keys).
+        for arrow in [Key::ArrowUp, Key::ArrowDown] {
+            let before = current();
+            let name = format!("{arrow:?}");
+            assert!(!keyed(&mut e, arrow), "{name} left free");
+            assert_eq!(current(), before);
+        }
+        e.playing.typing = true;
+        let before = current();
+        assert!(keyed(&mut e, Key::ArrowRight));
+        assert_ne!(current(), before, "TYPE leaves arrows free");
+        let root = e.playing.typing_root;
+        let before = current();
+        assert!(keyed(&mut e, Key::Character("x".into())));
+        assert_eq!(e.playing.typing_root, root + 12);
+        assert_eq!(current(), before);
+        for modifiers in [
+            Modifiers::SHIFT,
+            Modifiers::ALT,
+            Modifiers::CONTROL,
+            Modifiers::META,
+        ] {
+            assert!(!e.keyed(&KeyboardEvent {
+                key: Key::ArrowRight,
+                modifiers,
+                ..KeyboardEvent::default()
+            }));
+            assert_eq!(current(), before);
+        }
+        assert!(
+            !keyed(&mut e, Key::Character("v".into())),
+            "unused key stays the host's"
+        );
+        assert!(e.keyed(&KeyboardEvent {
+            key: Key::ArrowRight,
+            state: KeyState::Up,
+            ..KeyboardEvent::default()
+        }));
+        assert_eq!(current(), before, "key release");
+        e.playing.focused = false;
+        assert!(!keyed(&mut e, Key::ArrowRight));
+        assert_eq!(current(), before, "unfocused");
+        e.playing.focused = true;
+        e.start_typing(Readout::Drive);
+        keyed(&mut e, Key::ArrowRight);
+        assert_eq!(current(), before, "typed readout");
+        keyed(&mut e, Key::Escape);
+        params.midi_map.arm(learnable("cutoff"));
+        assert!(!keyed(&mut e, Key::ArrowRight));
+        assert_eq!(current(), before, "learning");
+        params.midi_map.cancel();
+        let point = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Next)));
+        right_click(&mut e, point);
+        assert!(e.learning.menu_open());
+        assert!(!keyed(&mut e, Key::ArrowRight));
+        assert_eq!(current(), before, "menu");
+        keyed(&mut e, Key::Escape);
+        e.browser.show(true, &params);
+        let before = current();
+        assert!(keyed(&mut e, Key::ArrowLeft));
+        assert_eq!(current(), before, "search moves its caret");
+        assert!(keyed(&mut e, Key::ArrowDown));
+        assert_ne!(current(), before, "the open preset list keeps its arrows");
+        let before = current();
+        e.browser.drawer.editing = Some(ca72_panel::presets::Edit::Rename);
+        e.browser.drawer.focus = Some(ca72_panel::presets::FieldId::Edit);
+        keyed(&mut e, Key::ArrowDown);
+        assert_eq!(current(), before, "rename field");
+        e.browser.show(false, &params);
+        e.show_release_notes(crate::whats_new::current());
+        keyed(&mut e, Key::ArrowDown);
+        assert_eq!(current(), before, "What's New scrolls");
+    }
+
+    #[test]
+    fn both_preset_keys_open_the_existing_learn_and_remove_menu() {
+        let (mut e, _, params) = editing();
+        for (target, id) in [
+            (BarTarget::Prev, "previous_preset"),
+            (BarTarget::Next, "next_preset"),
+        ] {
+            let point = on_strip(&e, strip_at(StripTarget::Bar(target)));
+            let before = params.preset.read().unwrap().clone();
+            right_click(&mut e, point);
+            assert!(
+                menu_items(&e)
+                    .iter()
+                    .any(|(label, _)| label == "MIDI LEARN")
+            );
+            menu_item(&mut e, "MIDI LEARN");
+            assert_eq!(params.midi_map.armed(), Some(learnable(id)));
+            assert_eq!(
+                params.midi_map.incoming_note(2, 44, true),
+                crate::learn::Incoming::Caught
+            );
+            e.draw();
+            assert_eq!(
+                params.midi_map.binding(learnable(id)),
+                Some(crate::learn::Binding::Note {
+                    channel: 2,
+                    note: 44
+                })
+            );
+            assert_eq!(
+                *params.preset.read().unwrap(),
+                before,
+                "learning never steps"
+            );
+            right_click(&mut e, point);
+            menu_item(&mut e, "REMOVE MIDI ASSIGNMENT");
+            assert_eq!(params.midi_map.binding(learnable(id)), None);
+        }
+    }
+
+    #[test]
+    fn forwarded_preset_arrows_leave_unused_and_modified_keys_with_the_host() {
+        let keys = HostKeys::default();
+        keys.navigation.store(true, Ordering::Release);
+        let key = HostKey {
+            character: None,
+            key_code: 13,
+            modifiers: 0,
+            down: true,
+        };
+        assert!(keys.offer(key));
+        assert_eq!(keys.take()[0].key, Key::ArrowRight);
+        assert!(!keys.offer(HostKey {
+            character: Some('q'),
+            key_code: 0,
+            ..key
+        }));
+        assert!(!keys.offer(HostKey {
+            modifiers: 2,
+            ..key
+        }));
+        keys.navigation.store(false, Ordering::Release);
+        assert!(!keys.offer(key));
     }
 
     fn learnable(id: &str) -> usize {
@@ -6423,8 +11905,147 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_mod_wheel_learns_and_keeps_its_computer_source_without_parameter_gestures() {
+        use crate::mod_wheel::Source;
+        let dir = tempfile::tempdir().expect("computer settings");
+        let path = dir.path().join("CA-72/settings.toml");
+        let (mut e, host, params) = editing();
+        e.settings_file = Some(path.clone());
+        let fields = params.serialize_fields();
+        let map = Arc::clone(&params.midi_map);
+        let p = at(&e, centre("mod_wheel"));
+        right_click(&mut e, p);
+        assert_eq!(
+            e.learning.menu().expect("wheel menu").title,
+            "MOD WHEEL SOURCE · CC 1"
+        );
+        menu_item(&mut e, "MIDI LEARN");
+        e.draw();
+        assert_eq!(e.scene.learning, ca72_panel::controls::index("mod_wheel"));
+        assert!(keyed(&mut e, Key::Escape));
+        assert_eq!(map.armed(), None);
+        right_click(&mut e, p);
+        menu_item(&mut e, "MIDI LEARN");
+        assert_eq!(map.incoming(7, 11), crate::learn::Incoming::Caught);
+        e.draw();
+        assert_eq!(map.wheel_source(), Source::Cc(11));
+        assert_eq!(Settings::read(&path).mod_wheel_source, Source::Cc(11));
+        assert_eq!(note_lines(&e), ["MOD WHEEL SOURCE: CC 11 · ALL CHANNELS"]);
+        assert_eq!(
+            params.serialize_fields(),
+            fields,
+            "source never enters project fields"
+        );
+        assert!(
+            e.learning
+                .list_scene(&map)
+                .reserved
+                .contains("CC 11 (MOD WHEEL SOURCE")
+        );
+        right_click(&mut e, p);
+        menu_item(&mut e, "MIDI LEARN");
+        map.incoming(2, 74);
+        drop(e);
+        assert_eq!(
+            Settings::read(&path).mod_wheel_source,
+            Source::Cc(74),
+            "caught before closing"
+        );
+        assert_eq!(map.armed(), None);
+        assert!(host.take().is_empty(), "source is not a sound parameter");
+    }
+
+    #[test]
+    fn settings_and_the_wheel_offer_common_sources_and_every_other_allowed_cc() {
+        use crate::mod_wheel::Source;
+        let (mut e, host, params) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        menu_item(&mut e, "CC 1…");
+        let m = e.learning.menu().expect("source menu");
+        assert_eq!(m.marked, [0]);
+        for label in [
+            "CC 2 · BREATH",
+            "CC 4 · FOOT",
+            "CC 11 · EXPRESSION",
+            "CC 74 · TIMBRE / MPE Y",
+            "CHANNEL AFTERTOUCH",
+            "POLYPHONIC AFTERTOUCH · MAX HELD",
+        ] {
+            assert!(
+                m.items.iter().any(|(text, on)| text == label && *on),
+                "{label}"
+            );
+        }
+        menu_item(&mut e, "CC 11 · EXPRESSION");
+        assert_eq!(params.midi_map.wheel_source(), Source::Cc(11));
+        assert_eq!(e.settings.mod_wheel_source, Source::Cc(11));
+        for label in ["CHANNEL AFTERTOUCH", "POLYPHONIC AFTERTOUCH · MAX HELD"] {
+            let p = at(&e, centre("mod_wheel"));
+            right_click(&mut e, p);
+            menu_item(&mut e, "MOD WHEEL SOURCE…");
+            menu_item(&mut e, label);
+        }
+        assert_eq!(params.midi_map.wheel_source(), Source::PolyPressure);
+        let p = at(&e, centre("mod_wheel"));
+        right_click(&mut e, p);
+        menu_item(&mut e, "MOD WHEEL SOURCE…");
+        menu_item(&mut e, "OTHER…");
+        menu_item(&mut e, "CC 16–31…");
+        menu_item(&mut e, "CC 23");
+        assert_eq!(params.midi_map.wheel_source(), Source::Cc(23));
+        for first in (0..128).step_by(16) {
+            e.learning.open_wheel_menu(
+                e.renderer.fonts(),
+                settings_menu_corner(),
+                e.renderer.text_size() * MENU_TEXT,
+                Source::Cc(23),
+                Some(first),
+            );
+            let m = e.learning.menu().expect("range");
+            for (i, (_, enabled)) in m.items.iter().enumerate() {
+                let cc = first + i as u8;
+                assert_eq!(*enabled, Source::cc(cc).is_some() && cc != 23, "CC {cc}");
+            }
+        }
+        assert!(host.take().is_empty());
+    }
+
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_mod_wheel_source_pngs() {
+        let out = std::env::var_os("CA72_MODWHEEL_PNG").expect("image folder");
+        let out = std::path::PathBuf::from(out);
+        std::fs::create_dir_all(&out).expect("image folder");
+        for (skin_name, skin) in [("realistic", Skin::Worn), ("classic", Skin::Drawn)] {
+            for (text_name, lettering) in [
+                ("standard", Lettering::Standard),
+                ("large", Lettering::Large),
+            ] {
+                let (mut e, _, _) = editing();
+                e.set_look(skin);
+                e.set_lettering(lettering);
+                let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+                click(&mut e, key);
+                window_frame(&mut e)
+                    .save_png(out.join(format!("settings-{skin_name}-{text_name}.png")))
+                    .expect("settings image");
+                menu_item(&mut e, "CC 1…");
+                window_frame(&mut e)
+                    .save_png(out.join(format!("sources-{skin_name}-{text_name}.png")))
+                    .expect("source image");
+                menu_item(&mut e, "OTHER…");
+                menu_item(&mut e, "CC 0–15…");
+                window_frame(&mut e)
+                    .save_png(out.join(format!("range-{skin_name}-{text_name}.png")))
+                    .expect("CC range image");
+            }
+        }
+    }
+
     /// The strip's controls have the menu too (a tab's above it, the control ringed on the
-    /// strip; a knob's as the panel's knobs'); a wheel and POWER say why they are not learned,
+    /// strip; a knob's as the panel's knobs'); PITCH and POWER say why they are not learned,
     /// MIDI LEARN not offered.
     #[test]
     fn the_strips_controls_learn_and_the_wheels_and_power_say_why_not() {
@@ -6474,10 +12095,6 @@ mod tests {
         assert_eq!(map.armed(), None);
         for (param, title) in [
             ("pitch_wheel", "PITCH: MIDI PITCH BEND MOVES IT"),
-            (
-                "mod_wheel",
-                "MODULATION: THE MODULATION WHEEL (CC 1) MOVES IT",
-            ),
             ("quality", "QUALITY: SET PER PLUGIN INSTANCE"),
         ] {
             let p = at(&e, centre(param));
@@ -6523,7 +12140,13 @@ mod tests {
         assert!(e.learning.list);
         e.draw();
         let list = e.browser.drawer.midi.clone().expect("the list shown");
-        assert_eq!(list.rows.len(), crate::learn::LEARNABLE.len());
+        // (Every learnable control but the effects' pins, the standalone's with effects alone:
+        // R-FX-PARAMS.)
+        assert_eq!(
+            list.rows.len(),
+            crate::learn::LEARNABLE.len() - crate::lfo::FX_PINS
+        );
+        assert_eq!(list.rows.len(), crate::learn::listed());
         assert_eq!(list.rows[0].name, "TUNE");
         assert!(keyed(&mut e, Key::ArrowDown));
         assert!(keyed(&mut e, Key::ArrowDown));
@@ -6630,6 +12253,7 @@ mod tests {
             host.take(),
             vec![
                 Call::Begin(cutoff),
+                Call::Set(cutoff, (0.5 + 2.0 / 240.0) as f32),
                 Call::Set(cutoff, 0.75),
                 Call::Set(cutoff, 1.0),
                 Call::End(cutoff)
@@ -6648,6 +12272,7 @@ mod tests {
             host.take(),
             vec![
                 Call::Begin(inner),
+                Call::Set(inner, (2.0 / 240.0) as f32),
                 Call::Set(inner, 0.25),
                 Call::Set(inner, 1.0),
                 Call::End(inner)
@@ -6769,6 +12394,349 @@ mod tests {
         }
         e.draw();
         assert_eq!(host.take(), vec![Call::End(emphasis)]);
+    }
+
+    /// Every input event reaches the host before a frame is drawn, including travel below
+    /// one logical pixel on a Retina display. The distance and Shift's rate stay the same.
+    #[test]
+    fn knob_resolution_keeps_every_subpixel_drag_value() {
+        let mut counts = Vec::new();
+        for (width, dpr) in [(860, 1.0), (1720, 1.0), (860, 2.0), (1720, 2.0)] {
+            for fine in [false, true] {
+                let (mut e, host, params) = editing();
+                e.fit(dpr, width, (f64::from(width) * dpr) as u32);
+                let p = at(&e, centre("cutoff"));
+                let modifiers = if fine {
+                    Modifiers::SHIFT
+                } else {
+                    Modifiers::empty()
+                };
+                go(&mut e, p);
+                e.mouse(MouseEvent::ButtonPressed {
+                    button: MouseButton::Left,
+                    modifiers,
+                });
+                for n in 1..=384 {
+                    e.mouse(MouseEvent::CursorMoved {
+                        position: below(p, -f64::from(n) / 16.0),
+                        modifiers,
+                    });
+                }
+                release(&mut e);
+                let calls = host.take();
+                well_formed(&calls);
+                let values: Vec<_> = calls
+                    .iter()
+                    .filter_map(|c| match *c {
+                        Call::Set(param, v) if param == params.cutoff.as_ptr() => Some(v),
+                        _ => None,
+                    })
+                    .collect();
+                assert!(values.windows(2).all(|v| v[1] > v[0]));
+                let expected = 0.5 + if fine { 0.01 } else { 0.1 };
+                assert!((f64::from(*values.last().expect("drag values")) - expected).abs() < 1e-6);
+                println!(
+                    "drag: width {width}, scale {dpr}, fine {fine}: {}/384 distinct values",
+                    values.len()
+                );
+                counts.push(values.len());
+            }
+        }
+        assert_eq!(counts, vec![384; 8]);
+    }
+
+    #[test]
+    fn knob_resolution_keeps_every_pixel_scroll_value() {
+        let mut counts = Vec::new();
+        for fine in [false, true] {
+            for sign in [-1.0, 1.0] {
+                let (mut e, host, params) = editing();
+                let p = at(&e, centre("cutoff"));
+                go(&mut e, p);
+                for _ in 0..384 {
+                    e.mouse(MouseEvent::WheelScrolled {
+                        delta: ScrollDelta::Pixels {
+                            x: 0.0,
+                            y: sign * 0.25,
+                        },
+                        modifiers: if fine {
+                            Modifiers::SHIFT
+                        } else {
+                            Modifiers::empty()
+                        },
+                    });
+                }
+                e.end_scroll();
+                let calls = host.take();
+                well_formed(&calls);
+                let values: Vec<_> = calls
+                    .iter()
+                    .filter_map(|c| match *c {
+                        Call::Set(param, v) if param == params.cutoff.as_ptr() => Some(v),
+                        _ => None,
+                    })
+                    .collect();
+                assert!(values.windows(2).all(|v| (v[1] - v[0]) * sign > 0.0));
+                println!(
+                    "pixel scroll: fine {fine}, direction {sign}: {}/384 distinct values, final {:?}",
+                    values.len(),
+                    values.last()
+                );
+                counts.push(values.len());
+                // The same sensitivity as a 40-point notch, with no discarded travel.
+                let expected = 0.5 + f64::from(sign) * 2.4 * if fine { 0.002 } else { 0.02 };
+                assert!(
+                    (f64::from(*values.last().expect("scroll values")) - expected).abs() < 1e-6
+                );
+            }
+        }
+        assert_eq!(counts, vec![384; 4]);
+    }
+
+    #[test]
+    fn knob_resolution_keeps_fractional_lines_excess_travel_and_direction() {
+        let (mut e, host, params) = editing();
+        // (Lines as Windows reads them, as far as they go: R-KNOB-GLIDE.)
+        e.precise_lines = true;
+        let p = at(&e, centre("cutoff"));
+        go(&mut e, p);
+        for _ in 0..384 {
+            wheel(&mut e, 1.0 / 64.0);
+        }
+        let values: Vec<_> = host
+            .take()
+            .into_iter()
+            .filter_map(|c| match c {
+                Call::Set(_, v) => Some(v),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(values.len(), 384);
+        assert!(values.windows(2).all(|v| v[1] > v[0]));
+        assert!(
+            (values[383] - 0.62).abs() < 1e-6,
+            "six lines, not 384 notches"
+        );
+        // A large event accounts for its whole distance; reversal works even at a limit.
+        wheel(&mut e, 30.0);
+        wheel(&mut e, -0.125);
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Set(params.cutoff.as_ptr(), 1.0),
+                Call::Set(params.cutoff.as_ptr(), 0.9975)
+            ]
+        );
+        e.end_scroll();
+        host.take();
+        // No vertical motion does not begin a gesture, including horizontal-only events.
+        e.scrolled(ScrollDelta::Pixels { x: 5.0, y: 0.0 }, Modifiers::empty());
+        assert!(host.take().is_empty());
+    }
+
+    #[test]
+    fn knob_resolution_leaves_discrete_controls_at_their_positions() {
+        let (mut e, host, _) = editing_poly();
+        // (Lines as Windows reads them, fractions too: R-KNOB-GLIDE.)
+        e.precise_lines = true;
+        for (id, positions) in [
+            ("voices", 8.0),
+            ("osc1_range", 5.0),
+            ("osc1_waveform", 5.0),
+            ("quality", 2.0),
+            ("osc1_on", 1.0),
+        ] {
+            let p = at(&e, centre(id));
+            go(&mut e, p);
+            // Tiny drags do not turn a selector into a continuous control.
+            press(&mut e);
+            for n in 1..=384 {
+                go(&mut e, below(p, -f64::from(n) / 4.0));
+            }
+            release(&mut e);
+            let drag_calls = host.take();
+            well_formed(&drag_calls);
+            for call in drag_calls {
+                if let Call::Set(_, v) = call {
+                    assert!(
+                        (v * positions - (v * positions).round()).abs() < 1e-6,
+                        "{id}: {v}"
+                    );
+                }
+            }
+            go(&mut e, p);
+            let places = f64::from(positions);
+            let mut position =
+                (e.value_of(ca72_panel::controls::index(id).expect("control")) * places).round();
+            for _ in 0..159 {
+                e.scrolled(ScrollDelta::Pixels { x: 0.0, y: 0.25 }, Modifiers::SHIFT);
+            }
+            let mut calls = host.take();
+            assert!(
+                calls.iter().all(|c| !matches!(c, Call::Set(..))),
+                "{id}: no partial step"
+            );
+            e.scrolled(ScrollDelta::Pixels { x: 0.0, y: 0.25 }, Modifiers::SHIFT);
+            position = (position + 1.0).min(places);
+            assert_eq!(e.scroll.as_ref().expect("scroll").value, position / places);
+            // Multiple notches and their excess, then reverse a fraction left over.
+            e.scrolled(ScrollDelta::Pixels { x: 0.0, y: -90.0 }, Modifiers::empty());
+            position = (position - 2.0).max(0.0);
+            assert_eq!(e.scroll.as_ref().expect("scroll").value, position / places);
+            e.scrolled(ScrollDelta::Pixels { x: 0.0, y: -30.0 }, Modifiers::empty());
+            position = (position - 1.0).max(0.0);
+            assert_eq!(e.scroll.as_ref().expect("scroll").value, position / places);
+            wheel(&mut e, 0.75);
+            wheel(&mut e, -0.5);
+            assert_eq!(e.scroll.as_ref().expect("scroll").value, position / places);
+            wheel(&mut e, -0.5);
+            position = (position - 1.0).max(0.0);
+            assert_eq!(e.scroll.as_ref().expect("scroll").value, position / places);
+            e.end_scroll();
+            calls.extend(host.take());
+            well_formed(&calls);
+            assert!(
+                calls.iter().any(|c| matches!(c, Call::Set(..))),
+                "{id}: whole steps move"
+            );
+            for call in calls {
+                if let Call::Set(_, v) = call {
+                    assert!(
+                        (v * positions - (v * positions).round()).abs() < 1e-6,
+                        "{id}: {v}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn knob_resolution_rebases_shift_during_a_drag_without_a_jump() {
+        let (mut e, host, params) = editing();
+        let p = at(&e, centre("cutoff"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -24.0));
+        for dy in [-24.0, -48.0] {
+            e.mouse(MouseEvent::CursorMoved {
+                position: below(p, dy),
+                modifiers: Modifiers::SHIFT,
+            });
+        }
+        for dy in [-48.0, -72.0] {
+            go(&mut e, below(p, dy));
+        }
+        release(&mut e);
+        let cutoff = params.cutoff.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(cutoff),
+                Call::Set(cutoff, 0.6),
+                Call::Set(cutoff, 0.61),
+                Call::Set(cutoff, 0.71),
+                Call::End(cutoff)
+            ]
+        );
+    }
+
+    /// A trackpad's or a Magic Mouse's points turn a knob as far as they travel (a notch's 2 %
+    /// for every 40 points, a fraction for a fraction; issue #107), in one gesture; VOICES, a
+    /// stepped knob, steps once a notch's travel has gathered.
+    #[test]
+    fn a_trackpad_turns_a_knob_in_proportion_and_voices_by_steps() {
+        let (mut e, host, params) = editing_poly();
+        let pixels = |e: &mut Editing, y: f32| {
+            e.mouse(MouseEvent::WheelScrolled {
+                delta: ScrollDelta::Pixels { x: 0.0, y },
+                modifiers: Modifiers::empty(),
+            });
+        };
+        let p = at(&e, centre("emphasis"));
+        go(&mut e, p);
+        for y in [4.0, 6.0, 30.0, -10.0] {
+            pixels(&mut e, y);
+        }
+        let emphasis = params.emphasis.as_ptr();
+        let calls = host.take();
+        assert_eq!(calls.first(), Some(&Call::Begin(emphasis)));
+        let set: Vec<f32> = calls
+            .iter()
+            .filter_map(|c| match c {
+                Call::Set(p, v) if *p == emphasis => Some(*v),
+                _ => None,
+            })
+            .collect();
+        let want = [0.002, 0.005, 0.02, 0.015];
+        assert_eq!(set.len(), want.len(), "{calls:?}");
+        for (got, want) in set.iter().zip(want) {
+            assert!((got - want).abs() < 1e-6, "{set:?}");
+        }
+        if let Some(s) = &mut e.scroll {
+            s.last -= SCROLL_REST * 2;
+        }
+        e.draw();
+        assert_eq!(host.take(), vec![Call::End(emphasis)]);
+        // VOICES: 30 points nothing; 15 more, a voice.
+        let p = at(&e, centre("voices"));
+        go(&mut e, p);
+        let before = params.voices.unmodulated_normalized_value();
+        pixels(&mut e, 30.0);
+        let voices = params.voices.as_ptr();
+        assert_eq!(host.take(), vec![Call::Begin(voices)]);
+        pixels(&mut e, 15.0);
+        let calls = host.take();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert!(
+            matches!(calls[0], Call::Set(p, v) if p == voices && (v - before - 0.125).abs() < 1e-6),
+            "{calls:?} from {before}"
+        );
+    }
+
+    /// What a scroll is as baseview gives it on each system (issue #107): macOS's points (a
+    /// precise device) as they come, 40 to a notch; a line a notch whatever its size (a wheel's,
+    /// X11's and macOS's, fractions too); on Windows lines as far as they go, a line a notch,
+    /// fractions (a precision touchpad's) and several at once (a fast wheel's) alike.
+    #[test]
+    fn scrolls_read_as_notches_or_travel_as_each_system_reports_them() {
+        let px = |y| ScrollDelta::Pixels { x: 0.0, y };
+        let lines = |y| ScrollDelta::Lines { x: 0.0, y };
+        for windows in [false, true] {
+            assert_eq!(scroll_travel(px(10.0), windows), 10.0);
+            assert_eq!(scroll_travel(px(-80.0), windows), -80.0);
+            assert_eq!(scroll_travel(lines(1.0), windows), 40.0);
+            assert_eq!(scroll_travel(lines(-1.0), windows), -40.0);
+            assert_eq!(scroll_travel(lines(0.0), windows), 0.0);
+        }
+        for (y, elsewhere, windows) in [
+            (0.125, 40.0, 5.0),
+            (-0.25, -40.0, -10.0),
+            (3.0, 40.0, 120.0),
+            (-1.5, -40.0, -60.0),
+        ] {
+            assert_eq!(scroll_travel(lines(y), false), elsewhere, "{y}");
+            assert_eq!(scroll_travel(lines(y), true), windows, "{y}");
+        }
+        assert_eq!(PRECISE_LINES, cfg!(windows));
+        // A slow turn of a Mac's wheel, a tenth of a line an event, turns a knob a notch an
+        // event, as before.
+        let (mut e, host, params) = editing();
+        e.precise_lines = false;
+        let p = at(&e, centre("cutoff"));
+        go(&mut e, p);
+        for _ in 0..3 {
+            wheel(&mut e, 0.1);
+        }
+        let cutoff = params.cutoff.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(cutoff),
+                Call::Set(cutoff, 0.52),
+                Call::Set(cutoff, 0.54),
+                Call::Set(cutoff, 0.56)
+            ]
+        );
     }
 
     /// A wheel's gesture waits for the wheel to rest, and a press ends it before beginning
@@ -6937,6 +12905,8 @@ mod tests {
 
     #[test]
     fn it_opens_at_four_fifths_of_the_screen_until_resized() {
+        // (The official panel's: the process's chosen look is another test's to change.)
+        let fitted_width = |screen| fitted_width_in(screen, art::Panel::OFFICIAL);
         // A 14-inch MacBook Pro's screen less the menu bar; a 34-inch ultrawide's.
         assert_eq!(fitted_width(Some((1512.0, 949.0))), 1210);
         // The height's share sets it on a wide screen (the panel and the strip under it).
@@ -6957,6 +12927,7 @@ mod tests {
     fn on_x11_it_opens_to_fit_the_monitor_it_is_on() {
         use screen::{Rect, monitor_area};
         let r = |x, y, w, h| Rect { x, y, w, h };
+        let fitted_width = |screen| fitted_width_in(screen, art::Panel::OFFICIAL);
         let whole = r(0, 0, 5120, 1440);
         let (left, right) = (r(0, 0, 2560, 1440), r(2560, 0, 2560, 1440));
         let monitors = [(left, true), (right, false)];
@@ -7013,8 +12984,12 @@ mod tests {
 
     /// Where a strip target is, found where the strip's hit test finds it.
     fn strip_at(target: StripTarget) -> (f64, f64) {
-        let p = strip::centre(target);
-        assert_eq!(strip::hit(p.0, p.1), Some(target), "{target:?} not found");
+        let p = strip::centre(Rail::Plugin, target);
+        assert_eq!(
+            strip::hit(Rail::Plugin, p.0, p.1),
+            Some(target),
+            "{target:?} not found"
+        );
         p
     }
 
@@ -7188,7 +13163,14 @@ mod tests {
                 placement: EnumParam::new("Scatter Placement", placement),
                 ..Ca72Params::default()
             };
-            strip_scene(&p, 0, (&[], 0.0), StripScene::default()).placement
+            strip_scene(
+                &p,
+                0,
+                (&[], 0.0),
+                &[None; LIVE.len()],
+                StripScene::default(),
+            )
+            .placement
         };
         assert_eq!(lit(true, false, Scatter::Even), Some(0));
         assert_eq!(lit(true, false, Scatter::Centre), Some(1));
@@ -7220,7 +13202,13 @@ mod tests {
                 doubled: BoolParam::new("Double", doubled),
                 ..Ca72Params::default()
             };
-            strip_scene(&p, 1 << 2, (&[], 0.5), StripScene::default())
+            strip_scene(
+                &p,
+                1 << 2,
+                (&[], 0.5),
+                &[None; LIVE.len()],
+                StripScene::default(),
+            )
         };
         let s = scene(false);
         let Field::Scatter(places) = &s.field else {
@@ -7281,7 +13269,13 @@ mod tests {
                 inert,
                 "POLY {poly}, UNISON {unison}, DOUBLE {doubled}, WIDTH {width}"
             );
-            let s = strip_scene(&p, 0, (&[], 0.0), StripScene::default());
+            let s = strip_scene(
+                &p,
+                0,
+                (&[], 0.0),
+                &[None; LIVE.len()],
+                StripScene::default(),
+            );
             assert_eq!(s.readouts[0].1, !inert, "the readout lit");
         }
         // The editor, at the defaults (MONO, SCATTER, WIDTH 0).
@@ -7303,6 +13297,636 @@ mod tests {
         assert!(e.typing.is_none());
         e.start_typing(Readout::Drive);
         assert!(e.typing.is_some());
+    }
+
+    /// GLIDE's menu selects a range in one host gesture, with its current choice marked. LONG
+    /// reaches the scene and the tip; selecting NORMAL again removes the print and the suffix.
+    #[test]
+    fn the_glide_menu_sets_its_range_and_the_panel_and_tip_follow() {
+        use crate::params::GlideRange;
+        for range in [GlideRange::Normal, GlideRange::Long] {
+            let (mut e, host, params) = editing_of(
+                Ca72Params {
+                    glide: FloatParam::new(
+                        "Glide",
+                        7.5,
+                        FloatRange::Linear {
+                            min: 0.0,
+                            max: 10.0,
+                        },
+                    ),
+                    glide_range: EnumParam::new("Glide Range", range),
+                    ..Ca72Params::default()
+                },
+                Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+            );
+            e.draw();
+            let long = range == GlideRange::Long;
+            assert_eq!(e.scene.glide_long, long);
+            let point = at(&e, centre("glide"));
+            e.hover = Some(Target::Control(
+                ca72_panel::controls::index("glide").expect("GLIDE"),
+            ));
+            assert_eq!(
+                e.tip().expect("a tip").0,
+                if long {
+                    "GLIDE: 7.5 · LONG"
+                } else {
+                    "GLIDE: 7.5"
+                }
+            );
+            right_click(&mut e, point);
+            let items = menu_items(&e);
+            assert_eq!(
+                &items[items.len() - 3..],
+                &[
+                    ("GLIDE RANGE".to_owned(), false),
+                    ("NORMAL".to_owned(), long),
+                    ("LONG (×5)".to_owned(), !long),
+                ]
+            );
+            let m = e.learning.menu().expect("a menu");
+            assert_eq!(m.heads, vec![items.len() - 3]);
+            assert_eq!(m.marked, vec![items.len() - if long { 1 } else { 2 }]);
+            host.take();
+            menu_item(&mut e, if long { "NORMAL" } else { "LONG (×5)" });
+            let p = params.glide_range.as_ptr();
+            assert_eq!(
+                host.take(),
+                vec![
+                    Call::Begin(p),
+                    Call::Set(p, if long { 0.0 } else { 1.0 }),
+                    Call::End(p)
+                ]
+            );
+            // The test host records gestures; apply its automation as the real host does.
+            let context = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+                params.clone(),
+                48_000.0,
+                ProcessMode::Realtime,
+            );
+            assert!(context.automate(p, if long { 0.0 } else { 1.0 }));
+            e.draw();
+            assert_eq!(e.scene.glide_long, !long);
+            assert_eq!(params.controls().panel.glide_long, !long);
+        }
+    }
+
+    /// A WAVEFORM switch's menu (decisions.md R-CONTINUOUS-WAVE): a WAVEFORM head, STEPPED (the
+    /// mode it is in, marked, not chosen again) and CONTINUOUS; CONTINUOUS chosen on WIDE puts the
+    /// shape at WIDE's place exactly first, so the sound does not move, then the mode, each a
+    /// gesture; oscillator 3's sawtooth goes to its reverse sawtooth's place.
+    #[test]
+    fn a_waveform_switchs_menu_makes_its_waveform_continuous() {
+        use crate::params::{Wave, Wave3};
+        let (mut e, host, params) = editing_of(
+            Ca72Params {
+                osc1_waveform: EnumParam::new("Osc 1 Waveform", Wave::WideRectangle),
+                osc3_waveform: EnumParam::new("Osc 3 Waveform", Wave3::Sawtooth),
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        e.draw();
+        let p = at(&e, centre("osc1_waveform"));
+        right_click(&mut e, p);
+        let items = menu_items(&e);
+        let tail: Vec<(String, bool)> = items[items.len() - 3..].to_vec();
+        assert_eq!(
+            tail,
+            [
+                ("WAVEFORM".to_owned(), false),
+                ("STEPPED".to_owned(), false),
+                ("CONTINUOUS".to_owned(), true)
+            ]
+        );
+        let m = e.learning.menu().expect("a menu").clone();
+        assert_eq!(m.heads, vec![items.len() - 3]);
+        assert_eq!(m.marked, vec![items.len() - 2]);
+        host.take();
+        menu_item(&mut e, "CONTINUOUS");
+        let places = interact::CONTINUOUS_PLACES;
+        let (shape, mode) = (params.osc1_shape.as_ptr(), params.osc1_shape_mode.as_ptr());
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(shape),
+                Call::Set(shape, (4.0 / places) as f32),
+                Call::End(shape),
+                Call::Begin(mode),
+                Call::Set(mode, 1.0),
+                Call::End(mode),
+            ]
+        );
+        // (The engine takes that place as WIDE's exactly.)
+        let s = ca72::voice::Shape {
+            continuous: true,
+            at: f64::from((4.0 / places) as f32) * places,
+            modulated: false,
+            direction: ca72::voice::ModDirection::Onward,
+        };
+        assert_eq!(ca72::voice::shape_at(s, Default::default()), 4.0);
+        // Oscillator 3 on SAWTOOTH: its reverse sawtooth's place, CONTINUOUS's third.
+        let p = at(&e, centre("osc3_waveform"));
+        right_click(&mut e, p);
+        menu_item(&mut e, "CONTINUOUS");
+        let shape3 = params.osc3_shape.as_ptr();
+        assert!(
+            host.take()
+                .contains(&Call::Set(shape3, (2.0 / places) as f32)),
+            "oscillator 3's place"
+        );
+    }
+
+    /// A CONTINUOUS switch (decisions.md R-CONTINUOUS-WAVE): its arc and MOD key on the panel, the
+    /// others' not; dragged, it turns without steps, WAVEFORM naming the nearest position; a
+    /// legend clicked lands on its place exactly; its tip says the shape; its MOD key flips MOD,
+    /// Command-clicked turns MOD's way round (its colour following), a STEPPED oscillator's is
+    /// not there at all.
+    #[test]
+    fn a_continuous_switch_turns_and_its_key_flips_mod_and_its_way() {
+        use crate::params::{ShapeModDirection, Wave, WaveMode};
+        let places = interact::CONTINUOUS_PLACES;
+        let (mut e, host, params) = editing_of(
+            Ca72Params {
+                osc1_waveform: EnumParam::new("Osc 1 Waveform", Wave::Square),
+                osc1_shape_mode: EnumParam::new("Osc 1 Waveform Mode", WaveMode::Continuous),
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        e.draw();
+        let index = |p: &str| ca72_panel::controls::index(p).expect("a control");
+        assert_eq!(e.scene.arcs(), [true, false, false]);
+        // (A new shape at SAWTOOTH, as WAVEFORM begins.)
+        assert!((e.scene.shape[0].at - 2.0).abs() < 1e-6);
+        let (key1, key2) = (index("osc1_shape_mod"), index("osc2_shape_mod"));
+        assert!(e.operable(key1) && !e.operable(key2));
+        let (x, y) = centre("osc2_shape_mod");
+        assert_ne!(
+            e.hit(x, y),
+            Some(Target::Control(key2)),
+            "a hidden key found"
+        );
+        let (x, y) = centre("osc1_shape_mod");
+        assert_eq!(e.hit(x, y), Some(Target::Control(key1)));
+        let wave1 = index("osc1_waveform");
+        e.hover = Some(Target::Control(wave1));
+        assert_eq!(e.tip().expect("a tip").0, "OSCILLATOR-1 WAVEFORM: Sawtooth");
+        // Dragged 12 pixels (0.4 of a step) from SAWTOOTH: there, WAVEFORM still SAWTOOTH.
+        host.take();
+        let p = at(&e, centre("osc1_waveform"));
+        go(&mut e, p);
+        press(&mut e);
+        go(
+            &mut e,
+            Point {
+                x: p.x + 12.0,
+                y: p.y,
+            },
+        );
+        release(&mut e);
+        let calls = host.take();
+        let (wave, shape) = (params.osc1_waveform.as_ptr(), params.osc1_shape.as_ptr());
+        let last = |calls: &[Call], q| {
+            calls
+                .iter()
+                .rev()
+                .find_map(|c| match c {
+                    Call::Set(p, v) if *p == q => Some(*v),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("not set: {calls:?}"))
+        };
+        assert!(
+            (f64::from(last(&calls, shape)) * places - 2.4).abs() < 1e-5,
+            "{calls:?}"
+        );
+        assert_eq!(
+            last(&calls, wave),
+            2.0 / 5.0,
+            "WAVEFORM the nearest: {calls:?}"
+        );
+        // NARROW's legend clicked: NARROW's place exactly.
+        let set = ca72_panel::controls::Legends::Waves12;
+        let (lx, ly) = e.renderer.layout().legend_at(set, 5);
+        let (cx, cy) = centre("osc1_waveform");
+        let p = at(&e, (cx + lx, cy + ly));
+        click(&mut e, p);
+        let calls = host.take();
+        assert_eq!(last(&calls, shape), (5.0 / places) as f32);
+        // The key: MOD on, a gesture of its own; Command-clicked, its next way.
+        let p = at(&e, centre("osc1_shape_mod"));
+        click(&mut e, p);
+        let m = params.osc1_shape_mod.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(m), Call::Set(m, 1.0), Call::End(m)]
+        );
+        let shortcut = if cfg!(target_os = "macos") {
+            Modifiers::META
+        } else {
+            Modifiers::CONTROL
+        };
+        go(&mut e, p);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: shortcut,
+        });
+        e.mouse(MouseEvent::ButtonReleased {
+            button: MouseButton::Left,
+            modifiers: shortcut,
+        });
+        let dir = params.osc1_shape_mod_dir.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(dir), Call::Set(dir, 0.5), Call::End(dir)]
+        );
+        assert_eq!(
+            params.osc1_shape_mod_dir.value(),
+            ShapeModDirection::Clockwise,
+            "(the test's host keeps no value)"
+        );
+        e.hover = Some(Target::Control(key1));
+        assert_eq!(
+            e.tip().expect("a tip").0,
+            "OSCILLATOR-1 MOD, CLOCKWISE: Off"
+        );
+        // Oscillator 2's place under its switch takes nothing.
+        let p = at(&e, centre("osc2_shape_mod"));
+        click(&mut e, p);
+        assert!(host.take().is_empty(), "the hidden key took a press");
+    }
+
+    /// A CONTINUOUS switch dragged slowly across its places (the owner, 2026-10-20: "It should
+    /// just be one continuous smooth motion"): each half pixel moves the shape the host is given
+    /// the same small way, through SAWTOOTH and SQUARE as between them.
+    #[test]
+    fn a_continuous_switch_dragged_slowly_moves_smoothly_through_its_places() {
+        use crate::params::WaveMode;
+        let places = interact::CONTINUOUS_PLACES;
+        let (mut e, host, params) = editing_of(
+            Ca72Params {
+                osc1_shape_mode: EnumParam::new("Osc 1 Waveform Mode", WaveMode::Continuous),
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        e.draw();
+        host.take();
+        let p = at(&e, centre("osc1_waveform"));
+        go(&mut e, p);
+        press(&mut e);
+        // (Past the click's threshold first, then half a pixel at a time across two places.)
+        go(
+            &mut e,
+            Point {
+                x: p.x + 4.0,
+                y: p.y,
+            },
+        );
+        for k in 1..=80 {
+            go(
+                &mut e,
+                Point {
+                    x: p.x + 4.0 + 0.5 * f64::from(k),
+                    y: p.y,
+                },
+            );
+        }
+        release(&mut e);
+        let shape = params.osc1_shape.as_ptr();
+        let set: Vec<f64> = host
+            .take()
+            .iter()
+            .filter_map(|c| match c {
+                Call::Set(p, v) if *p == shape => Some(f64::from(*v) * places),
+                _ => None,
+            })
+            .collect();
+        assert!(set.len() > 60, "{set:?}");
+        assert!(set[0] < 2.2 && set[set.len() - 1] > 3.4, "{set:?}");
+        let each = 0.5 / 30.0;
+        for w in set.windows(2).skip(1) {
+            let moved = w[1] - w[0];
+            assert!(
+                (moved - each).abs() < 1e-5,
+                "at {:.4}: moved {moved:.6}",
+                w[0]
+            );
+        }
+    }
+
+    /// MOD's orb (decisions.md R-CONTINUOUS-WAVE): where the voices have a CONTINUOUS shape while
+    /// its MOD is on, none while it is off or STEPPED.
+    #[test]
+    fn mods_orb_shows_where_the_voices_have_the_shape() {
+        use crate::params::WaveMode;
+        let (mut e, _host, _params) = editing_of(
+            Ca72Params {
+                osc1_shape_mode: EnumParam::new("Osc 1 Waveform Mode", WaveMode::Continuous),
+                osc1_shape_mod: BoolParam::new("Osc 1 Shape Mod", true),
+                osc2_shape_mode: EnumParam::new("Osc 2 Waveform Mode", WaveMode::Continuous),
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        e.meters.publish_shapes([Some(3.4), Some(1.0), Some(2.0)]);
+        e.draw();
+        assert_eq!(e.scene.shape[0].orb, Some(f64::from(3.4f32)));
+        assert_eq!(e.scene.shape[1].orb, None, "MOD off");
+        assert_eq!(e.scene.shape[2].orb, None, "STEPPED");
+        e.meters.publish_shapes([None; 3]);
+        e.draw();
+        assert_eq!(e.scene.shape[0].orb, None, "no voice");
+    }
+
+    /// Oscillators 2's and 3's timed mode on the panel (decisions.md R-OSC-TIMED): at LO with its
+    /// key on, oscillator 3's FREQUENCY turns its DIVISION a step at a time (FREQUENCY's own
+    /// place untouched), its tip names the value, it takes a note value typed, and a menu on it
+    /// learns DIVISION; its key flips TIMED and is learnable; oscillator 2's key, at 8', is
+    /// dimmed and takes nothing, and its FREQUENCY is FREQUENCY.
+    #[test]
+    fn a_timed_oscillators_dial_and_key_operate_its_timed_mode() {
+        use crate::params::{Division, Footage};
+        let (mut e, host, params) = editing_of(
+            Ca72Params {
+                osc3_range: EnumParam::new("Osc 3 Range", Footage::Lo),
+                osc3_timed: BoolParam::new("Osc 3 Timed", true),
+                osc3_division: EnumParam::new("Osc 3 Division", Division::EighthDotted),
+                osc2_timed: BoolParam::new("Osc 2 Timed", true),
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        e.draw();
+        let index = |p: &str| ca72_panel::controls::index(p).expect("a control");
+        let (freq2, freq3) = (index("osc2_frequency"), index("osc3_frequency"));
+        assert_eq!(
+            e.scene.timed,
+            [
+                ca72_panel::render::Timed {
+                    division: 8,
+                    inert: true
+                },
+                ca72_panel::render::Timed {
+                    division: 9,
+                    inert: false
+                }
+            ]
+        );
+        assert_eq!(e.scene.timed_dials(), [false, true]);
+        assert!((e.scene.values[freq3] - 9.0 / 17.0).abs() < 1e-6);
+        assert!(matches!(
+            e.kind_of(freq3),
+            Kind::Knob {
+                dial: ca72_panel::controls::Dial::Timed,
+                ..
+            }
+        ));
+        assert!(matches!(
+            e.kind_of(freq2),
+            Kind::Knob {
+                dial: ca72_panel::controls::Dial::Freq,
+                ..
+            }
+        ));
+        // A notch of the wheel: one note value, DIVISION's, nothing of FREQUENCY's.
+        host.take();
+        let pt = at(&e, centre("osc3_frequency"));
+        go(&mut e, pt);
+        wheel(&mut e, 1.0);
+        e.draw();
+        let tip = e.scene.tip.clone().expect("a tip").0;
+        assert!(tip.starts_with("OSCILLATOR-3 DIVISION: 1/"), "{tip}");
+        e.end_gestures();
+        let calls = host.take();
+        let division = params.osc3_division.as_ptr();
+        let frequency = params.osc3_frequency.as_ptr();
+        let set: Vec<f32> = calls
+            .iter()
+            .filter_map(|c| match c {
+                Call::Set(p, v) if *p == division => Some(*v),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(set.len(), 1, "{calls:?}");
+        let step = (set[0] * 17.0 - 9.0).abs();
+        assert!((step - 1.0).abs() < 1e-4, "one step: {set:?}");
+        assert!(
+            !calls
+                .iter()
+                .any(|c| matches!(c, Call::Begin(p) | Call::Set(p, _) if *p == frequency)),
+            "FREQUENCY touched: {calls:?}"
+        );
+        // A note value typed at the knob: its division's text first, then the one typed.
+        assert!(e.start_knob_entry(freq3));
+        assert_eq!(e.knob_entry.as_ref().map(|k| k.text()), Some("8."));
+        for c in "16t".chars() {
+            keyed(&mut e, Key::Character(c.to_string()));
+        }
+        keyed(&mut e, Key::Enter);
+        assert!(
+            host.take().contains(&Call::Set(division, 16.0 / 17.0)),
+            "1/16 triplet typed"
+        );
+        // MIDI Learn on the timed knob learns DIVISION; on a key, its TIMED.
+        assert_eq!(e.learning.timed, [false, true]);
+        for (place, id) in [
+            (freq3, "osc3_division"),
+            (freq2, "osc2_frequency"),
+            (index("osc3_timed"), "osc3_timed"),
+            (index("osc2_timed"), "osc2_timed"),
+        ] {
+            assert_eq!(
+                crate::learning::learnable_at(Place::Panel(place), e.learning.timed),
+                crate::learn::index(id),
+                "{id}"
+            );
+        }
+        assert_eq!(
+            crate::learning::place(crate::learn::index("osc3_division").expect("learnable")),
+            Some(Place::Panel(freq3))
+        );
+        // Oscillator 3's key flips TIMED; oscillator 2's, at 8', is inert.
+        let (key2, key3) = (index("osc2_timed"), index("osc3_timed"));
+        assert!(e.operable(key3) && !e.operable(key2));
+        host.take();
+        let pt = at(&e, centre("osc3_timed"));
+        click(&mut e, pt);
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(params.osc3_timed.as_ptr()),
+                Call::Set(params.osc3_timed.as_ptr(), 0.0),
+                Call::End(params.osc3_timed.as_ptr())
+            ]
+        );
+        let pt = at(&e, centre("osc2_timed"));
+        click(&mut e, pt);
+        assert!(host.take().is_empty(), "the hidden key took a press");
+    }
+
+    /// A TIMED key away from its RANGE's LO (decisions.md R-OSC-TIMED; the owner: "they should
+    /// disappear ... if it's not on low mode"): off the panel, not found by the pointer (no
+    /// press, wheel, tip or menu), not ringed while learned from the list; its TIMED and
+    /// DIVISION kept. At LO, the same key is there and flips TIMED.
+    #[test]
+    fn a_timed_key_away_from_lo_is_off_the_panel() {
+        use crate::params::{Division, Footage};
+        for range in [Footage::R32, Footage::R8, Footage::R2] {
+            let (mut e, host, params) = editing_of(
+                Ca72Params {
+                    osc2_range: EnumParam::new("Osc 2 Range", range),
+                    osc2_timed: BoolParam::new("Osc 2 Timed", true),
+                    osc2_division: EnumParam::new("Osc 2 Division", Division::Sixteenth),
+                    osc3_range: EnumParam::new("Osc 3 Range", Footage::Lo),
+                    ..Ca72Params::default()
+                },
+                Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+            );
+            e.draw();
+            let index = |p: &str| ca72_panel::controls::index(p).expect("a control");
+            let (key2, key3) = (index("osc2_timed"), index("osc3_timed"));
+            assert!(e.off_panel(key2) && !e.off_panel(key3), "{range:?}");
+            assert!(e.scene.timed[0].inert && !e.scene.timed[1].inert);
+            let (x, y) = centre("osc2_timed");
+            assert_ne!(e.hit(x, y), Some(Target::Control(key2)), "{range:?}: found");
+            let (x, y) = centre("osc3_timed");
+            assert_eq!(e.hit(x, y), Some(Target::Control(key3)), "{range:?}");
+            // A press, the wheel, a tip and a menu on its place: nothing of the key's.
+            host.take();
+            let pt = at(&e, centre("osc2_timed"));
+            click(&mut e, pt);
+            go(&mut e, pt);
+            wheel(&mut e, 1.0);
+            e.end_gestures();
+            assert!(
+                host.take().is_empty(),
+                "{range:?}: the hidden key took a press"
+            );
+            e.draw();
+            assert!(e.scene.tip.is_none(), "{range:?}: {:?}", e.scene.tip);
+            // (A pointer resting there as RANGE leaves LO: no tip.)
+            e.hover = Some(Target::Control(key2));
+            assert!(e.tip().is_none(), "{range:?}");
+            e.hover = None;
+            right_click(&mut e, pt);
+            assert!(
+                !e.learning.menu().is_some_and(|m| m.title.contains("TIMED")),
+                "{range:?}: its menu"
+            );
+            e.learning.close_menu();
+            // Learned from the MIDI list: no ring round its empty place.
+            e.learning.learn(&params.midi_map, learnable("osc2_timed"));
+            e.draw();
+            assert_eq!(e.scene.learning, None, "{range:?}: ringed");
+            e.learning.learn(&params.midi_map, learnable("osc3_timed"));
+            e.draw();
+            assert_eq!(e.scene.learning, Some(key3), "{range:?}");
+            e.learning.cancel(&params.midi_map);
+            // Its values kept.
+            assert!(params.osc2_timed.value());
+            assert_eq!(params.osc2_division.value(), Division::Sixteenth);
+            // At LO, oscillator 3's key is on the panel and flips TIMED.
+            host.take();
+            let pt = at(&e, centre("osc3_timed"));
+            click(&mut e, pt);
+            let p = params.osc3_timed.as_ptr();
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(p), Call::Set(p, 1.0), Call::End(p)],
+                "{range:?}"
+            );
+        }
+    }
+
+    /// OSC. 3 CONTROL while oscillator 3 is timed (its key on, its RANGE at LO; decisions.md
+    /// R-OSC-TIMED): dimmed, and a click or the wheel on it does nothing, its value kept as it
+    /// was, on or off; with the key off or RANGE away from LO, live with its own setting.
+    #[test]
+    fn osc3_control_is_inert_while_oscillator_3_is_timed() {
+        use crate::params::Footage;
+        let index = |p: &str| ca72_panel::controls::index(p).expect("a control");
+        let control = index("osc3_control");
+        for (timed, range, inert) in [
+            (true, Footage::Lo, true),
+            (true, Footage::R8, false),
+            (false, Footage::Lo, false),
+            (false, Footage::R16, false),
+        ] {
+            for held in [true, false] {
+                let case = format!("TIMED {timed}, RANGE {range:?}, OSC. 3 CONTROL {held}");
+                let (mut e, host, params) = editing_of(
+                    Ca72Params {
+                        osc3_range: EnumParam::new("Osc 3 Range", range),
+                        osc3_timed: BoolParam::new("Osc 3 Timed", timed),
+                        osc3_control: BoolParam::new("Osc 3 Control", held),
+                        ..Ca72Params::default()
+                    },
+                    Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+                );
+                e.draw();
+                assert_eq!(osc3_control_inert(&params), inert, "{case}");
+                assert_eq!(e.scene.osc3_control_off, inert, "{case}: dimmed");
+                assert_eq!(e.operable(control), !inert, "{case}: operable");
+                // (Oscillator 3's RANGE and FREQUENCY live whatever.)
+                assert!(e.operable(index("osc3_range")) && e.operable(index("osc3_frequency")));
+                assert_eq!(e.scene.values[control], f64::from(u8::from(held)), "{case}");
+                host.take();
+                let pt = at(&e, centre("osc3_control"));
+                click(&mut e, pt);
+                let p = params.osc3_control.as_ptr();
+                if inert {
+                    go(&mut e, pt);
+                    wheel(&mut e, 1.0);
+                    wheel(&mut e, -1.0);
+                    e.end_gestures();
+                    assert!(host.take().is_empty(), "{case}: took a press or the wheel");
+                    assert_eq!(params.osc3_control.value(), held, "{case}: its value kept");
+                } else {
+                    assert_eq!(
+                        host.take(),
+                        vec![
+                            Call::Begin(p),
+                            Call::Set(p, if held { 0.0 } else { 1.0 }),
+                            Call::End(p)
+                        ],
+                        "{case}: flipped"
+                    );
+                }
+            }
+        }
+        // Alongside oscillator 3's MOD key (R-CONTINUOUS-WAVE): its waveform CONTINUOUS, the key
+        // on the panel and live while OSC. 3 CONTROL is inert.
+        let (mut e, host, params) = editing_of(
+            Ca72Params {
+                osc3_range: EnumParam::new("Osc 3 Range", Footage::Lo),
+                osc3_timed: BoolParam::new("Osc 3 Timed", true),
+                osc3_shape_mode: EnumParam::new(
+                    "Osc 3 Waveform Mode",
+                    crate::params::WaveMode::Continuous,
+                ),
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        e.draw();
+        let key = index("osc3_shape_mod");
+        assert!(e.scene.osc3_control_off && !e.operable(control));
+        assert!(e.operable(key) && !e.off_panel(key));
+        host.take();
+        let pt = at(&e, centre("osc3_control"));
+        click(&mut e, pt);
+        assert!(host.take().is_empty(), "OSC. 3 CONTROL took a press");
+        let pt = at(&e, centre("osc3_shape_mod"));
+        click(&mut e, pt);
+        let p = params.osc3_shape_mod.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(p), Call::Set(p, 1.0), Call::End(p)],
+            "the MOD key flipped"
+        );
     }
 
     #[test]
@@ -7555,6 +14179,13 @@ mod tests {
                 &e.renderer,
                 e.strip.frame(),
                 None,
+                None,
+                (
+                    e.page_shows().then(|| e.lfo.frame()),
+                    e.macros_show()
+                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                    &e.modulation,
+                ),
                 None,
                 false,
                 (e.physical_width, e.physical_height()),
@@ -8383,10 +15014,27 @@ mod tests {
     #[test]
     fn a_frame_is_shown_again_on_linux_only() {
         let now = Instant::now();
-        assert!(repaint_due(None, now), "the first frame is always shown");
-        assert!(!repaint_due(Some(now), now));
+        assert!(
+            repaint_due(None, None, now),
+            "the first frame is always shown"
+        );
+        assert!(!repaint_due(Some(now), None, now));
         let later = now + Duration::from_secs(1);
-        assert_eq!(repaint_due(Some(now), later), cfg!(target_os = "linux"));
+        assert_eq!(
+            repaint_due(Some(now), None, later),
+            cfg!(target_os = "linux")
+        );
+        // Settling after a size first shown (R-LINUX-RESIZE): again at every frame, until then.
+        let until = SETTLE.map(|for_| now + for_);
+        let next = now + Duration::from_millis(15);
+        assert_eq!(
+            repaint_due(Some(now), until, next),
+            cfg!(target_os = "linux")
+        );
+        assert!(
+            !repaint_due(Some(next), until, now + Duration::from_millis(260)),
+            "settled"
+        );
     }
 
     /// The window as it opens (the panel and the strip under it), written to
@@ -8669,7 +15317,7 @@ mod tests {
             assert!(
                 text(n)
                     .iter()
-                    .any(|t| t.contains("ABOUT SIX TIMES THE WORK OF HI"))
+                    .any(|t| t.contains("ABOUT SEVEN TIMES THE WORK OF HI"))
             );
             assert!(text(n).iter().any(|t| t == says), "{:?}", text(n));
             let dim: Vec<_> = n.lines.iter().rev().take(2).collect();
@@ -8749,6 +15397,14 @@ mod tests {
         let p = at(&e, centre("inner"));
         right_click(&mut e, p);
         shot(&mut e, "learn-3.png");
+        for (target, name) in [(BarTarget::Prev, "previous"), (BarTarget::Next, "next")] {
+            e.learning.cancel(&params.midi_map);
+            let point = on_strip(&e, strip_at(StripTarget::Bar(target)));
+            right_click(&mut e, point);
+            shot(&mut e, &format!("preset-{name}-menu.png"));
+            menu_item(&mut e, "MIDI LEARN");
+            shot(&mut e, &format!("preset-{name}-learning.png"));
+        }
     }
 
     /// The settings key's menu with FREQUENCY DIALS (decisions.md R54), and oscillator 2's
@@ -8782,12 +15438,63 @@ mod tests {
         }
     }
 
+    /// SETTINGS offers AGENTS in the standalone alone (decisions.md R-MCP): ALLOW and OFF, the
+    /// one in force marked; off until chosen. `agents-<n>.png` in `$CA72_AGENTS_PNG`.
+    #[test]
+    fn agents_are_allowed_in_the_standalones_settings_menu() {
+        let out = std::env::var_os("CA72_AGENTS_PNG").map(std::path::PathBuf::from);
+        let (mut e, _host, _) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        assert!(
+            !menu_items(&e).iter().any(|(t, _)| t == "AGENTS"),
+            "not in a host"
+        );
+        e.learning.close_menu();
+        let (mut e, _host, _) = editing_standalone();
+        assert!(!e.settings.agents && !e.agents_allowed());
+        click(&mut e, key);
+        let items = menu_items(&e);
+        let at = items
+            .iter()
+            .position(|(t, _)| t == "AGENTS")
+            .expect("AGENTS");
+        assert_eq!(
+            items[at + 1..at + 3],
+            [("ALLOW".to_owned(), true), ("OFF".to_owned(), false)]
+        );
+        if let Some(out) = &out {
+            window_frame(&mut e)
+                .save_png(out.join("agents-1.png"))
+                .unwrap();
+        }
+        menu_item(&mut e, "ALLOW");
+        assert!(e.settings.agents && e.agents_allowed());
+        click(&mut e, key);
+        let items = menu_items(&e);
+        let at = items
+            .iter()
+            .position(|(t, _)| t == "AGENTS")
+            .expect("AGENTS");
+        assert_eq!(
+            items[at + 1..at + 3],
+            [("ALLOW".to_owned(), false), ("OFF".to_owned(), true)]
+        );
+        if let Some(out) = &out {
+            window_frame(&mut e)
+                .save_png(out.join("agents-2.png"))
+                .unwrap();
+        }
+        menu_item(&mut e, "OFF");
+        assert!(!e.agents_allowed());
+    }
+
     /// The drawer's update check (decisions.md R27): its button the editor's, not the
     /// presets'; a check that could not be made offers the releases' page. No parameter is
     /// touched and the drawer stays open.
     #[test]
     fn the_drawer_checks_for_updates() {
-        use crate::update::{RELEASES, VERSION, fake};
+        use crate::update::{RELEASES, fake, shown};
         let dir = tempfile::tempdir().unwrap();
         let (mut e, host, _params) = editing_with(Library::at(dir.path()));
         e.update = Update::with(fake::no_curl, fake::browser);
@@ -8796,7 +15503,7 @@ mod tests {
         let s = &e.browser.drawer.update;
         assert_eq!(
             (s.text.as_str(), s.button.as_str()),
-            (format!("CA-72 {VERSION}").as_str(), "CHECK FOR UPDATES")
+            (format!("CA-72 {}", shown()).as_str(), "CHECK FOR UPDATES")
         );
         let button = in_drawer(&e, presets_ui::update_centre());
         go(&mut e, button);
@@ -8858,6 +15565,2256 @@ mod tests {
         );
         go(&mut e, pt);
         window_frame(&mut e).save_png(out).unwrap();
+    }
+
+    /// The LFO page and modulation as the editor shows them, for looking at, written to
+    /// `$CA72_LFO_PNG`, the folder: `page.png` (the page, two LFOs on CUTOFF and one on VOLUME,
+    /// the orbs moving), `drag.png` (an assignment dragged from LFO 1's jack over EMPHASIS),
+    /// `hover.png` (the strip's page, CUTOFF under the pointer: its rings, pop-up and tip),
+    /// `menu.png` (CUTOFF's menu), `lfo-menu.png` (LFO 2's own), `glow.png` (the page away, an
+    /// LFO moving: its key glowing), `mode-tip.png` and `mode-tip-4.png` (MODE's tips).
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_lfo_pngs() {
+        use crate::lfo::{Reading, Source, Target as T};
+        let Some(out) = std::env::var_os("CA72_LFO_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        let (mut e, _, params) = editing();
+        let patch = Arc::clone(&params.lfo_patch);
+        patch.assign(Source::Lfo(0), T::Cutoff, 0.4).unwrap();
+        patch.assign(Source::Lfo(1), T::Cutoff, -0.25).unwrap();
+        patch
+            .assign(Source::Lfo(0), T::Osc2Frequency, -0.1)
+            .unwrap();
+        patch.assign(Source::Lfo(2), T::Volume, -0.5).unwrap();
+        let moving = |k: f32| Reading {
+            value: (k * 2.3).sin(),
+            phase: (k * 0.37) % 1.0,
+            since: 0.4 + k,
+            fade: 1.0,
+            moving: true,
+            ..Reading::default()
+        };
+        params
+            .lfo_scope
+            .publish(&[moving(0.1), moving(0.7), moving(1.3), Reading::default()]);
+        e.playing.visible = false;
+        lfo_open(&mut e);
+        e.modulating.due = None;
+        let save = |e: &mut Editing, name: &str| {
+            window_frame(e).save_png(out.join(name)).unwrap();
+        };
+        save(&mut e, "page.png");
+        // (MODE's tips, LFO 1's and LFO 4's: clear of the scopes, inside the window.)
+        for (n, name) in [(0, "mode-tip.png"), (3, "mode-tip-4.png")] {
+            let mode = at(&e, lfo_centre(n, 5));
+            go(&mut e, mode);
+            save(&mut e, name);
+        }
+        let jack = at(&e, ca72_panel::strip::lfo::places(0).jack);
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let emphasis = at(&e, centre("emphasis"));
+        go(&mut e, emphasis);
+        save(&mut e, "drag.png");
+        e.end_gestures();
+        let (x, y, w, h) = ca72_panel::strip::lfo::places(1).scope;
+        let scope = at(&e, (x + w / 2.0, y + h / 2.0));
+        right_click(&mut e, scope);
+        save(&mut e, "lfo-menu.png");
+        e.learning.close_menu();
+        let l = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Global)));
+        click(&mut e, l);
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        save(&mut e, "hover.png");
+        right_click(&mut e, cutoff);
+        save(&mut e, "menu.png");
+        e.learning.close_menu();
+        go(&mut e, Point { x: 5.0, y: 5.0 });
+        save(&mut e, "glow.png");
+        // (The LFOs moving each other, R-LFO's addendum: `cross.png` the page with LFO 1 and 2's
+        // RATEs in a loop, LFO 3 on its own PHASE, LFO 2 on LFO 1's LEVEL and macro 1 on LFO
+        // 4's; `cross-hover.png` LFO 1's RATE under the pointer, its pop-up; `level-hover.png`
+        // LFO 1's jack, its LEVEL's rings and tip.)
+        patch.assign(Source::Lfo(1), T::LfoRate(0), 0.4).unwrap();
+        patch.assign(Source::Lfo(0), T::LfoRate(1), -0.3).unwrap();
+        patch.assign(Source::Lfo(2), T::LfoPhase(2), 0.5).unwrap();
+        patch.assign(Source::Lfo(1), T::LfoLevel(0), -0.6).unwrap();
+        patch.assign(Source::Macro(0), T::LfoLevel(3), 0.8).unwrap();
+        lfo_open(&mut e);
+        e.modulating.due = None;
+        let (sx, sy, sw, sh) = ca72_panel::strip::lfo::places(3).scope;
+        let p = at(&e, (sx + sw / 2.0, sy + sh / 2.0));
+        go(&mut e, p);
+        save(&mut e, "cross.png");
+        let rate = at(&e, lfo_centre(0, 1));
+        go(&mut e, rate);
+        save(&mut e, "cross-hover.png");
+        go(&mut e, Point { x: 5.0, y: 5.0 });
+        let jack = at(&e, ca72_panel::strip::lfo::places(0).jack);
+        go(&mut e, jack);
+        save(&mut e, "level-hover.png");
+    }
+
+    // ---- The LFO page and modulation (decisions.md R-LFO).
+
+    /// The LFO page's knobs take exact values typed at them (R-KNOB-ENTRY), in their dials'
+    /// units: RATE in Hz, PHASE in degrees, FADE in seconds (signed, or IN and OUT).
+    #[test]
+    fn the_lfo_knobs_take_values_typed_in_their_units() {
+        let (mut e, host, params) = editing();
+        lfo_open(&mut e);
+        host.take();
+        let q = params.lfo(0);
+        for (k, text, p, want) in [
+            (3, "90", &q.phase, 90.0),
+            (4, "1", &q.fade, 1.0),
+            // (FADE signed, or IN and OUT: decisions.md R-LFO-FADE.)
+            (4, "-1.2", &q.fade, -1.2),
+            (4, "Out 0.5 s", &q.fade, -0.5),
+            (4, "in 2", &q.fade, 2.0),
+            (4, "-20", &q.fade, -10.0),
+            (1, "5 Hz", &q.rate, 5.0),
+        ] {
+            let id = format!("lfo1_{}", ca72_panel::controls::LFO_PARTS[k]);
+            entry_click(&mut e, &id);
+            assert!(e.knob_entry.is_some(), "{id} opens");
+            keyed(&mut e, Key::Character(text.into()));
+            keyed(&mut e, Key::Enter);
+            let calls = host.take();
+            let set = calls.iter().find_map(|c| match c {
+                Call::Set(ptr, v) if *ptr == p.as_ptr() => Some(*v),
+                _ => None,
+            });
+            let got = p.preview_plain(set.unwrap_or_else(|| panic!("{id}: {calls:?}")));
+            assert!((got - want).abs() < 0.01 * want.max(1.0), "{id}: {got}");
+        }
+    }
+
+    /// An LFO's FADE knob (decisions.md R-LFO-FADE): its tip reads Off at its centre, In and Out
+    /// to either side; let go within its detent of the centre it settles there, off, but let go
+    /// further it stays, and a notch of the mouse wheel from the centre steps out of the detent.
+    #[test]
+    fn the_fade_knob_reads_in_and_out_and_settles_at_off() {
+        use ca72_panel::controls::LFO_PARTS;
+        use ca72_panel::interact::FADE_DETENT;
+        let (mut e, host, params) = editing();
+        lfo_open(&mut e);
+        host.take();
+        let k = LFO_PARTS.iter().position(|p| *p == "fade").expect("FADE");
+        let f = params.lfo(0).fade.as_ptr();
+        let p = at(&e, lfo_centre(0, k));
+        go(&mut e, p);
+        e.draw();
+        let tip = |e: &Editing| e.tip().expect("FADE's tip").0;
+        assert!(tip(&e).starts_with("LFO 1 FADE: Off"), "{}", tip(&e));
+        let last_set = |calls: &[Call]| {
+            calls.iter().rev().find_map(|c| match c {
+                Call::Set(ptr, v) if *ptr == f => Some(*v),
+                _ => None,
+            })
+        };
+        // Dragged up, in; down, out; let go within the detent, off.
+        press(&mut e);
+        go(&mut e, below(p, -60.0));
+        e.draw();
+        assert!(last_set(&host.take()).is_some_and(|v| v > 0.6));
+        assert!(tip(&e).starts_with("LFO 1 FADE: In "), "{}", tip(&e));
+        go(&mut e, below(p, 60.0));
+        e.draw();
+        assert!(last_set(&host.take()).is_some_and(|v| v < 0.4));
+        assert!(tip(&e).starts_with("LFO 1 FADE: Out "), "{}", tip(&e));
+        go(&mut e, below(p, -1.0));
+        let near = last_set(&host.take()).expect("moved");
+        assert!(near > 0.5 && f64::from(near) - 0.5 <= FADE_DETENT, "{near}");
+        release(&mut e);
+        assert_eq!(host.take(), vec![Call::Set(f, 0.5), Call::End(f)]);
+        // Let go further: where it was let go. (Not a double click, which puts it back.)
+        e.last_press = None;
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, 12.0));
+        let out = last_set(&host.take()).expect("moved");
+        assert!(0.5 - f64::from(out) > FADE_DETENT, "{out}");
+        release(&mut e);
+        assert_eq!(host.take(), vec![Call::End(f)]);
+        // A notch of the wheel from the centre: out of the detent, and kept.
+        e.draw();
+        wheel(&mut e, 1.0);
+        assert_eq!(host.take(), vec![Call::Begin(f), Call::Set(f, 0.52)]);
+        e.end_scroll();
+        assert_eq!(host.take(), vec![Call::End(f)]);
+    }
+
+    /// The LFO page opened by the rail's LFO key (`lfo_page::Modulating::open`).
+    fn lfo_open(e: &mut Editing) {
+        e.draw();
+        let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Lfo)));
+        click(e, p);
+        assert!(e.page_shows());
+        e.draw();
+    }
+
+    fn lfo_centre(n: usize, k: usize) -> (f64, f64) {
+        CONTROLS[ca72_panel::controls::lfo_index(n, k)].centre()
+    }
+
+    /// Each scope shows one cycle of its LFO's waveform across its width, from PHASE (the owner,
+    /// 2026-10-20: "why does every waveform show two cycles? it should be 1"), stepped and
+    /// CONTINUOUS alike, and timed the same cycle (one note value) whatever the tempo; RATE,
+    /// FADE and MODE leave it as it is. The orb is where the LFO is in that cycle, at its
+    /// output, its wake at FADE's gain.
+    #[test]
+    fn each_scope_shows_one_cycle_from_its_phase() {
+        use crate::lfo::{LfoMode, LfoParams, Reading, Source, Target as T, wave};
+        use crate::params::{Wave, WaveMode};
+        use ca72_panel::strip::lfo::TRACE_POINTS;
+        let k = TRACE_POINTS - 1;
+        let traces = |phase: f32, timed: bool| {
+            let lfo = |n: usize| LfoParams {
+                waveform: EnumParam::new(format!("LFO {n} Waveform"), Wave::Sawtooth),
+                shape_mode: EnumParam::new(
+                    format!("LFO {n} Waveform Mode"),
+                    if n == 4 {
+                        WaveMode::Continuous
+                    } else {
+                        WaveMode::Stepped
+                    },
+                ),
+                shape: FloatParam::new(
+                    format!("LFO {n} Shape"),
+                    0.5,
+                    FloatRange::Linear { min: 0.0, max: 1.0 },
+                ),
+                phase: FloatParam::new(
+                    format!("LFO {n} Phase"),
+                    phase,
+                    FloatRange::Linear {
+                        min: 0.0,
+                        max: 360.0,
+                    },
+                ),
+                timed: BoolParam::new(format!("LFO {n} Timed"), timed && n == 3),
+                fade: FloatParam::new(
+                    format!("LFO {n} Fade"),
+                    if n == 2 { 2.0 } else { 0.0 },
+                    crate::lfo::FADE_RANGE,
+                ),
+                mode: EnumParam::new(
+                    format!("LFO {n} Mode"),
+                    if n == 2 { LfoMode::Env } else { LfoMode::Free },
+                ),
+                ..LfoParams::new(n)
+            };
+            let (mut e, _, params) = editing_of(
+                Ca72Params {
+                    lfo1: lfo(1),
+                    lfo2: lfo(2),
+                    lfo3: lfo(3),
+                    lfo4: lfo(4),
+                    ..Ca72Params::default()
+                },
+                Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+            );
+            lfo_open(&mut e);
+            (e.lfo_scene_now(), e, params)
+        };
+        let (at0, _, _) = traces(0.0, false);
+        let (at90, mut e, params) = traces(90.0, true);
+        for n in 0..4 {
+            let set = crate::lfo::settings(&params, n, crate::lfo::Edges::Soft);
+            let (t0, t90) = (&at0.columns[n].trace, &at90.columns[n].trace);
+            assert_eq!(t90.len(), TRACE_POINTS);
+            for i in 0..=k {
+                let x = i as f64 / k as f64 * (1.0 - 1e-9);
+                assert_eq!(t0[i], wave(set.at, x) as f32, "LFO {}: {i}", n + 1);
+                assert_eq!(t90[i], wave(set.at, 0.25 + x) as f32, "LFO {}: {i}", n + 1);
+            }
+            // (A sawtooth's one fall: one cycle, its start at PHASE; LFO 4's is CONTINUOUS.)
+            if n < 3 {
+                let falls = |t: &[f32]| t.windows(2).filter(|w| w[1] < w[0] - 0.5).count();
+                assert_eq!(falls(t0), 0, "LFO {}: from its start to its end", n + 1);
+                assert_eq!(falls(t90), 1, "LFO {}: a quarter on", n + 1);
+            }
+        }
+        // (ENV with FADE, LFO 2's, and timed, LFO 3's: the same cycle as LFO 1's.)
+        assert_eq!(at90.columns[1].trace, at90.columns[0].trace);
+        assert_eq!(at90.columns[2].trace, at90.columns[0].trace);
+        assert_ne!(at90.columns[3].trace, at90.columns[0].trace);
+        // The orb: where the reading has the LFO in its cycle, at its output.
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Cutoff, 0.4)
+            .unwrap();
+        params
+            .lfo_patch
+            .assign(Source::Lfo(1), T::Cutoff, 0.4)
+            .unwrap();
+        let r = |phase: f32, value: f32, fade: f32, moving: bool| Reading {
+            value,
+            phase,
+            since: 0.3,
+            fade,
+            moving,
+            ..Reading::default()
+        };
+        params.lfo_scope.publish(&[
+            r(0.75, 0.3, 1.0, true),
+            r(0.25, -0.5, 0.4, false),
+            r(0.5, 0.1, 0.5, true),
+            Reading::default(),
+        ]);
+        e.modulating.due = None;
+        e.read_lfos(Instant::now());
+        let s = e.lfo_scene_now();
+        let set = |n| crate::lfo::settings(&params, n, crate::lfo::Edges::Soft);
+        assert_eq!(s.columns[0].orb, Some((0.5, f64::from(0.3f32))));
+        assert_eq!(s.columns[0].orb_fade, 1.0);
+        // (ENV assigned, its cycle over: held at the cycle's end, on the trace.)
+        assert_eq!(s.columns[1].orb, Some((1.0, set(1).cycle_at(1.0))));
+        assert_eq!(s.columns[1].orb_fade, 1.0);
+        assert_eq!(s.columns[2].orb, Some((0.25, f64::from(0.1f32))));
+        assert_eq!(
+            s.columns[2].orb_fade, 0.5,
+            "FADE fading in: its wake so high"
+        );
+    }
+
+    /// Where an orb is along its one cycle: from PHASE, a cycle's start at 0 exactly; ENV at its
+    /// cycle's end once over, never begun, or in f32 its last instant.
+    #[test]
+    fn an_orb_is_where_its_lfo_is_in_its_cycle() {
+        use crate::lfo::{Mode, Reading, Settings};
+        use lfo_page::orb_at;
+        let set = |phase: f64, mode: Mode| Settings {
+            phase,
+            hz: 2.0,
+            mode,
+            ..Settings::default()
+        };
+        let r = |phase: f32, since: f32, moving: bool| Reading {
+            phase,
+            since,
+            moving,
+            ..Reading::default()
+        };
+        for mode in [Mode::Free, Mode::Retrig] {
+            let s = set(0.25, mode);
+            assert_eq!(orb_at(&s, &r(0.25, 0.1, true), 120.0, true), 0.0);
+            assert_eq!(orb_at(&s, &r(0.75, 0.1, true), 120.0, true), 0.5);
+            assert!((orb_at(&s, &r(0.1, 0.1, true), 120.0, true) - 0.85).abs() < 1e-6);
+            // (PHASE in f32 as the reading's: its start not read as just short of the end.)
+            let third = set(1.0 / 3.0, mode);
+            let start = r((1.0f64 / 3.0) as f32, 0.0, true);
+            assert_eq!(orb_at(&third, &start, 120.0, true), 0.0);
+        }
+        let env = set(0.5, Mode::Env);
+        assert!((orb_at(&env, &r(0.8, 0.15, true), 120.0, true) - 0.3).abs() < 1e-6);
+        assert_eq!(orb_at(&env, &r(0.5, 2.0, false), 120.0, true), 1.0, "over");
+        assert_eq!(
+            orb_at(&env, &r(0.5, 0.0, false), 120.0, false),
+            1.0,
+            "never begun"
+        );
+        assert_eq!(
+            orb_at(&env, &r(0.5, 0.25, false), 120.0, false),
+            0.5,
+            "not assigned"
+        );
+        let at0 = set(0.0, Mode::Env);
+        assert_eq!(
+            orb_at(&at0, &r(0.0, 0.499, true), 120.0, true),
+            1.0,
+            "its last instant"
+        );
+        assert_eq!(
+            orb_at(&at0, &r(0.0, 0.0, true), 120.0, true),
+            0.0,
+            "its first"
+        );
+    }
+
+    /// No tip on the LFO page covers a scope (the owner, 2026-10-20, saw MODE's over its
+    /// scope's corner): each control's, the jack's and the screen's, in every column, MODE at
+    /// each of its places, with the timed key on and off.
+    #[test]
+    fn no_tip_on_the_lfo_page_covers_a_scope() {
+        use crate::lfo::{LfoMode, LfoParams};
+        use ca72_panel::controls::LFO_PARTS;
+        use ca72_panel::strip::lfo::{LfoTarget, places, target_centre};
+        for timed in [false, true] {
+            for mode in [LfoMode::Free, LfoMode::Retrig, LfoMode::Env] {
+                let lfo = |n: usize| LfoParams {
+                    timed: BoolParam::new(format!("LFO {n} Timed"), timed),
+                    mode: EnumParam::new(format!("LFO {n} Mode"), mode),
+                    ..LfoParams::new(n)
+                };
+                let (mut e, _, _) = editing_of(
+                    Ca72Params {
+                        lfo1: lfo(1),
+                        lfo2: lfo(2),
+                        lfo3: lfo(3),
+                        lfo4: lfo(4),
+                        ..Ca72Params::default()
+                    },
+                    Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+                );
+                lfo_open(&mut e);
+                let size = e.renderer.text_size();
+                let hovered = |e: &mut Editing, p: (f64, f64), what: &str| {
+                    go(e, Point { x: 5.0, y: 5.0 });
+                    let p = at(e, p);
+                    go(e, p);
+                    e.draw();
+                    let (t, x, y) = e
+                        .scene
+                        .tip
+                        .clone()
+                        .unwrap_or_else(|| panic!("{what}: a tip"));
+                    let l = art::tip(e.renderer.fonts(), x, y, &t, size);
+                    let (x0, y0) = (l.origin.0 + l.bounds[0], l.origin.1 + l.bounds[1]);
+                    let (x1, y1) = (l.origin.0 + l.bounds[2], l.origin.1 + l.bounds[3]);
+                    assert!(
+                        x0 >= 0.0 && x1 <= art::W,
+                        "{what}: its tip {t:?} ({x0:.0}–{x1:.0}) leaves the window"
+                    );
+                    for m in 0..4 {
+                        let (sx, sy, sw, sh) = places(m).scope;
+                        assert!(
+                            x1 <= sx || x0 >= sx + sw || y1 <= sy || y0 >= sy + sh,
+                            "{what} ({timed}, {mode:?}): its tip {t:?} \
+                             ({x0:.0}, {y0:.0})–({x1:.0}, {y1:.0}) covers scope {m}"
+                        );
+                    }
+                };
+                for n in 0..4 {
+                    for (k, part) in LFO_PARTS.iter().enumerate() {
+                        hovered(&mut e, lfo_centre(n, k), &format!("LFO {} {part}", n + 1));
+                    }
+                    for t in [LfoTarget::Jack(n), LfoTarget::Screen(n)] {
+                        hovered(&mut e, target_centre(t), &format!("{t:?}"));
+                    }
+                }
+            }
+        }
+    }
+
+    /// The rail's LFO key (the owner, 2026-10-20: "the LFO rail key after the keyboard key")
+    /// shows the page in the keyboard's place, its key lit, the strip's own parts not drawn under
+    /// it; pressed lit, it stays. The keyboard's key shows the keyboard in its place; the
+    /// page's controls answer only while it shows.
+    #[test]
+    fn the_lfo_key_shows_its_page_in_the_keyboards_place() {
+        let (mut e, _, _) = editing();
+        e.playing.visible = false;
+        e.draw();
+        assert!(!e.browser.bar.lfo_page);
+        let rate = ca72_panel::controls::lfo_index(0, 1);
+        assert!(e.off_panel(rate), "not found while the page is away");
+        lfo_open(&mut e);
+        assert!(e.browser.bar.lfo_page && e.strip_scene.lfo && !e.strip_scene.extension());
+        assert!(!e.off_panel(rate));
+        let p = at(&e, lfo_centre(0, 1));
+        go(&mut e, p);
+        assert_eq!(e.hover, Some(Target::Control(rate)));
+        // The keyboard's key: the keyboard there instead.
+        let k = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Keyboard)));
+        click(&mut e, k);
+        e.draw();
+        assert!(!e.page_shows() && e.keyboard_shown() && e.strip_scene.keyboard.is_some());
+        assert!(e.browser.bar.keyboard && !e.browser.bar.lfo_page);
+        lfo_open(&mut e);
+        assert!(e.strip_scene.keyboard.is_none() && !e.browser.bar.keyboard);
+        let l = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Lfo)));
+        click(&mut e, l);
+        assert!(e.page_shows(), "the lit key leaves its page showing");
+        let g = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Global)));
+        click(&mut e, g);
+        e.draw();
+        assert!(!e.page_shows() && e.strip_scene.extension());
+    }
+
+    /// Every route through the three keys, PANEL off included, selects one page. The lit
+    /// key is inert, and PANEL restores the selected page without changing its preference.
+    #[test]
+    fn the_three_lower_page_keys_select_and_remember_one_page() {
+        let pages = [BarTarget::Global, BarTarget::Keyboard, BarTarget::Lfo];
+        for standalone in [false, true] {
+            let (mut e, host, _) = if standalone {
+                editing_standalone()
+            } else {
+                editing()
+            };
+            if standalone {
+                e.use_effects(crate::fx_view::FxView::new(Some(
+                    crate::fx_view::fake::Fake::with(&[], &[]),
+                )));
+            }
+            assert_eq!(
+                e.rail,
+                if standalone {
+                    Rail::Effects
+                } else {
+                    Rail::Plugin
+                }
+            );
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("settings.toml");
+            std::fs::write(&path, "keyboard_view = \"controls\"\nunknown = 42\n").unwrap();
+            e.settings.keyboard = Some(false);
+            e.playing.visible = false;
+            e.settings_file = Some(path.clone());
+            for from in pages {
+                for hidden in [false, true] {
+                    for to in pages {
+                        e.show_lower_page(from);
+                        let saved = e.settings.keyboard;
+                        if hidden {
+                            e.toggle_panel();
+                        }
+                        let p = on_strip(&e, strip::centre(e.rail, StripTarget::Bar(to)));
+                        click(&mut e, p);
+                        e.update_scene();
+                        assert!(e.expanded(), "{from:?} -> {to:?}, hidden {hidden}");
+                        assert_eq!(e.lower_page(), to);
+                        let lights = pages.map(|t| strip::key_light_of(&e.browser.bar, t));
+                        assert_eq!(lights.iter().filter(|&&n| n == 2).count(), 1);
+                        assert_eq!(strip::key_light_of(&e.browser.bar, to), 2);
+                        assert_eq!(
+                            e.settings.keyboard,
+                            match to {
+                                BarTarget::Global => Some(false),
+                                BarTarget::Keyboard => Some(true),
+                                _ => saved,
+                            }
+                        );
+                        let remembered = e.settings.keyboard;
+                        let file = std::fs::read_to_string(&path).unwrap();
+                        e.typing = Some((Typed::Strip(Readout::Level), "0".into()));
+                        click(&mut e, p);
+                        assert!(e.typing.is_some(), "lit key changes nothing");
+                        assert_eq!(std::fs::read_to_string(&path).unwrap(), file);
+                        e.typing = None;
+                        e.toggle_panel();
+                        e.update_scene();
+                        assert!(
+                            pages
+                                .iter()
+                                .all(|&t| strip::key_light_of(&e.browser.bar, t) < 2)
+                        );
+                        e.toggle_panel();
+                        assert_eq!(e.lower_page(), to);
+                        assert_eq!(e.settings.keyboard, remembered);
+                    }
+                }
+            }
+            assert!(
+                host.take().is_empty(),
+                "view keys never automate sound parameters"
+            );
+            let file = std::fs::read_to_string(&path).unwrap();
+            assert!(file.contains("unknown = 42"));
+            assert_eq!(Settings::read(&path).keyboard, e.settings.keyboard);
+        }
+    }
+
+    #[test]
+    fn page_keys_tips_name_their_print_and_the_learning_list_keeps_sound_controls() {
+        for standalone in [false, true] {
+            let (mut e, _, _) = if standalone {
+                editing_standalone()
+            } else {
+                editing()
+            };
+            if standalone {
+                e.use_effects(crate::fx_view::FxView::new(Some(
+                    crate::fx_view::fake::Fake::with(&[], &[]),
+                )));
+            }
+            assert_eq!(
+                e.rail,
+                if standalone {
+                    Rail::Effects
+                } else {
+                    Rail::Plugin
+                }
+            );
+            for (key, tip) in [
+                (BarTarget::Global, "GLOBAL: VOICES, STEREO AND OUTPUT"),
+                (BarTarget::Keyboard, "KEYS: PLAYABLE PIANO"),
+                (BarTarget::Lfo, "LFO: MODULATION SOURCES"),
+            ] {
+                let point = on_strip(&e, strip::centre(e.rail, StripTarget::Bar(key)));
+                go(&mut e, point);
+                assert_eq!(e.tip().map(|t| t.0), Some(tip.into()));
+            }
+            let list = e.learning.list_scene(&e.params.midi_map);
+            for name in ["KEYBOARD CONTROL 1", "KEYBOARD CONTROL 2"] {
+                assert!(list.rows.iter().any(|row| row.name == name));
+            }
+            for name in ["GLOBAL", "KEYS", "LFO"] {
+                assert!(!list.rows.iter().any(|row| row.name == name));
+            }
+        }
+    }
+
+    #[test]
+    fn page_keys_release_the_pointer_keep_drawers_and_leave_lit_keys_alone() {
+        let (mut e, _, _) = editing_standalone();
+        e.show_lower_page(BarTarget::Keyboard);
+        e.playing.press(60);
+        assert!(e.playing.dragging());
+        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        assert!(e.playing.dragging(), "lit key keeps a pointer note");
+        e.show_lower_page(BarTarget::Global);
+        assert!(!e.playing.dragging());
+        assert!(e.playing.notes.pop().unwrap().on);
+        assert!(!e.playing.notes.pop().unwrap().on);
+        e.show_lower_page(BarTarget::Keyboard);
+        e.playing.press(62);
+        e.show_lower_page(BarTarget::Lfo);
+        assert!(!e.playing.dragging());
+        e.toggle_lower(Lower::Arp);
+        for page in [BarTarget::Global, BarTarget::Keyboard, BarTarget::Lfo] {
+            e.show_lower_page(page);
+            assert!(e.lower.is_open(Lower::Arp));
+        }
+        e.lower.shut();
+        e.show_lower_page(BarTarget::Global);
+        e.browser.show(true, &e.params);
+        e.follow_drawer();
+        e.show_lower_page(BarTarget::Keyboard);
+        assert!(
+            e.browser.open,
+            "keyboard keeps the presets over it as before"
+        );
+        e.show_lower_page(BarTarget::Lfo);
+        assert!(!e.browser.open, "LFO puts the presets away as before");
+    }
+
+    #[test]
+    fn page_keys_leave_the_page_alone_when_the_host_refuses_to_show_panel() {
+        let (mut e, host, _) = editing();
+        e.show_lower_page(BarTarget::Keyboard);
+        e.toggle_panel();
+        host.fixed.store(true, Ordering::Relaxed);
+        let saved = e.settings.keyboard;
+        for page in [BarTarget::Global, BarTarget::Keyboard, BarTarget::Lfo] {
+            e.strip_press(StripTarget::Bar(page));
+            assert!(!e.expanded());
+            assert_eq!(e.lower_page(), BarTarget::Keyboard);
+            assert_eq!(e.settings.keyboard, saved);
+        }
+    }
+
+    #[test]
+    fn selecting_lfo_keeps_panel_shown_after_presets_temporarily_revealed_it() {
+        let (mut e, _, _) = editing();
+        e.show_lower_page(BarTarget::Global);
+        e.toggle_panel();
+        e.strip_press(StripTarget::Bar(BarTarget::Name));
+        assert!(e.expanded() && e.browser.open);
+        assert!(!e.params.editor_panel.load(Ordering::Relaxed));
+        let p = on_strip(&e, strip::centre(e.rail, StripTarget::Bar(BarTarget::Lfo)));
+        click(&mut e, p);
+        assert!(e.expanded() && !e.browser.open);
+        assert!(e.params.editor_panel.load(Ordering::Relaxed));
+        assert_eq!(e.lower_page(), BarTarget::Lfo);
+    }
+
+    /// The real editor's full frames and rail crops, in each lettering, look, rail and scale.
+    #[cfg(feature = "standalone-production")]
+    #[test]
+    #[ignore = "writes the rail keys' review pictures"]
+    fn the_rail_keys_pngs() {
+        let out = std::path::PathBuf::from(
+            std::env::var_os("CA72_RAIL_KEYS_PNG").expect("an output folder"),
+        );
+        std::fs::create_dir_all(&out).unwrap();
+        for standalone in [false, true] {
+            let (mut e, _, _) = if standalone {
+                editing_standalone()
+            } else {
+                editing()
+            };
+            if standalone {
+                e.use_effects(crate::fx_view::FxView::new(Some(
+                    crate::fx_view::fake::Fake::with(&[], &[]),
+                )));
+            }
+            let rail = if standalone { "standalone" } else { "plugin" };
+            for (look, skin) in [("worn", Skin::Worn), ("drawn", Skin::Drawn)] {
+                e.set_look(skin);
+                for (print, lettering) in
+                    [("normal", Lettering::Standard), ("large", Lettering::Large)]
+                {
+                    e.set_lettering(lettering);
+                    for scale in [0.44, 1.0] {
+                        let width = (art::W * scale).round() as u32;
+                        e.fit(1.0, width, width);
+                        for (page, key) in [
+                            ("global", BarTarget::Global),
+                            ("keyboard", BarTarget::Keyboard),
+                            ("lfo", BarTarget::Lfo),
+                        ] {
+                            e.strip_press(StripTarget::Bar(key));
+                            go(&mut e, Point { x: 0.0, y: 0.0 });
+                            let name = format!("{rail}-{look}-{print}-{scale}-{page}");
+                            let top = e.renderer.strip_row();
+                            let height = (strip::RAIL * e.renderer.scale()).round() as u32;
+                            let frame = window_frame(&mut e).clone();
+                            frame.save_png(out.join(format!("{name}.png"))).unwrap();
+                            frame
+                                .clone_rect(
+                                    resvg::tiny_skia::IntRect::from_xywh(0, top, width, height)
+                                        .unwrap(),
+                                )
+                                .unwrap()
+                                .save_png(out.join(format!("{name}-rail.png")))
+                                .unwrap();
+                            let left = (1900.0 * e.renderer.scale()).round() as u32;
+                            frame
+                                .clone_rect(
+                                    resvg::tiny_skia::IntRect::from_xywh(
+                                        left as i32,
+                                        top,
+                                        width - left,
+                                        height,
+                                    )
+                                    .unwrap(),
+                                )
+                                .unwrap()
+                                .save_png(out.join(format!("{name}-right.png")))
+                                .unwrap();
+                            // Selecting pages must also clear the former light in a partial redraw.
+                            e.composed = None;
+                            assert_eq!(frame.data(), window_frame(&mut e).data());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Each LFO's POLARITY, REVERSE and ON (R-LFO's corrections): UNI's key and ON's key (and
+    /// the title, ON's word) flip their parameters by a click; REVERSE is WAVEFORM's menu's,
+    /// marked while on. UNI, the trace runs 0..1 and its rings one way; reversed, the trace is
+    /// the cycle backwards; off, MODULATES reads MUTED, the orb goes, its rings dim, and the
+    /// tip and the pop-up say UNI and MUTED.
+    #[test]
+    fn an_lfos_polarity_reverse_and_on_show_and_operate() {
+        use crate::learning::{ModItem, Row};
+        use crate::lfo::{LfoKeys, Polarity, Source, Target as T};
+        use ca72_panel::strip::lfo::{LfoTarget, target_centre};
+        let (mut e, host, params) = editing();
+        lfo_open(&mut e);
+        host.take();
+        let k = params.lfo_keys(1);
+        for (place, ptr, to) in [
+            (lfo_centre(1, 7), k.polarity.as_ptr(), 1.0),
+            (lfo_centre(1, 8), k.on.as_ptr(), 0.0),
+            (target_centre(LfoTarget::Title(1)), k.on.as_ptr(), 0.0),
+        ] {
+            let p = at(&e, place);
+            click(&mut e, p);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(ptr), Call::Set(ptr, to), Call::End(ptr)]
+            );
+        }
+        let wave = ca72_panel::controls::lfo_index(1, 0);
+        let reverse = |e: &Editing| {
+            e.knob_rows(wave).into_iter().find_map(|r| match r {
+                Row::Item(ModItem::Reverse(1), t, true, marked) if t == "REVERSE" => Some(marked),
+                _ => None,
+            })
+        };
+        assert_eq!(reverse(&e), Some(false), "WAVEFORM's menu offers it");
+        e.mod_item(ModItem::Reverse(1));
+        let r = k.reverse.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(r), Call::Set(r, 1.0), Call::End(r)]
+        );
+        // As shown: LFO 2 UNI, reversed and off, on CUTOFF; LFO 1 as it was.
+        let (mut e, _, params) = editing_of(
+            Ca72Params {
+                lfo2_keys: LfoKeys {
+                    polarity: EnumParam::new("LFO 2 Polarity", Polarity::Uni),
+                    reverse: BoolParam::new("LFO 2 Reverse", true),
+                    on: BoolParam::new("LFO 2 On", false),
+                },
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        params
+            .lfo_patch
+            .assign(Source::Lfo(1), T::Cutoff, 0.25)
+            .expect("room");
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Cutoff, 0.4)
+            .expect("room");
+        assert_eq!(reverse(&e), Some(true), "marked");
+        lfo_open(&mut e);
+        let col = &e.lfo_scene.columns[1];
+        assert!(col.uni && !col.on);
+        assert_eq!(col.screen, "MUTED");
+        assert!(!col.in_use && col.orb.is_none());
+        assert!(
+            col.trace.iter().all(|v| (0.0..=1.0).contains(v)),
+            "UNI: 0..1"
+        );
+        // (TRIANGLE backwards from PHASE 0: from its top, the mirror of forwards.)
+        let set = crate::lfo::settings(&params, 1, crate::lfo::Edges::Soft);
+        let fwd = crate::lfo::Settings {
+            reverse: false,
+            ..set
+        };
+        for (i, v) in col.trace.iter().enumerate().skip(1) {
+            let x = i as f64 / (col.trace.len() - 1) as f64;
+            assert!((f64::from(*v) - fwd.cycle_at(1.0 - x)).abs() < 1e-3, "{i}");
+        }
+        let other = &e.lfo_scene.columns[0];
+        assert!(!other.uni && other.on && other.screen != "MUTED");
+        let cutoff = ca72_panel::controls::index("cutoff").expect("CUTOFF");
+        let k = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| k.control == cutoff)
+            .expect("its rings")
+            .clone();
+        assert!(!k.rings[0].one_way && !k.rings[0].dim, "LFO 1's");
+        assert!(k.rings[1].one_way && k.rings[1].dim, "LFO 2's");
+        let p = at(&e, centre("cutoff"));
+        go(&mut e, p);
+        e.draw();
+        let tip = e.scene.tip.clone().expect("a tip").0;
+        assert!(tip.ends_with("\u{b7} LFO 2 +25 % UNI MUTED"), "{tip}");
+        let popup = e.mod_scene.popup.clone().expect("its pop-up");
+        assert!(popup.dials[1].uni && popup.dials[1].muted);
+        assert_eq!(popup.dials[1].note(), "UNI \u{b7} MUTED");
+        assert_eq!(popup.dials[0].note(), "");
+    }
+
+    /// The page's controls operate their LFO's parameters as the panel's do: a knob dragged in
+    /// one gesture, MONO and the timed key flipped by a click, MODE's toggle to the place
+    /// clicked; RATE timed turns its DIVISION, stepped.
+    #[test]
+    fn the_lfo_pages_controls_operate_their_parameters() {
+        let (mut e, host, params) = editing();
+        lfo_open(&mut e);
+        host.take();
+        let q = params.lfo(1);
+        let p = at(&e, lfo_centre(1, 3));
+        go(&mut e, p);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        go(
+            &mut e,
+            Point {
+                x: p.x,
+                y: p.y - 30.0,
+            },
+        );
+        release(&mut e);
+        let calls = host.take();
+        assert_eq!(calls.first(), Some(&Call::Begin(q.phase.as_ptr())));
+        assert_eq!(calls.last(), Some(&Call::End(q.phase.as_ptr())));
+        well_formed(&calls);
+        let mono = at(&e, lfo_centre(1, 6));
+        click(&mut e, mono);
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(q.mono.as_ptr()),
+                Call::Set(q.mono.as_ptr(), 0.0),
+                Call::End(q.mono.as_ptr())
+            ]
+        );
+        // MODE: its toggle on its side, ENV at its right end.
+        let (mx, my) = lfo_centre(1, 5);
+        let env = at(&e, (mx + 40.0, my));
+        click(&mut e, env);
+        assert!(host.take().contains(&Call::Set(q.mode.as_ptr(), 1.0)));
+        // RATE timed: its DIVISION turned, a step at a time.
+        let p3 = params.lfo(3);
+        let timed = Ca72Params::default();
+        let _ = timed;
+        let i = ca72_panel::controls::lfo_index(3, 1);
+        assert!(!e.timed_dial(i));
+        assert!(matches!(
+            e.kind_of(i),
+            Kind::Knob {
+                dial: ca72_panel::controls::Dial::LfoRate,
+                ..
+            }
+        ));
+        assert_eq!(
+            e.operated(i).map(|o| o.text(o.default())),
+            Some(
+                p3.rate
+                    .normalized_value_to_string(p3.rate.default_normalized_value(), true)
+            )
+        );
+        // The last touched LFO is the column's.
+        assert_eq!(e.modulating.last, Some(crate::lfo::Source::Lfo(1)));
+    }
+
+    /// An assignment dragged from an OUT jack (the owner's "Drag to knob"): while held, the cord
+    /// and the knobs that can take it ringed, the one under the plug brightly with its preview
+    /// ring at 25 %; let go there, the LFO modulates it at +25 % (Pigments' convention), its
+    /// MODULATES screen saying so. Not on a switch; on another LFO's knob, that knob (R-LFO's
+    /// addendum).
+    #[test]
+    fn an_assignment_dragged_from_out_lands_on_a_knob_at_a_quarter() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, host, params) = editing();
+        lfo_open(&mut e);
+        host.take();
+        let jack = at(&e, ca72_panel::strip::lfo::places(1).jack);
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.draw();
+        let cord = e.mod_scene.cord.clone().expect("a cord");
+        assert!(cord.over.is_some(), "CUTOFF under the plug");
+        assert!(
+            cord.targets.len() >= 20,
+            "{} knobs ringed",
+            cord.targets.len()
+        );
+        let ringed = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| CONTROLS[k.control].param == "cutoff")
+            .expect("its preview");
+        assert_eq!(ringed.rings[0].depth, f64::from(crate::lfo::DEFAULT_DEPTH));
+        release(&mut e);
+        assert_eq!(
+            params.lfo_patch.depth(Source::Lfo(1), T::Cutoff),
+            Some(0.25)
+        );
+        assert!(host.take().is_empty(), "patch state: no host gesture");
+        assert!(e.modulating.patching.is_none());
+        e.draw();
+        assert!(e.mod_scene.cord.is_none());
+        assert_eq!(e.lfo_scene.columns[1].screen, "CUTOFF +25");
+        assert!(e.lfo_scene.columns[1].in_use);
+        // Dropped on a switch: nothing; on another LFO's knob, that knob (R-LFO's addendum).
+        for p in [at(&e, centre("osc_mod")), at(&e, lfo_centre(2, 3))] {
+            go(&mut e, jack);
+            e.mouse(MouseEvent::ButtonPressed {
+                button: MouseButton::Left,
+                modifiers: Modifiers::empty(),
+            });
+            go(&mut e, p);
+            release(&mut e);
+        }
+        assert_eq!(params.lfo_patch.count(Source::Lfo(1)), 2);
+        assert_eq!(
+            params.lfo_patch.depth(Source::Lfo(1), T::LfoPhase(2)),
+            Some(0.25)
+        );
+    }
+
+    /// A CONTINUOUS WAVEFORM's rings and pop-up take its own sweep, where its pointer stands at
+    /// its travel's ends (R-LFO's corrections: about 199 degrees, not a knob's 300): its ring from
+    /// its pointer as drawn, +25 % a quarter of that sweep, the pop-up's dial as far.
+    #[test]
+    fn a_continuous_waveforms_rings_take_its_own_sweep() {
+        use crate::lfo::{Source, Target as T};
+        use crate::params::{Wave, WaveMode};
+        let (mut e, _host, params) = editing_of(
+            Ca72Params {
+                osc1_waveform: EnumParam::new("Osc 1 Waveform", Wave::Square),
+                osc1_shape_mode: EnumParam::new("Osc 1 Waveform Mode", WaveMode::Continuous),
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Osc1Shape, 0.25)
+            .expect("room");
+        let wave = at(&e, centre("osc1_waveform"));
+        go(&mut e, wave);
+        e.draw();
+        let k = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| CONTROLS[k.control].param == "osc1_waveform")
+            .expect("its rings")
+            .clone();
+        assert_eq!(k.sweep, art::sweep(&CONTROLS[k.control].kind));
+        assert!((k.span() - 5.95 * 33.5).abs() < 1e-9, "{}", k.span());
+        let drawn = art::shape_angle(e.scene.shape[0].at);
+        assert!((k.angle(k.travel) - drawn).abs() < 1e-9, "from its pointer");
+        let (lo, hi, end) = ca72_panel::modulation::swing(&k, &k.rings[0]);
+        let quarter = 0.25 * k.span();
+        assert!((end - k.angle(k.travel) - quarter).abs() < 1e-9);
+        assert!((hi - lo - 2.0 * quarter).abs() < 1e-9, "{lo}..{hi}");
+        let popup = e.mod_scene.popup.clone().expect("its pop-up");
+        assert_eq!(popup.span, k.span());
+    }
+
+    #[test]
+    fn a_knobs_depth_popup_hides_on_press_and_cannot_intercept_its_drag() {
+        use crate::lfo::{Source, Target as T};
+        // A move may arrive before the next frame removes the cached popup.
+        for redraw in [false, true] {
+            let (mut e, host, params) = editing();
+            for source in [Source::Lfo(2), Source::Macro(0)] {
+                params
+                    .lfo_patch
+                    .assign(source, T::Cutoff, 0.15)
+                    .expect("room");
+            }
+            let cutoff = at(&e, centre("cutoff"));
+            go(&mut e, cutoff);
+            e.draw();
+            let popup = e.mod_scene.popup.clone().expect("hover shows the depths");
+            let (_, dials) = ca72_panel::modulation::popup_layout(&popup);
+            let over_depth = at(&e, dials[0].0);
+            host.take();
+            press(&mut e);
+            if redraw {
+                e.draw();
+            }
+            assert!(e.drag.is_some(), "the main knob is held");
+            assert!(
+                e.mod_scene_now().popup.is_none(),
+                "hidden before any movement"
+            );
+            let before = e.drag.as_ref().unwrap().value;
+            go(&mut e, over_depth);
+            e.draw();
+            assert!(e.mod_scene.popup.is_none(), "hidden throughout the drag");
+            assert_ne!(e.drag.as_ref().unwrap().value, before);
+            release(&mut e);
+            well_formed(&host.take());
+            for source in [Source::Lfo(2), Source::Macro(0)] {
+                assert_eq!(params.lfo_patch.depth(source, T::Cutoff), Some(0.15));
+            }
+            go(&mut e, cutoff);
+            e.draw();
+            assert!(
+                e.mod_scene.popup.is_some(),
+                "hover works again after release"
+            );
+        }
+    }
+
+    /// The rings show only while the LFO page shows, an assignment is dragged, or on the knob
+    /// under the pointer (the owner's "option 2"); there its pop-up shows a dial per source in its
+    /// colour, dragged up for more depth; a ring's end dragged round sets it; Alt/Option-drag on
+    /// the knob sets the last touched LFO's; the tip lists the depths; the knob's menu has a head
+    /// per source with DEPTH… (typed) and REMOVE.
+    #[test]
+    fn depths_are_set_by_the_pop_up_the_ring_alt_drag_and_the_menu() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, host, params) = editing();
+        let patch = Arc::clone(&params.lfo_patch);
+        patch.assign(Source::Lfo(0), T::Cutoff, 0.4).expect("room");
+        patch
+            .assign(Source::Lfo(1), T::Cutoff, -0.25)
+            .expect("room");
+        e.playing.visible = false;
+        e.draw();
+        assert!(e.mod_scene.knobs.is_empty(), "the panel as it was");
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.draw();
+        assert_eq!(e.mod_scene.knobs.len(), 1, "its own rings");
+        let tip = e.scene.tip.clone().expect("a tip").0;
+        assert!(
+            tip.ends_with("\u{b7} LFO 1 +40 % \u{b7} LFO 2 \u{2013}25 %"),
+            "{tip}"
+        );
+        let popup = e.mod_scene.popup.clone().expect("its pop-up");
+        assert_eq!(popup.dials.len(), 2);
+        // The pop-up's second dial dragged up 24 pixels: 10 % more.
+        let (_, dials) = ca72_panel::modulation::popup_layout(&popup);
+        let d = at(&e, dials[1].0);
+        go(&mut e, d);
+        e.draw();
+        assert!(e.mod_scene.popup.is_some(), "kept over itself");
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        go(
+            &mut e,
+            Point {
+                x: d.x,
+                y: d.y - 24.0,
+            },
+        );
+        release(&mut e);
+        assert!((patch.depth(Source::Lfo(1), T::Cutoff).unwrap() + 0.15).abs() < 1e-4);
+        // The first ring's end dragged round to the knob's pointer: taken away.
+        go(&mut e, cutoff);
+        e.draw();
+        let k = e.mod_scene.knobs[0].clone();
+        let end = at(&e, ca72_panel::modulation::ring_end(&k, 0));
+        go(&mut e, end);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let (px, py) = art::polar(k.skirt - 4.0, k.angle(k.travel));
+        let to = at(&e, (k.at.0 + px, k.at.1 + py));
+        go(&mut e, to);
+        release(&mut e);
+        assert_eq!(
+            patch.depth(Source::Lfo(0), T::Cutoff),
+            None,
+            "at 0: removed"
+        );
+        // Alt-drag on EMPHASIS: the last touched LFO's depth (LFO 3's, its column pressed).
+        e.modulating.last = Some(Source::Lfo(2));
+        let emphasis = at(&e, centre("emphasis"));
+        go(&mut e, emphasis);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::ALT,
+        });
+        go(
+            &mut e,
+            Point {
+                x: emphasis.x,
+                y: emphasis.y - 48.0,
+            },
+        );
+        release(&mut e);
+        assert!((patch.depth(Source::Lfo(2), T::Emphasis).unwrap() - 0.2).abs() < 1e-4);
+        assert!(host.take().is_empty(), "EMPHASIS itself untouched");
+        // CUTOFF's menu: LFO 2's head, its DEPTH… typed, its REMOVE.
+        right_click(&mut e, cutoff);
+        let items = menu_items(&e);
+        assert!(
+            items.iter().any(|(t, _)| t == "LFO 2 \u{b7} \u{2013}15 %"),
+            "{items:?}"
+        );
+        menu_item(&mut e, "DEPTH\u{2026}");
+        assert!(e.knob_entry.is_some());
+        keyed(&mut e, Key::Character("-60".into()));
+        keyed(&mut e, Key::Enter);
+        assert!((patch.depth(Source::Lfo(1), T::Cutoff).unwrap() + 0.6).abs() < 1e-6);
+        right_click(&mut e, cutoff);
+        menu_item(&mut e, "REMOVE");
+        assert_eq!(patch.depth(Source::Lfo(1), T::Cutoff), None);
+    }
+
+    /// The strip's knobs lie under the LFO page, so they take an LFO from their right-click menu:
+    /// a head, LFO 1 to LFO 4; one it already has, not again.
+    #[test]
+    fn a_strip_knob_takes_an_lfo_from_its_menu() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _, params) = editing();
+        e.playing.visible = false;
+        e.draw();
+        let drive = at(&e, centre("drive"));
+        right_click(&mut e, drive);
+        menu_item(&mut e, "LFO 3");
+        assert_eq!(params.lfo_patch.depth(Source::Lfo(2), T::Drive), Some(0.25));
+        right_click(&mut e, drive);
+        let items = menu_items(&e);
+        assert!(items.contains(&("LFO 3".to_owned(), false)), "{items:?}");
+        assert!(items.contains(&("LFO 1".to_owned(), true)));
+        assert!(items.iter().any(|(t, _)| t == "LFO 3 \u{b7} +25 %"));
+    }
+
+    /// An LFO's own menu (a right click on its scope): its colour from the phosphors, kept on the
+    /// computer; its EDGES, the patch's; the choice it is marked.
+    #[test]
+    fn an_lfos_menu_sets_its_colour_and_edges() {
+        use crate::lfo::{Edges, Phosphor};
+        let (mut e, _, params) = editing();
+        lfo_open(&mut e);
+        let (x, y, w, h) = ca72_panel::strip::lfo::places(2).scope;
+        let scope = at(&e, (x + w / 2.0, y + h / 2.0));
+        right_click(&mut e, scope);
+        assert_eq!(
+            e.learning.menu().map(|m| m.title.clone()),
+            Some("LFO 3".into())
+        );
+        menu_item(&mut e, "VIOLET");
+        assert_eq!(e.settings.lfo_colors[2], Phosphor::Violet);
+        e.draw();
+        assert_eq!(e.lfo_scene.columns[2].colour, Phosphor::Violet.rgb());
+        right_click(&mut e, scope);
+        menu_item(&mut e, "SHARP");
+        assert_eq!(params.lfo_patch.edges(2), Edges::Sharp);
+        right_click(&mut e, scope);
+        let m = e.learning.menu().expect("a menu").clone();
+        let sharp = m
+            .items
+            .iter()
+            .position(|(t, _)| t == "SHARP")
+            .expect("SHARP");
+        assert!(m.marked.contains(&sharp) && !m.items[sharp].1);
+    }
+
+    /// The rail's page keys: lit while their page or drawer shows, a faint glow while what they
+    /// open affects the sound (an LFO assigned and moving), else unlit.
+    #[test]
+    fn the_lfo_key_glows_while_an_lfo_moves_a_knob() {
+        use crate::lfo::Reading;
+        let (mut e, _, params) = editing();
+        e.draw();
+        assert!(!e.browser.bar.lfo);
+        let moving = Reading {
+            moving: true,
+            ..Reading::default()
+        };
+        params.lfo_scope.publish(&[
+            moving,
+            Reading::default(),
+            Reading::default(),
+            Reading::default(),
+        ]);
+        e.draw();
+        assert!(e.browser.bar.lfo && !e.browser.bar.lfo_page, "glowing");
+        lfo_open(&mut e);
+        assert!(e.browser.bar.lfo_page, "lit");
+        let p = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Arp)));
+        click(&mut e, p);
+        e.draw();
+        assert_eq!(
+            e.browser.bar.page,
+            Some(BarTarget::Arp),
+            "a drawer over the page, lit too"
+        );
+        assert!(e.browser.bar.lfo_page);
+    }
+
+    // ---- The macros (decisions.md R-MACROS).
+
+    /// The rail's MACRO key.
+    fn macro_key(e: &mut Editing) {
+        e.draw();
+        let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Macro)));
+        click(e, p);
+        e.draw();
+    }
+
+    /// Macro `n`'s value set as the host would have it (the test's host applies nothing).
+    fn turn_macro(params: &Arc<Ca72Params>, n: usize, normalized: f32) {
+        use nih_plug::context::process::TestProcessContext;
+        let c =
+            TestProcessContext::<crate::Ca72>::new(params.clone(), 48_000.0, ProcessMode::Realtime);
+        assert!(c.automate(params.macro_param(n).as_ptr(), normalized));
+    }
+
+    /// The rail's MACRO key (the owner: "the far left edge ... just a button that says macro")
+    /// flips the left area: the macros in the wheels' place, their knobs found and the wheels
+    /// and switches not; pressed again, the wheels. Its light: lit while the macros show, a
+    /// faint glow while the wheels do and an assigned macro is above 0, else unlit. The flip is
+    /// the computer's (`Settings::macros_shown`).
+    #[test]
+    fn the_macro_key_flips_the_left_area() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _, params) = editing();
+        let knob = ca72_panel::controls::MACRO_FIRST;
+        let wheel = ca72_panel::controls::index("mod_wheel").expect("the wheel");
+        e.draw();
+        assert!(!e.macros_show() && !e.browser.bar.macros && !e.browser.bar.macro_glow);
+        assert!(e.off_panel(knob) && !e.off_panel(wheel));
+        let (kx, ky) = CONTROLS[knob].centre();
+        assert_ne!(e.hit(kx, ky), Some(Target::Control(knob)));
+        macro_key(&mut e);
+        assert!(e.macros_show() && e.settings.macros_shown && e.browser.bar.macros);
+        assert!(!e.off_panel(knob) && e.off_panel(wheel));
+        assert_eq!(e.hit(kx, ky), Some(Target::Control(knob)));
+        let (wx, wy) = CONTROLS[wheel].centre();
+        assert_ne!(
+            e.hit(wx, wy),
+            Some(Target::Control(wheel)),
+            "the wheel hidden"
+        );
+        assert_eq!(e.macro_scene.cells[0].name, "MACRO 1");
+        assert!(e.macro_scene.cells[0].dim);
+        macro_key(&mut e);
+        assert!(!e.macros_show() && !e.browser.bar.macros);
+        // The glow: assigned and above 0.
+        params
+            .lfo_patch
+            .assign(Source::Macro(2), T::Cutoff, 0.5)
+            .expect("room");
+        e.draw();
+        assert!(!e.browser.bar.macro_glow, "at 0");
+        turn_macro(&params, 2, 0.4);
+        e.draw();
+        assert!(e.browser.bar.macro_glow && !e.browser.bar.macros, "glowing");
+        macro_key(&mut e);
+        assert!(e.browser.bar.macros, "lit");
+        // The key's light as the rail draws it.
+        let light = |bar: &ca72_panel::presets::BarScene| {
+            ca72_panel::strip::key_light_of(bar, BarTarget::Macro)
+        };
+        assert_eq!(light(&e.browser.bar), 2);
+        macro_key(&mut e);
+        assert_eq!(light(&e.browser.bar), 1);
+        turn_macro(&params, 2, 0.0);
+        e.draw();
+        assert_eq!(light(&e.browser.bar), 0);
+    }
+
+    /// The stereo and output knobs take LFOs and macros (the owner, 2026-10-20: "make sure the
+    /// stereo controls can be controlled by macros and lfos", "and entropy, drive, and
+    /// output"): with the strip's page showing and the macros in, a macro's cord lands on WIDTH,
+    /// INNER, DETUNE, ENTROPY, DRIVE and LEVEL, and on the panel's MAIN OUTPUT VOLUME and
+    /// FEEDBACK; from the LFO page (over the strip) an LFO's cord lands on VOLUME and FEEDBACK;
+    /// each strip knob's menu offers every LFO and every macro, and one chosen is assigned. Their
+    /// rings take the knob's own sweep. Neither an assignment to DRIVE nor a macro on it turned
+    /// here asks for AUTO GAIN's curve (R-AUTO-GAIN-DRIVE: only DRIVE itself changed here does).
+    #[test]
+    fn the_stereo_and_output_knobs_take_lfos_and_macros() {
+        use crate::learning::{ModItem, Row};
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _host, params) = editing();
+        e.playing.visible = false;
+        macro_key(&mut e);
+        let drag = |e: &mut Editing, from: (f64, f64), to: &str| {
+            let p = at(e, from);
+            go(e, p);
+            e.mouse(MouseEvent::ButtonPressed {
+                button: MouseButton::Left,
+                modifiers: Modifiers::empty(),
+            });
+            let q = at(e, centre(to));
+            go(e, q);
+            e.draw();
+            release(e);
+            e.draw();
+        };
+        let knobs = [
+            ("spread", T::Spread),
+            ("inner", T::Inner),
+            ("double", T::Double),
+            ("entropy", T::Entropy),
+            ("drive", T::Drive),
+            ("level", T::Level),
+            ("volume", T::Volume),
+            ("feedback", T::Feedback),
+        ];
+        for (n, (id, t)) in knobs.iter().enumerate() {
+            let m = n % crate::lfo::MACROS;
+            drag(&mut e, ca72_panel::strip::macros::jack_at(m), id);
+            assert_eq!(
+                params.lfo_patch.depth(Source::Macro(m), *t),
+                Some(0.25),
+                "a macro's cord on {id}"
+            );
+        }
+        assert!(!e.watched.take_moved(), "nothing for AUTO GAIN to measure");
+        // Their rings: a quarter of the knob's own 300 degrees.
+        let width = at(&e, centre("spread"));
+        go(&mut e, width);
+        e.draw();
+        let k = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| CONTROLS[k.control].param == "spread")
+            .expect("WIDTH's rings")
+            .clone();
+        assert_eq!(k.sweep, art::KNOB_SWEEP);
+        let (_, _, end) = ca72_panel::modulation::swing(&k, &k.rings[0]);
+        assert!((end - k.angle(k.travel) - 75.0).abs() < 1e-9);
+        // Each strip knob's menu: every LFO and every macro.
+        for (id, t) in &knobs[..6] {
+            let i = ca72_panel::controls::index(id).expect(id);
+            let rows = e.knob_rows(i);
+            for s in Source::all() {
+                assert!(
+                    rows.iter().any(
+                        |r| matches!(r, Row::Item(ModItem::Assign(x, y), ..) if *x == s && y == t)
+                    ),
+                    "{id}'s menu offers {s:?}"
+                );
+            }
+        }
+        e.mod_item(ModItem::Assign(Source::Lfo(2), T::Level));
+        assert_eq!(params.lfo_patch.depth(Source::Lfo(2), T::Level), Some(0.25));
+        e.mod_item(ModItem::Assign(Source::Lfo(1), T::Drive));
+        assert_eq!(params.lfo_patch.depth(Source::Lfo(1), T::Drive), Some(0.25));
+        // A macro on DRIVE turned here: not DRIVE changed, nothing asked.
+        e.set_once(ca72_panel::controls::MACRO_FIRST + 4, 0.8);
+        assert!(!e.watched.take_moved(), "a macro on DRIVE turned");
+        // From the LFO page, over the strip: VOLUME and FEEDBACK on the panel by cord.
+        lfo_open(&mut e);
+        for id in ["volume", "feedback"] {
+            drag(&mut e, ca72_panel::strip::lfo::places(3).jack, id);
+            let t = crate::lfo::Target::of_id(id).expect(id);
+            assert_eq!(
+                params.lfo_patch.depth(Source::Lfo(3), t),
+                Some(0.25),
+                "LFO 4 on {id}"
+            );
+        }
+        assert!(!e.watched.take_moved());
+    }
+
+    /// The LFOs' own knobs take sources (decisions.md R-LFO's addendum; the owner, 2026-10-20:
+    /// "LFOs to control each other's parameters", "Let's try B"): with the page open, LFO 2's cord
+    /// lands on LFO 1's RATE, PHASE and FADE, on its own RATE, on LFO 1's WAVEFORM only while it
+    /// is CONTINUOUS, on LFO 1's OUT jack as its LEVEL; LFO 1's cord let go on its own jack without
+    /// leaving it gives nothing, drawn away and back its own LEVEL; a timed RATE takes none; a
+    /// macro's cord lands on an LFO's RATE. The page's knobs then show rings (on their own
+    /// sweeps; the jack's round it), the pop-up on hover, the tip's depths and the menu's
+    /// DEPTH…/REMOVE; the jack's menu keeps the LFO's COLOR and EDGES; the wheel on the jack
+    /// turns LEVEL.
+    #[test]
+    fn the_lfos_own_knobs_take_sources() {
+        use crate::learning::{ModItem, Row};
+        use crate::lfo::{Source, Target as T};
+        use ca72_panel::controls::LFO_LEVEL_PART;
+        use ca72_panel::strip::lfo::places;
+        use nih_plug::context::process::TestProcessContext;
+        let (mut e, host, params) = editing();
+        e.playing.visible = false;
+        lfo_open(&mut e);
+        let drag = |e: &mut Editing, from: (f64, f64), to: (f64, f64)| {
+            let p = at(e, from);
+            go(e, p);
+            e.mouse(MouseEvent::ButtonPressed {
+                button: MouseButton::Left,
+                modifiers: Modifiers::empty(),
+            });
+            let q = at(e, to);
+            go(e, q);
+            e.draw();
+            release(e);
+            e.draw();
+        };
+        let depth = |s, t| params.lfo_patch.depth(s, t);
+        for (k, t) in [(1, T::LfoRate(0)), (3, T::LfoPhase(0)), (4, T::LfoFade(0))] {
+            drag(&mut e, places(1).jack, lfo_centre(0, k));
+            assert_eq!(depth(Source::Lfo(1), t), Some(0.25), "{t:?}");
+        }
+        drag(&mut e, places(1).jack, lfo_centre(1, 1));
+        assert_eq!(depth(Source::Lfo(1), T::LfoRate(1)), Some(0.25), "its own");
+        drag(&mut e, places(1).jack, lfo_centre(0, 0));
+        assert_eq!(depth(Source::Lfo(1), T::LfoShape(0)), None, "STEPPED");
+        drag(&mut e, places(1).jack, places(0).jack);
+        assert_eq!(depth(Source::Lfo(1), T::LfoLevel(0)), Some(0.25), "LEVEL");
+        // A click on its own jack: nothing; away and back: its own LEVEL.
+        let jack = at(&e, places(0).jack);
+        click(&mut e, jack);
+        assert_eq!(params.lfo_patch.count(Source::Lfo(0)), 0, "a click");
+        // (Past a double click's time: a second press then would put LEVEL back at 100 %.)
+        e.last_press = None;
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let away = at(&e, lfo_centre(0, 1));
+        go(&mut e, away);
+        go(&mut e, jack);
+        release(&mut e);
+        assert_eq!(
+            depth(Source::Lfo(0), T::LfoLevel(0)),
+            Some(0.25),
+            "away and back"
+        );
+        // Timed, RATE takes none; CONTINUOUS, WAVEFORM its shape (the parameters as a host sets
+        // them).
+        let c =
+            TestProcessContext::<crate::Ca72>::new(params.clone(), 48_000.0, ProcessMode::Realtime);
+        assert!(c.automate(params.lfo(2).timed.as_ptr(), 1.0));
+        assert!(c.automate(params.lfo(0).shape_mode.as_ptr(), 1.0));
+        e.draw();
+        drag(&mut e, places(1).jack, lfo_centre(2, 1));
+        assert_eq!(depth(Source::Lfo(1), T::LfoRate(2)), None, "timed");
+        drag(&mut e, places(1).jack, lfo_centre(0, 0));
+        assert_eq!(
+            depth(Source::Lfo(1), T::LfoShape(0)),
+            Some(0.25),
+            "CONTINUOUS"
+        );
+        // A macro's.
+        macro_key(&mut e);
+        drag(
+            &mut e,
+            ca72_panel::strip::macros::jack_at(0),
+            lfo_centre(3, 1),
+        );
+        assert_eq!(
+            depth(Source::Macro(0), T::LfoRate(3)),
+            Some(0.25),
+            "a macro's"
+        );
+        // Rings on the page's knobs, the jack's round it.
+        e.draw();
+        let rate = ca72_panel::controls::lfo_index(0, 1);
+        let level = ca72_panel::controls::lfo_index(0, LFO_LEVEL_PART);
+        let rings = |e: &Editing, i: usize| {
+            e.mod_scene
+                .knobs
+                .iter()
+                .find(|k| k.control == i)
+                .map(|k| (k.rings.len(), k.skirt, k.sweep))
+        };
+        assert_eq!(
+            rings(&e, rate).map(|r| (r.0, r.2)),
+            Some((1, art::KNOB_SWEEP))
+        );
+        let (n, skirt, _) = rings(&e, level).expect("LEVEL's rings");
+        assert_eq!(n, 2);
+        assert!(skirt < art::STD.skirt, "round the jack: {skirt}");
+        // The pop-up and the tip on hover.
+        let p = at(&e, lfo_centre(0, 1));
+        go(&mut e, p);
+        e.draw();
+        assert_eq!(e.modulating.popup, Some(rate));
+        let tip = e.tip().map(|t| t.0).unwrap_or_default();
+        assert!(
+            tip.starts_with("LFO 1 RATE") && tip.contains("LFO 2 +25 %"),
+            "{tip}"
+        );
+        // (Off RATE's pop-up, which hangs below it, first.)
+        let (sx, sy, sw, sh) = places(0).scope;
+        let p = at(&e, (sx + sw / 2.0, sy + sh / 2.0));
+        go(&mut e, p);
+        e.draw();
+        let p = at(&e, places(0).jack);
+        go(&mut e, p);
+        e.draw();
+        let tip = e.tip().map(|t| t.0).unwrap_or_default();
+        assert!(
+            tip.starts_with("LFO 1 LEVEL: 100")
+                && tip.contains("LFO 2 +25 %")
+                && tip.contains("OUT"),
+            "{tip}"
+        );
+        // The menus.
+        let rows = e.knob_rows(rate);
+        assert!(rows.iter().any(|r| matches!(
+            r,
+            Row::Item(ModItem::Depth(Source::Lfo(1), T::LfoRate(0), _), ..)
+        )));
+        assert!(rows.iter().any(|r| matches!(
+            r,
+            Row::Item(ModItem::Remove(Source::Lfo(1), T::LfoRate(0)), ..)
+        )));
+        let rows = e.knob_rows(level);
+        assert!(rows.iter().any(|r| matches!(
+            r,
+            Row::Item(ModItem::Remove(Source::Lfo(0), T::LfoLevel(0)), ..)
+        )));
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r, Row::Item(ModItem::Color(0, _), ..)))
+        );
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r, Row::Item(ModItem::Edges(0, _), ..)))
+        );
+        // The wheel on the jack turns LEVEL.
+        host.take();
+        wheel(&mut e, -1.0);
+        let calls = host.take();
+        let lvl = params.lfo_level(0).level.as_ptr();
+        assert!(
+            calls
+                .iter()
+                .any(|c| matches!(c, Call::Set(p, _) if *p == lvl)),
+            "{calls:?}"
+        );
+    }
+
+    /// The left hand's VELOCITY meter is dark until the velocity moves something, then lit to
+    /// the latest note (decisions.md R-VELOCITY).
+    #[test]
+    fn the_velocity_meter_is_dark_until_assigned() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _, params) = editing();
+        e.meters.publish_velocity(Some(0.76));
+        e.draw();
+        assert_eq!(e.scene.velocity_lit, 0, "nothing assigned");
+        params
+            .lfo_patch
+            .assign(Source::Velocity, T::Cutoff, 0.25)
+            .expect("room");
+        e.draw();
+        assert_eq!(e.scene.velocity_lit, 8);
+        params.lfo_patch.remove(Source::Velocity, T::Cutoff);
+        e.draw();
+        assert_eq!(e.scene.velocity_lit, 0, "its last assignment taken away");
+    }
+
+    /// The left hand's VELOCITY jack (decisions.md R-VELOCITY): a cord dragged from it lands at
+    /// +25 %, as an LFO's; the pointer on it shows a cord to each knob it moves, in its colour
+    /// (as on a macro's jack); with the macros shown it is neither found nor hovered.
+    #[test]
+    fn the_velocity_jack_is_patched_from_and_shows_its_cords() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _, params) = editing();
+        e.playing.visible = false;
+        let jack = at(&e, ca72_panel::strip::velocity::jack_at());
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.draw();
+        let cord = e.mod_scene.cord.clone().expect("a cord");
+        assert_eq!(cord.from, ca72_panel::strip::velocity::jack_at());
+        assert_eq!(cord.colour, ca72_panel::strip::velocity::RGB);
+        release(&mut e);
+        assert_eq!(
+            params.lfo_patch.depth(Source::Velocity, T::Cutoff),
+            Some(0.25)
+        );
+        params
+            .lfo_patch
+            .assign(Source::Velocity, T::Volume, 0.5)
+            .expect("room");
+        // Away from the jack: no cords.
+        e.draw();
+        assert!(e.mod_scene.patched.is_empty());
+        // On it: one to each knob it moves, from it, each ringing its knob.
+        go(&mut e, jack);
+        e.draw();
+        let mut to: Vec<_> = e.mod_scene.patched.iter().map(|c| c.to).collect();
+        to.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
+        let mut want = vec![centre("cutoff"), centre("volume")];
+        want.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
+        assert_eq!(to, want);
+        for c in &e.mod_scene.patched {
+            assert_eq!(c.from, ca72_panel::strip::velocity::jack_at());
+            assert_eq!(c.colour, ca72_panel::strip::velocity::RGB);
+            assert!(c.over.is_some() && c.targets.is_empty());
+        }
+        // The macros over the left hand: the jack is not there.
+        macro_key(&mut e);
+        go(&mut e, cutoff);
+        go(&mut e, jack);
+        e.draw();
+        assert!(e.mod_scene.patched.is_empty());
+        // A macro's jack shows its cords alike.
+        params
+            .lfo_patch
+            .assign(Source::Macro(0), T::Emphasis, 0.3)
+            .expect("room");
+        let macro_jack = at(&e, ca72_panel::strip::macros::jack_at(0));
+        go(&mut e, macro_jack);
+        e.draw();
+        let to: Vec<_> = e.mod_scene.patched.iter().map(|c| c.to).collect();
+        assert_eq!(to, [centre("emphasis")]);
+        // SETTINGS: HOVER CABLES off, none; on again, back.
+        e.keep_settings(crate::settings::Change::HoverCables(false));
+        e.draw();
+        assert!(e.mod_scene.patched.is_empty(), "turned off");
+        e.keep_settings(crate::settings::Change::HoverCables(true));
+        e.draw();
+        assert_eq!(e.mod_scene.patched.len(), 1);
+    }
+
+    /// An assignment dragged from a macro's jack lands on a knob at +25 %, as an LFO's; while
+    /// the macros show, every macro's rings show on the panel's knobs, one way from the knob's
+    /// setting, an LFO's only on the knob under the pointer; a macro's knob takes none.
+    #[test]
+    fn a_macro_is_assigned_from_its_jack_and_its_rings_show() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, host, params) = editing();
+        e.playing.visible = false;
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Cutoff, 0.4)
+            .expect("room");
+        macro_key(&mut e);
+        host.take();
+        let jack = at(&e, ca72_panel::strip::macros::jack_at(1));
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.draw();
+        let cord = e.mod_scene.cord.clone().expect("a cord");
+        assert_eq!(cord.from, ca72_panel::strip::macros::jack_at(1));
+        assert_eq!(cord.colour, crate::lfo::MacroColor::Rose.rgb());
+        release(&mut e);
+        assert_eq!(
+            params.lfo_patch.depth(Source::Macro(1), T::Cutoff),
+            Some(0.25)
+        );
+        assert!(host.take().is_empty(), "patch state: no host gesture");
+        // Away from CUTOFF: its macro's ring alone, one way, its point where the macro has it.
+        turn_macro(&params, 1, 0.5);
+        go(&mut e, Point { x: 5.0, y: 5.0 });
+        e.draw();
+        let k = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| CONTROLS[k.control].param == "cutoff")
+            .expect("its rings while the macros show");
+        assert_eq!(k.rings.len(), 1);
+        assert!(k.rings[0].one_way);
+        assert_eq!(k.rings[0].point, Some((k.travel + 0.125).clamp(0.0, 1.0)));
+        // Under the pointer: every source's, the LFO's too, and the pop-up names the macro.
+        go(&mut e, cutoff);
+        e.draw();
+        let k = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| CONTROLS[k.control].param == "cutoff");
+        assert_eq!(k.map(|k| k.rings.len()), Some(2));
+        let popup = e.mod_scene.popup.clone().expect("its pop-up");
+        assert_eq!(popup.dials[1].label, "MACRO 2");
+        // A macro's knob takes no source.
+        let m3 = at(&e, CONTROLS[ca72_panel::controls::MACRO_FIRST + 2].centre());
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        go(&mut e, m3);
+        release(&mut e);
+        assert_eq!(params.lfo_patch.count(Source::Macro(1)), 1);
+        // The wheels again: no rings while nothing else shows them.
+        macro_key(&mut e);
+        go(&mut e, Point { x: 5.0, y: 5.0 });
+        e.draw();
+        assert!(e.mod_scene.knobs.is_empty());
+    }
+
+    /// The standalone's TEMPO a target (decisions.md R-LFO): a macro's cord dropped on its
+    /// screen (a dashed box round it while dragged, a bright one under the plug), its rails under
+    /// the screen with the pop-up beneath them while it is hovered, its tip beside it, its menu's
+    /// DEPTH… and REMOVE and the sources that can take it, a rail's end dragged; the screen reading
+    /// the moving tempo, and its own while it is dragged. In a plug-in none of it.
+    #[test]
+    fn the_tempo_screen_takes_a_source_and_reads_the_moving_tempo() {
+        use crate::lfo::{Source, Target as T};
+        use lfo_page::TEMPO_CONTROL;
+        let (mut e, host, params) = editing_standalone();
+        e.playing.visible = false;
+        macro_key(&mut e);
+        host.take();
+        let (x, y, w, h) = art::tempo_window(e.renderer.arrangement().plate_at());
+        let screen = at(&e, (x + w / 2.0, y + h / 2.0));
+        let jack = at(&e, ca72_panel::strip::macros::jack_at(0));
+        go(&mut e, jack);
+        press(&mut e);
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.draw();
+        let cord = e.mod_scene.cord.clone().expect("a cord");
+        assert_eq!(cord.boxes, vec![(x, y, w, h)], "TEMPO's screen can take it");
+        go(&mut e, screen);
+        e.draw();
+        let cord = e.mod_scene.cord.clone().expect("a cord");
+        assert_eq!((cord.over_box, cord.boxes.len()), (Some((x, y, w, h)), 0));
+        release(&mut e);
+        assert_eq!(
+            params.lfo_patch.depth(Source::Macro(0), T::Tempo),
+            Some(0.25)
+        );
+        assert!(host.take().is_empty(), "patch state: no host gesture");
+        // Hovered: its rails, the pop-up under them, its tip beside the screen.
+        go(&mut e, Point { x: 5.0, y: 5.0 });
+        go(&mut e, screen);
+        e.draw();
+        let k = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| k.control == TEMPO_CONTROL)
+            .cloned()
+            .expect("its rails");
+        assert_eq!(k.bar, Some(w / 2.0));
+        assert!((k.travel - 1.0 / 3.0).abs() < 1e-9, "120 BPM along 30..300");
+        let popup = e.mod_scene.popup.clone().expect("its pop-up");
+        assert!(popup.knob.0.1 >= y + h, "under the screen");
+        assert_eq!(popup.dials[0].label, "MACRO 1");
+        let (tip, tx, _) = e.scene.tip.clone().expect("a tip");
+        assert_eq!(tip, "TEMPO: 120 BPM \u{b7} MACRO 1 +25 %");
+        assert!(tx > x + w, "beside it");
+        // A rail's end dragged further: a deeper depth.
+        let (ex, ey) = ca72_panel::modulation::ring_end(&k, 0);
+        let end = at(&e, (ex, ey));
+        go(&mut e, end);
+        press(&mut e);
+        let further = at(&e, (ex + w / 4.0, ey));
+        go(&mut e, further);
+        release(&mut e);
+        let d = params.lfo_patch.depth(Source::Macro(0), T::Tempo).unwrap();
+        assert!((d - 0.5).abs() < 0.02, "{d}");
+        // Its menu: what moves it, and the sources that can.
+        right_click(&mut e, screen);
+        let items: Vec<String> = menu_items(&e).into_iter().map(|(t, _)| t).collect();
+        for want in ["DEPTH\u{2026}", "REMOVE", "LFO 1", "MACRO 2"] {
+            assert!(items.iter().any(|t| t == want), "{want} in {items:?}");
+        }
+        menu_item(&mut e, "REMOVE");
+        assert_eq!(params.lfo_patch.depth(Source::Macro(0), T::Tempo), None);
+        // The screen reads the moving tempo while a source moves it, its own while dragged.
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Tempo, 0.3)
+            .unwrap();
+        e.meters.publish_tempo(151.4);
+        e.live_due = None;
+        e.update_scene();
+        assert_eq!(e.scene.tempo.as_deref(), Some("151 BPM"));
+        go(&mut e, screen);
+        e.last_tempo_press = None;
+        press(&mut e);
+        e.update_scene();
+        assert_eq!(e.scene.tempo.as_deref(), Some("120 BPM"), "dragged: as set");
+        release(&mut e);
+        e.update_scene();
+        assert_eq!(e.scene.tempo.as_deref(), Some("151 BPM"));
+        params.lfo_patch.remove(Source::Lfo(0), T::Tempo);
+        e.update_scene();
+        assert_eq!(
+            e.scene.tempo.as_deref(),
+            Some("120 BPM"),
+            "none on it: as set"
+        );
+        // In a plug-in: no target, the LFO's screen dim, its menu and tip saying why.
+        let (p, _, params) = editing();
+        params
+            .lfo_patch
+            .assign(Source::Lfo(1), T::Tempo, 0.4)
+            .unwrap();
+        assert_eq!(p.mod_target(TEMPO_CONTROL), None);
+        assert_eq!(
+            lfo_page::screen_text(&params.lfo_patch, 1, true, false),
+            ("TEMPO".to_owned(), false)
+        );
+        assert_eq!(p.standalone_only(T::Tempo), " (STANDALONE ONLY)");
+    }
+
+    /// The strip's screens follow a source moving their controls (decisions.md R-LFO: the owner,
+    /// "that screen should represent where the modulator currently is based on modulation
+    /// position. Not the position of the static knob"): DRIVE at 0 with an LFO on it reads and
+    /// is lit where the engine has it (AUTO GAIN's too), its own value while it is turned, and
+    /// its own again once the LFO is taken off; the screens of controls nothing moves as set.
+    #[test]
+    fn a_modulated_screen_reads_where_its_source_has_the_control() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _, params) = editing();
+        let drive = Readout::ALL
+            .iter()
+            .position(|&r| r == Readout::Drive)
+            .unwrap();
+        let width = Readout::ALL
+            .iter()
+            .position(|&r| r == Readout::Width)
+            .unwrap();
+        e.update_scene();
+        let still = e.strip_scene.readouts.clone();
+        assert!(!still[drive].1, "DRIVE at 0: dark");
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Drive, 0.5)
+            .unwrap();
+        let mut c = params.controls();
+        c.drive = 1.3;
+        c.spread = 0.9;
+        e.meters.publish_live(&c);
+        e.update_scene();
+        assert_eq!(e.strip_scene.readouts[drive], ("1.3".to_owned(), true));
+        assert_eq!(
+            e.strip_scene.readouts[width], still[width],
+            "nothing on WIDTH"
+        );
+        // Read again only once a thirtieth has passed.
+        c.drive = 2.0;
+        e.meters.publish_live(&c);
+        e.update_scene();
+        assert_eq!(e.strip_scene.readouts[drive].0, "1.3");
+        e.live_due = None;
+        e.update_scene();
+        assert_eq!(e.strip_scene.readouts[drive].0, "2.0");
+        // Turned: its own value.
+        let i = ca72_panel::controls::index("drive").unwrap();
+        e.scroll = None;
+        assert!(e.live_shown()[3].is_some());
+        e.knob_entry = None;
+        let k = at(&e, centre("drive"));
+        go(&mut e, k);
+        press(&mut e);
+        assert!(e.operated_now(i));
+        e.update_scene();
+        assert_eq!(
+            e.strip_scene.readouts[drive], still[drive],
+            "its own while turned"
+        );
+        release(&mut e);
+        e.live_due = None;
+        e.update_scene();
+        assert_eq!(e.strip_scene.readouts[drive].0, "2.0");
+        // Taken off: as set again.
+        params.lfo_patch.remove(Source::Lfo(0), T::Drive);
+        e.update_scene();
+        assert_eq!(e.strip_scene.readouts[drive], still[drive]);
+    }
+
+    /// A macro's name is typed on its screen, double-clicked (or RENAME… from its menu):
+    /// capitals, seven at most, Enter keeping it, Escape leaving it as it was, a press elsewhere
+    /// keeping it; it then names the macro in its screen, the pop-up, the tips and the menus.
+    /// Its name's menu sets its colour, the computer's.
+    #[test]
+    fn a_macros_name_is_typed_and_its_colour_chosen() {
+        use crate::lfo::{MacroColor, Source, Target as T};
+        let (mut e, host, params) = editing();
+        macro_key(&mut e);
+        host.take();
+        let (x, y, w, h) = ca72_panel::strip::macros::name_at(0);
+        let name = at(&e, (x + w / 2.0, y + h / 2.0));
+        click(&mut e, name);
+        click(&mut e, name);
+        assert_eq!(e.macro_view.typing, Some((0, String::new())));
+        for c in ["b", "r", "i", "g", "h", "t", "e", "r"] {
+            keyed(&mut e, Key::Character(c.into()));
+        }
+        e.draw();
+        assert_eq!(e.macro_scene.cells[0].typing.as_deref(), Some("BRIGHTE"));
+        keyed(&mut e, Key::Backspace);
+        keyed(&mut e, Key::Enter);
+        assert_eq!(params.lfo_patch.name(0), "BRIGHT");
+        assert!(host.take().is_empty(), "patch state");
+        e.draw();
+        assert_eq!(e.macro_scene.cells[0].name, "BRIGHT");
+        // Escape leaves it.
+        e.start_rename(0);
+        keyed(&mut e, Key::Character("x".into()));
+        keyed(&mut e, Key::Escape);
+        assert_eq!(params.lfo_patch.name(0), "BRIGHT");
+        // A press elsewhere keeps what is typed.
+        e.start_rename(0);
+        keyed(&mut e, Key::Backspace);
+        let away = at(&e, centre("cutoff"));
+        click(&mut e, away);
+        assert_eq!(params.lfo_patch.name(0), "BRIGH");
+        // Its colour from its name's menu.
+        right_click(&mut e, name);
+        assert!(e.learning.menu_open());
+        e.mod_item(crate::learning::ModItem::MacroColor(0, MacroColor::Purple));
+        assert_eq!(e.settings.macro_colors[0], MacroColor::Purple);
+        e.learning.close_menu();
+        e.draw();
+        assert_eq!(e.macro_scene.cells[0].colour, MacroColor::Purple.rgb());
+        // Its knob's menu: RENAME…, REMOVE ALL ASSIGNMENTS, a head for each knob it modulates.
+        params
+            .lfo_patch
+            .assign(Source::Macro(0), T::Cutoff, 0.6)
+            .expect("room");
+        let rows = e.knob_rows(ca72_panel::controls::MACRO_FIRST);
+        assert!(
+            matches!(&rows[0], crate::learning::Row::Item(_, t, true, _) if t == "RENAME\u{2026}")
+        );
+        assert!(rows.iter().any(|r| matches!(r, crate::learning::Row::Head(h) if h.starts_with("CUTOFF FREQUENCY \u{b7} +60"))));
+        e.mod_item(crate::learning::ModItem::RemoveAll(Source::Macro(0)));
+        assert_eq!(params.lfo_patch.count(Source::Macro(0)), 0);
+        // The knob's tip names the macro.
+        let knob = at(&e, CONTROLS[ca72_panel::controls::MACRO_FIRST].centre());
+        go(&mut e, knob);
+        e.draw();
+        let tip = e.scene.tip.clone().expect("a tip").0;
+        assert!(tip.starts_with("MACRO 1 \u{b7} BRIGH: 0"), "{tip}");
+        // A strip knob's menu offers the macros as the LFOs.
+        let i = ca72_panel::controls::index("drive").expect("DRIVE");
+        let rows = e.knob_rows(i);
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r, crate::learning::Row::Head(h) if h == "MACRO"))
+        );
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r, crate::learning::Row::Item(_, t, _, _) if t == "BRIGH"))
+        );
+    }
+
+    /// The window's frame with the macros showing, a macro turned and renamed and its rings on
+    /// the panel, is the frame put together whole, each time.
+    #[test]
+    fn the_macros_put_together_in_parts_are_put_together_whole() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _, params) = editing();
+        params
+            .lfo_patch
+            .assign(Source::Macro(0), T::Cutoff, 0.4)
+            .expect("room");
+        macro_key(&mut e);
+        for i in 0..5 {
+            turn_macro(&params, 0, i as f32 / 5.0);
+            if i == 2 {
+                params.lfo_patch.set_name(3, "SPACE");
+            }
+            if i == 3 {
+                e.start_rename(4);
+                keyed(&mut e, Key::Character("s".into()));
+            }
+            e.draw();
+            let mut whole = None;
+            compose(
+                &mut whole,
+                &e.renderer,
+                e.strip.frame(),
+                lower_of(&e),
+                None,
+                (
+                    e.page_shows().then(|| e.lfo.frame()),
+                    e.macros_show()
+                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                    &e.modulation,
+                ),
+                None,
+                true,
+                (e.physical_width, e.physical_height()),
+            );
+            assert!(e.composed == whole, "frame {i}: not as put together whole");
+        }
+    }
+
+    /// How long the editor takes to draw the macros' frames (decisions.md R-MACROS; the owner:
+    /// "Just make sure performance is tight"), at the opening size (0.44) and at twice it: the
+    /// first showing, a macro turned (its knob and its rings on the panel), a name typed, the
+    /// wheels again, and nothing changed. Printed, not asserted (the machine's load decides).
+    #[test]
+    #[ignore = "measures frame times"]
+    fn the_macros_frame_times() {
+        use crate::lfo::{Source, Target as T};
+        use std::time::Instant;
+        for k in [1.0, 2.0] {
+            let (mut e, _, params) = editing();
+            let width = (art::W * 0.44 * k) as u32;
+            e.fit(k, (art::W * 0.44) as u32, width);
+            for (n, to) in [
+                (0, T::Cutoff),
+                (0, T::Emphasis),
+                (1, T::Drive),
+                (2, T::Spread),
+            ] {
+                params.lfo_patch.assign(Source::Macro(n), to, 0.5).unwrap();
+            }
+            e.playing.visible = false;
+            e.draw();
+            e.draw();
+            let time = |e: &mut Editing, f: &mut dyn FnMut(&mut Editing)| {
+                f(e);
+                let t = Instant::now();
+                e.draw();
+                t.elapsed().as_secs_f64() * 1e3
+            };
+            let first = time(&mut e, &mut |e| {
+                let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Macro)));
+                click(e, p);
+            });
+            // (Again in another editor, its still made on its thread meanwhile, as when the key
+            // is pressed some time after the editor opened.)
+            let ready = {
+                let (mut f, _, _) = editing();
+                f.fit(k, (art::W * 0.44) as u32, width);
+                f.playing.visible = false;
+                f.draw();
+                std::thread::sleep(std::time::Duration::from_millis(600));
+                f.draw();
+                time(&mut f, &mut |f| {
+                    let p = on_strip(f, strip_at(StripTarget::Bar(BarTarget::Macro)));
+                    click(f, p);
+                })
+            };
+            let mut turned = Vec::new();
+            for i in 1..8 {
+                turned.push(time(&mut e, &mut |_| {
+                    turn_macro(&params, 0, i as f32 / 8.0);
+                }));
+            }
+            let typed = time(&mut e, &mut |e| {
+                e.start_rename(3);
+                keyed(e, Key::Character("w".into()));
+            });
+            let still = time(&mut e, &mut |_| {});
+            let back = time(&mut e, &mut |e| {
+                e.end_rename(true);
+                let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Macro)));
+                click(e, p);
+            });
+            let again = time(&mut e, &mut |e| {
+                let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Macro)));
+                click(e, p);
+            });
+            turned.sort_by(f64::total_cmp);
+            println!(
+                "scale {:.2}: first showing {first:.1} ms (still waited for), {ready:.1} ms (still ready); a macro turned {:.1}-{:.1} ms (median {:.1}); a name typed {typed:.1} ms; nothing changed {still:.2} ms; the wheels again {back:.1} ms; the macros again {again:.1} ms",
+                0.44 * k,
+                turned[0],
+                turned[turned.len() - 1],
+                turned[turned.len() / 2]
+            );
+        }
+    }
+
+    /// The macros as the editor shows them, for looking at, written to `$CA72_MACRO_PNG`, the
+    /// folder: `wheels.png` (the wheels, the MACRO key glowing), `macros.png` (the six, round
+    /// 2's example, their rings on the panel), `keyboard.png` and `lfo.png` (the six beside the
+    /// keyboard and the LFO page), `drag.png` (an assignment dragged from GROWL's jack),
+    /// `hover.png` (CUTOFF's rings and pop-up with LFOs and a macro), `menu.png` (BRIGHT's knob's
+    /// menu), `name-menu.png` (its name's), `rename.png` (a name typed), `drawn.png` (the drawn
+    /// skin).
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_macro_pngs() {
+        use crate::lfo::{Source, Target as T};
+        let Some(out) = std::env::var_os("CA72_MACRO_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        let (mut e, _, params) = editing();
+        let patch = Arc::clone(&params.lfo_patch);
+        // Round 2's example.
+        for (n, name, value, to) in [
+            (
+                0,
+                "BRIGHT",
+                0.55,
+                vec![(T::Cutoff, 0.60), (T::Emphasis, -0.20)],
+            ),
+            (
+                1,
+                "GROWL",
+                0.30,
+                vec![(T::ContourAmount, 0.40), (T::Drive, 0.50)],
+            ),
+            (2, "SPACE", 0.0, vec![(T::Spread, 0.70), (T::Inner, 0.40)]),
+            (3, "WOBBLE", 0.20, vec![(T::Osc2Frequency, 0.08)]),
+            (4, "SWELL", 0.70, vec![(T::LoudnessAttack, 0.50)]),
+        ] {
+            patch.set_name(n, name);
+            turn_macro(&params, n, value);
+            for (t, d) in to {
+                patch.assign(Source::Macro(n), t, d).unwrap();
+            }
+        }
+        patch.assign(Source::Lfo(0), T::Cutoff, 0.4).unwrap();
+        patch.assign(Source::Lfo(1), T::Cutoff, -0.25).unwrap();
+        let save = |e: &mut Editing, name: &str| {
+            window_frame(e).save_png(out.join(name)).unwrap();
+        };
+        e.playing.visible = false;
+        e.draw();
+        save(&mut e, "wheels.png");
+        macro_key(&mut e);
+        save(&mut e, "macros.png");
+        let k = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Keyboard)));
+        click(&mut e, k);
+        save(&mut e, "keyboard.png");
+        lfo_open(&mut e);
+        save(&mut e, "lfo.png");
+        let g = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Global)));
+        click(&mut e, g);
+        e.draw();
+        let jack = at(&e, ca72_panel::strip::macros::jack_at(1));
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let to = at(&e, centre("mod_mix"));
+        go(&mut e, to);
+        save(&mut e, "drag.png");
+        e.end_gestures();
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        save(&mut e, "hover.png");
+        let knob = at(&e, CONTROLS[ca72_panel::controls::MACRO_FIRST].centre());
+        right_click(&mut e, knob);
+        save(&mut e, "menu.png");
+        e.learning.close_menu();
+        let (x, y, w, h) = ca72_panel::strip::macros::name_at(0);
+        let name = at(&e, (x + w / 2.0, y + h / 2.0));
+        right_click(&mut e, name);
+        save(&mut e, "name-menu.png");
+        e.learning.close_menu();
+        e.start_rename(5);
+        for c in ["s", "u", "b"] {
+            keyed(&mut e, Key::Character(c.into()));
+        }
+        go(&mut e, Point { x: 5.0, y: 5.0 });
+        save(&mut e, "rename.png");
+        e.end_rename(false);
+        e.set_look(Skin::Drawn);
+        save(&mut e, "drawn.png");
+    }
+
+    /// The window's frame with the LFO page, its orbs moving, a knob on it turned and rings on
+    /// the panel is the frame put together whole, each time.
+    #[test]
+    fn the_lfo_page_put_together_in_parts_is_put_together_whole() {
+        use crate::lfo::{Reading, Source, Target as T};
+        let (mut e, _, params) = editing();
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Cutoff, 0.4)
+            .expect("room");
+        lfo_open(&mut e);
+        e.draw();
+        for i in 0..6 {
+            let r = Reading {
+                value: (i as f32 * 0.3).sin(),
+                phase: (i as f32 * 0.1) % 1.0,
+                since: i as f32 * 0.05,
+                fade: 1.0,
+                moving: true,
+                ..Reading::default()
+            };
+            params.lfo_scope.publish(&[r; 4]);
+            e.modulating.due = None;
+            if i == 3 {
+                let p = at(&e, lfo_centre(2, 4));
+                go(&mut e, p);
+            }
+            e.draw();
+            let mut whole = None;
+            compose(
+                &mut whole,
+                &e.renderer,
+                e.strip.frame(),
+                lower_of(&e),
+                None,
+                (
+                    e.page_shows().then(|| e.lfo.frame()),
+                    e.macros_show()
+                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                    &e.modulation,
+                ),
+                None,
+                true,
+                (e.physical_width, e.physical_height()),
+            );
+            assert!(e.composed == whole, "frame {i}: not as put together whole");
+        }
     }
 }
 
@@ -9118,7 +18075,7 @@ mod windows_window_tests {
         }
 
         fn click_bar(&self, target: BarTarget) {
-            let (x, y) = strip::centre(StripTarget::Bar(target));
+            let (x, y) = strip::centre(Rail::Plugin, StripTarget::Bar(target));
             self.drag(self.at((x, y)), 0.0);
         }
 
@@ -9476,7 +18433,10 @@ mod windows_window_tests {
     #[test]
     fn a_press_with_no_move_before_it_lands_where_it_is() {
         let o = Opened::new(false, HostWindow::OffScreen);
-        let (x, y) = o.at(strip::centre(StripTarget::Tab(strip::Bank::Mode, 1)));
+        let (x, y) = o.at(strip::centre(
+            Rail::Plugin,
+            StripTarget::Tab(strip::Bank::Mode, 1),
+        ));
         let at = (((y.round() as u32) << 16) | (x.round() as u32 & 0xFFFF)) as LPARAM;
         let w = o.window();
         // SAFETY: messages posted to the test's own window.
@@ -9825,7 +18785,7 @@ mod windows_window_tests {
                 // SAFETY: the test's own window.
                 let child = unsafe { GetWindow(self.window, GW_CHILD) };
                 let k = f64::from(Self::client(child).0) / art::W;
-                let (x, y) = strip::centre(StripTarget::Bar(BarTarget::Panel));
+                let (x, y) = strip::centre(Rail::Plugin, StripTarget::Bar(BarTarget::Panel));
                 let at = ((((y * k).round() as u32) << 16) | ((x * k).round() as u32 & 0xFFFF))
                     as LPARAM;
                 // SAFETY: messages posted to the test's own window.
@@ -9980,3 +18940,6 @@ mod windows_window_tests {
         }
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_resize_tests;

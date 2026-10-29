@@ -10,6 +10,13 @@
 //! What the drawing does not draw is drawn here, over it, by [`StripRenderer`]: the tabs and
 //! their light, the readouts, the voices' display, the rail's keys and the preset's name.
 
+pub mod arp;
+pub mod fx;
+pub mod lfo;
+pub mod lower;
+pub mod macros;
+pub mod mpe;
+pub mod velocity;
 mod worn;
 
 use resvg::tiny_skia::Pixmap;
@@ -19,7 +26,9 @@ use crate::presets::{BarScene, BarTarget};
 use crate::svg::{N, Svg, colour, put};
 
 pub use worn::StripRenderer;
-pub(crate) use worn::pixel_screen;
+pub(crate) use worn::{
+    BLUE, KEY_PRINT, Lamp, RED, amber_caps, pixel_screen, screen_still, screen_text, tinted_caps,
+};
 
 // ---- The layout.
 
@@ -41,16 +50,24 @@ pub const SECTIONS: [(f64, f64, &str); 4] = [
 pub const LEFT_HAND: (f64, f64) = (art::LH_X + 20.0, PANEL_H + 78.0);
 /// A tab's size, and a bank's pitch between its tabs.
 pub const TAB: (f64, f64) = (150.0, 60.0);
-const TAB_PITCH: f64 = TAB.0 + 6.0;
+pub const TAB_PITCH: f64 = TAB.0 + 6.0;
 /// A bank's recess beyond its tabs' pitches, across.
-const RECESS_PAD: f64 = 18.0;
+pub const RECESS_PAD: f64 = 18.0;
 /// A readout's size.
 pub const READOUT: (f64, f64) = (156.0, 84.0);
+/// The seven-segment cells' pitch and visible height, shared by every readout (R-DRAWER-LETTERING).
+pub const DIGIT_PITCH: f64 = 44.0;
+pub const DIGIT_HEIGHT: f64 = READOUT.1 * 0.64;
+
+/// More cells make a wider window, never narrower digits.
+pub const fn readout_width(cells: usize) -> f64 {
+    cells as f64 * DIGIT_PITCH + 22.0
+}
 /// The grid (the mock-up's A5 and A6): every amount a unit of its knob and its readout, the
 /// knob this far left of the unit's middle, the readout this far right, the unit this wide.
 pub const UNIT_KNOB: f64 = -84.0;
-const UNIT_READOUT: f64 = 106.0;
-const UNIT_HALF: f64 = 184.0;
+pub const UNIT_READOUT: f64 = 106.0;
+pub const UNIT_HALF: f64 = 184.0;
 /// Each section's units' middles: VOICES's, STEREO's three (WIDTH's, INNER's and DETUNE's,
 /// INNER's in the section's middle, the others this far either side of it), OUTPUT's.
 pub const CV: f64 = (SECTIONS[1].0 + SECTIONS[1].1) / 2.0;
@@ -63,14 +80,51 @@ const BANKS_GAP: f64 = 180.0;
 pub const CO: f64 = (SECTIONS[3].0 + SECTIONS[3].1) / 2.0;
 /// The keys on the rail: their middles across and their widths. The settings' key at the right
 /// end (the owner, 2026-10-10: "a settings button on the right hand side of the preview preset
-/// row"), the name's display a key shorter for it, the gaps between the keys as they were.
-const KEYS: [(f64, f64, BarTarget); 7] = [
-    (92.0, 86.0, BarTarget::Star),
-    (192.0, 86.0, BarTarget::Prev),
-    (2526.0, 86.0, BarTarget::Next),
-    (2670.0, 170.0, BarTarget::Save),
-    (2812.0, 86.0, BarTarget::Panel),
-    (2912.0, 86.0, BarTarget::Keyboard),
+/// row"), the name's display a key shorter for it, the gaps between the keys as they were; and
+/// ARP after the keyboard's, the name a key shorter again for it (the owner's C1, 2026-10-18;
+/// decisions.md R-ARP); and MPE after ARP, the name a key shorter again (the owner's A,
+/// 2026-10-20; R-MPE); and LFO directly after the keyboard's, the name a key shorter again (the
+/// owner, 2026-10-20; R-LFO); and MACRO at the far left, over the left area it flips, the star and
+/// the previous key a key right, the name a key shorter again (the owner, 2026-10-20: "in the
+/// same bar as the presets ... the far left edge"; R-MACROS); and GLOBAL before KEYS,
+/// the name a key shorter again (the owner, 2026-10-22; R-GLOBAL-KEY). GLOBAL is 104 units
+/// wide for its lettering at 20, taking 18 more from the name; the gaps stay unchanged. The
+/// previous key beside the next, after the name (players asked for the two together;
+/// R-PRESET-ARROWS): the name a key left, as wide, its clearances to the star and to the
+/// arrows as they were, the arrows a key's gap apart.
+const KEYS: [(f64, f64, BarTarget); 12] = [
+    (92.0, 86.0, BarTarget::Macro),
+    (192.0, 86.0, BarTarget::Star),
+    (2008.0, 86.0, BarTarget::Prev),
+    (2108.0, 86.0, BarTarget::Next),
+    (2252.0, 170.0, BarTarget::Save),
+    (2394.0, 86.0, BarTarget::Panel),
+    (2503.0, 104.0, BarTarget::Global),
+    (2612.0, 86.0, BarTarget::Keyboard),
+    (2712.0, 86.0, BarTarget::Lfo),
+    (2812.0, 86.0, BarTarget::Arp),
+    (2912.0, 86.0, BarTarget::Mpe),
+    (3012.0, 86.0, BarTarget::Settings),
+];
+/// The standalone application's (the owner's FX-A, 2026-10-18; decisions.md R-FX-DRAWER): FX
+/// after ARP, the name a key shorter again for it, the gaps between the keys as they were; MPE
+/// after FX, in the plug-ins' place beside the settings' key (R-MPE); LFO after the keyboard's
+/// (R-LFO); MACRO at the far left (R-MACROS); GLOBAL before KEYS, widened to 104 units
+/// from the name's display as above, with the same gaps (R-GLOBAL-KEY); the previous key beside
+/// the next, as above (R-PRESET-ARROWS).
+const KEYS_FX: [(f64, f64, BarTarget); 13] = [
+    (92.0, 86.0, BarTarget::Macro),
+    (192.0, 86.0, BarTarget::Star),
+    (1908.0, 86.0, BarTarget::Prev),
+    (2008.0, 86.0, BarTarget::Next),
+    (2152.0, 170.0, BarTarget::Save),
+    (2294.0, 86.0, BarTarget::Panel),
+    (2403.0, 104.0, BarTarget::Global),
+    (2512.0, 86.0, BarTarget::Keyboard),
+    (2612.0, 86.0, BarTarget::Lfo),
+    (2712.0, 86.0, BarTarget::Arp),
+    (2812.0, 86.0, BarTarget::Fx),
+    (2912.0, 86.0, BarTarget::Mpe),
     (3012.0, 86.0, BarTarget::Settings),
 ];
 pub const KEY_H: f64 = 62.0;
@@ -79,8 +133,46 @@ pub const KEY_W: f64 = 86.0;
 /// The name's display: its window (left, top, width, height), as tall with its surround as
 /// the keys beside it (the owner, 2026-10-09: "Needs to be the same height as the buttons
 /// flanking it").
-pub const NAME: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 2200.0, 50.0);
-const NAME_SURROUND: f64 = 6.0;
+pub const NAME: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 1682.0, 50.0);
+const NAME_FX: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 1582.0, 50.0);
+
+/// Key `t`'s light on the rail (decisions.md R-LFO-PAGE's rule): 0 unlit, 1 a faint glow (its
+/// page or drawer closed but affecting the sound), 2 lit.
+pub fn key_light_of(bar: &BarScene, t: BarTarget) -> u8 {
+    match worn::key_light(bar, t) {
+        worn::KeyLight::Off => 0,
+        worn::KeyLight::Glow => 1,
+        worn::KeyLight::Lit => 2,
+    }
+}
+
+/// The rail's keys: the plug-ins', or the standalone application's with its effects' key.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Rail {
+    #[default]
+    Plugin,
+    /// FX after ARP (decisions.md R-FX-DRAWER).
+    Effects,
+}
+
+impl Rail {
+    /// Its keys: each key's middle, width and target.
+    pub fn keys(self) -> &'static [(f64, f64, BarTarget)] {
+        match self {
+            Rail::Plugin => &KEYS,
+            Rail::Effects => &KEYS_FX,
+        }
+    }
+
+    /// The name's display: its window (left, top, width, height).
+    pub fn name(self) -> (f64, f64, f64, f64) {
+        match self {
+            Rail::Plugin => NAME,
+            Rail::Effects => NAME_FX,
+        }
+    }
+}
+pub(crate) const NAME_SURROUND: f64 = 6.0;
 /// The voices' display, across STEREO's last row from WIDTH's unit's left to DETUNE's right.
 pub const DISPLAY: (f64, f64, f64, f64) = (
     CW - UNIT_HALF,
@@ -90,7 +182,7 @@ pub const DISPLAY: (f64, f64, f64, f64) = (
 );
 /// The section titles' size (the legends' and the small print's are the lettering's:
 /// `art::Lettering`).
-const TITLE: f64 = 52.0;
+pub(super) const TITLE: f64 = crate::arrangement::TITLE_SIZE;
 
 /// The banks of tabs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -289,18 +381,18 @@ impl StripTarget {
     }
 }
 
-/// What a pointer at (`x`, `y`) (the drawing's units) finds on the strip.
-pub fn hit(x: f64, y: f64) -> Option<StripTarget> {
+/// What a pointer at (`x`, `y`) (the drawing's units) finds on the strip, its rail `rail`.
+pub fn hit(rail: Rail, x: f64, y: f64) -> Option<StripTarget> {
     if y < PANEL_H {
         return None;
     }
     if (y - RAIL_Y).abs() <= KEY_H / 2.0 + 6.0 {
-        for (kx, w, t) in KEYS {
+        for &(kx, w, t) in rail.keys() {
             if (x - kx).abs() <= w / 2.0 + 4.0 {
                 return Some(StripTarget::Bar(t));
             }
         }
-        let (nx, _, nw, _) = NAME;
+        let (nx, _, nw, _) = rail.name();
         if (nx..nx + nw).contains(&x) {
             return Some(StripTarget::Bar(BarTarget::Name));
         }
@@ -333,14 +425,20 @@ pub fn hit(x: f64, y: f64) -> Option<StripTarget> {
     ((dx..dx + dw).contains(&x) && (dy..dy + dh).contains(&y)).then_some(StripTarget::Display)
 }
 
-/// A target's middle (the tests', and a menu's place).
-pub fn centre(t: StripTarget) -> (f64, f64) {
+/// A target's middle (the tests', and a menu's place), the rail `rail`.
+pub fn centre(rail: Rail, t: StripTarget) -> (f64, f64) {
     match t {
         StripTarget::Tab(b, i) => b.tab(i),
         StripTarget::Switch(r) | StripTarget::Readout(r) => r.at(),
         StripTarget::Display => (DISPLAY.0 + DISPLAY.2 / 2.0, DISPLAY.1 + DISPLAY.3 / 2.0),
-        StripTarget::Bar(BarTarget::Name) => (NAME.0 + NAME.2 / 2.0, RAIL_Y),
-        StripTarget::Bar(b) => (KEYS.iter().find(|k| k.2 == b).map_or(0.0, |k| k.0), RAIL_Y),
+        StripTarget::Bar(BarTarget::Name) => {
+            let (x, _, w, _) = rail.name();
+            (x + w / 2.0, RAIL_Y)
+        }
+        StripTarget::Bar(b) => (
+            rail.keys().iter().find(|k| k.2 == b).map_or(0.0, |k| k.0),
+            RAIL_Y,
+        ),
     }
 }
 
@@ -410,6 +508,16 @@ pub struct StripScene {
     pub learning: Option<StripControl>,
     /// None shows the extension controls; Some replaces them with the keyboard.
     pub keyboard: Option<crate::keyboard::Scene>,
+    /// The LFO page shows over the extension controls (decisions.md R-LFO; drawn apart:
+    /// `lfo`), so they are neither drawn nor moved under it.
+    pub lfo: bool,
+}
+
+impl StripScene {
+    /// Whether the extension controls show: neither the keyboard nor the LFO page over them.
+    pub fn extension(&self) -> bool {
+        self.keyboard.is_none() && !self.lfo
+    }
 }
 
 impl Default for StripScene {
@@ -427,6 +535,7 @@ impl Default for StripScene {
             hover: None,
             learning: None,
             keyboard: None,
+            lfo: false,
         }
     }
 }
@@ -434,7 +543,8 @@ impl Default for StripScene {
 // ---- What the drawing draws for it (`art`): its surfaces and its print.
 
 /// The strip's surfaces that do not move, for either skin: the banks' recesses, the readouts'
-/// and the display's bezels, the name's surround on the rail.
+/// and the display's bezels. (The name's surround on the rail is the strip's renderer's, as long
+/// as its rail's name is: decisions.md R-FX-DRAWER.)
 pub(crate) fn surfaces(s: &mut Svg) {
     let bezel = |s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64), r: f64| {
         put!(
@@ -471,7 +581,6 @@ pub(crate) fn surfaces(s: &mut Svg) {
         bezel(s, r.window(), 5.0);
     }
     bezel(s, DISPLAY, 5.0);
-    name_bezel(s, 0.0);
 }
 
 /// The name's display set into the rail's wood (the owner: "we need some sort of border or edge
@@ -480,8 +589,8 @@ pub(crate) fn surfaces(s: &mut Svg) {
 /// bottom in shade, a black lip down into the glass, its lower inner edge catching the light.
 /// Within the surround: as tall as the keys beside it. `dy` down (the worn strip draws in its
 /// own frame, from the rail's top).
-pub(crate) fn name_bezel(s: &mut Svg, dy: f64) {
-    let (x, y, w, h) = NAME;
+pub(crate) fn name_bezel(s: &mut Svg, rail: Rail, dy: f64) {
+    let (x, y, w, h) = rail.name();
     screen_bezel(s, (x, y + dy, w, h));
 }
 
@@ -527,23 +636,29 @@ pub(crate) fn screen_bezel(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64)) {
     );
 }
 
-/// The strip's print: the sections' rules and titles, the banks' titles, the knobs' legends,
+/// A bank's legend, as far above its recess as GLOBAL's MODE (R-DRAWER-LETTERING).
+pub(super) fn bank_legend(s: &mut Svg, x: f64, recess_top: f64, word: &str) {
+    art::text(
+        s,
+        x,
+        recess_top - 26.0,
+        word,
+        s.1.strip_legend(),
+        art::Style::Legend,
+        false,
+        "",
+    );
+}
+
+/// The strip's print: the sections' rules and titles, the banks' legends, the knobs' legends,
 /// the readouts' units, the display's title and its ends. (The knobs' dials are drawn with the
 /// panel's: `art`.)
-pub(crate) fn print(s: &mut Svg, fonts_family: &str) {
+pub(crate) fn print(s: &mut Svg) {
     let top = PANEL_H + RAIL;
     let foot = art::H;
     let (legend, small) = (s.1.strip_legend(), s.1.strip_small());
     let text = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64| {
-        put!(
-            s,
-            "<text x='{}' y='{}' font-family='{fonts_family}' font-size='{}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}'>{}</text>",
-            N(x),
-            N(y),
-            N(size),
-            colour::LEGEND,
-            t
-        );
+        art::text(s, x, y, t, size, art::Style::Legend, false, "");
     };
     for (x0, _, _) in &SECTIONS[1..] {
         put!(
@@ -558,12 +673,23 @@ pub(crate) fn print(s: &mut Svg, fonts_family: &str) {
     }
     for (x0, x1, t) in SECTIONS {
         if !t.is_empty() {
-            text(s, (x0 + x1) / 2.0, foot - 50.0, t, TITLE);
+            put!(s, "<g id='strip-title-{t}'>");
+            art::text(
+                s,
+                (x0 + x1) / 2.0,
+                foot - 50.0,
+                t,
+                TITLE,
+                art::Style::Title,
+                false,
+                "",
+            );
+            s.0.push_str("</g>");
         }
     }
     for b in Bank::ALL {
         let (_, y, _, _) = b.recess();
-        text(s, b.x(), y - 26.0, b.title(), legend);
+        bank_legend(s, b.x(), y, b.title());
     }
     let knob_legends = [
         "VOICES", "ENTROPY", "WIDTH", "DETUNE", "DRIVE", "LEVEL", "INNER",
@@ -587,12 +713,6 @@ pub(crate) fn print(s: &mut Svg, fonts_family: &str) {
         "WHERE THE VOICES SOUND",
         legend,
     );
-}
-
-/// The strip's keys and tabs, as the tests and the renderer find them: each key's middle,
-/// width and target.
-pub(crate) fn keys() -> impl Iterator<Item = (f64, f64, BarTarget)> {
-    KEYS.into_iter()
 }
 
 pub(crate) const KEY_HEIGHT: f64 = KEY_H;
@@ -668,7 +788,7 @@ mod tests {
         for i in 0..2 {
             let t = StripTarget::Tab(b, i);
             let (tx, ty) = b.tab(i);
-            assert_eq!(hit(tx, ty), Some(t));
+            assert_eq!(hit(Rail::Plugin, tx, ty), Some(t));
             assert_eq!(t.control(), Some(StripControl::Placement));
             assert!(
                 tx - TAB.0 / 2.0 > x && tx + TAB.0 / 2.0 < x + w,
@@ -677,12 +797,20 @@ mod tests {
         }
         assert_eq!(span(StripControl::Placement), (x, y, x + w, y + h));
         for beyond in [b.tab(0).0 - TAB_PITCH, b.tab(1).0 + TAB_PITCH] {
-            assert_eq!(hit(beyond, ROWS[0]), None, "a tab at {beyond}");
+            assert_eq!(
+                hit(Rail::Plugin, beyond, ROWS[0]),
+                None,
+                "a tab at {beyond}"
+            );
         }
         for b in Bank::ALL {
             for i in 0..b.words().len() {
                 let (tx, ty) = b.tab(i);
-                assert_eq!(hit(tx, ty), Some(StripTarget::Tab(b, i)), "{b:?} {i}");
+                assert_eq!(
+                    hit(Rail::Plugin, tx, ty),
+                    Some(StripTarget::Tab(b, i)),
+                    "{b:?} {i}"
+                );
             }
         }
     }

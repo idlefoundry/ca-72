@@ -5,7 +5,7 @@
 //! a sample to more than a pass. A worker that stops leaves silence, counted, and never a caller waiting.
 
 use ca72::threaded::{CHUNK, Threaded};
-use ca72::voice::{Jacks, Quality, Voice, Waveform};
+use ca72::voice::{Jacks, Quality, Swept, Voice, Waveform};
 
 fn noop() {}
 
@@ -43,6 +43,18 @@ fn threads_give_the_same_samples_as_one() {
                 0.04 * libm::sin(tau * 0.3 * t)
             } else {
                 0.0
+            },
+            timed: [None; 3],
+            // The plug-in's LFOs' glides from 1.1 s (decisions.md R-LFO-STRESS).
+            swept: if t > 1.1 {
+                let x = libm::sin(tau * 40.0 * t);
+                Swept {
+                    cutoff: 0.05 * x,
+                    tune: 0.1 * x,
+                    freq: [0.02 * x, -0.03 * x],
+                }
+            } else {
+                Swept::default()
             },
         }
     };

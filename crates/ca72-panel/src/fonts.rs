@@ -1,6 +1,6 @@
 //! The lettering's typeface, URW Gothic (AGPL-3.0 with a font exception; decisions.md R22),
-//! built in, and its
-//! measures: what a browser's `getComputedTextLength` and `getBBox` give for a text.
+//! built in, or a skin pack's own (decisions.md R-SKIN-PACKS), and its measures: what a
+//! browser's `getComputedTextLength` and `getBBox` give for a text.
 
 use std::fmt;
 use std::sync::Arc;
@@ -56,6 +56,42 @@ impl Fonts {
             regular: face(REGULAR),
             bold: face(BOLD),
         }
+    }
+
+    /// A skin pack's typeface (its regular and its bold, checked as the pack was), set under
+    /// the lettering's family name and its weights, so that the panel's print is set in it.
+    pub fn with(regular: &'static [u8], bold: &'static [u8]) -> Result<Self, String> {
+        let face = |data: &'static [u8]| {
+            rustybuzz::Face::from_slice(data, 0).ok_or_else(|| "a font cannot be read".to_owned())
+        };
+        let (r, b) = (face(regular)?, face(bold)?);
+        let mut db = fontdb::Database::new();
+        for (data, weight) in [(regular, 400), (bold, 700)] {
+            let mut one = fontdb::Database::new();
+            one.load_font_data(data.to_vec());
+            let mut info = one
+                .faces()
+                .next()
+                .cloned()
+                .ok_or_else(|| "a font cannot be read".to_owned())?;
+            info.families = vec![(FAMILY.to_owned(), fontdb::Language::English_UnitedStates)];
+            info.weight = fontdb::Weight(weight);
+            info.style = fontdb::Style::Normal;
+            db.push_face_info(info);
+        }
+        db.set_sans_serif_family(FAMILY);
+        Ok(Self {
+            db: Arc::new(db),
+            regular: r,
+            bold: b,
+        })
+    }
+
+    /// Whether the typeface has a glyph for every character of `s` (spaces aside).
+    pub fn covers(&self, s: &str) -> bool {
+        s.chars()
+            .filter(|c| !c.is_whitespace())
+            .all(|c| self.regular.glyph_index(c).is_some() && self.bold.glyph_index(c).is_some())
     }
 
     /// The font database rendering uses.

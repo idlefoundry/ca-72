@@ -13,7 +13,7 @@
 use ca72::tuning::Range;
 use ca72::voice::{Panel, Waveform};
 use ca72_plugin::character::Placement;
-use ca72_plugin::engine::{Controls, Engine, Event};
+use ca72_plugin::engine::{BEND_MOST, Controls, Engine, Event, Expression, Reach};
 
 /// A small generator, the same sequence on every run.
 struct Lcg(u64);
@@ -100,6 +100,30 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         lock: r.end(),
         potato: r.end(),
         ultra: r.end(),
+        reach: Reach::default(),
+        // (Oscillators 2 and 3 timed at their slowest and fastest divisions, or not; 1 never.)
+        timed: std::array::from_fn(|n| {
+            (n > 0 && r.end()).then(|| {
+                if r.end() {
+                    ca72_plugin::timed::Length::Bars(4.0)
+                } else {
+                    ca72_plugin::timed::Length::Beats(0.125)
+                }
+            })
+        }),
+        // (No LFO: the fuzz's sequence as it was; `lfos_at_the_ends` adds them.)
+        lfo: Default::default(),
+    }
+}
+
+/// The expression's reaches at their ends (R-MPE), from a generator of their own, so that
+/// the controls' sequence is as it was.
+fn reach_at_the_ends(x: &mut Lcg) -> Reach {
+    Reach {
+        pressure_mod: x.either(-1.0, 1.0),
+        pressure_filter: x.either(-4.0, 4.0),
+        timbre_mod: x.either(-1.0, 1.0),
+        timbre_filter: x.either(-4.0, 4.0),
     }
 }
 
@@ -114,15 +138,25 @@ fn every_control_at_its_ends_plays_on() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(40);
     let mut r = Lcg(seed);
+    let mut x = Lcg(seed ^ 0x81);
     for rate in [44_100.0, 48_000.0] {
         let mut e = Engine::new();
         e.set(&at_the_ends(&mut r));
         e.prepare(rate, 7);
         for round in 0..rounds {
-            let c = at_the_ends(&mut r);
+            let mut c = at_the_ends(&mut r);
+            c.reach = reach_at_the_ends(&mut x);
             e.set(&c);
             for _ in 0..4 {
                 let key = (r.next() % 128) as u8;
+                // (Each note's own expression at its ends too, its bend as far as MPE's goes.)
+                let expression = Expression {
+                    pressure: x.either(0.0, 1.0) as f32,
+                    timbre: x.either(0.0, 1.0) as f32,
+                    bend: x.either(-f64::from(BEND_MOST), f64::from(BEND_MOST)) as f32,
+                };
+                e.event(Event::NoteExpression { key, expression });
+                e.event(Event::ChannelPressure(x.either(0.0, 1.0) as f32));
                 e.event(Event::Note { key, on: true });
                 let off = r.end().then(|| (r.next() % 128) as u8);
                 if let Some(k) = off {

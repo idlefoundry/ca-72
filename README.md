@@ -13,6 +13,8 @@ against them, the factory calibration procedures included.
 
 Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU).
 
+New to the instrument? Start with the [illustrated quick-start guide](docs/quick-start.md).
+
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
@@ -121,8 +123,11 @@ reopens the current release's highlights.
 
 ## Playing it
 
-The keyboard button beside SAVE and settings switches the lower panel between
-VOICES/STEREO/OUTPUT and a playable 44-key keyboard. The wheels, GLIDE and DECAY
+The rail's **GLOBAL**, **KEYS** and **LFO** keys select the three
+lower pages. GLOBAL holds VOICES, STEREO and OUTPUT; KEYS shows a playable
+44-key piano. The selected key is lit; pressing it again leaves the page showing.
+Any of the three shows the lower panel if hidden; **PANEL** shows or hides the
+whole lower area and restores its selected page. The wheels, GLIDE and DECAY
 remain visible. Click a key or drag between keys to play; the octave buttons move
 the visible range. In standalone, TYPING enables a piano layout on your computer keyboard: `A S D F G`
 play `C D E F G`, with `W E T Y U` on the black notes. The full chromatic order is
@@ -167,6 +172,46 @@ once. Open selectors update as devices arrive or disappear. Discovery errors kee
 the last good MIDI list and appear in settings; a successful empty inventory reports
 that no inputs are available. Refresh retries discovery.
 Input/output changes briefly stop playback and retain the sound and editor.
+**TEMPO**, the last row, is the arpeggiator's tempo in the standalone (which has no host to
+give one), the same as the screen at the top left of the panel shows: 120 BPM until you choose
+another from its list (or step it a beat at a time with the left and right arrow keys). It
+applies at once, needs no Apply, and is kept for this computer.
+
+**FX**, on the standalone's rail after ARP (from 0.3.0), drops a drawer of four slots for your
+own CLAP and VST3 effects, run after the synthesizer, left to right. **+ ADD EFFECT** lists the
+effects in your CLAP and VST3 folders (scanned the first time you open it, each plug-in loaded in
+a process of its own; **SCAN AGAIN** after installing more). Click an effect's name to open its
+window, its **ON** tab to bypass it, drag a name onto another slot to move it there, and
+right-click a slot for **REPLACE…** and **REMOVE**. The key is lit while its drawer is open and
+glows faintly while an effect plays with it shut. **PARAMETERS…** in an effect's menu opens a
+searchable list: pin up to four knobs under each effect, then give them LFOs, macros or MIDI
+Learn. The knobs show the effect's own value text; missing or crashed effects keep their pins
+and assignments, dimmed and inert. An effect that crashes is started again;
+after five crashes it is passed by and its slot says CRASHED; one whose plug-in is not installed says MISSING and keeps its settings. The chain and
+each effect's settings are saved in `effects.json` beside `session.json`.
+Standalone presets also save the chain you hear, including each effect's settings and ON tab.
+With **CHAIN › LOCK** off (the default), choosing a preset replaces the chain; a factory or older
+preset clears it. **LOCK** keeps your chain as you browse and stays set between launches on this
+computer. A dim padlock on **FX** shows it is locked. When a preset's own effects differ, a dim
+**FX** beside its name's arrow and the small names under the slots show what is held back;
+**UNLOCK TO HEAR** reminds you that clicking LOCK loads them. Saving while locked saves what you
+hear. The changed mark includes effects while unlocked. VST3, CLAP and AU instances leave a
+preset's effects unheard and preserve their section when you save the sound again.
+**FIND** searches effects by name, maker or type; **MAKER** and **TYPE** group the list, and
+**RECENT** keeps your last six choices on this computer. The standalone never waits for an
+effect: it opens and plays while they load. One that crashes or stops responding as it loads,
+or is passed by, stays off (CRASHED, NOT RESPONDING) at the next start until you click it to try
+again; if its saved settings crash it, its menu's **LOAD WITHOUT ITS SETTINGS** loads it
+fresh and keeps them. After a run that did not close properly, or with Shift (Option on macOS) held
+as it opens, or `--safe-start`, it starts with every effect OFF: click a slot to turn them back on.
+
+On Linux the standalone plays at real-time priority, so that other work on the computer cannot
+hold its sound up. It takes it itself where your user is allowed it (an rtprio limit: on Arch
+and Omarchy the `realtime` group of `realtime-privileges`, on Debian and Ubuntu the `audio` group
+where JACK's setup gave it one), and otherwise asks RTKit (`rtkit`, which Ubuntu, Fedora and most
+desktops run). Where it gets neither, a note after PANIC says so for a few seconds as it starts,
+and SETTINGS and AUDIO & MIDI go on saying so: install rtkit or join the group, then log in
+again. macOS and Windows give it real-time priority themselves.
 
 CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.
 The development JACK launcher is kept separately (Building); direct ASIO and
@@ -206,6 +251,7 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   lowest note held priority and triggers once while keys are held. Far above the keys
   (with RANGE, FREQUENCY and the PITCH wheel high as well) an oscillator stops rising, far
   past the audio band.
+- **GLIDE** goes five times longer: right-click it and choose **LONG**; **×5** prints beside the dial.
 - **POLY** (under the panel, not the instrument's): off, the one instrument as above. On,
   each note plays a whole instrument of its own, with its own keyboard circuit, contours
   and glide, up to VOICES of them (2 to 10). A new note takes the voice that last played
@@ -266,9 +312,181 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   again. A sound set only by the host or a MIDI controller uses the factory presets' average
   until it is changed in the window.
 - **LEVEL** (-30 to +12 dB, 0 by default): the output's gain, after MAIN OUTPUT's.
+- **ARP**, the arpeggiator (from 0.3.0; off by default, and off in every preset and project
+  saved before it): the **ARP** key on the rail drops its drawer down over the lower controls,
+  the keyboard or the LFO page, and puts it away; the key is lit while its drawer is open and
+  glows faintly while the arpeggiator runs with it shut. It plays the keys you hold one at a time, in turn, and its notes go
+  through the instrument exactly as played ones do (MONO, POLY, UNISON, NOTE PRIORITY,
+  RETRIGGER and GLIDE take them the same way). **ON** switches it on; **HOLD** keeps the chord
+  playing after you let go, until you play a new one with no keys held or switch HOLD off.
+  With ON off, HOLD holds the notes you play as you played them, a drone, until you play a new
+  chord or switch HOLD off. **DIRECTION**: UP and DOWN in pitch order, UP/DOWN up and back with
+  its ends played once, RANDOM never the same note twice running, ORDER in the order you
+  pressed the keys (a key added goes on the end). **RATE** is a note value on the host's tempo,
+  from a half note (2) to a thirty-second (32), the dotted and triplet values between them (the
+  readout shows `16.` for a dotted sixteenth, `16t` for a triplet). **OCTAVES** (1 to 5)
+  repeats the pattern an octave up each time; a note that would go past the top of MIDI's
+  range plays in the highest octave it has instead. **GATE** (0 to 100 %, 50 by default) is
+  each note's length, a share of what the instrument can play in a step: even 0 % is held long
+  enough (20 ms) for its contours to start, and each note is let go long enough (13 ms) before
+  the next for them to start again, but at 100 %, which ties each note into the next (legato).
+  **SWING** (0 to 100 %, 0 by default) delays every second step: 67 % is a triplet
+  shuffle, 100 % puts it three quarters of the way through the pair. While the host plays, the
+  steps lock to its bars and beats (a key pressed up to a quarter of a step late plays at
+  once); stopped, the arpeggiator runs at the host's tempo from the moment you press a key;
+  the standalone uses its own **TEMPO**, the screen at the panel's top left (drag it, scroll
+  it, or double-click it and type; 30 to 300 BPM, 120 by default; also in Audio & MIDI). In a
+  plug-in the host gives the tempo and there is no screen. The sustain pedal
+  (CC 64) holds the keys you let go while the arpeggiator runs, and under HOLD's drone keeps
+  the keys let go part of the chord (unless MIDI Learn has CC 64; played without either, the
+  instrument ignores the pedal, as before). Every setting
+  is a host parameter that can be automated or learned, and is saved with presets and
+  projects. It sends no MIDI out.
 - **Wheels:** MIDI pitch bend moves the pitch by MIDI BEND RANGE semitones (2 by
-  default), and the modulation wheel (CC 1) moves the MODULATION wheel. All sound off,
+  default). SETTINGS > MOD WHEEL SOURCE chooses what moves the MODULATION wheel: CC 1
+  by default, another available CC, channel aftertouch, or the strongest polyphonic
+  aftertouch of the notes held. The common choices include breath (CC 2), foot (CC 4),
+  expression (CC 11) and timbre (CC 74); OTHER… reaches the other available numbers.
+  The source follows any MIDI channel and stays on this computer, outside presets and
+  projects. Changing it clears the old MIDI value. All sound off,
   reset all controllers and all notes off (CC 120, 121 and 123) are followed.
+- **Velocity:** how hard each note is struck can move knobs, as an LFO does. Drag a cord from
+  the **VELOCITY** jack under GLIDE and DECAY (shown with the wheels) onto a knob; each voice
+  then takes its own note's velocity, and the meter beside the jack lights to the latest note
+  while velocity moves something. Point at any jack (an LFO's OUT, a macro's, VELOCITY) to see
+  cords to every knob it moves (SETTINGS > HOVER CABLES turns this off). The **EXP** drawer's
+  second row shapes it: **CURVE** (SOFT to HARD), **FLOOR** (the least a soft note gives), a
+  **RESPONSE** screen drawing the curve with the latest note on it, **LAST NOTE** (0 to 127) and
+  **MODULATES**. The on-screen keyboard plays softer near a key's top and harder near its foot.
+  With nothing assigned, velocity changes nothing.
+- **Each note's own expression (MPE):** with an MPE controller, each note's pressure, timbre
+  (CC 74, the slide) and its own pitch bend move only that note's voice. CLAP and VST3 note
+  expressions (pressure, tuning, brightness) and polyphonic aftertouch are each note's own
+  too; ordinary channel pressure and CC 74 move every voice alike. In mono and UNISON the
+  voice takes the expression of the note it plays. The rail's **EXP** key (after ARP; after
+  FX in the standalone) drops a drawer with what they move: **INPUT** reads MPE while each
+  note's own expression comes in, CHANNEL while only ordinary channel pressure or CC 74 does,
+  and is dark otherwise; **PRESSURE** and **TIMBRE** each have **MODULATION** (-100 to
+  100 %, how far they move the voice's MODULATION wheel, added to the wheel's own) and
+  **CUTOFF** (-4 to 4 octaves of the voice's filter cutoff). All four are 0 by default, so
+  nothing changes until you turn them; the key is lit while its drawer is open and glows faintly
+  while any is not 0 with it shut. Double-click a
+  readout (or ⌘/Ctrl-click a knob) to type a value. They are host parameters that can be
+  automated or MIDI-learned, and are saved with presets and projects. SETTINGS > MPE >
+  INPUT & TIMBRE… chooses, for this computer: **MPE INPUT**, AUTO (the default: the
+  controller's MPE Configuration Message sets the zone, and each member channel's bend follows
+  its bend range, 48 semitones unless the controller sends RPN 0), LOWER ZONE (a lower zone of
+  fifteen channels, for hosts that do not pass that message on) or OFF; and **TIMBRE REST**,
+  where timbre moves nothing: CENTERED ON 64 (the default: CC 74 at 64, or a host's brightness
+  at half, is the rest, and lower values move the other way), FROM 0 (0 is the rest, timbre
+  only adding), or FROM THE NOTE'S START (each note's timbre counts from where it began, so a
+  fresh touch is always at rest; ordinary CC 74, shared by every voice, counts from where it
+  was when you began playing, the first key pressed with none held). A note or channel that
+  never sends timbre is always at rest.
+- **LFOs** (from 0.3.0; none assigned in any preset or project saved before it, which sound as
+  they did): the rail's **LFO** key, right after **KEYS**, shows the LFO page in the
+  keyboard's place (the wheels stay at its left). Choose **GLOBAL** or **KEYS**
+  to leave it; pressing the lit **LFO** key leaves it showing. Four LFOs
+  side by side, each with:
+  - its **scope**, in its own phosphor colour (LFO 1 amber, LFO 2 green, LFO 3 blue, LFO 4 red
+    at first): one cycle of its waveform from PHASE, and an orb where the LFO is in it now, at its
+    output (under the trace while FADE fades it in or out; at the cycle's end once ENV holds). Right-click the scope for its **COLOR** (amber, green, blue, red,
+    violet or white; kept on this computer, not in the patch) and its **EDGES**: SOFT (the
+    default, a jump eased over about 2 ms) or SHARP;
+  - **MODE**: FREE runs on; RETRIG starts again at PHASE with a new note; ENV runs one cycle from
+    PHASE and holds (a new note follows the left hand's RETRIGGER switch, as the contours do);
+    and **MONO** (on: one LFO every voice shares; off: one a voice, except on the knobs every
+    voice shares, VOLUME and the strip's, which take the shared one);
+  - its **ON** key, just left of its title (press the key or the title): off, the LFO is muted,
+    fading out over 10 ms with what it modulates kept, its scope and rings dimmed and MODULATES
+    reading MUTED; on again, it fades back in. Its **UNI** key, right of the title: off (BI), the
+    LFO swings its knobs both ways about where they are set; on (UNI), it runs from 0 to 1, so a
+    positive depth moves a knob up from its setting and a negative one down;
+  - **WAVEFORM**, the oscillators' six shapes, STEPPED or CONTINUOUS (right-click it, as an
+    oscillator's), and **REVERSE** in the same menu, which reads the waveform backwards (a
+    sawtooth falls); **RATE**, 0.01 to 50 Hz, or with its timed key (the note beside it shows the
+    value) a note value locked to the host's tempo, as the timed oscillators' dials; **PHASE**,
+    0 to 360°, where the cycle starts (a negative depth inverts the LFO exactly); **FADE**, off at
+    its centre (it settles there when let go near it), to the right how long it fades in after a
+    new note, to the left how long it fades out, up to 10 s either way;
+  - its **OUT** jack and its **MODULATES** screen (the knob and its depth, the count, or NOT IN
+    USE; its tip lists them all, a click drops the list with DEPTH… and REMOVE for each).
+
+  **To modulate a knob, drag a cord from an LFO's OUT jack to it.** While you drag, every knob
+  that can take it has a dotted ring and the one under the plug a bright one; let go there and
+  the LFO moves it by 25 % of its travel either way. Each LFO modulates up to eight knobs, and
+  a knob takes several LFOs. The panel's continuous knobs can be modulated, an oscillator's
+  WAVEFORM while CONTINUOUS, and the LFO page's own knobs (below); not switches, stepped
+  selectors, VOICES, the timed dials, the wheels or the drawers' knobs. The strip's knobs (ENTROPY, WIDTH, INNER, DETUNE,
+  DRIVE, LEVEL) are under the LFO page, so they take an LFO from their right-click menu instead. A
+  modulated knob carries a thin ring for each LFO in its colour (the first LFO outermost)
+  showing how far it swings either way, its positive end ticked, and while the LFO page shows a
+  point where the LFO has it now; the rings show only while the LFO page is open, while you
+  drag a cord, or on the knob under the pointer, so the panel looks as it always did otherwise.
+  The knob's pointer stays where you set it. To change a depth: drag its dial up or down in the
+  pop-up over the knob (double-click a dial to take it away); drag a ring's ticked end round
+  the knob (to the pointer takes it away); hold Alt/Option and drag the knob itself, for the
+  LFO whose column you touched last; or right-click the knob, where each LFO has DEPTH… (type
+  -100 to 100 %) and REMOVE. The knob's tip lists its LFOs' depths. Depths and EDGES are saved
+  with presets and projects but are not host parameters; every other LFO control is a host
+  parameter that can be automated or MIDI-learned. The LFO key is lit while its page shows and
+  glows faintly while an LFO is assigned and moving a knob with it put away.
+
+  **LFOs move LFOs.** An LFO's RATE (not while timed), PHASE, FADE and WAVEFORM (while
+  CONTINUOUS) take a cord from any LFO's OUT jack, its own included, or from a macro's jack, as
+  the panel's knobs do, with the same rings, pop-up, menus and tip. An LFO's **OUT** jack is also
+  its **LEVEL**, how much of every one of its assignments it gives (0 to 100 %, 100 to start; a
+  host parameter): let a cord go on the jack to move it (drawn away from an LFO's own jack and
+  back, its own LEVEL), turn it with the wheel over the jack, Ctrl- or Command-click the jack to
+  type it, double-click it for 100 %. Loops are allowed: each LFO reads the others where they
+  were at its last tick, every 0.5 ms of audio time, so a loop evolves without running away
+  (everything stays within its range), and a patch plays the same at every sample rate and
+  buffer size, live and exported. RETRIG on every LFO of a loop starts it again the same at each
+  note. A MONO-off LFO on another MONO-off LFO's knob moves each voice's own; on a MONO LFO's
+  knob, its shared one.
+
+  **The tempo (standalone).** The standalone's **TEMPO** screen takes a cord from an LFO's or a
+  macro's jack too: its depth is a share of TEMPO's 30 to 300 BPM, and the arpeggiator, the
+  timed oscillators and LFOs and your effects follow the moving tempo, going on from where they
+  were, never jumping. The screen shows the moving tempo (the one you set while you drag or type
+  it); thin rails under it in the wood stand for a knob's rings (30 BPM at the left, 300 at the
+  right), with the pop-up under them, and its right-click menu has DEPTH… and REMOVE and the
+  sources that can move it. The plug-ins follow the host's tempo: a patch from the standalone
+  keeps its TEMPO assignment there but it does nothing, and the LFO's tip and menus say
+  STANDALONE ONLY.
+
+  **Screens show the value as it plays.** A screen whose control an LFO or a macro moves (the
+  strip's ENTROPY, WIDTH, DETUNE, DRIVE, LEVEL, INNER and AUTO GAIN, and TEMPO) reads the value
+  the instrument plays by, lit as that value is, up to 30 times a second; while you turn the
+  control or type into it, its own value. An LFO scope whose PHASE, WAVEFORM (CONTINUOUS) or
+  LEVEL another source moves draws its cycle as it plays now, so the orb stays on the line.
+- **Macros** (from 0.3.0; none assigned in any preset or project saved before it, which sound as
+  they did, each macro at 0): the rail's **MACRO** key, at its far left, flips the lower page's
+  left area from the PITCH and MOD wheels and their switches to six macro knobs, two across and
+  three down, on every lower page (the strip's controls, the keyboard, the LFO page, beside the
+  drawers); pressed again, the wheels. Which one shows is kept on this computer. The wheels and
+  switches go on working from MIDI and automation while the macros show. Each macro has:
+  - its **name**, seven characters on a dot screen in its colour (MACRO 1 to MACRO 6 until you
+    name it): double-click it, or choose RENAME… from its menu, type, and press Enter (Escape
+    leaves it as it was). Names are saved with presets and projects;
+  - its **knob**, 0 to 10 (0 to 100 % in the host), a host parameter named MACRO 1 to MACRO 6
+    that can be automated or MIDI-learned, saved with presets and projects; a new patch has
+    each at 0;
+  - its **jack**, with a collar in the macro's colour (teal, rose, lemon, sage, lavender and
+    white at first; right-click the name or the jack for its **COLOR** and RENAME…, kept on this
+    computer, not in the patch).
+
+  **To have a macro move a knob, drag a cord from its jack to it**, as from an LFO's OUT: it
+  starts at 25 %, up to eight knobs a macro, the same knobs an LFO can take (the LFOs' own
+  knobs and LEVELs among them, not another macro). A macro moves its knobs one way: at 0 a knob is where you set it, at
+  100 % it is moved by the depth (-100 to 100 % of its travel; negative turns it down). Its ring
+  on a knob runs from the knob's setting toward where 100 % takes it, ticked there, bright as far
+  as the macro is turned now. While the macros show, every macro's rings show on the panel's
+  knobs; the pop-up, a ring's end, Alt/Option-drag (for the macro you touched last) and the
+  knob's right-click menu set the depth, as an LFO's. A macro knob's own right-click menu has
+  MIDI Learn, RENAME…, REMOVE ALL ASSIGNMENTS and each knob it moves, with DEPTH… and REMOVE.
+  The strip's knobs take a macro from their menu, as an LFO. The MACRO key is lit while the
+  macros show and glows faintly while the wheels show and an assigned macro is above 0.
 - **External input:** the host's side chain is the panel's EXTERNAL INPUT, through its
   MIXER switch and VOLUME.
 - **Output:** stereo, the same on both channels unless SPREAD places the voices or DOUBLE's
@@ -298,16 +516,22 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   too heavy for. It follows the same panel, the plug-in's own controls with it, its laws
   fitted to the circuit's (pitch, levels, the filter's cutoff, emphasis and rings, the
   contours, GLIDE, the VCA, DRIVE and FILTER MODE), and sounds close to it but simpler: ten
-  voices were a thirtieth to a fortieth of HI's cost in the 0.2.0 measurements. The 0.2.2
-  filter fixes increase both LO and HI's cost; those earlier ratios no longer describe this
-  release. Switching it stops the notes
+  voices cost a quarter to a seventh of HI's on one thread (about a fifth of a core of a fast
+  computer, a Ryzen 7 7800X3D, against four fifths of a core to one and a half at HI;
+  [docs/decisions.md](docs/decisions.md) R-LO-WORKERS). In 0.2.0 it was a thirtieth to a
+  fortieth; 0.2.2's filter fixes made LO's filter costlier. Like HI's, LO's voices are shared
+  with the plug-in's own threads where the machine has them and enough voices sound to repay it
+  (on Windows only while the host's thread is busy; see below). Switching it stops the notes
   sounding (switching between HI and ULTRA does not). It is saved with the session, not with
   presets: it suits the computer, not the sound.
 
 The editor works like the panel:
 
-- **Knobs:** drag up or down, or use the mouse wheel. Hold Shift to turn finely, and
-  double-click to return a control to its default.
+- **Knobs:** drag up or down, or scroll: a mouse wheel turns a knob a notch at a time, a
+  trackpad or a Magic Mouse as far as you move (on Linux, a trackpad also a notch at a time).
+  Hold Shift to turn finely, and double-click to return a control to its default. What you
+  hear follows a knob over 30 ms, so it moves smoothly however it is turned, by the editor or
+  by your host's automation; a preset you choose sounds at once.
 - **RANGE and WAVEFORM:** drag or scroll, click either side to step, or click a printed
   position to go straight to it.
 - **Switches:** click.
@@ -327,6 +551,21 @@ stands (cents under a semitone). The settings key (the gear at the strip's right
 wider than a semitone near the centre and narrower towards the stops, which reach 8 to 8.6
 semitones. The choice is the computer's, not the sound's: a session or preset keeps its pitch
 whichever is chosen; only where the knob points changes.
+
+**Timed oscillators (oscillators 2 and 3).** Under each of their RANGE selectors is a small
+amber key. With RANGE at **LO**, press it (it lights) and the oscillator's cycle becomes a note
+value of your host's tempo, locked to the song position so it never drifts: its FREQUENCY dial
+turns into note values, **4× 2×** (four and two bars), **1** (a bar) and **2 4 8 16 32** (a half
+note to a thirty-second), with the dotted and triplet values on the short ticks between. The
+knob steps from value to value, its tip names the value (OSCILLATOR-3 DIVISION: 1/8 dotted), and
+you can type one at it (`8.` dotted, `8t` triplet, `4x` four bars). The note beside the key
+shows the value chosen. FREQUENCY keeps its own place for when the key is off. At any other
+RANGE the key and its note leave the panel (the key keeps its setting), and the dial reads
+semitones. While timed, the oscillator ignores the keyboard, the PITCH wheel and GLIDE; in the
+standalone and with the host stopped it runs on at the tempo (the standalone's TEMPO). So while
+oscillator 3 is timed, OSC. 3 CONTROL is dimmed and does nothing; it keeps its setting for when
+the key is off or RANGE leaves LO. Oscillator 3 timed at LO makes a
+tempo-synced modulation source through MODULATION MIX.
 
 **Lettering.** If the panel's print is hard to read at the size the editor opens, choose
 **LETTERING › LARGE** from the settings key. It prints the panel's and the strip's legends and
@@ -352,8 +591,9 @@ the name and a drawer drops down over the strip, in three sections:
 
 - **FIND**: type to search names, descriptions and tags; click a tag to filter by it (the
   wheel scrolls the tags).
-- **PRESETS**: ALL, FAVORITES and MINE over the list. Click a preset, or use the arrow keys,
-  to choose it; double-click it to choose it and close the drawer; click its star to make it a
+- **PRESETS**: ALL, FACTORY, MINE and FAVORITES over the list. FACTORY shows only bundled
+  presets; edited factory replacements and your saved presets are in MINE. Click a preset,
+  or use the arrow keys, to choose it; double-click it to choose it and close the drawer; click its star to make it a
   favourite. The mouse wheel or a trackpad scrolls the list.
 - **PRESET**: its keys act on the preset you have chosen: RENAME, TAGS, DELETE (asked first:
   DELETE again or Enter deletes it) and, for a factory preset you edited, REVERT. SAVE AS
@@ -371,11 +611,17 @@ the name and a drawer drops down over the strip, in three sections:
 
 The library is a folder of files, `Idle Foundry/CA-72/Presets` in your user data folder
 (`~/Library/Application Support` on macOS, `%APPDATA%` on Windows, `~/.local/share` on
-Linux). The nineteen factory
+Linux). The forty-two factory
 presets are built in, among them a drum kit and a riser made on the panel alone (Driven
 Kick, Split Snare, Tight Hat, Loose Hat, Wide Crash, Swarm Riser: one instance a drum), Warp
 Field, eight POLY voices drifting with ENTROPY, and White Lotus, a held bass whose filter
-rings an octave and a fifth above each note.
+rings an octave and a fifth above each note. The twenty-three from 0.3.0 show its features off:
+the arpeggiator (Octave Runner, Random Glass, Swing Keys), the LFOs and macros (Tonewheel
+Drift, Tempo Wobble, Morph Bloom, Ray Gun, Night Surf and more), velocity (Zither Me Timbres,
+Velocihator), the timed and CONTINUOUS oscillators (Gatekeeper, Pulse Strings),
+pressure (Pressure Solo), and four presets whose LFOs move each other (Finger in a Light
+Socket, Phase Chase, Level Pump, Hold Me Long Time). Every factory preset plays at
+about the same loudness, -18 LUFS.
 
 **Projects saved with 0.1.** From 0.2.0 the circuit is calibrated against a hardware
 instrument ([docs/decisions.md](docs/decisions.md) R42), which changed the laws of a dozen
@@ -418,16 +664,34 @@ to the next one beginning with it), Enter learns it or stops waiting, Delete or 
 removes its controller, Escape stops waiting and then closes the drawer. It is the only way to
 learn **LOCK**, which has no control on the panel.
 
-**What can be learned:** the panel's knobs, RANGE and WAVEFORM, and its switches, the left
-hand controller's GLIDE and DECAY switches, and POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD),
-INNER, SCATTER, DETUNE (DOUBLE), DRIVE, AUTO GAIN, LEVEL and LOCK. Not
-the PITCH and MODULATION wheels (MIDI pitch bend and the modulation wheel, CC 1, move them
-already), POWER (your host's bypass), MIDI BEND RANGE, nor the presets.
+**The MIDI map mode (standalone).** Press **MIDI** on the walnut, between TYPING and PANIC. Every
+control that can be learned is outlined, and each that has a controller shows it in small print
+(`CC 74`; on another channel `CH 2 CC 74`). Click a control: it is chosen, not moved, and waits
+as with MIDI LEARN. Move a knob, fader or button on your controller and it is assigned; the mode
+stays on, so click the next control. While a switch waits (an oscillator's ON, POLY, ARP ON,
+HOLD and the like), a note works too: each press of that note then turns the switch over, and
+the note does not play. Clicking another control moves the waiting there. Delete or Backspace
+removes the chosen control's controller. Escape stops waiting; Escape again, or MIDI, leaves the
+mode, as does closing the window. The rail's keys work in the mode, so GLOBAL, LFO, MACRO and
+the ARP, MPE and FX drawers can be opened and their controls mapped too. The plug-ins have no
+MIDI key: use the menu and the list there.
 
-**Controllers that are not learned:** CC 0 and 32 (bank select), CC 1 (the modulation
-wheel), CC 6, 38 and 96–101 (data entry, RPN and NRPN), and CC 120–127 (the channel mode
-messages). Moving one while a control waits says so, and it waits on. CC 1, 120 (all sound
-off), 121 (reset all controllers) and 123 (all notes off) do what they always did.
+**What can be learned:** the panel's knobs, RANGE and WAVEFORM, and its switches and TIMED
+keys (a timed FREQUENCY knob learns its note value), the left
+hand controller's GLIDE and DECAY switches, and POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD),
+INNER, SCATTER, DETUNE (DOUBLE), DRIVE, AUTO GAIN, LEVEL and LOCK. Right-click the
+MODULATION wheel and choose MIDI LEARN to set this computer's wheel source to a CC,
+on every channel. Its menu also opens the source choices in Settings. Not learned:
+PITCH (MIDI pitch bend moves it), POWER (your host's bypass), MIDI BEND RANGE, nor the presets.
+
+**Controllers that are not learned by sound controls:** the wheel's chosen CC on every
+channel, CC 0 and 32 (bank select), CC 6, 38 and 96–101 (data entry, RPN and NRPN), and
+CC 120–127 (the channel mode messages). The last groups cannot be wheel sources either.
+Choosing a CC for the wheel removes that CC's other assignments; choosing another source
+frees it again. The MIDI list names the wheel's source. Moving a reserved CC while a
+sound control waits says so, and it waits on. CC 120 (all sound off), 121 (reset all
+controllers) and 123 (all notes off) keep their actions; CC 121 resets the wheel's MIDI
+value for every source.
 
 **How a controller moves a control:** its value, 0 to 127, sets a knob to that share of its
 travel (127 is the top); RANGE and WAVEFORM to one of their six positions, each an equal
@@ -442,8 +706,8 @@ MIDI channel, shown 1 to 16: CC 74 on channel 1 and CC 74 on channel 2 are two c
 Learning a control again replaces its controller. Learning a controller another control has
 moves it, and the note says which control lost it.
 
-**Where they are kept:** with the CA-72 in your host's project, each instance its own, and
-in your host's own presets of the plug-in. Not in the CA-72's presets: choosing, saving or
+**Where they are kept:** with the CA-72 in your host's project (a switch's note too), each
+instance its own, and in your host's own presets of the plug-in. Not in the CA-72's presets: choosing, saving or
 reverting one leaves the controllers as they are. A project saved before MIDI Learn opens
 with none.
 
@@ -470,6 +734,18 @@ follows it there.
 **Escape in REAPER on Windows.** REAPER closes its plug-in window at Escape, which stops MIDI
 Learn waiting too, unless that window's **Send all keyboard input to plug-in** is on; the
 arrows, Enter and Delete reach the MIDI list either way.
+
+## Agents and audio references
+
+The 0.3 MCP bridge lets an agent inspect the standalone, adjust controls and save presets,
+on macOS, Windows and Linux. Turn on SETTINGS › AGENTS › ALLOW, then choose COPY SETUP:
+CLAUDE CODE (or JSON FOR OTHER APPS) there and paste it where it says.
+It also renders detached candidates and measures local WAV references: spectrograms, pitch,
+harmonics, modulation sidebands, envelopes and level-matched comparisons. It can export the
+selected snapshot as a preset file and reload that exact file without an open app. Use the
+`ca72_match_reference` MCP prompt for the fitting workflow. Processing stays on your computer;
+offline rendering explicitly uses the dry synth. See [MCP and reference matching](docs/mcp.md)
+for setup, tools, replay conditions and current platform limits.
 
 ## Building
 
@@ -633,8 +909,10 @@ The service documents and datasheets the model was derived from are not included
   computer (a Ryzen 7 7800X3D) with every voice sounding, twice what 0.1's POLY presets did,
   and on a computer of four processors or a slower one they can overload. QUALITY LO took
   about a fortieth of that then ([docs/decisions.md](docs/decisions.md) R67). Both costs
-  increase with the 0.2.2 filter fixes; the R71 measurements cover one voice, not this full
-  polyphony matrix.
+  increased with the 0.2.2 filter fixes: at LO, Horn Bloom now takes about a third of a core
+  and Brass Choir and Warp Field a little less, on one thread (R-LO-WORKERS): a seventh to an
+  eighth of Horn Bloom's and Brass Choir's at HI (R-POLY-CRACKLE), shared with the plug-in's
+  threads as HI's are.
 - POLY's voices are shared between the host's audio thread and threads of the plug-in's own,
   as many as the machine gives ([docs/decisions.md](docs/decisions.md) R-THREADS): every
   instance in the host shares one budget of the machine's hardware threads less two and
@@ -644,7 +922,13 @@ The service documents and datasheets the model was derived from are not included
   machine's fast cores less two (the performance cores on a processor with efficiency
   cores): 8 on an Apple M4 Pro, 4 on an Intel i5-13600K. An instance holds its threads only
   while its POLY is on, taking them a moment after POLY is switched on and giving them back
-  when it is switched off (R18, R21).
+  when it is switched off (R18, R21). At QUALITY LO, whose voices are light, a run of voices is
+  shared only on as many threads as repay waking them: a thread a voice up to four, then one
+  for each two, so ten voices use five threads at most (R-LO-WORKERS). With one worker (a
+  computer of 3 or 4 processors) LO's voices are split between it and the host's thread. On
+  Linux and macOS LO always shares; on Windows, where a worker's short runs cost more, it
+  shares only while the host's thread is busy (above half the block, smoothed, or after a late
+  block) and returns to the host's thread when the load has stayed below 30 % for a while.
 - At ULTRA, on a machine of 6 or more fast cores, each sounding voice plays on six threads
   (one voice where the machine has 6 to 9, two from 10), when every sounding voice can: the
   same samples, in about half the time. The one instrument does too, so at ULTRA it holds
@@ -710,6 +994,9 @@ The service documents and datasheets the model was derived from are not included
   anew; the photograph is not included.
 - The panel's lettering is URW Gothic, by (URW)++, one of the URW base 35 fonts, under the
   GNU Affero General Public License 3.0 with a font exception (`third_party/urw-gothic/`).
+- The note values beside the TIMED keys are GNU FreeFont's FreeSerif (its musical symbols, a
+  subset), by the GNU FreeFont contributors, under the GNU General Public License 3.0 or later
+  with a font exception (`third_party/gnu-freefont/`).
 - The plug-in is built with [nih-plug](https://github.com/robbert-vdh/nih-plug), by Robbert
   van der Helm (ISC; its VST3 bindings GPL-3.0), patched as
   `third_party/nih-plug/PATCHES.md` describes. The editor uses

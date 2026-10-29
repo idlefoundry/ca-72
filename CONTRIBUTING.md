@@ -12,13 +12,27 @@ Bug reports, measurements and fixes are welcome.
   (on Linux `--all-features` needs the ALSA, JACK and OpenGL headers as well:
   `libasound2-dev libjack-jackd2-dev libgl-dev`). CI builds, tests and runs clippy so, with
   the validators, on macOS, Windows and Linux.
+- **Factory presets:** bundled presets must contain only the synth sound, with no hosted
+  effects (VST3 or CLAP), plug-in paths, or effect state. Import synth values only; the factory
+  library test enforces this for every bundled preset. Personal presets may keep effects.
 - **The sound:** the voice is derived from circuit simulations and tested against them
   (`docs/circuit/`). A change that alters the samples needs its reason and a measurement.
   `crates/ca72-plugin/tests/preset_render.rs` compares every factory preset with the code
   before it, run by hand: on the code before your change,
   `CA72_RENDER_OUT=<dir> cargo test --release -p ca72-plugin --test preset_render -- --ignored --nocapture`,
   then on yours the same with `CA72_RENDER_REF=<dir>`.
+- **The editor's look** goes through the skin system (`docs/skin-packs.md`, decisions.md
+  R-SKIN-PACKS): the official looks are packs in its format (`crates/ca72-panel/packs/official`),
+  and a pack can dress the panel, the strip, the keyboard view and the presets' drawer. Something
+  new the editor draws gets its built-in look the same way (a picture slot, a colour, a drawing
+  or a `[look]` option with the built-in one as its default), documented in
+  `docs/skin-packs.md`, so that a pack can dress it too and the official looks draw as before.
+  The official looks' golden frames show what a change does to them: `cargo run --release -p
+  ca72-panel --example golden -- <dir>` on the code before and after, then `-- --compare
+  <before> <after>`.
 - **Decisions** are recorded in `docs/decisions.md`; a change of behaviour adds to it.
 
 By contributing you agree that your contribution is licensed under the GNU General Public
-License, version 3 or later, as the rest of the CA-72 is.
+License, version 3 or later, as the rest of the CA-72 is, except for contributions to the skin
+packs' format and its examples (`docs/skin-packs.md`, `docs/skin-packs/`), which are dedicated to
+the public domain under CC0 1.0, as those files are.

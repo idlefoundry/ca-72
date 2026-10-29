@@ -17,12 +17,24 @@ assert_process_allocs = ["nih_plug/assert_process_allocs"]
 # The plug-in as an application of its own (nih-plug's standalone host), for trying the
 # editor without a host: `cargo run -p ca72-plugin --example standalone --features standalone`.
 standalone = ["nih_plug/standalone"]
-standalone-production = ["nih_plug/standalone-production", "dep:plugin-kit-standalone", "dep:resvg"]
+standalone-production = ["nih_plug/standalone-production", "dep:plugin-kit-standalone", "dep:resvg", "fx-host"]
+# Third-party effects after the synth, in helper processes (docs/fx-host.md): the standalone
+# application's only, never the plug-ins'.
+fx-host = ["dep:ca72-fx"]
+# A measurement's switch (`tests/lfo_stress.rs`): the LFOs' step set by
+# `engine::set_modulation_step_for_measurement`, a sample for the reference the 32-sample step is
+# measured against (decisions.md R-LFO-STRESS). Never in a plug-in or release build.
+lfo-lab = []
 
 [[bin]]
 name = "ca72-standalone"
 path = "src/bin/standalone.rs"
 required-features = ["standalone-production"]
+
+# The bridge an AI agent's MCP client starts (crate::agent, docs/mcp.md).
+[[bin]]
+name = "ca72-mcp"
+path = "src/bin/mcp.rs"
 
 [[example]]
 name = "standalone"
@@ -41,15 +53,19 @@ harness = false
 name = "mac_quit"
 harness = false
 
+[build-dependencies]
+sha2 = "0.10"
+
 [dependencies]
 ca72.workspace = true
+ca72-fx = { workspace = true, optional = true }
 # The workers' real-time scheduling (decisions.md R11).
 ca72-rt.workspace = true
 libm.workspace = true
 ca72-panel = { path = "../ca72-panel" }
 nih_plug.workspace = true
-plugin-kit-queue = { git = "https://github.com/idlefoundry/plugin-kit", rev = "bcc4d8f7706043dccdecfe8b115ba129f84ec39c" }
-plugin-kit-standalone = { git = "https://github.com/idlefoundry/plugin-kit", rev = "bcc4d8f7706043dccdecfe8b115ba129f84ec39c", optional = true }
+plugin-kit-queue = { git = "https://github.com/idlefoundry/plugin-kit", rev = "91faf69ae98045b9c1d3b4846c7831262353be98" }
+plugin-kit-standalone = { git = "https://github.com/idlefoundry/plugin-kit", rev = "91faf69ae98045b9c1d3b4846c7831262353be98", optional = true }
 resvg = { version = "0.45", default-features = false, features = ["text"], optional = true }
 # The editor's window and its pixels: baseview at the revision nih-plug's own examples use,
 # and softbuffer 0.4.8, both patched (third_party/baseview/PATCHES.md,
@@ -61,15 +77,19 @@ raw-window-handle-06 = { package = "raw-window-handle", version = "0.6" }
 keyboard-types = { version = "0.6.1", default-features = false }
 # The presets' files (decisions.md R10: the format the DAW's instrument shares).
 toml = "0.7"
+toml_edit = { version = "0.25", default-features = false, features = ["parse"] }
 semver = "1"
 # GitHub's answer to the update check (decisions.md R27): nih-plug's own, without the
 # workspace's features. The MIDI assignments in the plug-in's state (R34) as well, with serde
 # (nih-plug's too).
 serde_json = "1"
 serde.workspace = true
+ca72-analysis.workspace = true
+base64 = "0.22"
+sha2 = "0.10"
 # The stereo and AUTO GAIN's machinery (plugin-kit's K6 and K7), from github.com/idlefoundry/plugin-kit
-# at one commit (its main, K5 to K7 merged), as the panel takes K5.
-plugin-kit-stereo = { git = "https://github.com/idlefoundry/plugin-kit", rev = "4c0f0f31041cb28b9dc803996dd01d8f44af5ce8" }
+# at the one commit every kit crate is taken at (decisions.md R-X11-REPEAT), as the panel takes K5.
+plugin-kit-stereo = { git = "https://github.com/idlefoundry/plugin-kit", rev = "91faf69ae98045b9c1d3b4846c7831262353be98" }
 
 # The screen's size, for the editor's first size (and on Windows the keyboard's focus and
 # the pointer's capture, and the shell that opens a release in the browser): the versions
@@ -80,6 +100,8 @@ objc = "0.2.7"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = ["winuser", "windef", "shellapi"] }
+# The agents' socket (docs/mcp.md): AF_UNIX, which Windows 10 1803 and later have, as on Unix.
+uds_windows = "1.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11 = { version = "2.21", features = ["xlib"] }
@@ -87,22 +109,30 @@ x11 = { version = "2.21", features = ["xlib"] }
 x11rb = { version = "0.13.0", features = ["randr"] }
 
 [dev-dependencies]
-ca72-analysis.workspace = true
 ca72-rt.workspace = true
 tempfile.workspace = true
 # A CLAP host in the tests (`tests/clap_host.rs`, decisions.md R34): the bindings nih-plug's CLAP
 # wrapper takes, at its revision.
 clap-sys = { git = "https://github.com/micahrj/clap-sys.git", rev = "25d7f53fdb6363ad63fbd80049cb7a42a97ac156" }
 
+# The process's RLIMIT_RTTIME, SIGXCPU handler and threads' policies read
+# (`tests/standalone_adapter.rs`: the library never asks RTKit, decisions.md R-RTKIT).
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc.workspace = true
+# Held-key integration tests on X11 (R-X11-REPEAT).
+x11rb = { version = "0.13.0", features = ["randr", "xtest"] }
+
 # The Objective-C classes of other copies of softbuffer, and the test's own view
 # (tests/softbuffer_copies.rs): the versions softbuffer takes.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
+# The measurements' processor time (`tests/lo_workers.rs`).
+libc.workspace = true
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSGeometry"] }
 
 # The editor's pixels read and its window captured, in the tests in a real window.
 [target.'cfg(target_os = "windows")'.dev-dependencies]
-winapi = { version = "0.3.9", features = ["winuser", "windef", "wingdi"] }
+winapi = { version = "0.3.9", features = ["winuser", "windef", "wingdi", "processthreadsapi", "realtimeapiset"] }
 
 [lints]
 workspace = true

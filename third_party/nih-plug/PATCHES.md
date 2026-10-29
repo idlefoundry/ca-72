@@ -121,6 +121,12 @@ host, the editor and the saved state would not see:
     automation is set between runs. It touches only the parameters of the `Params` it is made
     with. (A plugin cannot set a parameter outside nih-plug otherwise: its setters are
     crate-private.)
+    Its `set_transport()` gives the next runs a host's transport (playing, tempo, position in
+    quarter notes, time signature), for a plugin that follows it (the CA-72's arpeggiator,
+    `docs/decisions.md` R-ARP; the transport's fields are crate-private too).
+    It says it is the standalone (`PluginApi::Standalone`) until `set_plugin_api()` tells it
+    otherwise, for what a plugin does in its standalone alone (the CA-72's TEMPO as a
+    modulation target, R-LFO).
 
 One more came from a report: the CA-72's switches and buttons did nothing in Cubase 15 on
 Windows 11 (2026-10-07; the CA-72's `docs/decisions.md` R36):
@@ -175,8 +181,17 @@ One more from the CA-72's own testing in Cubase 15 on Windows 11 (2026-10-10; it
     `visibility_tests` unit tests exercise the actual CLAP initialization and context;
     CI runs them explicitly because this vendored crate is outside the workspace.
 
+16. **A VST3 host's brightness arrives as brightness.** `NoteExpressionController::
+    translate_event` (`src/wrapper/vst3/note_expressions.rs`) turned `kBrightnessTypeID` into
+    `NoteEvent::PolyExpression` and `kExpressionTypeID` into `PolyBrightness`, the opposite of
+    its own `translate_event_reverse` and of the CLAP wrapper. The CA-72 takes brightness as a
+    note's timbre (its `docs/decisions.md` R-MPE, issue 81), so a VST3 host's MPE timbre went
+    nowhere. They now map each to its own (the module's own test, run as
+    `cargo test --manifest-path third_party/nih-plug/Cargo.toml --features vst3 --lib
+    note_expressions`; not yet in CI).
+
 To move to a newer upstream commit, copy its `Cargo.toml`, `LICENSE`, `README.md`, `src`
-and `nih_plug_derive` here and apply the fifteen changes again, unless upstream has fixed them.
+and `nih_plug_derive` here and apply the sixteen changes again, unless upstream has fixed them.
 Then update the commit above and `nih_plug_xtask`'s `rev` in the workspace's `Cargo.toml`.
 
 The standalone app adds a separate `standalone-production` feature. Its adapter
@@ -218,8 +233,23 @@ them to the window under the pointer) asks for it with `app_window::request_quit
 window acts on at its next frame. The manifest takes `keyboard-types` for the key, as baseview
 gives it, with the `standalone-production` feature.
 
+The production standalone's window closing (the CA-72's `docs/decisions.md` R-QUIT-NAP,
+2026-10-27): `app_window::on_closing` gives the function called once as the app's window
+starts to close, however it is closed: at its `WillClose` (the close button; on macOS ⌘Q and
+the quit Apple event, baseview's change 11), before `app_window::quits` and `request_quit`
+close it, and as the window's handler is dropped otherwise. The CA-72 lifts App Nap there, so
+that a napped app's shutdown runs at its ordinary pace. Nothing is called if none is given.
+
 Production standalone PANIC identity: the additive ProcessContext token accessor
 and per-block adapter metadata carry the exact token captured by plugin-kit's
 panic flag. Read the token before consuming the panic; direct, untagged and hosted
 callbacks retain their existing behavior. Adapter metadata is consumed even if a
 malformed block is rejected, preventing stale acknowledgements on later calls.
+
+
+## Detached offline rendering (R-REFERENCE-AUDIO, 2026-10-21)
+
+`util::with_flush_to_zero` exposes the wrappers' existing scoped FTZ guard for detached
+offline processing. It restores the caller's previous FP mode and permits output-buffer
+allocation, so the MCP renderer can use the same processing environment without a live host.
+The live wrappers' processing path is unchanged.

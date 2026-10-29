@@ -13,10 +13,11 @@
 * R72 47 to the switched ground (pin 20).
 *
 * Ports: in (pin 11), out (pin 17), amp (the output before C20), lamp (pin 19), swgnd
-* (pin 20), p10, n10, p15.
+* (pin 20), p10, n10, p15. p10 is +10 V on the drawing; the model and its bench give it +13 V,
+* where the hardware reference's preamplifier swings as far positive (board4.md B4-11).
 .subckt mm_preamp in out amp lamp swgnd p10 n10 p15
 r78   in n78 1k                     ; R78 1K
-c23   n78 b27 0.1u                  ; C23 .1 uF
+c23   n78 b27 0.082u                ; C23: .1 uF on the drawing; 82 nF where the hardware reference's FEEDBACK loop runs (board4.md B4-11)
 r66   b27 0 100k                    ; R66 100K
 q27   c27 b27 tail QTIS97           ; Q27 TIS97
 r65   p10 c27 27k                   ; R65 27K

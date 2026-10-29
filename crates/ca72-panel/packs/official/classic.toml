@@ -1,0 +1,26 @@
+# The CA-72's CLASSIC look as a skin pack, built into the plug-in (decisions.md R-SKIN-PACKS):
+# the format every pack uses (docs/skin-packs.md). `cargo run -p ca72-panel --example
+# export_pack -- classic <folder>` writes it out as a folder.
+
+format = 1
+id = "com.idlefoundry.ca72.classic"
+name = "CLASSIC"
+version = "1.0.0"
+plugin = "ca-72"
+summary = "The panel as drawn: every surface a vector drawing."
+license = "GPL-3.0-or-later"
+license_files = ["LICENSE.txt"]
+
+[[creators]]
+name = "Idle Foundry Ltd."
+role = "layout and drawing"
+
+[[assets]]
+path = "layout.toml"
+origin = "original"
+author = "Idle Foundry Ltd."
+note = "Measured from a photograph of the instrument, Wikimedia Commons' Minimoog panel.jpg (Alex Harden, cropped by Clusternote, CC BY 2.0), only looked at: the photograph is not included."
+
+[look]
+base = "classic"
+layout = "layout.toml"

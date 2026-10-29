@@ -99,7 +99,37 @@ fn the_voice_does_not_allocate_while_it_plays() {
             // The plug-in's ENTROPY moving too.
             detune: [3.0 * (tau * 0.3 * t).sin(), -2.0, 1.5],
             cutoff: 0.03 * (tau * 0.2 * t).sin(),
+            timed: [None; 3],
+            // And the plug-in's LFOs' glides (decisions.md R-LFO-STRESS).
+            swept: ca72::voice::Swept {
+                cutoff: 0.02 * (tau * 9.0 * t).sin(),
+                tune: 0.05 * (tau * 9.0 * t).sin(),
+                freq: [0.01, -0.01],
+            },
         });
+    }
+    // First-use fixed selector and continuously modulated pulse widths use only
+    // constructor-prepared reductions in all circuit quality paths.
+    for q in [
+        Quality::NoCompromises,
+        Quality::HighFidelity,
+        Quality::Potato,
+    ] {
+        v.panel.quality = q;
+        for i in 0..4800 {
+            for n in 0..3 {
+                v.panel.osc[n].waveform = match (i / 400 + n) % 3 {
+                    0 => ca72::voice::Waveform::Square,
+                    1 => ca72::voice::Waveform::WideRectangle,
+                    _ => ca72::voice::Waveform::NarrowRectangle,
+                };
+                v.panel.shape[n].continuous = i % 1200 >= 600;
+                v.panel.shape[n].at = 3.0 + 2.4 * (0.5 + 0.5 * (i as f64 * 0.001 + n as f64).sin());
+                v.panel.shape[n].modulated = i % 2 == 0;
+            }
+            v.panel.mod_wheel = 0.8;
+            v.tick();
+        }
     }
     // HI's filter stays oversampled as EMPHASIS crosses the regeneration region.
     v.panel.quality = Quality::Potato;
@@ -162,6 +192,12 @@ fn the_voice_on_threads_does_not_allocate_while_it_plays() {
                     s_trig: t.rem_euclid(0.35) < 0.005,
                     detune: [3.0 * (tau * 0.3 * t).sin(), -2.0, 1.5],
                     cutoff: 0.03 * (tau * 0.2 * t).sin(),
+                    timed: [None; 3],
+                    swept: ca72::voice::Swept {
+                        cutoff: 0.02 * (tau * 9.0 * t).sin(),
+                        tune: 0.05 * (tau * 9.0 * t).sin(),
+                        freq: [0.01, -0.01],
+                    },
                 }
             },
             |_, y| sink += y,

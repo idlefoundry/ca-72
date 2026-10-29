@@ -20,13 +20,15 @@ use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::entry::clap_plugin_entry;
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_DONT_RECORD, CLAP_EVENT_IS_LIVE, CLAP_EVENT_MIDI,
-    CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE, CLAP_EVENT_TRANSPORT,
-    CLAP_TRANSPORT_IS_PLAYING, clap_event_header, clap_event_midi, clap_event_note,
-    clap_event_param_value, clap_event_transport, clap_input_events, clap_output_events,
+    CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE,
+    CLAP_EVENT_TRANSPORT, CLAP_NOTE_EXPRESSION_BRIGHTNESS, CLAP_NOTE_EXPRESSION_PRESSURE,
+    CLAP_NOTE_EXPRESSION_TUNING, CLAP_TRANSPORT_IS_PLAYING, clap_event_header, clap_event_midi,
+    clap_event_note, clap_event_note_expression, clap_event_param_value, clap_event_transport,
+    clap_input_events, clap_output_events,
 };
 use clap_sys::ext::params::{
-    CLAP_EXT_PARAMS, clap_host_params, clap_param_clear_flags, clap_param_rescan_flags,
-    clap_plugin_params,
+    CLAP_EXT_PARAMS, clap_host_params, clap_param_clear_flags, clap_param_info,
+    clap_param_rescan_flags, clap_plugin_params,
 };
 use clap_sys::ext::render::{CLAP_EXT_RENDER, CLAP_RENDER_OFFLINE, clap_plugin_render};
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_plugin_state};
@@ -90,6 +92,8 @@ enum In {
     Midi(u32, [u8; 3]),
     Note(u32, u16, i32, i16, i16, f64),
     Transport(u32, bool),
+    /// A note expression (decisions.md R-MPE): time, expression, note id, channel, key, value.
+    Expression(u32, i32, i32, i16, i16, f64),
 }
 
 /// A parameter value the plug-in told the host: time, flags, parameter, value.
@@ -109,6 +113,7 @@ struct Events {
     _params: Vec<Box<clap_event_param_value>>,
     _notes: Vec<Box<clap_event_note>>,
     _transport: Vec<Box<clap_event_transport>>,
+    _expressions: Vec<Box<clap_event_note_expression>>,
 }
 
 unsafe extern "C" fn in_size(list: *const clap_input_events) -> u32 {
@@ -186,6 +191,10 @@ impl Instance {
     }
 
     fn with_block(block: u32) -> Instance {
+        Instance::with_rate_block(RATE, block)
+    }
+
+    fn with_rate_block(rate: f64, block: u32) -> Instance {
         let rescans = Box::new(AtomicUsize::new(0));
         let host = Box::new(clap_host {
             clap_version: CLAP_VERSION,
@@ -212,7 +221,7 @@ impl Instance {
             );
             assert!(!plugin.is_null());
             assert!(((*plugin).init.unwrap())(plugin));
-            assert!(((*plugin).activate.unwrap())(plugin, RATE, 1, block));
+            assert!(((*plugin).activate.unwrap())(plugin, rate, 1, block));
             assert!(((*plugin).start_processing.unwrap())(plugin));
             Instance {
                 plugin,
@@ -245,6 +254,7 @@ impl Instance {
             _params: Vec::new(),
             _notes: Vec::new(),
             _transport: Vec::new(),
+            _expressions: Vec::new(),
         };
         for &e in events {
             match e {
@@ -305,6 +315,25 @@ impl Instance {
                     });
                     ev.headers.push(&raw const note.header);
                     ev._notes.push(note);
+                }
+                In::Expression(time, expression_id, note_id, channel, key, value) => {
+                    let x = Box::new(clap_event_note_expression {
+                        header: clap_event_header {
+                            size: size_of::<clap_event_note_expression>() as u32,
+                            time,
+                            space_id: CLAP_CORE_EVENT_SPACE_ID,
+                            type_: CLAP_EVENT_NOTE_EXPRESSION,
+                            flags: 0,
+                        },
+                        expression_id,
+                        note_id,
+                        port_index: 0,
+                        channel,
+                        key,
+                        value,
+                    });
+                    ev.headers.push(&raw const x.header);
+                    ev._expressions.push(x);
                 }
                 In::Transport(time, playing) => {
                     // SAFETY: every field of the CLAP transport permits zero.
@@ -485,6 +514,7 @@ fn at(e: In, timing: u32) -> In {
         In::Midi(_, data) => In::Midi(timing, data),
         In::Note(_, kind, id, ch, key, velocity) => In::Note(timing, kind, id, ch, key, velocity),
         In::Transport(_, playing) => In::Transport(timing, playing),
+        In::Expression(_, x, id, ch, key, value) => In::Expression(timing, x, id, ch, key, value),
     }
 }
 
@@ -647,6 +677,9 @@ fn envelope_sequences_match_in_both_clap_dialects_at_every_buffer_size() {
                 for block in [32, 64, 128, 256, 512, 1024, 2048] {
                     let p = envelope_instance(block, mode, priority, retrigger);
                     let state = p.save();
+                    // (Both instances load the state, so that both voices' noise, the mixer's
+                    // own in LO too (decisions.md R-LO-HISS), starts from the same seeding.)
+                    assert!(p.load(&state));
                     let a = render(&p, &midi, 105_600);
                     if let Some(reference) = &reference {
                         // A released POLY voice is retired at a block boundary, so its next
@@ -906,5 +939,608 @@ fn no_editor_means_no_release_notes_during_scanning_or_rendering() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+}
+
+/// Run in a fresh process so each instance really reads its computer assignments at birth,
+/// without changing this test runner's environment or any installed settings.
+#[test]
+fn midi_preset_actions_work_through_clap_with_no_editor() {
+    use std::time::{Duration, Instant};
+    if std::env::var_os("CA72_PRESET_ACTION_CHILD").is_none() {
+        let target = std::env::var_os("CARGO_TARGET_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap().join("target"));
+        std::fs::create_dir_all(&target).unwrap();
+        let dir = tempfile::tempdir_in(target).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "midi_preset_actions_work_through_clap_with_no_editor",
+                "--nocapture",
+            ])
+            .env("CA72_PRESET_ACTION_CHILD", "1")
+            .env("IDLE_FOUNDRY_SHARED", dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let shared = std::path::PathBuf::from(std::env::var_os("IDLE_FOUNDRY_SHARED").unwrap());
+    std::fs::create_dir_all(shared.join("CA-72")).unwrap();
+    std::fs::write(shared.join("CA-72/settings.toml"), "[preset_actions.next_preset]\nchannel = 16\nnote = 127\n[preset_actions.previous_preset]\nchannel = 15\ncc = 119\n").unwrap();
+    let entries = ca72_plugin::library::Library::at(shared.join("CA-72/Presets"))
+        .entries()
+        .0;
+    let p = Instance::new();
+    let name = || {
+        let state = json_of(&p.save());
+        serde_json::from_str::<String>(state["fields"]["preset"].as_str().unwrap()).unwrap()
+    };
+    let wait = |expected: &str| {
+        let start = Instant::now();
+        let mut applied = false;
+        loop {
+            let told = p.process(&[]);
+            if !told.is_empty() {
+                assert!(
+                    told.iter()
+                        .all(|event| event.time == 0 && event.flags & CLAP_EVENT_DONT_RECORD != 0)
+                );
+                applied = true;
+            }
+            if name() == expected && applied {
+                break;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "preset {expected} not applied: {}",
+                name()
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    p.process(&[In::Midi(0, [0x9f, 127, 127])]);
+    wait(&entries[0].sound.name);
+    for _ in 0..3 {
+        assert!(p.process(&[In::Midi(0, [0x9f, 127, 127])]).is_empty());
+        assert_eq!(name(), entries[0].sound.name);
+    }
+    assert!(p.process(&[In::Midi(0, [0x8f, 127, 0])]).is_empty());
+    p.process(&[In::Note(0, CLAP_EVENT_NOTE_ON, 4, 15, 127, 1.0)]);
+    wait(&entries[1].sound.name);
+    assert!(
+        p.process(&[In::Note(0, CLAP_EVENT_NOTE_OFF, 4, 15, 127, 0.0)])
+            .is_empty()
+    );
+    p.process(&[In::Cc(0, 14, 119, 127)]);
+    wait(&entries[0].sound.name);
+    for v in [127, 100, 64, 63, 0] {
+        assert!(p.process(&[In::Cc(0, 14, 119, v)]).is_empty());
+        assert_eq!(name(), entries[0].sound.name);
+    }
+    p.process(&[In::Cc(0, 14, 119, 64)]);
+    wait(&entries.last().unwrap().sound.name);
+    let state = json_of(&p.save());
+    assert!(
+        !state["fields"]["midi_map"]
+            .as_str()
+            .unwrap()
+            .contains("preset")
+    );
+}
+
+/// A note's expression through CLAP's note expressions (pressure, brightness, tuning: what
+/// Bitwig sends an MPE controller's as) and the same through MIDI in an MPE zone (the MPE
+/// Configuration Message, then each note on its member channel), both into the real CLAP
+/// entry: the same samples to the bit, the one instrument and POLY; and audibly not the
+/// notes without it (decisions.md R-MPE).
+#[test]
+fn clap_note_expressions_and_mpe_midi_play_the_same_samples() {
+    // MPE's bend for MIDI's 14-bit value, as the plug-in reads it (over 48 semitones).
+    let bend_of = |v: u16| ((f32::from(v) / 16_383.0) * 2.0 - 1.0) * 48.0;
+    let seven = |v: u8| f64::from(f32::from(v) / 127.0);
+    let bend = 10_240u16;
+    let (lsb, msb) = ((bend & 127) as u8, (bend >> 7) as u8);
+    for mode in [0u8, 1] {
+        let instance = || {
+            let p = envelope_instance(256, mode, 0, false);
+            p.audio(
+                1,
+                &[
+                    In::Param(0, "pressure_filter", 0.8),
+                    In::Param(0, "timbre_filter", 0.3),
+                    In::Param(0, "pressure_mod", 0.9),
+                ],
+            );
+            p
+        };
+        let x = |t: u32, id: i32, note: i32, key: i16, v: f64| {
+            (t, In::Expression(0, id, note, 0, key, v))
+        };
+        let on =
+            |t: u32, note: i32, key: i16| (t, In::Note(0, CLAP_EVENT_NOTE_ON, note, 0, key, 1.0));
+        let off =
+            |t: u32, note: i32, key: i16| (t, In::Note(0, CLAP_EVENT_NOTE_OFF, note, 0, key, 0.0));
+        let native = [
+            on(0, 1, 60),
+            x(0, CLAP_NOTE_EXPRESSION_PRESSURE, 1, 60, seven(96)),
+            x(0, CLAP_NOTE_EXPRESSION_BRIGHTNESS, 1, 60, seven(100)),
+            x(
+                0,
+                CLAP_NOTE_EXPRESSION_TUNING,
+                1,
+                60,
+                f64::from(bend_of(bend)),
+            ),
+            on(4_800, 2, 67),
+            x(9_600, CLAP_NOTE_EXPRESSION_PRESSURE, 1, 60, seven(20)),
+            x(12_000, CLAP_NOTE_EXPRESSION_PRESSURE, 2, 67, seven(127)),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let midi = [
+            (0, In::Cc(0, 0, 101, 0)),
+            (0, In::Cc(0, 0, 100, 6)),
+            (0, In::Cc(0, 0, 6, 15)),
+            (0, In::Midi(0, [0xe1, lsb, msb])),
+            (0, In::Cc(0, 1, 74, 100)),
+            (0, In::Midi(0, [0xd1, 96, 0])),
+            (0, In::Midi(0, [0x91, 60, 127])),
+            (4_800, In::Midi(0, [0x92, 67, 127])),
+            (9_600, In::Midi(0, [0xd1, 20, 0])),
+            (12_000, In::Midi(0, [0xd2, 127, 0])),
+            (16_800, In::Midi(0, [0x81, 60, 0])),
+            (19_200, In::Midi(0, [0x82, 67, 0])),
+        ];
+        let plain = [
+            on(0, 1, 60),
+            on(4_800, 2, 67),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let a = render(&instance(), &native, 24_000);
+        let b = render(&instance(), &midi, 24_000);
+        let c = render(&instance(), &plain, 24_000);
+        assert!(rms(&a) > 0.01, "mode {mode}: sounding");
+        assert!(
+            a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()),
+            "mode {mode}: CLAP's note expressions and MPE's MIDI differ"
+        );
+        let apart = a
+            .iter()
+            .zip(&c)
+            .map(|(x, y)| f64::from(x - y).powi(2))
+            .sum::<f64>();
+        assert!(
+            apart > 1.0,
+            "mode {mode}: the expression is heard ({apart})"
+        );
+    }
+}
+
+/// TIMBRE REST through the real CLAP entry, as the computer's `settings.toml` chooses it
+/// (decisions.md R-MPE), each in a process of its own with a shared folder of its own:
+/// at "centre" (and with none set) a host's brightness at 0.5 is at rest, the notes the same to
+/// the bit as with none, TIMBRE TO FILTER turned up; at "zero" it is half the reach, audibly not;
+/// at "start", a note's first brightness is where it begins, so 0.5 then 0.9 is heard and 0.5
+/// alone is not.
+#[test]
+fn clap_brightness_rests_where_the_computers_setting_says() {
+    if let Ok(word) = std::env::var("CA72_TIMBRE_REST_CHILD") {
+        let instance = || {
+            let p = envelope_instance(256, 1, 0, false);
+            p.audio(1, &[In::Param(0, "timbre_filter", 2.0)]);
+            p
+        };
+        let x = |t: u32, note: i32, key: i16, v: f64| {
+            (
+                t,
+                In::Expression(0, CLAP_NOTE_EXPRESSION_BRIGHTNESS, note, 0, key, v),
+            )
+        };
+        let on =
+            |t: u32, note: i32, key: i16| (t, In::Note(0, CLAP_EVENT_NOTE_ON, note, 0, key, 1.0));
+        let off =
+            |t: u32, note: i32, key: i16| (t, In::Note(0, CLAP_EVENT_NOTE_OFF, note, 0, key, 0.0));
+        let plain = [
+            on(0, 1, 60),
+            on(4_800, 2, 67),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let half = [
+            on(0, 1, 60),
+            x(0, 1, 60, 0.5),
+            on(4_800, 2, 67),
+            x(4_800, 2, 67, 0.5),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let moved = [
+            on(0, 1, 60),
+            x(0, 1, 60, 0.5),
+            x(2_400, 1, 60, 0.9),
+            on(4_800, 2, 67),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let a = render(&instance(), &plain, 24_000);
+        let same = |b: &[f32]| a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits());
+        assert!(rms(&a) > 0.01, "{word}: sounding");
+        let b = render(&instance(), &half, 24_000);
+        assert_eq!(same(&b), word != "zero", "{word}: brightness 0.5");
+        let c = render(&instance(), &moved, 24_000);
+        assert!(!same(&c), "{word}: brightness moved from 0.5 to 0.9");
+        return;
+    }
+    for word in ["", "centre", "zero", "start"] {
+        let dir = tempfile::tempdir().expect("shared data folder");
+        if !word.is_empty() {
+            let folder = dir.path().join("CA-72");
+            std::fs::create_dir_all(&folder).expect("settings folder");
+            std::fs::write(
+                folder.join("settings.toml"),
+                format!("timbre_rest = \"{word}\"\n"),
+            )
+            .expect("settings");
+        }
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "clap_brightness_rests_where_the_computers_setting_says",
+                "--nocapture",
+            ])
+            .env("CA72_TIMBRE_REST_CHILD", word)
+            .env("IDLE_FOUNDRY_SHARED", dir.path())
+            .env("CA72_SEATS_DIR", dir.path().join("seats"))
+            .output()
+            .expect("child host");
+        let told = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && told.contains("1 passed"),
+            "{word}:\n{told}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+/// Host display text must remain stable after typing it back, including waveform blends,
+/// rectangle duties and LFO rate units. Rounded displays need not preserve the original value.
+#[test]
+fn every_parameter_display_roundtrips_through_the_host_api() {
+    let p = Instance::with_rate_block(RATE, BLOCK);
+    let params: &clap_plugin_params = p.extension(CLAP_EXT_PARAMS);
+    // SAFETY: the instance and CLAP output buffers live through every call; zero is valid
+    // initial storage for clap_param_info's scalar fields, pointers and character arrays.
+    unsafe {
+        for index in 0..(params.count.unwrap())(p.plugin) {
+            let mut info: clap_param_info = std::mem::zeroed();
+            assert!((params.get_info.unwrap())(p.plugin, index, &mut info));
+            let name = CStr::from_ptr(info.name.as_ptr());
+            // Dense sampling includes rounded 0%/100% blends and rectangle aliases.
+            let steps = if name.to_bytes().ends_with(b" Shape") {
+                10_000
+            } else {
+                100
+            };
+            if name.to_bytes().starts_with(b"LFO ") && name.to_bytes().ends_with(b" Shape") {
+                let mut travel = f64::NAN;
+                assert!((params.text_to_value.unwrap())(
+                    p.plugin,
+                    info.id,
+                    c"0.25".as_ptr(),
+                    &mut travel
+                ));
+                assert_eq!(travel, 0.25, "bare LFO shape numbers retain travel units");
+                assert!(!(params.text_to_value.unwrap())(
+                    p.plugin,
+                    info.id,
+                    c"NaN".as_ptr(),
+                    &mut travel
+                ));
+            }
+            for step in 0..=steps {
+                let value = info.min_value
+                    + (info.max_value - info.min_value) * f64::from(step) / f64::from(steps);
+                let mut text = [0 as c_char; 256];
+                let mut again = [0 as c_char; 256];
+                let mut back = f64::NAN;
+                let mut last = f64::NAN;
+                assert!((params.value_to_text.unwrap())(
+                    p.plugin,
+                    info.id,
+                    value,
+                    text.as_mut_ptr(),
+                    text.len() as u32
+                ));
+                let shown = CStr::from_ptr(text.as_ptr());
+                assert!(
+                    (params.text_to_value.unwrap())(p.plugin, info.id, text.as_ptr(), &mut back),
+                    "{name:?} {value}: {shown:?}"
+                );
+                assert!(
+                    back.is_finite() && (info.min_value..=info.max_value).contains(&back),
+                    "{name:?} {shown:?} -> {back}"
+                );
+                assert!((params.value_to_text.unwrap())(
+                    p.plugin,
+                    info.id,
+                    back,
+                    again.as_mut_ptr(),
+                    again.len() as u32
+                ));
+                assert_eq!(
+                    shown,
+                    CStr::from_ptr(again.as_ptr()),
+                    "{name:?} {value} -> {back}"
+                );
+                assert!((params.text_to_value.unwrap())(
+                    p.plugin,
+                    info.id,
+                    again.as_ptr(),
+                    &mut last
+                ));
+                assert_eq!(back, last, "{name:?} {shown:?}");
+            }
+        }
+    }
+}
+
+/// A host may make, start and play an instance on a thread of its own, with less stack than a
+/// main thread's (a macOS secondary thread has 512 KB; a host's own threads may have less): the
+/// instance's whole life, made, activated, played at each QUALITY in POLY with GLIDE moving,
+/// its state loaded, deactivated and destroyed, fits in 256 KB (decisions.md R-HOST-STACK:
+/// making one took 576 to 640 KB in a release build and over 1 MB in a debug build, its ten
+/// spare voices built on the stack).
+#[test]
+fn an_instance_lives_on_a_host_thread_of_256_kb() {
+    std::thread::Builder::new()
+        .stack_size(256 << 10)
+        .spawn(|| {
+            let p = Instance::with_rate_block(RATE, BLOCK);
+            let state = p.save();
+            for quality in [0.0, 1.0, 2.0] {
+                p.audio(
+                    BLOCK,
+                    &[
+                        In::Param(0, "quality", quality),
+                        In::Param(0, "poly", 1.0),
+                        In::Param(0, "glide_on", 1.0),
+                        In::Note(0, CLAP_EVENT_NOTE_ON, -1, 0, 48, 1.0),
+                        In::Note(0, CLAP_EVENT_NOTE_ON, -1, 0, 55, 1.0),
+                    ],
+                );
+                for k in 0..4u32 {
+                    p.audio(
+                        BLOCK,
+                        &[
+                            In::Param(0, "glide", f64::from(k) / 4.0),
+                            In::Param(BLOCK / 2, "glide", f64::from(k + 1) / 4.0),
+                            In::Note(BLOCK / 2, CLAP_EVENT_NOTE_ON, -1, 0, 60 + k as i16, 1.0),
+                        ],
+                    );
+                }
+                assert!(p.load(&state));
+                p.audio(BLOCK, &[]);
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+/// GLIDE moved as hard as a host can move it (issue #58: a crash in FL Studio on Windows 11
+/// "when messing with glide"): its knob set at many points of every block, at its ends, by a
+/// denormal's breadth and, with `CA72_HOSTILE` set, out of its range and not a number; its switch
+/// flipped; keys played legato and detached, the bend moving; NOTE PRIORITY, RETRIGGER, POLY,
+/// UNISON, VOICES and QUALITY changed; and a saved state (a host's preset) loaded while it
+/// glides. `CA72_RATES` (44100,48000,96000,192000), `CA72_BLOCKS` (32,256,1024),
+/// `CA72_SECONDS` (2; ULTRA a tenth of it), `CA72_STACK` (the thread's stack, bytes; 8 MB).
+/// Every sample must be finite and within ±16.
+///
+/// By hand, in a debug build (overflow checks and debug assertions):
+/// `cargo test -p ca72-plugin --test clap_host -- --ignored --nocapture glide_stress`.
+#[test]
+#[ignore = "a stress test, run by hand"]
+fn glide_stress() {
+    // (On a thread of `CA72_STACK` bytes, as a host's own thread may be smaller than a main
+    // thread's: the plug-in's every call is made there.)
+    let stack: usize = std::env::var("CA72_STACK").map_or(8 << 20, |s| s.parse().unwrap());
+    std::thread::Builder::new()
+        .stack_size(stack)
+        .spawn(glide_stress_here)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+fn glide_stress_here() {
+    fn list<T: std::str::FromStr + Clone>(name: &str, default: &[T]) -> Vec<T> {
+        std::env::var(name).map_or_else(
+            |_| default.to_vec(),
+            |s| {
+                s.split(',')
+                    .map(|v| v.trim().parse().ok().unwrap())
+                    .collect()
+            },
+        )
+    }
+    let rates: Vec<f64> = list("CA72_RATES", &[44_100.0, 48_000.0, 96_000.0, 192_000.0]);
+    let blocks: Vec<u32> = list("CA72_BLOCKS", &[32, 256, 1024]);
+    let seconds: f64 = list("CA72_SECONDS", &[2.0])[0];
+    let hostile = std::env::var_os("CA72_HOSTILE").is_some();
+    let mut seed = 0x5EED_u64;
+    let mut rand = move || {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 33) as f64 / f64::from(1u32 << 31)
+    };
+    for &rate in &rates {
+        for &block in &blocks {
+            for quality in [0.0, 1.0, 2.0] {
+                for mode in 0..3 {
+                    // (Made on a thread of a main thread's stack where `CA72_MADE_BIG` is set,
+                    // so that `CA72_STACK` measures what the rest needs.)
+                    let p = if std::env::var_os("CA72_MADE_BIG").is_some() {
+                        struct Made(Instance);
+                        // SAFETY: the instance is made there and only used here after.
+                        unsafe impl Send for Made {}
+                        std::thread::Builder::new()
+                            .stack_size(8 << 20)
+                            .spawn(move || Made(Instance::with_rate_block(rate, block)))
+                            .unwrap()
+                            .join()
+                            .unwrap()
+                            .0
+                    } else {
+                        Instance::with_rate_block(rate, block)
+                    };
+                    p.audio(
+                        1,
+                        &[
+                            In::Param(0, "quality", quality),
+                            In::Param(0, "poly", f64::from(mode == 1)),
+                            In::Param(0, "unison", f64::from(mode == 2)),
+                            In::Param(0, "voices", 4.0),
+                            In::Param(0, "glide_on", 1.0),
+                            In::Param(0, "glide", 0.6),
+                            In::Param(0, "emphasis", 0.8),
+                        ],
+                    );
+                    let preset = p.save();
+                    let length = if quality == 2.0 {
+                        seconds / 10.0
+                    } else {
+                        seconds
+                    };
+                    let total = (length * rate) as u32;
+                    let (mut start, mut held, mut peak) = (0u32, Vec::<i16>::new(), 0.0f32);
+                    while start < total {
+                        let frames = block.min(total - start);
+                        let mut ev: Vec<In> = Vec::new();
+                        let mut times: Vec<u32> = (0..(rand() * 9.0) as u32)
+                            .map(|_| (rand() * f64::from(frames)) as u32)
+                            .collect();
+                        times.sort_unstable();
+                        for t in times {
+                            let r = rand();
+                            let v = if r < 0.1 {
+                                0.0
+                            } else if r < 0.2 {
+                                1.0
+                            } else if r < 0.25 {
+                                1e-40
+                            } else if hostile && r < 0.3 {
+                                [f64::NAN, -0.5, 1.5, f64::INFINITY, -1e300]
+                                    [(rand() * 5.0) as usize]
+                            } else {
+                                rand()
+                            };
+                            ev.push(In::Param(t, "glide", v));
+                            let r = rand();
+                            if r < 0.05 {
+                                ev.push(In::Param(t, "glide_on", f64::from(rand() < 0.7)));
+                            } else if r < 0.25 {
+                                // A key, legato over those held or alone.
+                                let key = 24 + (rand() * 84.0) as i16;
+                                if !held.contains(&key) {
+                                    ev.push(In::Note(t, CLAP_EVENT_NOTE_ON, -1, 0, key, 1.0));
+                                    held.push(key);
+                                }
+                            } else if r < 0.4 && !held.is_empty() {
+                                let key = held.remove((rand() * held.len() as f64) as usize);
+                                ev.push(In::Note(t, CLAP_EVENT_NOTE_OFF, -1, 0, key, 0.0));
+                            } else if r < 0.45 {
+                                let bend = (rand() * 16_383.0) as u16;
+                                ev.push(In::Midi(
+                                    t,
+                                    [0xe0, (bend & 0x7f) as u8, (bend >> 7) as u8],
+                                ));
+                            }
+                        }
+                        let r = rand();
+                        if r < 0.03 {
+                            ev.push(In::Param(0, "note_priority", (rand() * 3.0).floor()));
+                        } else if r < 0.06 {
+                            ev.push(In::Param(0, "retrigger", f64::from(rand() < 0.5)));
+                        } else if r < 0.07 {
+                            ev.push(In::Param(0, "voices", 2.0 + (rand() * 9.0).floor()));
+                        } else if r < 0.075 {
+                            ev.push(In::Param(0, "poly", f64::from(rand() < 0.5)));
+                        } else if r < 0.08 {
+                            ev.push(In::Param(0, "unison", f64::from(rand() < 0.5)));
+                        } else if r < 0.083 && quality < 2.0 {
+                            ev.push(In::Param(0, "quality", (rand() * 2.0).floor()));
+                        }
+                        // (Sorted by time, as a host gives them.)
+                        let time = |e: &In| match *e {
+                            In::Param(t, ..) | In::Note(t, ..) | In::Midi(t, ..) => t,
+                            In::Cc(t, ..) | In::Transport(t, ..) | In::Expression(t, ..) => t,
+                        };
+                        ev.sort_by_key(time);
+                        if rand() < 0.01 && std::env::var_os("CA72_NO_LOAD").is_none() {
+                            // A host's preset loaded while the keys are held and GLIDE glides.
+                            assert!(p.load(&preset));
+                        }
+                        let (_, out) = p.audio(frames, &ev);
+                        for x in &out {
+                            assert!(x.is_finite());
+                            peak = peak.max(x.abs());
+                        }
+                        start += frames;
+                    }
+                    eprintln!(
+                        "{rate} Hz, {block} frames, QUALITY {quality}, mode {mode}: peak {peak:.3}"
+                    );
+                    assert!(peak < 16.0, "the output ran away: {peak}");
+                }
+            }
+        }
+    }
+}
+
+/// GLIDE RANGE goes through the host's automation and state, including its stable enum ids;
+/// a state from before it replaces LONG with NORMAL. A learned CC steps at the switch's
+/// threshold, without turning GLIDE's knob (decisions.md R-GLIDE-LONG).
+#[test]
+fn glide_range_is_automated_learned_and_saved_with_the_session() {
+    let a = Instance::new();
+    assert_eq!(a.value("glide_range"), 0.0);
+    a.process(&[In::Param(0, "glide_range", 1.0)]);
+    assert_eq!(a.value("glide_range"), 1.0);
+    let saved = a.save();
+    assert_eq!(
+        json_of(&saved)["params"]["glide_range"],
+        serde_json::json!({"string": "long"})
+    );
+    let b = Instance::new();
+    assert!(b.load(&saved));
+    assert_eq!(b.value("glide_range"), 1.0);
+    assert_eq!(
+        json_of(&b.save())["params"]["glide_range"],
+        serde_json::json!({"string": "long"})
+    );
+    let mut old = json_of(&saved);
+    old["params"].as_object_mut().unwrap().remove("glide_range");
+    assert!(b.load(&bytes_of(&old)));
+    assert_eq!(b.value("glide_range"), 0.0);
+    assert_eq!(
+        json_of(&b.save())["params"]["glide_range"],
+        serde_json::json!({"string": "normal"})
+    );
+    let table = r#"{"version":1,"assignments":[{"param":"glide_range","channel":1,"cc":20}]}"#;
+    assert!(b.load(&with_table(&b, Some(table))));
+    let knob = b.value("glide");
+    for (cc, range) in [(127, 1.0), (63, 0.0), (64, 1.0), (0, 0.0)] {
+        b.process(&[In::Cc(0, 0, 20, cc)]);
+        assert_eq!(b.value("glide_range"), range);
+        assert_eq!(b.value("glide"), knob);
     }
 }

@@ -25,10 +25,12 @@ The headphone amplifier (circuit No. 11) is not transcribed, at the owner's dire
    its emitter). White noise leaves through C18 (pin 5): flat within 1.1 dB from 100 Hz to
    10 kHz, with C18 into its load rolling it off below.
 3. **Pink.** R16 10K from Q4's emitter into two series RC branches to -10 V, C3 with R8 and
-   C2 with R13: poles and zeros alternating from about 100 Hz to 22 kHz, the usual pinking
+   C2 with R13 (.022 uF and 510 in the model where Figure 9-8 draws .033 uF and 220: the
+   hardware reference's pink, docs/calibration change 33): poles and zeros alternating from
+   about 100 Hz to 14 kHz (22 kHz as drawn), the usual pinking
    network. C1 couples it to Q3 (gain about R3/R1, 27; its bias from its collector through
    R6 and R7, decoupled by C4). Pink noise leaves through C20 (pin 6). It falls 10 dB per
-   decade from 100 Hz to 1 kHz, 13.5 from 1 to 10 kHz.
+   decade from 100 Hz to 1 kHz, 10.8 from 1 to 10 kHz (13.5 as drawn).
 4. **Red.** R12 10K and C7 (a pole at 106 Hz) into Q6, C22 from its collector to -10 V;
    out through C28 with R59 100K (pin 2).
 5. **The NOISE switch** (SW14, Figure 9-17). At WHITE it sends the white noise to the

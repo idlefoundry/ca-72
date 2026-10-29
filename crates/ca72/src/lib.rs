@@ -20,6 +20,7 @@ pub mod modulation;
 pub mod noise;
 pub mod preamp;
 pub mod prof;
+pub mod pulse;
 pub mod resample;
 pub mod revsaw;
 pub mod shared;

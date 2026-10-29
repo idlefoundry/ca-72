@@ -1,8 +1,8 @@
 //! The drawer as the mock-up has it (A6: decisions.md R44; the owner, 2026-10-10: "we didn't
 //! update the preset search page to the new one that you had sketched out"): on the strip's
 //! face under the rail, three sections in the panel's print, their displays dots behind glass
-//! as the rail's name is: FIND, the search and the tags in use; PRESETS, ALL, FAVORITES and MINE
-//! over the list; PRESET, its keys (RENAME, TAGS, DELETE and REVERT, each for the preset the
+//! as the rail's name is: FIND, the search and the tags in use; PRESETS, ALL, FACTORY, MINE
+//! and FAVORITES over the list; PRESET, its keys (RENAME, TAGS, DELETE and REVERT, each for the preset the
 //! plug-in is set to; SAVE AS, RESTORE, MIDI LEARN and CLOSE) over a display of that preset, of
 //! what a key is doing (a name or tags typed, a question asked) and of the update check. MIDI
 //! Learn's list shows in the list's place, its keys and the controllers it will not learn in
@@ -115,6 +115,8 @@ const DISPLAYS: [Display; 4] = [SEARCH, TAGS, LIST, STATUS];
 /// The sections' titles, printed over their displays: their middles' height and size.
 const LABEL_Y: f64 = 31.0;
 const LABEL: f64 = 26.0;
+/// A section's title centred over it (`drawer_titles = "centre"`).
+const CENTRED_LABEL: f64 = 27.0;
 /// The keys: their size, the middles of their columns and rows, their legends' size.
 const KEY: (f64, f64) = (164.0, 61.0);
 const KEY_X: [f64; 4] = [2422.0, 2603.0, 2784.0, 2965.0];
@@ -136,6 +138,9 @@ pub const ROWS_SHOWN: usize = ((LIST.h / LIST.pitch) as usize - ROW_TOP - (LINE 
 const STAR_AT: usize = 2;
 const NAME_AT: usize = 4;
 const NAME_CHARS: usize = 21;
+/// Where a row's origin (YOURS, EDITED) and its tags begin.
+const ORIGIN_AT: usize = NAME_AT + NAME_CHARS + 1;
+const TAGS_AT: usize = ORIGIN_AT + 7;
 /// The MIDI list's: the controller after the name.
 const MIDI_NAME_CHARS: usize = 24;
 const MIDI_AT: usize = 28;
@@ -238,14 +243,16 @@ impl PresetKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     All,
-    Favourites,
+    Factory,
     Mine,
+    Favourites,
 }
 
-const TABS: [(Tab, &str); 3] = [
+const TABS: [(Tab, &str); 4] = [
     (Tab::All, "ALL"),
-    (Tab::Favourites, "FAVORITES"),
+    (Tab::Factory, "FACTORY"),
     (Tab::Mine, "MINE"),
+    (Tab::Favourites, "FAVORITES"),
 ];
 
 /// A tab's characters, from the list's first: each three apart.
@@ -262,7 +269,9 @@ fn tab_span(t: Tab) -> (usize, usize) {
 
 /// The tab the list shows.
 pub fn tab_of(s: &DrawerScene) -> Tab {
-    if s.mine {
+    if s.factory {
+        Tab::Factory
+    } else if s.mine {
         Tab::Mine
     } else if s.favourites {
         Tab::Favourites
@@ -282,15 +291,24 @@ enum Ink {
 }
 
 impl Ink {
+    /// Its colour in the built-in look.
+    #[cfg(test)]
     fn colour(self) -> (u8, u8, u8) {
+        self.in_dress(&Dress::default())
+    }
+
+    /// Its colour in `dress`: its lamps', or its current preset's.
+    fn in_dress(self, dress: &Dress) -> (u8, u8, u8) {
         match self {
-            Ink::Amber => DOT_ON,
-            Ink::Selected => DOT_SELECTED,
+            Ink::Amber => dress.dot,
+            Ink::Selected => dress.selected,
         }
     }
 }
 
-/// Characters on a display: from dot `col`, its top at dot `row`, `lv` bright.
+/// Characters on a display: from dot `col`, its top at dot `row`, `lv` bright, in `ink`;
+/// `field`: a field's text or caret (set in a typeface, the caret goes where the typeface puts
+/// the characters before it).
 #[derive(Clone, Debug, PartialEq)]
 struct Item {
     text: String,
@@ -298,6 +316,7 @@ struct Item {
     col: usize,
     row: usize,
     ink: Ink,
+    field: bool,
 }
 
 /// (A control character, from a file written elsewhere, is shown as if it were not there.)
@@ -308,6 +327,7 @@ fn item(text: &str, lv: f32, col: usize, row: usize) -> Item {
         col,
         row,
         ink: Ink::Amber,
+        field: false,
     }
 }
 
@@ -453,7 +473,10 @@ fn field_items(out: &mut Vec<Item>, s: &DrawerScene, id: FieldId, placeholder: &
         out.push(item(placeholder, lv, col, row));
     } else {
         let shown: String = f.text.chars().skip(from).take(chars).collect();
-        out.push(item(&shown, BRIGHT, col, row));
+        out.push(Item {
+            field: true,
+            ..item(&shown, BRIGHT, col, row)
+        });
     }
     if s.focus == Some(id) && s.midi.is_none() {
         let at = f.caret.saturating_sub(from);
@@ -463,6 +486,7 @@ fn field_items(out: &mut Vec<Item>, s: &DrawerScene, id: FieldId, placeholder: &
             col: col + 6 * at,
             row,
             ink: Ink::Amber,
+            field: true,
         });
     }
 }
@@ -580,24 +604,27 @@ fn list_items(s: &DrawerScene) -> Vec<Item> {
             NORMAL
         };
         let star = if r.favorite { '\u{2605}' } else { '\u{2606}' };
-        let mark = if r.current {
-            ROW_SELECTED
-        } else if pointed {
-            '>'
-        } else {
-            ' '
-        };
-        let text = format!(
-            "{mark} {star} {:<NAME_CHARS$} {:<6} {}",
-            cut(&r.name, NAME_CHARS),
-            r.origin.unwrap_or(""),
-            r.tags
-        );
         let ink = if r.current { Ink::Selected } else { Ink::Amber };
-        out.push(Item {
+        let at = |text: &str, col: usize| Item {
             ink,
-            ..item(&cut(&text, n - 2), lv, COL, row)
-        });
+            ..item(text, lv, col, row)
+        };
+        // (Its columns each from its own place, as one line cut to the list's width would
+        // have them: a typeface sets them as it does, and they still line up.)
+        if r.current {
+            out.push(at(&ROW_SELECTED.to_string(), COL));
+        } else if pointed {
+            out.push(at(">", COL));
+        }
+        out.push(at(&star.to_string(), COL + 6 * STAR_AT));
+        out.push(at(&cut(&r.name, NAME_CHARS), COL + 6 * NAME_AT));
+        if let Some(o) = r.origin {
+            out.push(at(o, COL + 6 * ORIGIN_AT));
+        }
+        out.push(at(
+            &cut(&r.tags, (n - 2).saturating_sub(TAGS_AT)),
+            COL + 6 * TAGS_AT,
+        ));
         if s.hover == Some(DrawerTarget::Star(i)) {
             out.push(Item {
                 ink,
@@ -669,13 +696,10 @@ fn midi_items(s: &DrawerScene, m: &MidiList) -> Vec<Item> {
         } else {
             NORMAL
         };
-        let mark = if chosen { ">" } else { " " };
-        out.push(item(
-            &format!("{mark} {}", cut(&r.name, MIDI_NAME_CHARS)),
-            lv,
-            COL,
-            row,
-        ));
+        if chosen {
+            out.push(item(">", lv, COL, row));
+        }
+        out.push(item(&cut(&r.name, MIDI_NAME_CHARS), lv, COL + 12, row));
         let acts = if chosen || pointed || r.waiting {
             midi_spans(r)
         } else {
@@ -1123,6 +1147,11 @@ pub struct DrawerRenderer {
     scale: f64,
     /// For the keys' marks (no lettering).
     options: usvg::Options<'static>,
+    /// What its look gives it, and its typeface for its displays (where they are lettered in
+    /// it).
+    dress: Arc<Dress>,
+    typed: usvg::Options<'static>,
+    typeface: Arc<Fonts>,
     /// The pictures and what does not change at the scale it opened at, made on a thread of
     /// their own as the editor opens (none once taken).
     warming: Option<JoinHandle<Warmed>>,
@@ -1145,9 +1174,123 @@ impl fmt::Debug for DrawerRenderer {
     }
 }
 
-/// What the thread begun as the editor opens hands back: the pictures, the scale it made the
-/// still at, the still.
-type Warmed = (Arc<Pictures>, f64, Arc<Pixmap>);
+/// What the thread begun as the editor opens hands back: the pictures, the scale and the
+/// dressing it made the still in, the still.
+type Warmed = (Arc<Pictures>, f64, u64, Arc<Pixmap>);
+
+/// What a look gives the drawer (decisions.md R-SKIN-PACKS): its face (as the panel's), its
+/// displays' glass, its keys' cap, its lamps' colour (the dots' and the lettering lit), its
+/// print's colours and typeface, a drawing over its face, and whether its displays are lettered
+/// in that typeface; the built-in ones where it gives none. `key` tells one look's dressing from another's: 0, the built-in one (every
+/// official look's).
+#[derive(Clone)]
+struct Dress {
+    key: u64,
+    face: Option<Pixmap>,
+    glass: Option<Pixmap>,
+    button: Option<Pixmap>,
+    dot: (u8, u8, u8),
+    glow: (u8, u8, u8),
+    /// The current preset's lettering: gold over the built-in lamps, the lamps' own colour
+    /// over a look's.
+    selected: (u8, u8, u8),
+    /// The sections' titles'; the keys' legends' on their caps; the displays' lettering not
+    /// lit.
+    print: String,
+    legend: String,
+    unlit: String,
+    /// The current row's band (none: faintly the lamps' glow).
+    selection: Option<(u8, u8, u8)>,
+    fonts: Option<(&'static [u8], &'static [u8])>,
+    art: Option<Arc<usvg::Tree>>,
+    typed: bool,
+    centred: bool,
+}
+
+impl Default for Dress {
+    fn default() -> Self {
+        Dress {
+            key: 0,
+            face: None,
+            glass: None,
+            button: None,
+            dot: DOT_ON,
+            glow: DOT_GLOW,
+            selected: DOT_SELECTED,
+            print: colour::LEGEND.into(),
+            legend: colour::LEGEND.into(),
+            unlit: TYPED_UNLIT.into(),
+            selection: None,
+            fonts: None,
+            art: None,
+            typed: false,
+            centred: false,
+        }
+    }
+}
+
+/// The displays' lettering not lit, in a typeface, where a look gives no colour for it: a
+/// cream.
+const TYPED_UNLIT: &str = "#e6dcc4";
+
+impl Dress {
+    fn of(look: &crate::look::Look) -> Dress {
+        let pack = |name: &str| {
+            let size = crate::skin::slot_size(name).unwrap_or((1, 1));
+            look.pictures.get(name).and_then(|p| p.picture(size))
+        };
+        let hex = |(r, g, b): (u8, u8, u8)| format!("#{r:02x}{g:02x}{b:02x}");
+        let c = look.colours;
+        let lamp = c.lamp.map(crate::strip::Lamp::of);
+        let built_in = Dress::default();
+        let mut d = Dress {
+            face: pack("face").map(|f| match look.face_tint {
+                Some(t) => crate::skin::tinted(&f, t),
+                None => f,
+            }),
+            glass: pack("glass"),
+            button: pack("key"),
+            dot: lamp.map_or(DOT_ON, |l| l.on),
+            glow: lamp.map_or(DOT_GLOW, |l| l.glow),
+            selected: lamp.map_or(DOT_SELECTED, |l| l.on),
+            print: c.tab_print.map_or(built_in.print, hex),
+            legend: c.key_print.map_or(built_in.legend, hex),
+            unlit: c.display.or(c.tab_print).map_or(built_in.unlit, hex),
+            selection: c.selection,
+            fonts: look.fonts,
+            art: look.drawer_art.clone(),
+            typed: look.drawer_type,
+            centred: look.drawer_centred,
+            key: 0,
+        };
+        let own = d.face.is_some()
+            || d.glass.is_some()
+            || d.button.is_some()
+            || d.fonts.is_some()
+            || d.art.is_some()
+            || d.typed
+            || d.centred
+            || c.lamp.is_some()
+            || c.tab_print.is_some()
+            || c.key_print.is_some()
+            || c.display.is_some()
+            || c.selection.is_some();
+        if own {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (&look.id, &look.version).hash(&mut h);
+            d.key = h.finish().max(1);
+        }
+        d
+    }
+
+    /// Its typeface (the built-in one where it brings none or its own does not load).
+    fn fonts(&self) -> Fonts {
+        self.fonts
+            .and_then(|(regular, bold)| Fonts::with(regular, bold).ok())
+            .unwrap_or_default()
+    }
+}
 
 /// The pictures a drawer is made of, decoded: the face's, the displays' glass (smoothed), the
 /// keys' cap.
@@ -1158,21 +1301,31 @@ struct Pictures {
 }
 
 impl Pictures {
-    fn load() -> Pictures {
+    fn load(dress: &Dress) -> Pictures {
         let png = |b: &[u8]| Pixmap::decode_png(b).expect("a built-in picture decodes");
         Pictures {
-            face: crate::skin::face_picture(),
-            glass: smooth_glass(&png(crate::skin::GLASS)),
-            button: png(crate::skin::BUTTON),
+            face: dress.face.clone().unwrap_or_else(crate::skin::face_picture),
+            glass: smooth_glass(
+                &dress
+                    .glass
+                    .clone()
+                    .unwrap_or_else(|| png(crate::skin::GLASS)),
+            ),
+            button: dress
+                .button
+                .clone()
+                .unwrap_or_else(|| png(crate::skin::BUTTON)),
         }
     }
 }
 
-/// What does not change at `scale`: another drawer's open at it, else made (and kept for
-/// others while one has it: each instance's editor has its own drawer).
-fn shared_still(scale: f64, pictures: &Pictures) -> Arc<Pixmap> {
-    static SHARED: Mutex<Vec<(u64, Weak<Pixmap>)>> = Mutex::new(Vec::new());
-    let key = scale.to_bits();
+/// What does not change at `scale` in `dress`: another drawer's open at it, else made (and
+/// kept for others while one has it: each instance's editor has its own drawer).
+fn shared_still(scale: f64, pictures: &Pictures, dress: &Dress) -> Arc<Pixmap> {
+    /// A still's scale (its bits) and dressing.
+    type Key = (u64, u64);
+    static SHARED: Mutex<Vec<(Key, Weak<Pixmap>)>> = Mutex::new(Vec::new());
+    let key = (scale.to_bits(), dress.key);
     let found = {
         let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
         shared.retain(|(_, w)| w.strong_count() > 0);
@@ -1184,7 +1337,7 @@ fn shared_still(scale: f64, pictures: &Pictures) -> Arc<Pixmap> {
     if let Some(still) = found {
         return still;
     }
-    let still = Arc::new(make_still(scale, pictures));
+    let still = Arc::new(make_still(scale, pictures, dress));
     SHARED
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -1366,7 +1519,7 @@ fn tile_reflected(frame: &mut Pixmap, tile: &Pixmap, (tx, ty): (i64, i64)) {
 /// (Drawn out over a display many times its size, the picture's faint lines had been hard
 /// bands across the list: the owner, 2026-10-10, "there's several harsh horizontal lines,
 /// please get rid of them". The dots behind it are the displays' texture.)
-fn smooth_glass(p: &Pixmap) -> Pixmap {
+pub(crate) fn smooth_glass(p: &Pixmap) -> Pixmap {
     let (w, h) = (p.width() as usize, p.height() as usize);
     let mut px: Vec<[f32; 3]> = p
         .pixels()
@@ -1411,6 +1564,28 @@ fn smooth_glass(p: &Pixmap) -> Pixmap {
     }
     // The mesh: the picture at a sixth of its size (drawn out smoothly again over a display).
     resample(&out, (p.width() / 6).max(1), (p.height() / 6).max(1))
+}
+
+/// A large display's glass (the smoothed picture: [`smooth_glass`]) filling the window `(x, y, w,
+/// h)` (the frame's units): the effects' list's (decisions.md R-FX-DRAWER), as the drawer's.
+pub(crate) fn display_glass(
+    frame: &mut Pixmap,
+    p: &Pixmap,
+    scale: f64,
+    (x, y, w, h): (f64, f64, f64, f64),
+) {
+    glass(
+        frame,
+        p,
+        scale,
+        &Display {
+            x,
+            y,
+            w,
+            h,
+            pitch: 1.0,
+        },
+    );
 }
 
 /// A display's glass filling its window, covering it about its middle (as the kit's `glass`),
@@ -1587,27 +1762,24 @@ fn grid(frame: &mut Pixmap, scale: f64, d: &Display, alpha: f32, (r, g, b): (u8,
 }
 
 /// The print: the sections' titles over their displays.
-fn print_svg() -> String {
+fn print_svg(dress: &Dress) -> String {
     let mut s = Svg::default();
-    let text = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64, anchor: &str| {
-        put!(
-            s,
-            "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='{anchor}' dominant-baseline='central' fill='{}'>{t}</text>",
-            N(x),
-            N(y),
-            N(size),
-            colour::LEGEND
-        );
-    };
     for (d, t) in [(SEARCH, "FIND"), (LIST, "PRESETS"), (STATUS, "PRESET")] {
-        text(&mut s, d.x, LABEL_Y, t, LABEL, "start");
+        if dress.centred {
+            let at = (d.x + d.w / 2.0, LABEL_Y - 4.0);
+            legend(&mut s, at, t, CENTRED_LABEL, "middle", &dress.print);
+        } else {
+            legend(&mut s, (d.x, LABEL_Y), t, LABEL, "start", &dress.print);
+        }
     }
     s.0
 }
 
-/// Action names on their caps, in clear print rather than tiny worn captions above them.
-/// Keep the longest one, MIDI LEARN, inside the cap with the same margin as the others.
-fn key_print_svg(fonts: &Fonts) -> String {
+/// Action names on their caps, in clear print rather than tiny worn captions above them (in
+/// every look: `drawer_legends` no longer changes where they are), in the look's `key_print`
+/// and typeface. Keep the longest one, MIDI LEARN, inside the cap with the same margin as the
+/// others.
+fn key_print_svg(fonts: &Fonts, dress: &Dress) -> String {
     let mut s = Svg::default();
     for k in PresetKey::ALL {
         let (x, y) = k.centre();
@@ -1619,7 +1791,7 @@ fn key_print_svg(fonts: &Fonts) -> String {
             N(x),
             N(baseline),
             N(size),
-            colour::LEGEND,
+            dress.legend,
             k.legend()
         );
     }
@@ -1631,23 +1803,29 @@ fn key_legend_size(fonts: &Fonts, k: PresetKey) -> f64 {
     KEY_LEGEND * ((k.size().0 - 16.0) / advance).min(1.0)
 }
 
+fn legend(s: &mut Svg, (x, y): (f64, f64), t: &str, size: f64, anchor: &str, fill: &str) {
+    put!(
+        s,
+        "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='{anchor}' dominant-baseline='central' fill='{fill}'>{t}</text>",
+        N(x),
+        N(y),
+        N(size)
+    );
+}
+
 impl DrawerRenderer {
     /// At `scale`: its pictures decoded and what does not change at it made on a thread of
     /// their own, begun now (as the editor opens, so the drawer's first opening waits for
     /// neither: a tenth of a second at a Retina screen's scale).
     pub fn new(scale: f64) -> Self {
-        let warming = std::thread::Builder::new()
-            .name("ca72-drawer".into())
-            .spawn(move || {
-                let pictures = Pictures::load();
-                let still = shared_still(scale, &pictures);
-                (Arc::new(pictures), scale, still)
-            })
-            .ok();
+        let dress = Arc::new(Dress::default());
         DrawerRenderer {
             scale,
             options: usvg::Options::default(),
-            warming,
+            warming: warm(scale, dress.clone()),
+            typed: usvg::Options::default(),
+            typeface: Arc::new(Fonts::new()),
+            dress,
             pictures: None,
             still: None,
             frame: Pixmap::new(1, 1).expect("a pixel"),
@@ -1655,6 +1833,66 @@ impl DrawerRenderer {
             drawn: Default::default(),
             keys: None,
         }
+    }
+
+    /// Drawn in `look` from now on (decisions.md R-SKIN-PACKS): what it gives the drawer, the
+    /// built-in ones where it gives none; what does not change made again on a thread of its
+    /// own, begun now.
+    pub fn set_look(&mut self, look: &crate::look::Look) {
+        let dress = Dress::of(look);
+        if dress.key == self.dress.key {
+            return;
+        }
+        self.typeface = Arc::new(self.dress_fonts(&dress));
+        self.dress = Arc::new(dress);
+        self.typed = typed_options(&self.dress, &self.typeface);
+        self.warming = warm(self.scale, self.dress.clone());
+        self.pictures = None;
+        self.still = None;
+        self.shown = None;
+        self.drawn = Default::default();
+        self.keys = None;
+    }
+
+    fn dress_fonts(&self, dress: &Dress) -> Fonts {
+        if dress.typed {
+            dress.fonts()
+        } else {
+            Fonts::new()
+        }
+    }
+
+    /// Where a press at `x` (panel units) across a field falls, as the dots would have it: in a
+    /// look whose displays are lettered in a typeface, the place of the character gap nearest
+    /// it as that typeface sets the field (so that [`caret_at`] puts the caret there); else `x`.
+    pub fn press_x(&self, s: &DrawerScene, t: DrawerTarget, x: f64) -> f64 {
+        let DrawerTarget::Field(id) = t else {
+            return x;
+        };
+        let Some((d, col, _, chars)) = field_place(s, id) else {
+            return x;
+        };
+        if !self.dress.typed {
+            return x;
+        }
+        let f = field_of(s, id);
+        let shown: Vec<char> = f
+            .text
+            .chars()
+            .skip(shown_from(f, chars))
+            .take(chars)
+            .collect();
+        let left = typed_left(&d, col);
+        let size = typed_size(&d);
+        let gap = (0..=shown.len())
+            .map(|k| {
+                let before: String = shown[..k].iter().collect();
+                let at = left + self.typeface.advance(&before, size, Weight::Regular, 0.0);
+                (k, (at - x).abs())
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map_or(0, |(k, _)| k);
+        d.at((col + 6 * gap) as f64 - 0.5, 0.0).0
     }
 
     pub fn rescale(&mut self, scale: f64) {
@@ -1702,9 +1940,24 @@ impl DrawerRenderer {
                 Some(was) => changed_bands(was, &items),
                 None => vec![(-1.5, d.rows() as f64 + 0.5)],
             };
-            let lit = lit_dots(d, &items);
-            for band in bands {
-                redraw(&mut self.frame, &still, self.scale, d, &lit, band);
+            if self.dress.typed {
+                for band in bands {
+                    let how = (self.dress.as_ref(), &self.typed, self.typeface.as_ref());
+                    retype(&mut self.frame, &still, self.scale, d, &items, how, band);
+                }
+            } else {
+                let lit = lit_dots(d, &items);
+                for band in bands {
+                    redraw(
+                        &mut self.frame,
+                        &still,
+                        self.scale,
+                        d,
+                        &lit,
+                        &self.dress,
+                        band,
+                    );
+                }
             }
             self.drawn[k] = Some(items);
             changed = true;
@@ -1770,25 +2023,79 @@ impl DrawerRenderer {
     /// What does not change at this scale: the thread's, made as the editor opened (waited for
     /// if it is not done), if it is still the scale; else made now.
     fn still_now(&mut self) -> Arc<Pixmap> {
-        if let Some(Ok((pictures, scale, still))) = self.warming.take().map(JoinHandle::join) {
+        if let Some(Ok((pictures, scale, key, still))) = self.warming.take().map(JoinHandle::join)
+            && key == self.dress.key
+        {
             self.pictures = Some(pictures);
             if scale == self.scale {
                 return still;
             }
         }
+        let dress = self.dress.clone();
         let pictures = self
             .pictures
-            .get_or_insert_with(|| Arc::new(Pictures::load()));
-        shared_still(self.scale, pictures)
+            .get_or_insert_with(|| Arc::new(Pictures::load(&dress)));
+        shared_still(self.scale, pictures, &dress)
     }
+}
+
+/// The pictures decoded and what does not change at `scale` in `dress` made, on a thread of
+/// their own.
+fn warm(scale: f64, dress: Arc<Dress>) -> Option<JoinHandle<Warmed>> {
+    std::thread::Builder::new()
+        .name("ca72-drawer".into())
+        .spawn(move || {
+            let pictures = Pictures::load(&dress);
+            let still = shared_still(scale, &pictures, &dress);
+            (Arc::new(pictures), scale, dress.key, still)
+        })
+        .ok()
+}
+
+/// For lettering the displays in `dress`'s typeface (`fonts`).
+fn typed_options(dress: &Dress, fonts: &Fonts) -> usvg::Options<'static> {
+    if !dress.typed {
+        return usvg::Options::default();
+    }
+    usvg::Options {
+        fontdb: fonts.database(),
+        font_family: FAMILY.into(),
+        ..usvg::Options::default()
+    }
+}
+
+/// How strongly a line not lit shows in a typeface, as bright as the plug-in makes it: what is
+/// said aside (DIM) nearly as the list, only what is barely there (a field's placeholder)
+/// faint. (Scaled as the dots' brightness, the dim lines had been grey beside the list: the
+/// reviewing agent, 2026-10-17.)
+fn typed_alpha(lv: f32) -> f64 {
+    if lv >= POINTED {
+        1.0
+    } else if lv >= NORMAL {
+        0.92
+    } else if lv >= DIM {
+        0.84
+    } else {
+        0.5
+    }
+}
+
+/// A display's lettering's size in a typeface: its capitals about the dots' seven rows.
+fn typed_size(d: &Display) -> f64 {
+    9.6 * d.pitch
+}
+
+/// Where a field's characters from its first column `col` begin, set in a typeface.
+fn typed_left(d: &Display, col: usize) -> f64 {
+    d.at(col as f64 - 0.5, 0.0).0
 }
 
 /// What never changes at `scale`: the face, as the strip's under it (the picture 640 units
 /// across, mirrored tile to tile, placed as the strip's), its trim and the rail's shadow; the
 /// print, worn into it; the displays' bezels and glass, every dot faintly there; the keys' caps.
-fn make_still(scale: f64, pictures: &Pictures) -> Pixmap {
+fn make_still(scale: f64, pictures: &Pictures, dress: &Dress) -> Pixmap {
     let s = scale;
-    let fonts = Fonts::new();
+    let fonts = dress.fonts();
     let options = usvg::Options {
         fontdb: fonts.database(),
         font_family: FAMILY.into(),
@@ -1820,13 +2127,36 @@ fn make_still(scale: f64, pictures: &Pictures) -> Pixmap {
     );
     tile_reflected(&mut still, &face, ((320.0 * s).round() as i64, 0));
     svg_over(&options, &mut still, s, &plate_svg());
+    // A look's drawing over the face, under the print, the glass and the keys.
+    if let Some(art) = &dress.art {
+        let size = art.size();
+        if let Some(mut layer) = Pixmap::new(w, h)
+            && skin_pack::svg::render(
+                art,
+                Transform::from_scale(
+                    (W * s) as f32 / size.width(),
+                    (DRAWER_H * s) as f32 / size.height(),
+                ),
+                &mut layer.as_mut(),
+            )
+        {
+            still.draw_pixmap(
+                0,
+                0,
+                layer.as_ref(),
+                &PixmapPaint::default(),
+                Transform::identity(),
+                None,
+            );
+        }
+    }
     // The print, in the band across the top it is in.
     let band = ((PRINT_H * s).ceil() as u32).min(h);
     if let (Some(mut print), Some(under)) = (
         Pixmap::new(w, band),
         IntRect::from_xywh(0, 0, w, band).and_then(|r| still.clone_rect(r)),
     ) {
-        svg_over(&options, &mut print, s, &print_svg());
+        svg_over(&options, &mut print, s, &print_svg(dress));
         crate::render::worn_into(&mut print, &under);
         still.draw_pixmap(
             0,
@@ -1842,7 +2172,10 @@ fn make_still(scale: f64, pictures: &Pictures) -> Pixmap {
     }
     for d in DISPLAYS {
         glass(&mut still, &pictures.glass, s, &d);
-        grid(&mut still, s, &d, UNLIT, DOT_ON);
+        // (Lettered in a typeface, a display has no dots to show unlit.)
+        if !dress.typed {
+            grid(&mut still, s, &d, UNLIT, dress.dot);
+        }
     }
     let cap = widened(&pictures.button, KEY.0 / KEY.1);
     let init_size = PresetKey::Init.size();
@@ -1855,7 +2188,7 @@ fn make_still(scale: f64, pictures: &Pictures) -> Pixmap {
         };
         sprite(&mut still, picture, s, k.centre(), k.size());
     }
-    svg_over(&options, &mut still, s, &key_print_svg(&fonts));
+    svg_over(&options, &mut still, s, &key_print_svg(&fonts, dress));
     still
 }
 
@@ -1936,6 +2269,7 @@ fn redraw(
     scale: f64,
     d: &Display,
     lit: &[LitDot],
+    dress: &Dress,
     (from, to): (f64, f64),
 ) {
     let (_, oy) = d.origin();
@@ -1988,12 +2322,13 @@ fn redraw(
             &mut band,
             &mut cover,
             &glows,
-            DOT_GLOW,
+            dress.glow,
             0.08 * f32::from(q) / 40.0,
         );
     }
     for (&(ink, q), ds) in &by {
-        discs(&mut band, &mut cover, ds, ink.colour(), f32::from(q) / 40.0);
+        let on = ink.in_dress(dress);
+        discs(&mut band, &mut cover, ds, on, f32::from(q) / 40.0);
     }
     for y in y0..y1 {
         let (i, b) = (
@@ -2002,6 +2337,291 @@ fn redraw(
         );
         frame.data_mut()[i..i + bw * 4].copy_from_slice(&band.data()[b..b + bw * 4]);
     }
+}
+
+/// A band of a display drawn again in a look's typeface (`drawer_lettering = "type"`; its rows
+/// as [`redraw`]'s): the still under it, then every item whose line reaches it, as text in the
+/// window, put in the frame. (Drawn apart a little beyond the band, so a letter across its edge
+/// is drawn as it was.)
+fn retype(
+    frame: &mut Pixmap,
+    still: &Pixmap,
+    scale: f64,
+    d: &Display,
+    items: &[Item],
+    (dress, options, fonts): (&Dress, &usvg::Options<'_>, &Fonts),
+    (from, to): (f64, f64),
+) {
+    let (_, oy) = d.origin();
+    let pad = 4.0;
+    let (fw, fh) = (i64::from(frame.width()), i64::from(frame.height()));
+    let px = |v: f64| (v * scale).round() as i64;
+    let (x0, x1) = (px(d.x - pad).max(0), px(d.x + d.w + pad).min(fw));
+    let y0 = px((oy + from * d.pitch).max(d.y - pad)).max(0);
+    let y1 = px((oy + to * d.pitch).min(d.y + d.h + pad)).min(fh);
+    if x0 >= x1 || y0 >= y1 {
+        return;
+    }
+    let margin = px(3.0 * d.pitch) + 2;
+    let (top, foot) = ((y0 - margin).max(0), (y1 + margin).min(fh));
+    let (bw, bh) = ((x1 - x0) as usize, (foot - top) as usize);
+    let Some(mut band) = Pixmap::new(bw as u32, bh as u32) else {
+        return;
+    };
+    let row = fw as usize * 4;
+    for y in 0..bh {
+        let i = (top as usize + y) * row + x0 as usize * 4;
+        band.data_mut()[y * bw * 4..(y + 1) * bw * 4].copy_from_slice(&still.data()[i..i + bw * 4]);
+    }
+    let (first, last) = (from - 2.0, to + 2.0);
+    let mut s = Svg::default();
+    put!(
+        s,
+        "<defs><clipPath id='window'><rect x='{}' y='{}' width='{}' height='{}'/></clipPath></defs><g clip-path='url(#window)'>",
+        N(d.x),
+        N(d.y),
+        N(d.w),
+        N(d.h)
+    );
+    for it in items {
+        let (r0, r1) = (it.row as f64, (it.row + LINE) as f64);
+        if r1 >= first && r0 <= last {
+            // A field's caret after the characters before it, as the typeface sets them.
+            let caret_x = (it.field && it.text == CARET.to_string()).then(|| {
+                let text = items
+                    .iter()
+                    .find(|o| o.field && o.row == it.row && o.col <= it.col && o.text != it.text);
+                let left = typed_left(d, text.map_or(it.col, |o| o.col));
+                let before: String = text.map_or(String::new(), |o| {
+                    o.text.chars().take((it.col - o.col) / 6).collect()
+                });
+                left + fonts.advance(&before, typed_size(d), Weight::Regular, 0.0)
+            });
+            typed(&mut s, d, it, dress, caret_x);
+        }
+    }
+    put!(s, "</g>");
+    let view = [
+        x0 as f64 / scale,
+        top as f64 / scale,
+        bw as f64 / scale,
+        bh as f64 / scale,
+    ];
+    let doc = art::document(view, bw as u32, bh as u32, &s.0);
+    if let Ok(tree) = usvg::Tree::from_str(&doc, options) {
+        resvg::render(&tree, Transform::identity(), &mut band.as_mut());
+    }
+    for y in y0..y1 {
+        let (i, b) = (
+            y as usize * row + x0 as usize * 4,
+            (y - top) as usize * bw * 4,
+        );
+        frame.data_mut()[i..i + bw * 4].copy_from_slice(&band.data()[b..b + bw * 4]);
+    }
+}
+
+/// An item in a look's typeface: lit (as bright as the brightest) in its lamps' colour, else
+/// in its print's, fainter as the item is; its text set from its first character's place (a
+/// field's each character in its own), its signs drawn (the stars, the arrows, the current
+/// one's mark and the one under the pointer, a chosen tag's bar, the caret, a chosen tab's
+/// underline).
+fn typed(s: &mut Svg, d: &Display, it: &Item, dress: &Dress, caret_x: Option<f64>) {
+    let lit = it.lv >= BRIGHT;
+    let hex = |(r, g, b): (u8, u8, u8)| format!("#{r:02x}{g:02x}{b:02x}");
+    // Lit: the lamps' colour, or the current preset's.
+    let lamp = hex(it.ink.in_dress(dress));
+    let p = d.pitch;
+    let at = |c: f64, r: f64| d.at(c, r);
+    // A chosen tab's underline: one line under its characters' cells.
+    if !it.field && !it.text.is_empty() && it.text.chars().all(|c| c == CARET) {
+        let (x, y) = at(it.col as f64 - 0.5, it.row as f64 + 8.0);
+        put!(
+            s,
+            "<rect x='{}' y='{}' width='{}' height='{}' fill='{lamp}'/>",
+            N(x),
+            N(y - 0.4 * p),
+            N((6 * it.text.chars().count()) as f64 * p - p),
+            N(0.8 * p)
+        );
+        return;
+    }
+    // (What is typed in a field in the print's colour, fully; its caret lit.)
+    let typing = it.field && caret_x.is_none();
+    let (fill, alpha) = if typing && lit {
+        (dress.unlit.clone(), 1.0)
+    } else if lit {
+        (lamp.clone(), 1.0)
+    } else {
+        (dress.unlit.clone(), typed_alpha(it.lv))
+    };
+    // A place in dots (as `Display::at`): a character's cell from `col - 0.5` to `col + 5.5`,
+    // its capitals from row 0 to 7, its line's foot at row 6.5.
+    let size = typed_size(d);
+    let glow = if lit && !typing {
+        format!(
+            " stroke='{}' stroke-opacity='0.22' stroke-width='{}' paint-order='stroke'",
+            hex(dress.glow),
+            N(0.55 * p)
+        )
+    } else {
+        String::new()
+    };
+    let text = |s: &mut Svg, x: f64, t: &str| {
+        let (_, y) = at(0.0, it.row as f64 + 6.5);
+        put!(
+            s,
+            "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' fill='{fill}' fill-opacity='{}'{glow}>{}</text>",
+            N(x),
+            N(y),
+            N(size),
+            N(alpha),
+            crate::svg::escape(t)
+        );
+    };
+    let chars: Vec<char> = it.text.chars().collect();
+    let col = |k: usize| (it.col + 6 * k) as f64;
+    let mut run = String::new();
+    let mut run_at = 0;
+    let flush = |s: &mut Svg, run: &mut String, run_at: usize| {
+        let t = run.trim_end();
+        if !t.is_empty() {
+            let lead = t.chars().take_while(|c| *c == ' ').count();
+            text(
+                s,
+                typed_left(d, it.col + 6 * (run_at + lead)),
+                t.trim_start(),
+            );
+        }
+        run.clear();
+    };
+    for (k, &c) in chars.iter().enumerate() {
+        let sign = matches!(
+            c,
+            '\u{2605}' | '\u{2606}' | '\u{25b2}' | '\u{25bc}' | CARET | ROW_SELECTED | TAG_SELECTED
+        ) || (c == '>' && chars.len() == 1);
+        if !sign {
+            if run.is_empty() {
+                run_at = k;
+            }
+            run.push(c);
+            continue;
+        }
+        flush(s, &mut run, run_at);
+        let (cx, cy) = at(col(k) + 2.0, it.row as f64 + 3.0);
+        match c {
+            '\u{2605}' | '\u{2606}' => {
+                let pts: Vec<String> = (0..10)
+                    .map(|i| {
+                        let a = std::f64::consts::PI * (f64::from(i) / 5.0 - 0.5);
+                        let r = if i % 2 == 0 { 3.4 * p } else { 1.4 * p };
+                        format!("{},{}", N(cx + r * a.cos()), N(cy + 0.25 * p + r * a.sin()))
+                    })
+                    .collect();
+                if c == '\u{2605}' {
+                    put!(
+                        s,
+                        "<polygon points='{}' fill='{lamp}' fill-opacity='{}'/>",
+                        pts.join(" "),
+                        N(alpha.max(0.85))
+                    );
+                } else {
+                    put!(
+                        s,
+                        "<polygon points='{}' fill='none' stroke='{fill}' stroke-opacity='{}' stroke-width='{}' stroke-linejoin='round'/>",
+                        pts.join(" "),
+                        N(alpha),
+                        N(0.42 * p)
+                    );
+                }
+            }
+            '\u{25b2}' | '\u{25bc}' => {
+                let k = if c == '\u{25b2}' { -1.0 } else { 1.0 };
+                put!(
+                    s,
+                    "<path d='M{} {}L{} {}L{} {}Z' fill='{}'/>",
+                    N(cx - 2.2 * p),
+                    N(cy - k * 1.6 * p),
+                    N(cx + 2.2 * p),
+                    N(cy - k * 1.6 * p),
+                    N(cx),
+                    N(cy + k * 1.8 * p),
+                    hex(dress.dot)
+                );
+            }
+            ROW_SELECTED => {
+                // (Its line's band first, under what follows: in the look's `selection`
+                // colour, else faintly in the lamps' glow.)
+                let (_, top) = at(0.0, it.row as f64 - 1.2);
+                let (band, opacity) = match dress.selection {
+                    Some(c) => (hex(c), 0.9),
+                    None => (hex(dress.glow), 0.1),
+                };
+                put!(
+                    s,
+                    "<rect x='{}' y='{}' width='{}' height='{}' fill='{band}' fill-opacity='{}'/>",
+                    N(d.x + 3.0),
+                    N(top),
+                    N(d.w - 6.0),
+                    N(9.4 * p),
+                    N(opacity)
+                );
+                let (x, y) = at(col(k), it.row as f64 + 3.0);
+                put!(
+                    s,
+                    "<path d='M{} {}L{} {}L{} {}Z' fill='{}'/>",
+                    N(x - 0.3 * p),
+                    N(y - 2.8 * p),
+                    N(x + 3.8 * p),
+                    N(y),
+                    N(x - 0.3 * p),
+                    N(y + 2.8 * p),
+                    lamp
+                );
+            }
+            // The row under the pointer's: an arrow's outline.
+            '>' => {
+                let (x, y) = at(col(k), it.row as f64 + 3.0);
+                put!(
+                    s,
+                    "<path d='M{} {}L{} {}L{} {}Z' fill='none' stroke='{fill}' stroke-opacity='{}' stroke-width='{}' stroke-linejoin='round'/>",
+                    N(x),
+                    N(y - 2.5 * p),
+                    N(x + 3.5 * p),
+                    N(y),
+                    N(x),
+                    N(y + 2.5 * p),
+                    N(alpha),
+                    N(0.42 * p)
+                );
+            }
+            TAG_SELECTED => {
+                let (x, y) = at(col(k) - 0.4, it.row as f64 - 0.4);
+                put!(
+                    s,
+                    "<rect x='{}' y='{}' width='{}' height='{}' fill='{lamp}'/>",
+                    N(x),
+                    N(y),
+                    N(0.8 * p),
+                    N(6.8 * p)
+                );
+            }
+            CARET => {
+                let (x, y) = at(col(k) - 0.5, it.row as f64 - 0.5);
+                let x = caret_x.unwrap_or(x);
+                put!(
+                    s,
+                    "<rect x='{}' y='{}' width='{}' height='{}' fill='{}'/>",
+                    N(x - 0.2 * p),
+                    N(y - 0.6 * p),
+                    N(0.4 * p),
+                    N(8.8 * p),
+                    lamp
+                );
+            }
+            _ => {}
+        }
+    }
+    flush(s, &mut run, run_at);
 }
 
 #[cfg(test)]
@@ -2035,6 +2655,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn four_categories_fit_in_order_and_factory_has_an_empty_state() {
+        assert_eq!(
+            TABS.map(|(_, label)| label),
+            ["ALL", "FACTORY", "MINE", "FAVORITES"]
+        );
+        let s = DrawerScene {
+            factory: true,
+            ..DrawerScene::default()
+        };
+        let items = list_items(&s);
+        assert_eq!(tab_of(&s), Tab::Factory);
+        assert!(items.iter().any(|i| i.text == "NO PRESET MATCHES"));
+        for (tab, label) in TABS {
+            let item = items.iter().find(|i| i.text == label).unwrap();
+            assert!(item.col + 6 * label.len() <= LIST.cols());
+            assert_eq!(
+                drawer_hit(&s, tab_centre(tab).0, tab_centre(tab).1),
+                Some(DrawerTarget::Tab(tab))
+            );
+        }
+    }
+
     /// Each control is found where it is drawn: the search, the tabs, the tags, a row and its
     /// star, each key, the update check's button when it has one; scrolled, the rows shown; a
     /// field only while what it is for goes on.
@@ -2046,7 +2689,7 @@ mod tests {
             at(&s, search_centre()),
             Some(DrawerTarget::Field(FieldId::Search))
         );
-        for t in [Tab::All, Tab::Favourites, Tab::Mine] {
+        for (t, _) in TABS {
             assert_eq!(at(&s, tab_centre(t)), Some(DrawerTarget::Tab(t)));
         }
         for i in 0..5 {
@@ -2199,6 +2842,14 @@ mod tests {
             let states = [
                 base.clone(),
                 DrawerScene {
+                    factory: true,
+                    ..base.clone()
+                },
+                DrawerScene {
+                    mine: true,
+                    ..base.clone()
+                },
+                DrawerScene {
                     focus: Some(FieldId::Search),
                     search: Field::new("bass"),
                     favourites: true,
@@ -2332,12 +2983,18 @@ mod tests {
         let mut s = scene();
         s.rows[2].name = "A Name Far Too Long To Show Whole".into();
         let items = list_items(&s);
+        // A row's line as the dots show it: each of its items' characters in its place.
         let row = |k: usize| {
-            items
-                .iter()
-                .find(|it| it.row == list_row(k) && it.col == COL)
-                .map(|it| it.text.clone())
-                .expect("a row")
+            let mut line = vec![' '; LIST.chars(COL)];
+            let mut found = false;
+            for it in items.iter().filter(|it| it.row == list_row(k)) {
+                found = true;
+                for (i, c) in it.text.chars().enumerate() {
+                    line[(it.col - COL) / 6 + i] = c;
+                }
+            }
+            assert!(found, "a row");
+            line.into_iter().collect::<String>()
         };
         let chars =
             |t: &str, from: usize, n: usize| t.chars().skip(from).take(n).collect::<String>();
@@ -2361,22 +3018,24 @@ mod tests {
         let mut s = scene();
         s.hover = Some(DrawerTarget::Row(3));
         let items = list_items(&s);
-        let row = |i| {
+        // A row's name, and its mark (none: unmarked).
+        let at = |i, col| {
             items
                 .iter()
-                .find(|it| it.row == list_row(i) && it.col == COL)
-                .expect("preset row")
+                .find(|it| it.row == list_row(i) && it.col == col)
         };
+        let row = |i| at(i, COL + 6 * NAME_AT).expect("preset row");
+        let mark = |i| at(i, COL).map(|it| it.text.clone());
         let (selected, hovered, ordinary) = (row(1), row(3), row(7));
         assert_eq!(selected.ink.colour(), (255, 197, 110));
         assert_eq!(selected.lv, BRIGHT);
-        assert!(selected.text.starts_with(ROW_SELECTED));
+        assert_eq!(mark(1), Some(ROW_SELECTED.to_string()));
         assert_eq!(hovered.ink.colour(), (255, 140, 58));
         assert_eq!(hovered.lv, POINTED);
-        assert!(hovered.text.starts_with('>'));
+        assert_eq!(mark(3).as_deref(), Some(">"));
         assert_eq!(ordinary.ink.colour(), (255, 140, 58));
         assert_eq!(ordinary.lv, 0.65);
-        assert!(ordinary.text.starts_with(' '));
+        assert_eq!(mark(7), None);
         assert!(hovered.lv > ordinary.lv);
         // Hovering its star must not repaint part of the current row in orange.
         s.hover = Some(DrawerTarget::Star(1));
@@ -2459,7 +3118,11 @@ mod tests {
             s.hover = Some(hover);
             let items = list_items(&s);
             for i in [0, 1] {
-                let row: Vec<_> = items.iter().filter(|it| it.row == list_row(i)).collect();
+                // (The chosen row's mark aside.)
+                let row: Vec<_> = items
+                    .iter()
+                    .filter(|it| it.row == list_row(i) && it.text != ">")
+                    .collect();
                 assert_eq!(row[0].lv, 1.0);
                 assert_eq!(row[1].text, "-");
                 assert_eq!(row[1].lv, 0.7);

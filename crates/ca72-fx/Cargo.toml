@@ -1,0 +1,23 @@
+[package]
+name = "ca72-fx"
+description = "The standalone application's effects: third-party CLAP and VST3 effects after the synth, each in a helper process (docs/fx-host.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The transport and protocol the helper speaks (DAW-v3's, third_party/daw-v3). No plug-in
+# SDK: plug-ins are loaded only in `ca72-fx-helper` (docs/fx-host.md).
+daw-ipc.workspace = true
+# The audio thread's queues, preallocated, without locks.
+rtrb.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

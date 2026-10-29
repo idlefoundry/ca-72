@@ -4,15 +4,105 @@
 //! and the distortion of a driven VCA; the EXT. LOUDNESS jack (J3) plugged, steady and at
 //! audio rate.
 //!
+//! ULTRA's VCA runs its signal path at 4x ([`OversampledVca`]; decisions.md R-BLEP): the thump
+//! and the audio-rate tremolo are checked at 1x and 4x; the others at 4x too with
+//! `CA72_VCA_FACTOR=4` (by hand).
+//!
 //! The known difference: the output pair loads the second pair's collectors about 5 %
 //! less in the model (its linearised base current), which leaves the gain 0.1 dB high.
 
-use ca72::vca::{CONTOUR_FULL, Vca, VcaCircuit};
+use ca72::vca::{CONTOUR_FULL, OversampledVca, Vca, VcaCircuit};
 use ca72_lab::bench::Solver;
 use ca72_lab::vca::{self as lab, VcaBench};
 use ca72_lab::work_dir;
 use ca72_spice::{Ngspice, Plot, for_test};
 use std::f64::consts::PI;
+
+/// The real-time VCA as these tests run it: [`Vca::tick`], or (`factor` above 1) its signal
+/// path oversampled as ULTRA's ([`OversampledVca`]) on the bias [`Vca::control`] works out at
+/// the test's rate, the input taken at the signal path's own rate (the sources are functions
+/// of time), its output [`Rt::delay`] samples late.
+struct Rt {
+    v: Vca,
+    os: Option<(OversampledVca, usize)>,
+    sr: f64,
+}
+
+impl Rt {
+    /// At the factor `CA72_VCA_FACTOR` gives (1 unless).
+    fn new(c: VcaCircuit, sr: f64, cont: f64) -> Rt {
+        let factor = std::env::var("CA72_VCA_FACTOR")
+            .ok()
+            .and_then(|f| f.parse().ok())
+            .unwrap_or(1);
+        Rt::at(c, sr, cont, factor)
+    }
+
+    fn at(c: VcaCircuit, sr: f64, cont: f64, factor: usize) -> Rt {
+        let v = Vca::new(c, sr, cont);
+        Rt {
+            os: (factor > 1).then(|| (OversampledVca::new(&v, factor), factor)),
+            v,
+            sr,
+        }
+    }
+
+    /// One sample, the input `x` a function of time and this sample's time `t`.
+    fn tick_with(&mut self, x: impl Fn(f64) -> f64, t: f64, cont: f64) -> f64 {
+        match &mut self.os {
+            None => self.v.tick(x(t), cont),
+            Some((os, m)) => {
+                let d = self.v.control(cont);
+                let m = *m;
+                let xs: Vec<f64> = (0..m)
+                    .map(|k| x(t - (m - 1 - k) as f64 / (m as f64 * self.sr)))
+                    .collect();
+                os.signal(&xs, &d)
+            }
+        }
+    }
+
+    /// One sample with a steady input `x`.
+    fn tick(&mut self, x: f64, cont: f64) -> f64 {
+        self.tick_with(|_| x, 0.0, cont)
+    }
+
+    /// How late the output is, samples (the oversampled path's decimator).
+    fn delay(&self) -> f64 {
+        self.os
+            .as_ref()
+            .map_or(0.0, |&(_, m)| OversampledVca::bias_latency(m))
+    }
+
+    fn factor(&self) -> usize {
+        self.os.as_ref().map_or(1, |&(_, m)| m)
+    }
+}
+
+impl std::ops::Deref for Rt {
+    type Target = Vca;
+    fn deref(&self) -> &Vca {
+        &self.v
+    }
+}
+
+impl std::ops::DerefMut for Rt {
+    fn deref_mut(&mut self) -> &mut Vca {
+        &mut self.v
+    }
+}
+
+/// The signal path's rates the time-domain tests check: the sample rate's, and ULTRA's 4x
+/// (or only `CA72_VCA_FACTOR`'s, when set).
+fn factors() -> Vec<usize> {
+    match std::env::var("CA72_VCA_FACTOR")
+        .ok()
+        .and_then(|f| f.parse().ok())
+    {
+        Some(f) => vec![f],
+        None => vec![1, 4],
+    }
+}
 
 fn circuit(b: &VcaBench) -> VcaCircuit {
     // A source plugged into J3 holds the input itself (the normal contact open).
@@ -67,7 +157,7 @@ fn rt_gain(b: &VcaBench, hz: f64) -> f64 {
 /// [`rt_gain`] with the bias solved every `every` samples (None: the VCA's own interval).
 fn rt_gain_every(b: &VcaBench, hz: f64, every: Option<usize>) -> f64 {
     let sr = 192_000.0;
-    let mut v = Vca::new(circuit(b), sr, b.cont);
+    let mut v = Rt::new(circuit(b), sr, b.cont);
     if let Some(e) = every {
         v.control_every = e;
     }
@@ -78,7 +168,7 @@ fn rt_gain_every(b: &VcaBench, hz: f64, every: Option<usize>) -> f64 {
     let m = (periods / hz * sr).round() as usize;
     let n = (settle * sr) as usize + m;
     let out: Vec<f64> = (0..n)
-        .map(|i| v.tick(a * (2.0 * PI * hz * i as f64 / sr).sin(), b.cont))
+        .map(|i| v.tick_with(|t| a * (2.0 * PI * hz * t).sin(), i as f64 / sr, b.cont))
         .collect();
     let (mut p, mut q) = (0.0, 0.0);
     for (k, y) in out[n - m..].iter().enumerate() {
@@ -339,29 +429,32 @@ fn thump_matches_the_circuit() {
         .expect("tran");
         let sr = 48_000.0;
         let n = (tstop * sr) as usize;
-        let ng = resampled(&p, 0.0, sr, n);
-        let mut v = Vca::new(c, sr, 0.0);
-        let rt: Vec<f64> = (0..n).map(|i| v.tick(0.0, cont(i as f64 / sr))).collect();
-        let peak = ng.iter().fold(0.0f64, |a, x| a.max(x.abs()));
-        let (k, err) = ng
-            .iter()
-            .zip(&rt)
-            .enumerate()
-            .fold((0, 0.0f64), |a, (k, (x, y))| {
-                if (x - y).abs() > a.1 {
-                    (k, (x - y).abs())
-                } else {
-                    a
-                }
-            });
-        fail |= err >= 0.03 * peak;
-        report.push_str(&format!(
-            "thump, rise {:.1} ms: ngspice peak {:.1} mV; RT worst difference {:.2} mV at {:.4} s\n",
+        for factor in factors() {
+            let mut v = Rt::at(c, sr, 0.0, factor);
+            let ng = resampled(&p, -v.delay() / sr, sr, n);
+            let rt: Vec<f64> = (0..n).map(|i| v.tick(0.0, cont(i as f64 / sr))).collect();
+            let peak = ng.iter().fold(0.0f64, |a, x| a.max(x.abs()));
+            let (k, err) = ng
+                .iter()
+                .zip(&rt)
+                .enumerate()
+                .fold((0, 0.0f64), |a, (k, (x, y))| {
+                    if (x - y).abs() > a.1 {
+                        (k, (x - y).abs())
+                    } else {
+                        a
+                    }
+                });
+            fail |= err >= 0.03 * peak;
+            report.push_str(&format!(
+            "thump, rise {:.1} ms, VCA at {}x: ngspice peak {:.1} mV; RT worst difference {:.2} mV at {:.4} s\n",
             rise * 1e3,
+            v.factor(),
             peak * 1e3,
             err * 1e3,
             k as f64 / sr
         ));
+        }
     }
     eprintln!("{report}");
     assert!(!fail, "budget: 3 % of the peak\n{report}");
@@ -418,10 +511,10 @@ fn drive_distortion_matches_the_circuit() {
         let sr = 192_000.0;
         let n = (0.1 * sr) as usize;
         let ng = resampled(&p, tstop - 0.1, sr, n);
-        let mut v = Vca::new(c, sr, cont);
+        let mut v = Rt::new(c, sr, cont);
         let total = (tstop * sr) as usize;
         let rt: Vec<f64> = (0..total)
-            .map(|i| v.tick(amp * (2.0 * PI * hz * i as f64 / sr).sin(), cont))
+            .map(|i| v.tick_with(|t| amp * (2.0 * PI * hz * t).sin(), i as f64 / sr, cont))
             .collect();
         let hn = harmonics_at(&ng, sr, hz, 7);
         let hr = harmonics_at(&rt[total - n..], sr, hz, 7);
@@ -526,7 +619,7 @@ fn the_loudness_jack_overdrive_matches_the_circuit() {
                 Solver::default(),
             )
             .expect("ac");
-            let mut rt = Vca::new(circuit(&b), 48e3, cont);
+            let mut rt = Rt::new(circuit(&b), 48e3, cont);
             let rest = rt.rest_output(cont);
             let r = rt.bias();
             // Solved every sample as with the jack plugged: how many solves do not settle.
@@ -615,42 +708,50 @@ fn the_loudness_jack_follows_audio_rate_cv() {
             .expect("tran");
         let sr = 48_000.0;
         let n = (0.2 * sr) as usize;
-        let ng = resampled(&plots[0], tstop - 0.2, sr, n);
-        let mut v = Vca::new(circuit(&b), sr, CONTOUR_FULL);
-        // As the voice runs it with the jack plugged: the bias solved every sample.
-        v.control_every = 1;
-        let total = (tstop * sr) as usize;
-        let rt: Vec<f64> = (0..total)
-            .map(|i| {
-                let t = i as f64 / sr;
-                v.circuit.ext = 3.0 + 2.0 * (2.0 * PI * hz * t).sin();
-                v.circuit.r_j3 = 0.0;
-                v.tick(0.05 * (2.0 * PI * 1000.0 * t).sin(), CONTOUR_FULL)
-            })
-            .collect();
-        let tail = &rt[total - n..];
-        let rms = |x: &[f64]| (x.iter().map(|v| v * v).sum::<f64>() / x.len() as f64).sqrt();
-        let err: Vec<f64> = ng.iter().zip(tail).map(|(a, b)| a - b).collect();
-        let worst = err.iter().fold(0.0f64, |a, e| a.max(e.abs()));
-        let below = 20.0 * (rms(&ng) / rms(&err)).log10();
-        // A tremolo at 1 kHz is 27.9 dB below: the model's step, which converges as it is
-        // oversampled (31.4, 33.8, 35.2 dB at 2, 4, 8 times; `tremolo_step_budget`). The
-        // model before its fast-attack correction read 35.5 dB here by an accident: its
-        // tails, two Newton steps behind, cancelled part of that error.
-        fail |= below < if hz < 500.0 { 33.0 } else { 27.5 };
-        report.push_str(&format!(
-            "tremolo at {hz} Hz: ngspice {:.2} mV rms, RT difference {:.3} mV rms ({:.1} dB below), worst {:.3} mV\n",
+        for factor in factors() {
+            let mut v = Rt::at(circuit(&b), sr, CONTOUR_FULL, factor);
+            let ng = resampled(&plots[0], tstop - 0.2 - v.delay() / sr, sr, n);
+            // As the voice runs it with the jack plugged: the bias solved every sample.
+            v.control_every = 1;
+            let total = (tstop * sr) as usize;
+            let rt: Vec<f64> = (0..total)
+                .map(|i| {
+                    let t = i as f64 / sr;
+                    v.circuit.ext = 3.0 + 2.0 * (2.0 * PI * hz * t).sin();
+                    v.circuit.r_j3 = 0.0;
+                    v.tick_with(|t| 0.05 * (2.0 * PI * 1000.0 * t).sin(), t, CONTOUR_FULL)
+                })
+                .collect();
+            let tail = &rt[total - n..];
+            let rms = |x: &[f64]| (x.iter().map(|v| v * v).sum::<f64>() / x.len() as f64).sqrt();
+            let err: Vec<f64> = ng.iter().zip(tail).map(|(a, b)| a - b).collect();
+            let worst = err.iter().fold(0.0f64, |a, e| a.max(e.abs()));
+            let below = 20.0 * (rms(&ng) / rms(&err)).log10();
+            // A tremolo at 1 kHz is 27.9 dB below: the model's step, which converges as it is
+            // oversampled (31.4, 33.8, 35.2 dB at 2, 4, 8 times; `tremolo_step_budget`). The
+            // model before its fast-attack correction read 35.5 dB here by an accident: its
+            // tails, two Newton steps behind, cancelled part of that error. ULTRA's at 4x: 33.5
+            // dB.
+            fail |= below
+                < match (hz < 500.0, factor) {
+                    (true, _) => 33.0,
+                    (false, 1) => 27.5,
+                    (false, _) => 32.0,
+                };
+            report.push_str(&format!(
+            "tremolo at {hz} Hz, VCA at {factor}x: ngspice {:.2} mV rms, RT difference {:.3} mV rms ({:.1} dB below), worst {:.3} mV\n",
             rms(&ng) * 1e3,
             rms(&err) * 1e3,
             below,
             worst * 1e3
         ));
+        }
     }
     eprintln!("{report}");
     assert!(
         !fail,
         "budget: the difference 33 dB below the output up to 100 Hz (the VCA's thump and its\n\
-         pairs' linearised base current; board4.md), 27.5 dB at 1 kHz (the model's step)\n{report}"
+         pairs' linearised base current; board4.md), 27.5 dB at 1 kHz (the model's step; 32 at 4x)\n{report}"
     );
 }
 

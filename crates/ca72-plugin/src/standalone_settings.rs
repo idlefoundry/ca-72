@@ -75,6 +75,13 @@ const ROW_H: f64 = 90.0;
 const VALUE_X: f64 = X + 560.0;
 const NEXT_X: f64 = X + WIDTH - 100.0;
 const BUTTON_Y: f64 = Y + HEIGHT - 125.0;
+/// The rows: the devices' eight, then TEMPO (decisions.md R-ARP).
+const ROWS: usize = 9;
+/// The row of TEMPO: the arpeggiator's where no host gives one, applied at once (not a device
+/// setting: nothing to restart), kept for the computer by the editor.
+const TEMPO_ROW: usize = 8;
+/// TEMPO's choices in its list: every 5 from 40 to 240 (the arrow keys step it by 1).
+const TEMPO_LIST: (u16, u16, u16) = (40, 240, 5);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Choice {
@@ -87,6 +94,7 @@ enum Choice {
     MidiAuto,
     Midi(Option<String>),
     Channel(Option<u8>),
+    Tempo(u16),
 }
 #[derive(Debug)]
 struct SelectionMenu {
@@ -152,6 +160,13 @@ pub struct Dialog {
     next_poll: Instant,
     stamp: String,
     changed: bool,
+    /// TEMPO as shown, and whether it changed since the editor last took it.
+    tempo: u16,
+    tempo_changed: bool,
+    /// The audio threads' priority as last read, and where it is read (decisions.md R-RTKIT:
+    /// the audio side's atomics; the tests give their own).
+    realtime: (ca72_rt::Standing, ca72_rt::Standing),
+    read_realtime: fn() -> (ca72_rt::Standing, ca72_rt::Standing),
 }
 
 impl Dialog {
@@ -170,7 +185,61 @@ impl Dialog {
             next_poll: Instant::now(),
             stamp: String::new(),
             changed: true,
+            tempo: crate::params::DEFAULT_TEMPO as u16,
+            tempo_changed: false,
+            realtime: crate::audio_thread::standing(),
+            read_realtime: crate::audio_thread::standing,
         }
+    }
+
+    /// For a look (the editor's review frames): playing at 48 kHz in 256-frame blocks, its audio
+    /// threads standing as `realtime`, polled no more.
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn review(&mut self, realtime: (ca72_rt::Standing, ca72_rt::Standing)) {
+        self.frame();
+        self.next_poll = Instant::now() + Duration::from_secs(3600);
+        self.snapshot.phase = Phase::Running;
+        self.snapshot.actual_sample_rate = 48_000;
+        self.snapshot.actual_buffer_frames = 256;
+        self.snapshot.error = None;
+        self.snapshot.warning = None;
+        // (A device to play on, as a computer has.)
+        let id = DeviceId {
+            name: "Speakers".into(),
+            input_channels: 0,
+            output_channels: 2,
+        };
+        let capability = plugin_kit_standalone::StreamCapability {
+            channels: 2,
+            min_sample_rate: 44_100,
+            max_sample_rate: 48_000,
+            buffer_range: Some([64, 1024]),
+        };
+        self.snapshot.devices.backend = "ALSA".into();
+        self.snapshot.devices.default_output = Some(id.clone());
+        self.snapshot.devices.default_sample_rate = 48_000;
+        self.snapshot.devices.audio = vec![plugin_kit_standalone::DeviceInfo {
+            id: id.clone(),
+            input_configs: Vec::new(),
+            output_configs: vec![capability],
+            sample_rates: vec![44_100, 48_000],
+            default_sample_rate: 48_000,
+        }];
+        self.snapshot.config.output = Some(id.clone());
+        self.draft.output = Some(id);
+        self.realtime = realtime;
+        self.changed = true;
+    }
+
+    /// TEMPO as this computer has it (the editor's, as it opens the dialog).
+    pub fn set_tempo(&mut self, bpm: u16) {
+        self.tempo = crate::settings::tempo_within(bpm);
+        self.changed = true;
+    }
+
+    /// TEMPO, if it was changed here since the last time it was asked.
+    pub fn take_tempo(&mut self) -> Option<u16> {
+        std::mem::take(&mut self.tempo_changed).then_some(self.tempo)
     }
 
     pub fn frame(&mut self) -> bool {
@@ -182,6 +251,11 @@ impl Dialog {
                     Err(error) => self.complete_application(Err(error)),
                     Ok(None) => {}
                 }
+            }
+            let realtime = (self.read_realtime)();
+            if realtime != self.realtime {
+                self.realtime = realtime;
+                self.changed = true;
             }
             let snapshot = self.app.snapshot();
             let stamp = format!("{snapshot:?}");
@@ -376,6 +450,18 @@ impl Dialog {
                     (1..=16).map(|channel| (channel.to_string(), Choice::Channel(Some(channel)))),
                 )
                 .collect(),
+            TEMPO_ROW => {
+                let (lo, hi, step) = TEMPO_LIST;
+                let mut tempos: Vec<u16> = (lo..=hi).step_by(usize::from(step)).collect();
+                if !tempos.contains(&self.tempo) {
+                    tempos.push(self.tempo);
+                    tempos.sort_unstable();
+                }
+                tempos
+                    .into_iter()
+                    .map(|bpm| (format!("{bpm} BPM"), Choice::Tempo(bpm)))
+                    .collect()
+            }
             _ => Vec::new(),
         }
     }
@@ -391,6 +477,7 @@ impl Dialog {
             Choice::Midi(None) => !self.draft.auto_midi && self.draft.midi_inputs.is_empty(),
             Choice::Midi(Some(name)) => self.draft.midi_inputs.contains(name),
             Choice::Channel(channel) => self.draft.midi_channel == *channel,
+            Choice::Tempo(bpm) => self.tempo == *bpm,
         }
     }
     fn choose(&mut self, choice: Choice) {
@@ -441,6 +528,10 @@ impl Dialog {
                 }
             }
             Choice::Channel(channel) => self.draft.midi_channel = channel,
+            Choice::Tempo(bpm) => {
+                self.tempo = crate::settings::tempo_within(bpm);
+                self.tempo_changed = true;
+            }
         }
         self.record_edit(&previous);
         self.local_error = None;
@@ -516,6 +607,10 @@ impl Dialog {
                 self.draft.midi_channel = stepped(&channels, &self.draft.midi_channel, direction)
                     .copied()
                     .flatten();
+            }
+            TEMPO_ROW => {
+                let bpm = (i32::from(self.tempo) + direction).clamp(0, i32::from(u16::MAX));
+                self.choose(Choice::Tempo(bpm as u16));
             }
             _ => {}
         }
@@ -622,7 +717,7 @@ impl Dialog {
             }
             return false;
         }
-        if (ROW_Y..ROW_Y + ROW_H * 8.0).contains(&y) && (X..X + WIDTH).contains(&x) {
+        if (ROW_Y..ROW_Y + ROW_H * ROWS as f64).contains(&y) && (X..X + WIDTH).contains(&x) {
             let row = ((y - ROW_Y) / ROW_H) as usize;
             self.focus = row;
             if x >= VALUE_X - 30.0 {
@@ -680,30 +775,30 @@ impl Dialog {
             Key::Tab => {
                 self.focus = (self.focus
                     + if event.modifiers.contains(Modifiers::SHIFT) {
-                        10
+                        ROWS + 2
                     } else {
                         1
                     })
-                    % 11;
+                    % (ROWS + 3);
                 self.changed = true;
             }
             Key::ArrowDown => {
-                self.focus = (self.focus + 1) % 11;
+                self.focus = (self.focus + 1) % (ROWS + 3);
                 self.changed = true;
             }
             Key::ArrowUp => {
-                self.focus = (self.focus + 10) % 11;
+                self.focus = (self.focus + ROWS + 2) % (ROWS + 3);
                 self.changed = true;
             }
             Key::ArrowLeft => self.cycle(self.focus, -1),
             Key::ArrowRight => self.cycle(self.focus, 1),
             Key::Enter => match self.focus {
-                8 => {
+                f if f == ROWS => {
                     self.local_error = self.app.refresh().err();
                     self.changed = true;
                 }
-                9 => return true,
-                10 => return self.finish_or_apply(),
+                f if f == ROWS + 1 => return true,
+                f if f == ROWS + 2 => return self.finish_or_apply(),
                 _ => self.open_menu(self.focus),
             },
             Key::Character(ref text) if text == " " => self.open_menu(self.focus),
@@ -825,6 +920,10 @@ impl Dialog {
                     .midi_channel
                     .map_or_else(|| "ALL".to_owned(), |channel| channel.to_string()),
             ),
+            (
+                "TEMPO",
+                format!("{} BPM (the arpeggiator's; applied at once)", self.tempo),
+            ),
         ];
         for (row, (label, value)) in rows.iter().enumerate() {
             let y = ROW_Y + row as f64 * ROW_H;
@@ -856,7 +955,7 @@ impl Dialog {
                 y + 31.0
             );
         }
-        let status_y = ROW_Y + ROW_H * 8.0 + 50.0;
+        let status_y = ROW_Y + ROW_H * ROWS as f64 + 50.0;
         let phase = match self.snapshot.phase {
             Phase::Stopped => "STOPPED",
             Phase::Starting => "STARTING",
@@ -864,11 +963,20 @@ impl Dialog {
             Phase::Recovering => "RECOVERING",
             Phase::Error => "ERROR",
         };
+        // (The audio threads' priority after, while it plays: decisions.md R-RTKIT.)
+        let (audio, workers) = self.realtime;
+        let priority = match crate::audio_thread::summary(audio, workers) {
+            crate::audio_thread::Standing::Unknown => "",
+            crate::audio_thread::Standing::Asking => " · asking RTKit for real-time priority",
+            crate::audio_thread::Standing::RealTime { rtkit: false } => " · real-time",
+            crate::audio_thread::Standing::RealTime { rtkit: true } => " · real-time (RTKit)",
+            crate::audio_thread::Standing::Ordinary => " · ordinary priority",
+        };
         let actual = self.snapshot.buffer_duration_ms().map_or_else(
             || "Audio has not started".to_owned(),
             |ms| {
                 format!(
-                    "{} Hz · actual callback {} frames · buffer duration {ms:.2} ms",
+                    "{} Hz · actual callback {} frames · buffer duration {ms:.2} ms{priority}",
                     self.snapshot.actual_sample_rate, self.snapshot.actual_buffer_frames
                 )
             },
@@ -887,6 +995,7 @@ impl Dialog {
             .or_else(|| self.snapshot.error.clone())
             .or_else(|| self.validation().err())
             .or_else(|| self.snapshot.warning.clone());
+        let busy = issue.is_some();
         if let Some(issue) = issue {
             text(
                 &mut svg,
@@ -897,10 +1006,37 @@ impl Dialog {
                 "#e5b94d",
             );
         }
+        // The audio not real-time (decisions.md R-RTKIT): which threads and why, then the fix,
+        // under any other issue, the note below moved down for them.
+        let mut note = status_y + 135.0;
+        if let Some(w) = crate::audio_thread::warning(audio, workers, cfg!(target_os = "linux")) {
+            let (y, size) = if busy {
+                note += 34.0;
+                (status_y + 101.0, 27.0)
+            } else {
+                (status_y + 67.0, 30.0)
+            };
+            text(
+                &mut svg,
+                X + 55.0,
+                y,
+                size,
+                &ellipsize(&w.detail, 124),
+                "#e5b94d",
+            );
+            text(
+                &mut svg,
+                X + 55.0,
+                y + 34.0,
+                27.0,
+                &ellipsize(w.remedy, 124),
+                "#e5b94d",
+            );
+        }
         text(
             &mut svg,
             X + 55.0,
-            status_y + 135.0,
+            note,
             27.0,
             "External input is adapted to the output clock. Changing settings briefly interrupts sound.",
             "#a6a5a1",
@@ -922,7 +1058,7 @@ impl Dialog {
                 svg,
                 r##"<rect x="{x}" y="{BUTTON_Y}" width="{width}" height="75" rx="8" fill="{}" stroke="{}" stroke-width="3"/>"##,
                 if enabled { "#3a3022" } else { "#15171b" },
-                if self.focus == button + 8 {
+                if self.focus == button + ROWS {
                     "#f0a030"
                 } else {
                     "#4a4640"
@@ -1099,7 +1235,7 @@ mod tests {
         assert!(dialog.svg().contains(">DONE</text>"));
         assert!(!dialog.svg().contains(">APPLY</text>"));
         assert!(dialog.press(X + WIDTH - 200.0, BUTTON_Y + 30.0));
-        dialog.focus = 10;
+        dialog.focus = ROWS + 2;
         assert!(dialog.key(&KeyboardEvent {
             key: Key::Enter,
             ..Default::default()

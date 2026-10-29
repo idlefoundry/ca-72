@@ -352,6 +352,91 @@ pub fn ring_around(origin: (f64, f64), b: [f64; 4]) -> Layer {
     }
 }
 
+/// The MIDI map mode's mark round a learnable control in view (the CA-72's `docs/decisions.md`
+/// R-MIDI-MAP): where it is (left, top, right, bottom, the drawing's units), its controller in
+/// small print (`CC 74`) if it has one, whether it waits for one (the learn ring's dashes), and
+/// whether it is the one chosen.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MapMark {
+    pub rect: [f64; 4],
+    pub label: Option<String>,
+    pub waiting: bool,
+    /// The control chosen last (what Delete takes the controller of), outlined more strongly.
+    pub chosen: bool,
+}
+
+/// The small print's size, a tip's lettering's share.
+pub const MARK_TEXT: f64 = 0.8;
+
+/// A mark's layer: the drawer's accent laid faintly over the control (a little more over one
+/// that has a controller), outlined as the learn ring is but thin and solid, or the ring's
+/// dashes while it waits; its controller on a tab in the notes' colours across its outline's foot,
+/// `size` its lettering's.
+pub fn map_mark(fonts: &Fonts, m: &MapMark, size: f64) -> Layer {
+    let [x0, y0, x1, y1] = m.rect;
+    let (w, h) = (x1 - x0, y1 - y0);
+    let mut s = Svg::default();
+    let tint = if m.label.is_some() { 0.16 } else { 0.07 };
+    if m.waiting {
+        put!(
+            s,
+            "<rect x='{}' y='{}' width='{}' height='{}' rx='14' fill='{ACCENT}' fill-opacity='{tint}' stroke='{ACCENT}' stroke-width='6' stroke-dasharray='18 10'/>",
+            N(-w / 2.0),
+            N(-h / 2.0),
+            N(w),
+            N(h)
+        );
+    } else {
+        let (opacity, width) = if m.chosen { (1.0, 6.0) } else { (0.75, 3.0) };
+        put!(
+            s,
+            "<rect x='{}' y='{}' width='{}' height='{}' rx='14' fill='{ACCENT}' fill-opacity='{tint}' stroke='{ACCENT}' stroke-opacity='{opacity}' stroke-width='{width}'/>",
+            N(-w / 2.0),
+            N(-h / 2.0),
+            N(w),
+            N(h)
+        );
+    }
+    let mut bounds = [-w / 2.0 - 6.0, -h / 2.0 - 6.0, w / 2.0 + 6.0, h / 2.0 + 6.0];
+    if let Some(t) = &m.label {
+        let spacing = size * 0.06;
+        let tw = fonts.advance(t, size, Weight::Bold, spacing) + size * 0.9;
+        let th = size * 1.4;
+        let top = h / 2.0 - th / 2.0;
+        put!(
+            s,
+            "<rect x='{}' y='{}' width='{}' height='{}' rx='{}' fill='{BACK}' stroke='{ACCENT}' stroke-width='{}'/>",
+            N(-tw / 2.0),
+            N(top),
+            N(tw),
+            N(th),
+            N(th * 0.3),
+            N(size / 10.0)
+        );
+        put!(
+            s,
+            "<text x='0' y='{}' text-anchor='middle' font-size='{}' font-weight='700' letter-spacing='{}' fill='{ACCENT}'>{}</text>",
+            N(top + th / 2.0 + size * 0.36),
+            N(size),
+            N(spacing),
+            escape(t)
+        );
+        let e = size / 8.0;
+        bounds = [
+            bounds[0].min(-tw / 2.0 - e),
+            bounds[1],
+            bounds[2].max(tw / 2.0 + e),
+            bounds[3].max(top + th + e),
+        ];
+    }
+    Layer {
+        origin: ((x0 + x1) / 2.0, (y0 + y1) / 2.0),
+        bounds,
+        body: s.0,
+        ..Layer::default()
+    }
+}
+
 /// The panel's area, for placing a menu within it.
 pub const PANEL: [f64; 4] = [0.0, 0.0, W, H];
 

@@ -78,7 +78,7 @@ clap = { version = "4.1.8", features = ["derive", "wrap_help"], optional = true 
 cpal = { version = "0.15", optional = true }
 # The production standalone's quit shortcut (`app_window::quits`), as baseview gives its keys.
 keyboard-types = { version = "0.6.1", default-features = false, optional = true }
-plugin-kit-standalone = { git = "https://github.com/idlefoundry/plugin-kit", rev = "bcc4d8f7706043dccdecfe8b115ba129f84ec39c", optional = true }
+plugin-kit-standalone = { git = "https://github.com/idlefoundry/plugin-kit", rev = "91faf69ae98045b9c1d3b4846c7831262353be98", optional = true }
 jack = { version = "0.11.4", optional = true }
 midir = { version = "0.9.1", optional = true }
 rtrb = { version = "0.2.2", optional = true }

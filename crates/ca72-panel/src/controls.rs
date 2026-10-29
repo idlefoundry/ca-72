@@ -23,7 +23,59 @@ pub enum Dial {
     Drive,
     /// LEVEL: -30 to +12 dB.
     Level,
+    /// The arpeggiator's (decisions.md R-ARP): RATE, its note values 2 (a half note) to 32, the
+    /// straight ones numbered, the dotted and triplet ones between them unnumbered ticks.
+    ArpRate,
+    /// OCTAVES, 1 to 5.
+    ArpOctaves,
+    /// GATE and SWING: 0 to 100 %.
+    Percent,
+    /// The expression drawer's MODULATION (decisions.md R-MPE): –100 to 100 %.
+    Reach,
+    /// An oscillator's FREQUENCY while it is timed (decisions.md R-OSC-TIMED): its DIVISION's
+    /// eighteen note values, 4 and 2 bars (4×, 2×) and 1 bar to a thirty-second (1 to 32), the
+    /// dotted and triplet ones between them unnumbered ticks.
+    Timed,
+    /// An LFO's RATE (decisions.md R-LFO): 0.01 to 50 Hz on its parameter's skewed travel
+    /// (about 1.6 Hz at its middle), Hz below.
+    LfoRate,
+    /// An LFO's PHASE: 0 to 360 degrees.
+    LfoPhase,
+    /// An LFO's FADE (decisions.md R-LFO-FADE): off at its top, out to the left and in to the
+    /// right, 10 s at each end, on a cube-root travel each way, so that short fades have room;
+    /// its centre a detent (`interact::release`).
+    LfoFade,
+    /// A macro's (decisions.md R-MACROS): 0 to 10, eleven ticks, only its ends numbered, its
+    /// name's screen over its top.
+    Macro,
 }
+
+impl Dial {
+    /// How many steps its travel is in, for a knob of discrete positions (it goes from one to
+    /// the next, never between them: the owner, 2026-10-10); none for one that turns smoothly.
+    pub fn steps(self) -> Option<usize> {
+        match self {
+            Dial::Voices => Some(8),
+            Dial::ArpRate => Some(12),
+            Dial::ArpOctaves => Some(4),
+            Dial::Timed => Some(TIMED_STEPS),
+            _ => None,
+        }
+    }
+}
+
+/// The timed dial's steps: its eighteen note values' seventeen intervals (R-OSC-TIMED).
+pub const TIMED_STEPS: usize = 17;
+
+/// The time dial's labelled marks: angle in degrees and milliseconds (R-KNOB-ENTRY).
+pub const TIME_MARKS: [(f64, f64); 6] = [
+    (-120.0, 10.0),
+    (-90.0, 200.0),
+    (-30.0, 600.0),
+    (30.0, 1000.0),
+    (67.0, 5000.0),
+    (108.0, 10000.0),
+];
 
 /// A selector's legends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,6 +140,24 @@ pub enum Kind {
         detent: bool,
         span: f64,
     },
+    /// A small amber key lit from inside while on (`art::KEY` in size), the note value its
+    /// oscillator is timed at printed beside it: an oscillator's TIMED (decisions.md
+    /// R-OSC-TIMED). It flips at a click, as a switch.
+    Key,
+    /// An LFO's OUT jack, as its LEVEL's control (decisions.md R-LFO's addendum): no knob of
+    /// its own (the page draws the jack), its rings round the jack; a press there drags an
+    /// assignment from it, the wheel turns its LEVEL, a typed value sets it.
+    Jack,
+}
+
+impl Kind {
+    /// Whether every fraction of a drag or scroll can change the value, rather than only
+    /// whole positions. VOICES and the arpeggiator's RATE and OCTAVES have a knob's shape but
+    /// discrete options.
+    pub fn is_continuous(&self) -> bool {
+        matches!(self, Self::Knob { dial, .. } if dial.steps().is_none())
+            || matches!(self, Self::Wheel { .. } | Self::Jack)
+    }
 }
 
 /// The part of the drawing a control's position is in.
@@ -100,6 +170,31 @@ pub enum Place {
     Column,
     /// The strip's, its origin the drawing's.
     Strip,
+    /// The arpeggiator's drawer's (`strip::arp`), its origin the drawing's with the drawer
+    /// open: drawn by the drawer, found only while it is open.
+    Arp,
+    /// The expression drawer's (`strip::mpe`; decisions.md R-MPE), as the arpeggiator's.
+    Mpe,
+    /// The LFO page's (`strip::lfo`; decisions.md R-LFO), its origin the drawing's: drawn by
+    /// the page, found only while it shows.
+    Lfo,
+    /// The macros' (`strip::macros`; decisions.md R-MACROS), in the left hand's area in its
+    /// place, its origin the drawing's: drawn by their renderer, found only while they show.
+    Macro,
+}
+
+impl Place {
+    /// Whether it is a drawer's dropped from the rail: drawn by the drawer, found only while it
+    /// is open.
+    pub fn is_drawer(self) -> bool {
+        matches!(self, Place::Arp | Place::Mpe)
+    }
+
+    /// Whether its controls are drawn apart from the panel's renderer and found only while
+    /// their part shows: a drawer's, or the LFO page's.
+    pub fn drawn_apart(self) -> bool {
+        self.is_drawer() || self == Place::Lfo || self == Place::Macro
+    }
 }
 
 /// A control of the panel, operating the parameter of the same function.
@@ -122,7 +217,7 @@ impl Control {
         let (ox, oy) = match self.place {
             Place::Panel => (crate::art::COL, crate::art::TOP),
             Place::Column => crate::strip::LEFT_HAND,
-            Place::Strip => (0.0, 0.0),
+            Place::Strip | Place::Arp | Place::Mpe | Place::Lfo | Place::Macro => (0.0, 0.0),
         };
         (ox + self.x, oy + self.y)
     }
@@ -135,6 +230,30 @@ const fn knob(param: &'static str, label: &'static str, x: f64, y: f64, dial: Di
         place: Place::Panel,
         x,
         y,
+        kind: Kind::Knob { dial, big: false },
+    }
+}
+
+/// A knob of the arpeggiator's drawer, the `at`th of its units (`strip::arp::UNITS`).
+const fn arp_knob(param: &'static str, label: &'static str, at: usize, dial: Dial) -> Control {
+    Control {
+        param,
+        label,
+        place: Place::Arp,
+        x: crate::strip::arp::UNITS[at] + crate::strip::UNIT_KNOB,
+        y: crate::strip::arp::ROW,
+        kind: Kind::Knob { dial, big: false },
+    }
+}
+
+/// A knob of the expression drawer, the `at`th of its units (`strip::mpe::UNITS`).
+const fn mpe_knob(param: &'static str, label: &'static str, at: usize, dial: Dial) -> Control {
+    Control {
+        param,
+        label,
+        place: Place::Mpe,
+        x: crate::strip::mpe::UNITS[at] + crate::strip::UNIT_KNOB,
+        y: crate::strip::mpe::unit_row(at),
         kind: Kind::Knob { dial, big: false },
     }
 }
@@ -230,11 +349,240 @@ const fn switch(
     )
 }
 
+/// An oscillator's TIMED key (R-OSC-TIMED), centred under its RANGE, or its MOD key
+/// (R-CONTINUOUS-WAVE), centred under its WAVEFORM.
+const fn key(param: &'static str, label: &'static str, x: f64, y: f64) -> Control {
+    Control {
+        param,
+        label,
+        place: Place::Panel,
+        x,
+        y,
+        kind: Kind::Key,
+    }
+}
+
+/// One of the LFO page's controls (decisions.md R-LFO), at its place in its column
+/// (`strip::lfo::places`).
+const fn lfo(param: &'static str, label: &'static str, at: (f64, f64), kind: Kind) -> Control {
+    Control {
+        param,
+        label,
+        place: Place::Lfo,
+        x: at.0,
+        y: at.1,
+        kind,
+    }
+}
+
+const fn lfo_knob(dial: Dial) -> Kind {
+    Kind::Knob { dial, big: false }
+}
+
+/// LFO `n`'s (0 to 3) ten controls, in the order [`LFO_PARTS`] names them.
+const fn lfo_column(
+    n: usize,
+    params: [&'static str; 10],
+    labels: [&'static str; 10],
+) -> [Control; 10] {
+    let p = crate::strip::lfo::places(n);
+    [
+        lfo(
+            params[0],
+            labels[0],
+            p.wave,
+            Kind::Selector(Legends::Waves12),
+        ),
+        lfo(params[1], labels[1], p.rate, lfo_knob(Dial::LfoRate)),
+        lfo(params[2], labels[2], p.timed, Kind::Key),
+        lfo(params[3], labels[3], p.phase, lfo_knob(Dial::LfoPhase)),
+        lfo(params[4], labels[4], p.fade, lfo_knob(Dial::LfoFade)),
+        lfo(
+            params[5],
+            labels[5],
+            p.mode,
+            Kind::Toggle {
+                w: crate::art::TOGGLE.1,
+                h: crate::art::TOGGLE.0,
+                across: true,
+            },
+        ),
+        lfo(params[6], labels[6], p.mono, Kind::Key),
+        lfo(params[7], labels[7], p.polarity, Kind::Key),
+        lfo(params[8], labels[8], p.on, Kind::Key),
+        lfo(params[9], labels[9], p.jack, Kind::Jack),
+    ]
+}
+
+/// The parts of an LFO's column that are controls, their parameters' IDs' last parts.
+pub const LFO_PARTS: [&str; 10] = [
+    "waveform", "rate", "timed", "phase", "fade", "mode", "mono", "polarity", "on", "level",
+];
+
+/// LEVEL's place among [`LFO_PARTS`]: its OUT jack's (R-LFO's addendum).
+pub const LFO_LEVEL_PART: usize = 9;
+
+const LFO_COLUMNS: [[Control; 10]; 4] = [
+    lfo_column(
+        0,
+        [
+            "lfo1_waveform",
+            "lfo1_rate",
+            "lfo1_timed",
+            "lfo1_phase",
+            "lfo1_fade",
+            "lfo1_mode",
+            "lfo1_mono",
+            "lfo1_polarity",
+            "lfo1_on",
+            "lfo1_level",
+        ],
+        [
+            "LFO 1 WAVEFORM",
+            "LFO 1 RATE",
+            "LFO 1 TIMED",
+            "LFO 1 PHASE",
+            "LFO 1 FADE",
+            "LFO 1 MODE (FREE, RETRIG or ENV)",
+            "LFO 1 MONO",
+            "LFO 1 POLARITY (BI or UNI)",
+            "LFO 1 ON",
+            "LFO 1 LEVEL",
+        ],
+    ),
+    lfo_column(
+        1,
+        [
+            "lfo2_waveform",
+            "lfo2_rate",
+            "lfo2_timed",
+            "lfo2_phase",
+            "lfo2_fade",
+            "lfo2_mode",
+            "lfo2_mono",
+            "lfo2_polarity",
+            "lfo2_on",
+            "lfo2_level",
+        ],
+        [
+            "LFO 2 WAVEFORM",
+            "LFO 2 RATE",
+            "LFO 2 TIMED",
+            "LFO 2 PHASE",
+            "LFO 2 FADE",
+            "LFO 2 MODE (FREE, RETRIG or ENV)",
+            "LFO 2 MONO",
+            "LFO 2 POLARITY (BI or UNI)",
+            "LFO 2 ON",
+            "LFO 2 LEVEL",
+        ],
+    ),
+    lfo_column(
+        2,
+        [
+            "lfo3_waveform",
+            "lfo3_rate",
+            "lfo3_timed",
+            "lfo3_phase",
+            "lfo3_fade",
+            "lfo3_mode",
+            "lfo3_mono",
+            "lfo3_polarity",
+            "lfo3_on",
+            "lfo3_level",
+        ],
+        [
+            "LFO 3 WAVEFORM",
+            "LFO 3 RATE",
+            "LFO 3 TIMED",
+            "LFO 3 PHASE",
+            "LFO 3 FADE",
+            "LFO 3 MODE (FREE, RETRIG or ENV)",
+            "LFO 3 MONO",
+            "LFO 3 POLARITY (BI or UNI)",
+            "LFO 3 ON",
+            "LFO 3 LEVEL",
+        ],
+    ),
+    lfo_column(
+        3,
+        [
+            "lfo4_waveform",
+            "lfo4_rate",
+            "lfo4_timed",
+            "lfo4_phase",
+            "lfo4_fade",
+            "lfo4_mode",
+            "lfo4_mono",
+            "lfo4_polarity",
+            "lfo4_on",
+            "lfo4_level",
+        ],
+        [
+            "LFO 4 WAVEFORM",
+            "LFO 4 RATE",
+            "LFO 4 TIMED",
+            "LFO 4 PHASE",
+            "LFO 4 FADE",
+            "LFO 4 MODE (FREE, RETRIG or ENV)",
+            "LFO 4 MONO",
+            "LFO 4 POLARITY (BI or UNI)",
+            "LFO 4 ON",
+            "LFO 4 LEVEL",
+        ],
+    ),
+];
+
+/// Macro `n`'s (0 to 5) knob.
+const fn macro_knob(param: &'static str, label: &'static str, n: usize) -> Control {
+    let (x, y) = crate::strip::macros::knob_at(n);
+    Control {
+        param,
+        label,
+        place: Place::Macro,
+        x,
+        y,
+        kind: Kind::Knob {
+            dial: Dial::Macro,
+            big: false,
+        },
+    }
+}
+
+/// Where the macros' knobs begin in [`CONTROLS`] (macro `n`'s is `MACRO_FIRST + n`).
+pub const MACRO_FIRST: usize = 96;
+
+/// The index in [`CONTROLS`] of LFO `n`'s (0 to 3) part `k` ([`LFO_PARTS`]' order): its first
+/// seven together, its POLARITY and ON keys after the macros' (R-LFO's corrections: so that no
+/// control moves), its LEVEL after those (R-LFO's addendum).
+pub const fn lfo_index(n: usize, k: usize) -> usize {
+    if k < 7 {
+        LFO_FIRST + 7 * n + k
+    } else if k < LFO_LEVEL_PART {
+        LFO_KEYS_FIRST + 2 * n + (k - 7)
+    } else {
+        LFO_LEVEL_FIRST + n
+    }
+}
+
+/// Where the LFOs' POLARITY and ON keys begin in [`CONTROLS`]: after the macros' knobs.
+pub const LFO_KEYS_FIRST: usize = MACRO_FIRST + 6;
+
+/// Where the LFOs' LEVELs (their OUT jacks) begin in [`CONTROLS`]: after their keys.
+pub const LFO_LEVEL_FIRST: usize = LFO_KEYS_FIRST + 8;
+
+/// Where the LFO page's controls begin in [`CONTROLS`].
+pub const LFO_FIRST: usize = 68;
+
+/// How far under its RANGE's centre an oscillator's TIMED key is (the mock-ups', the owner's
+/// "under the oscillator range selector", 2026-10-20), and its MOD key under its WAVEFORM's.
+pub const KEY_BELOW_RANGE: f64 = 84.0;
+
 /// The MIXER's rows.
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 55] = [
+pub const CONTROLS: [Control; 116] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -575,7 +923,238 @@ pub const CONTROLS: [Control; 55] = [
         Colour::Ivory,
         Orient::Right,
     ),
+    // The arpeggiator's drawer's knobs (decisions.md R-ARP), the plug-in's own, after every
+    // other, so that no control moves.
+    arp_knob("arp_rate", "RATE", 0, Dial::ArpRate),
+    arp_knob("arp_octaves", "OCTAVES", 1, Dial::ArpOctaves),
+    arp_knob("arp_gate", "GATE", 2, Dial::Percent),
+    arp_knob("arp_swing", "SWING", 3, Dial::Percent),
+    // The expression drawer's (decisions.md R-MPE), the plug-in's own, after every other.
+    mpe_knob("pressure_mod", "PRESSURE MODULATION", 0, Dial::Reach),
+    mpe_knob("pressure_filter", "PRESSURE CUTOFF", 1, Dial::Cutoff),
+    mpe_knob("timbre_mod", "TIMBRE MODULATION", 2, Dial::Reach),
+    mpe_knob("timbre_filter", "TIMBRE CUTOFF", 3, Dial::Cutoff),
+    // Oscillators 2's and 3's TIMED keys (decisions.md R-OSC-TIMED), each centred under its
+    // own RANGE, after every other, so that no control moves. Oscillator 1 has none: it has no
+    // FREQUENCY to turn into note values.
+    key(
+        "osc2_timed",
+        "OSCILLATOR-2 TIMED",
+        617.0,
+        370.0 + KEY_BELOW_RANGE,
+    ),
+    key(
+        "osc3_timed",
+        "OSCILLATOR-3 TIMED",
+        617.0,
+        576.0 + KEY_BELOW_RANGE,
+    ),
+    // Each oscillator's MOD key (decisions.md R-CONTINUOUS-WAVE), centred under its own
+    // WAVEFORM, after every other, so that no control moves: on the panel only while its
+    // oscillator's waveform is CONTINUOUS.
+    key(
+        "osc1_shape_mod",
+        "OSCILLATOR-1 MOD",
+        1021.0,
+        163.0 + KEY_BELOW_RANGE,
+    ),
+    key(
+        "osc2_shape_mod",
+        "OSCILLATOR-2 MOD",
+        1021.0,
+        370.0 + KEY_BELOW_RANGE,
+    ),
+    key(
+        "osc3_shape_mod",
+        "OSCILLATOR-3 MOD",
+        1021.0,
+        576.0 + KEY_BELOW_RANGE,
+    ),
+    // The LFO page's (decisions.md R-LFO), the plug-in's own, after every other, so that no
+    // control moves: each LFO's WAVEFORM, RATE, its TIMED key, PHASE, FADE, MODE and MONO.
+    LFO_COLUMNS[0][0],
+    LFO_COLUMNS[0][1],
+    LFO_COLUMNS[0][2],
+    LFO_COLUMNS[0][3],
+    LFO_COLUMNS[0][4],
+    LFO_COLUMNS[0][5],
+    LFO_COLUMNS[0][6],
+    LFO_COLUMNS[1][0],
+    LFO_COLUMNS[1][1],
+    LFO_COLUMNS[1][2],
+    LFO_COLUMNS[1][3],
+    LFO_COLUMNS[1][4],
+    LFO_COLUMNS[1][5],
+    LFO_COLUMNS[1][6],
+    LFO_COLUMNS[2][0],
+    LFO_COLUMNS[2][1],
+    LFO_COLUMNS[2][2],
+    LFO_COLUMNS[2][3],
+    LFO_COLUMNS[2][4],
+    LFO_COLUMNS[2][5],
+    LFO_COLUMNS[2][6],
+    LFO_COLUMNS[3][0],
+    LFO_COLUMNS[3][1],
+    LFO_COLUMNS[3][2],
+    LFO_COLUMNS[3][3],
+    LFO_COLUMNS[3][4],
+    LFO_COLUMNS[3][5],
+    LFO_COLUMNS[3][6],
+    // The macros' (decisions.md R-MACROS), the plug-in's own, after every other, so that no
+    // control moves: two across, three down, in the left hand's area while they show.
+    macro_knob("macro1", "MACRO 1", 0),
+    macro_knob("macro2", "MACRO 2", 1),
+    macro_knob("macro3", "MACRO 3", 2),
+    macro_knob("macro4", "MACRO 4", 3),
+    macro_knob("macro5", "MACRO 5", 4),
+    macro_knob("macro6", "MACRO 6", 5),
+    // Each LFO's POLARITY and ON keys (R-LFO's corrections), after the macros', so that no
+    // control moves.
+    LFO_COLUMNS[0][7],
+    LFO_COLUMNS[0][8],
+    LFO_COLUMNS[1][7],
+    LFO_COLUMNS[1][8],
+    LFO_COLUMNS[2][7],
+    LFO_COLUMNS[2][8],
+    LFO_COLUMNS[3][7],
+    LFO_COLUMNS[3][8],
+    // Each LFO's LEVEL, its OUT jack's (R-LFO's addendum), after those, so that no control
+    // moves.
+    LFO_COLUMNS[0][9],
+    LFO_COLUMNS[1][9],
+    LFO_COLUMNS[2][9],
+    LFO_COLUMNS[3][9],
+    // The velocity's CURVE and FLOOR, the expression drawer's second row (decisions.md
+    // R-VELOCITY), after every other, so that no control moves.
+    mpe_knob("velocity_curve", "VELOCITY CURVE", 4, Dial::Reach),
+    mpe_knob("velocity_floor", "VELOCITY FLOOR", 5, Dial::Ten),
 ];
+
+/// The panel's controls' history (decisions.md R-SKIN-PACKS), so that a skin pack's layout made
+/// for one CA-72 works on later ones: the revision of the panel's controls this build has, and
+/// each change since the first. A layout says which revision it was made for (`controls`):
+/// a control added since is placed by the plug-in, a renamed one found by its old name, a
+/// retired one passed over, and a control whose kind changed drawn in its own kind's look.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ControlSet {
+    pub revision: u32,
+    /// Controls added after the first revision: each with the revision it came in.
+    pub added: &'static [(&'static str, u32)],
+    /// Controls renamed: the old name, the new, and the revision of the change.
+    pub renamed: &'static [(&'static str, &'static str, u32)],
+    /// Controls removed: the name, and the revision it went in.
+    pub retired: &'static [(&'static str, u32)],
+    /// Controls whose kind changed (a switch become a toggle): the name, and the revision.
+    pub kind_changed: &'static [(&'static str, u32)],
+}
+
+/// This build's panel controls: the fifth revision; oscillators 2's and 3's TIMED keys added in
+/// the second (decisions.md R-OSC-TIMED), each oscillator's MOD key in the third
+/// (R-CONTINUOUS-WAVE), the LFO page's in the fourth (R-LFO: the plug-in's own, on its lower
+/// page, which a layout does not place, as the strip's), the six macros in the fifth (R-MACROS:
+/// in the left hand's area, which a layout does not place either), each LFO's POLARITY (UNI) and
+/// ON keys in the sixth (R-LFO's corrections), each LFO's LEVEL (its OUT jack) in the seventh
+/// (R-LFO's addendum). Never edit an entry once
+/// released: add to it (and raise `revision`) as controls come, go, or change.
+pub const CONTROL_SET: ControlSet = ControlSet {
+    revision: 7,
+    added: &[
+        ("osc2_timed", 2),
+        ("osc3_timed", 2),
+        ("osc1_shape_mod", 3),
+        ("osc2_shape_mod", 3),
+        ("osc3_shape_mod", 3),
+        ("lfo1_waveform", 4),
+        ("lfo1_rate", 4),
+        ("lfo1_timed", 4),
+        ("lfo1_phase", 4),
+        ("lfo1_fade", 4),
+        ("lfo1_mode", 4),
+        ("lfo1_mono", 4),
+        ("lfo2_waveform", 4),
+        ("lfo2_rate", 4),
+        ("lfo2_timed", 4),
+        ("lfo2_phase", 4),
+        ("lfo2_fade", 4),
+        ("lfo2_mode", 4),
+        ("lfo2_mono", 4),
+        ("lfo3_waveform", 4),
+        ("lfo3_rate", 4),
+        ("lfo3_timed", 4),
+        ("lfo3_phase", 4),
+        ("lfo3_fade", 4),
+        ("lfo3_mode", 4),
+        ("lfo3_mono", 4),
+        ("lfo4_waveform", 4),
+        ("lfo4_rate", 4),
+        ("lfo4_timed", 4),
+        ("lfo4_phase", 4),
+        ("lfo4_fade", 4),
+        ("lfo4_mode", 4),
+        ("lfo4_mono", 4),
+        ("macro1", 5),
+        ("macro2", 5),
+        ("macro3", 5),
+        ("macro4", 5),
+        ("macro5", 5),
+        ("macro6", 5),
+        ("lfo1_polarity", 6),
+        ("lfo1_on", 6),
+        ("lfo2_polarity", 6),
+        ("lfo2_on", 6),
+        ("lfo3_polarity", 6),
+        ("lfo3_on", 6),
+        ("lfo4_polarity", 6),
+        ("lfo4_on", 6),
+        ("lfo1_level", 7),
+        ("lfo2_level", 7),
+        ("lfo3_level", 7),
+        ("lfo4_level", 7),
+    ],
+    renamed: &[],
+    retired: &[],
+    kind_changed: &[],
+};
+
+impl ControlSet {
+    /// The revision a control came in (1 for the first's).
+    pub fn since(&self, param: &str) -> u32 {
+        self.added
+            .iter()
+            .find(|(p, _)| *p == param)
+            .map_or(1, |(_, r)| *r)
+    }
+
+    /// A name a layout of revision `made_for` uses, as this build knows it: renamed since
+    /// (`Some(new)`), or the same.
+    pub fn current<'a>(&self, name: &'a str, made_for: u32) -> &'a str
+    where
+        'static: 'a,
+    {
+        let mut name = name;
+        // (A chain of renames followed in order.)
+        for (old, new, at) in self.renamed {
+            if *old == name && *at > made_for {
+                name = new;
+            }
+        }
+        name
+    }
+
+    /// Whether `param` was retired after revision `made_for`.
+    pub fn retired_since(&self, param: &str, made_for: u32) -> bool {
+        self.retired
+            .iter()
+            .any(|(p, at)| *p == param && *at > made_for)
+    }
+
+    /// Whether `param`'s kind changed after revision `made_for`.
+    pub fn kind_changed_since(&self, param: &str, made_for: u32) -> bool {
+        self.kind_changed
+            .iter()
+            .any(|(p, at)| *p == param && *at > made_for)
+    }
+}
 
 /// The index of the control operating `param`.
 pub fn index(param: &str) -> Option<usize> {

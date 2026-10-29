@@ -11,6 +11,10 @@ use crate::{
     fonts::{FAMILY, Fonts, Weight},
 };
 
+/// The keys' sprites (`assets/keyboard/README.md`).
+pub(crate) static WHITE_KEY: &[u8] = include_bytes!("../assets/keyboard/white-key-v4.png");
+pub(crate) static BLACK_KEY: &[u8] = include_bytes!("../assets/keyboard/black-key-v4.png");
+
 pub const AREA: [f64; 4] = [
     370.0,
     art::PANEL_H + crate::strip::RAIL,
@@ -37,10 +41,7 @@ const RANGE_W: f64 = 348.0;
 const RANGE_H: f64 = 50.0;
 const RANGE_X: f64 = crate::strip::CW - RANGE_W / 2.0;
 const RANGE_SURROUND: f64 = (BUTTON_H - RANGE_H) / 2.0;
-const ACTION_W: f64 = 230.0;
 pub const UP_X: f64 = RANGE_X + RANGE_W + RANGE_SURROUND + HEADER_GAP + ARROW_W / 2.0;
-pub const TYPING_X: f64 = crate::strip::CO - (ACTION_W + HEADER_GAP) / 2.0;
-pub const PANIC_X: f64 = crate::strip::CO + (ACTION_W + HEADER_GAP) / 2.0;
 /// A held key keeps its material and shading, with a darker surface over the key bed.
 const PRESSED_LEVEL: f32 = 0.65;
 
@@ -49,12 +50,12 @@ pub enum Target {
     Note(u8),
     Down,
     Up,
-    Type,
-    Panic,
     Back,
 }
 
-const BUTTONS: [(f64, f64, &str, Target); 4] = [
+/// The OCTAVE keys. (TYPING and PANIC moved up beside the TEMPO screen, to work from every
+/// page: decisions.md R-TEMPO-CORNER.)
+const BUTTONS: [(f64, f64, &str, Target); 2] = [
     (
         RANGE_X - RANGE_SURROUND - HEADER_GAP - ARROW_W / 2.0,
         ARROW_W,
@@ -62,15 +63,7 @@ const BUTTONS: [(f64, f64, &str, Target); 4] = [
         Target::Down,
     ),
     (UP_X, ARROW_W, "+", Target::Up),
-    (TYPING_X, ACTION_W, "TYPING", Target::Type),
-    (PANIC_X, ACTION_W, "PANIC", Target::Panic),
 ];
-
-fn buttons(standalone: bool) -> impl Iterator<Item = (f64, f64, &'static str, Target)> {
-    BUTTONS.into_iter().filter(move |(_, _, _, target)| {
-        standalone || !matches!(target, Target::Type | Target::Panic)
-    })
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
@@ -205,11 +198,11 @@ fn shape_svg(shape: [[f64; 2]; 8]) -> String {
     path + " Z"
 }
 
-pub fn hit(root: u8, x: f64, y: f64, standalone: bool) -> Option<Target> {
+pub fn hit(root: u8, x: f64, y: f64) -> Option<Target> {
     if !inside(x, y) {
         return None;
     }
-    for (cx, w, _, target) in buttons(standalone) {
+    for (cx, w, _, target) in BUTTONS {
         if (x - cx).abs() <= w / 2.0 && (y - HEADER).abs() <= BUTTON_H / 2.0 {
             return Some(target);
         }
@@ -274,6 +267,22 @@ pub struct Renderer {
     white_pressed: Option<Pixmap>,
     black_pressed: Option<Pixmap>,
     base: Option<(Scene, Pixmap)>,
+    /// A look's dressing for it (decisions.md R-SKIN-PACKS), where it has one.
+    dressing: Dressing,
+}
+
+/// What a look gives the keyboard view: its case's wood, its keys, its header keys' cap, its
+/// glass, its lamps' colour and a drawing over its case (the built-in ones where it gives none).
+#[derive(Clone, Default)]
+struct Dressing {
+    wood: Option<Pixmap>,
+    /// The case in the face's picture (tiled as the strip's face) rather than wood's.
+    face: Option<Pixmap>,
+    white: Option<Pixmap>,
+    black: Option<Pixmap>,
+    button: Option<Pixmap>,
+    lamp: Option<crate::strip::Lamp>,
+    art: Option<std::sync::Arc<usvg::Tree>>,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -304,7 +313,47 @@ impl Renderer {
             white_pressed: None,
             black_pressed: None,
             base: None,
+            dressing: Dressing::default(),
         }
+    }
+
+    /// Drawn in `look`'s pictures, typeface, drawing and lamp colour (`lamp`) for it, where it
+    /// has them.
+    pub(crate) fn set_look(&mut self, look: &crate::look::Look, lamp: crate::strip::Lamp) {
+        let pack = |name: &str| {
+            let size = crate::skin::slot_size(name).unwrap_or((1, 1));
+            look.pictures.get(name).and_then(|p| p.picture(size))
+        };
+        self.dressing = Dressing {
+            wood: pack("walnut"),
+            face: look.keyboard_face.then(|| {
+                let face = pack("face").unwrap_or_else(crate::skin::face_picture);
+                match (look.pictures.contains_key("face"), look.face_tint) {
+                    (true, Some(t)) => crate::skin::tinted(&face, t),
+                    _ => face,
+                }
+            }),
+            white: pack("white-key"),
+            black: pack("black-key"),
+            button: pack("key"),
+            lamp: Some(lamp),
+            art: look.keyboard_art.clone(),
+        };
+        self.glass = pack("glass").unwrap_or_else(|| {
+            Pixmap::decode_png(crate::skin::GLASS).expect("preset display glass")
+        });
+        self.fonts = look
+            .fonts
+            .and_then(|(regular, bold)| Fonts::with(regular, bold).ok())
+            .unwrap_or_default();
+        self.options = usvg::Options {
+            fontdb: self.fonts.database(),
+            font_family: FAMILY.into(),
+            ..Default::default()
+        };
+        (self.materials, self.white, self.black) = (None, None, None);
+        (self.white_pressed, self.black_pressed) = (None, None);
+        (self.base, self.shown) = (None, None);
     }
 
     pub fn rescale(&mut self, scale: f64) {
@@ -322,7 +371,10 @@ impl Renderer {
 
     pub fn over(&mut self, destination: &mut Pixmap, scene: &Scene, clip: [i32; 4]) {
         if scene.skin == Skin::Worn && self.white.is_none() {
-            let materials = self.materials.get_or_insert_with(Materials::new);
+            let dressing = &self.dressing;
+            let materials = self
+                .materials
+                .get_or_insert_with(|| Materials::with(dressing));
             self.white = Some(key_size(&materials.white, self.scale, false));
             self.black = Some(key_size(&materials.black, self.scale, true));
             self.white_pressed = self.white.as_ref().map(pressed_key);
@@ -338,7 +390,31 @@ impl Renderer {
                     self.materials
                         .as_ref()
                         .expect("worn materials loaded")
-                        .draw(&mut self.frame, self.scale, scene.standalone);
+                        .draw(&mut self.frame, self.scale);
+                    // A look's drawing over the case, under the key bed and the print.
+                    if let Some(art) = &self.dressing.art {
+                        let (w, h) = (self.frame.width(), self.frame.height());
+                        let size = art.size();
+                        if let Some(mut layer) = Pixmap::new(w, h)
+                            && skin_pack::svg::render(
+                                art,
+                                Transform::from_scale(
+                                    w as f32 / size.width(),
+                                    h as f32 / size.height(),
+                                ),
+                                &mut layer.as_mut(),
+                            )
+                        {
+                            self.frame.draw_pixmap(
+                                0,
+                                0,
+                                layer.as_ref(),
+                                &resvg::tiny_skia::PixmapPaint::default(),
+                                Transform::identity(),
+                                None,
+                            );
+                        }
+                    }
                 }
                 let body = drawing(&still, &self.fonts);
                 let document = art::document(
@@ -446,6 +522,7 @@ impl Renderer {
                 label(scene.root),
                 label(scene.root.saturating_add(43).min(127))
             ),
+            &self.dressing.lamp.unwrap_or(crate::strip::Lamp::ORANGE),
         );
     }
     fn draw_keys(&mut self, scene: &Scene, dirty: [f64; 4]) {
@@ -552,12 +629,9 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
         },
         crate::strip::CV,
     );
-    for (x, w, label, target) in buttons(scene.standalone) {
-        let on = target == Target::Type && scene.typing;
-        let fill = if scene.skin == Skin::Worn && !on {
+    for (x, w, label, target) in BUTTONS {
+        let fill = if scene.skin == Skin::Worn {
             "none"
-        } else if on {
-            "#b0702b"
         } else {
             "url(#keycap)"
         };
@@ -577,7 +651,7 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
                 "1"
             },
             fonts.baseline_for_centre(label, 20.0, Weight::Bold, HEADER),
-            if on { "#2a1006" } else { "#d9d2c0" }
+            "#d9d2c0"
         );
     }
     out += &format!(
@@ -646,44 +720,63 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
 
 struct Materials {
     wood: Pixmap,
+    face: Option<Pixmap>,
     white: Pixmap,
     black: Pixmap,
     button: Pixmap,
 }
 impl Materials {
-    fn new() -> Self {
+    /// The built-in ones, a look's `dressing` where it has its own.
+    fn with(dressing: &Dressing) -> Self {
         let decode = |b: &[u8]| Pixmap::decode_png(b).expect("built-in keyboard material");
         Self {
-            wood: decode(crate::skin::WALNUT),
-            white: crop(
-                &decode(include_bytes!("../assets/keyboard/white-key-v4.png")),
-                [427, 81, 598, 1466],
-            ),
-            black: crop(
-                &decode(include_bytes!("../assets/keyboard/black-key-v4.png")),
-                [497, 49, 678, 1281],
-            ),
-            button: decode(crate::skin::BUTTON),
+            wood: dressing
+                .wood
+                .clone()
+                .unwrap_or_else(|| decode(crate::skin::WALNUT)),
+            face: dressing.face.clone(),
+            white: dressing
+                .white
+                .clone()
+                .unwrap_or_else(|| crop(&decode(WHITE_KEY), [427, 81, 598, 1466])),
+            black: dressing
+                .black
+                .clone()
+                .unwrap_or_else(|| crop(&decode(BLACK_KEY), [497, 49, 678, 1281])),
+            button: dressing
+                .button
+                .clone()
+                .unwrap_or_else(|| decode(crate::skin::BUTTON)),
         }
     }
-    fn draw(&self, frame: &mut Pixmap, s: f64, standalone: bool) {
+    fn draw(&self, frame: &mut Pixmap, s: f64) {
         let along = (art::W * s) as f32 / self.wood.width() as f32;
         let across = along / 2.2;
         // One continuous wooden case surrounds the recessed key bed. Separate
         // rails over a metal face left a stepped material seam down the side.
-        crate::render::fill(
-            frame,
-            &self.wood,
-            (
-                AREA[0] * s,
-                (AREA[1] - art::PANEL_H) * s,
-                (AREA[2] - AREA[0]) * s,
-                (AREA[3] - AREA[1]) * s,
-            ),
-            None,
-            Transform::from_row(along, 0.0, 0.0, across, 0.0, -260.0 * across),
+        let area = (
+            AREA[0] * s,
+            (AREA[1] - art::PANEL_H) * s,
+            (AREA[2] - AREA[0]) * s,
+            (AREA[3] - AREA[1]) * s,
         );
-        for (x, w, _, _) in buttons(standalone) {
+        match &self.face {
+            // The face's picture, 640 units a tile, as the strip's face under it is laid.
+            Some(face) => {
+                let k = (640.0 * s) as f32 / face.width() as f32;
+                let at = Transform::from_scale(k, k)
+                    .post_translate((320.0 * s) as f32, (crate::strip::RAIL * s) as f32);
+                crate::render::fill(frame, face, area, None, at);
+            }
+            None => crate::render::fill(
+                frame,
+                &self.wood,
+                area,
+                None,
+                Transform::from_row(along, 0.0, 0.0, across, 0.0, -260.0 * across),
+            ),
+        }
+        for (x, w, _, _) in BUTTONS {
             let cap = plugin_kit_materials::widened(&self.button, w / BUTTON_H);
             plugin_kit_materials::sprite(frame, &cap, s, (x, HEADER - art::PANEL_H), (w, BUTTON_H));
         }
@@ -749,30 +842,24 @@ mod tests {
             assert_eq!(shape[4][1], BED[3]);
             assert_eq!(shape[5][1], BED[3]);
             assert_eq!(
-                hit(36, (r[0] + r[2]) / 2.0, BED[3] - 5.0, false),
+                hit(36, (r[0] + r[2]) / 2.0, BED[3] - 5.0),
                 Some(Target::Note(note))
             );
             if note > 36 && black(note - 1) {
                 assert!(shape[0][0] > r[0]);
                 assert_eq!(
-                    hit(36, shape[0][0] - CLEARANCE / 2.0, BED[1] + 20.0, false),
+                    hit(36, shape[0][0] - CLEARANCE / 2.0, BED[1] + 20.0),
                     Some(Target::Back)
                 );
-                assert_eq!(
-                    hit(36, r[0] + 5.0, NOTCH_Y - 2.0, false),
-                    Some(Target::Back)
-                );
+                assert_eq!(hit(36, r[0] + 5.0, NOTCH_Y - 2.0), Some(Target::Back));
             }
             if black(note + 1) {
                 assert!(shape[1][0] < r[2]);
                 assert_eq!(
-                    hit(36, shape[1][0] + CLEARANCE / 2.0, BED[1] + 20.0, false),
+                    hit(36, shape[1][0] + CLEARANCE / 2.0, BED[1] + 20.0),
                     Some(Target::Back)
                 );
-                assert_eq!(
-                    hit(36, r[2] - 5.0, NOTCH_Y - 2.0, false),
-                    Some(Target::Back)
-                );
+                assert_eq!(hit(36, r[2] - 5.0, NOTCH_Y - 2.0), Some(Target::Back));
             }
         }
         let first = white_shape(41, 41).expect("first F");
@@ -786,10 +873,10 @@ mod tests {
     fn black_keys_win_and_every_midi_note_is_reachable() {
         let r = rect(36, 37).expect("C sharp");
         assert_eq!(
-            hit(36, (r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0, false),
+            hit(36, (r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0),
             Some(Target::Note(37))
         );
-        assert_eq!(hit(36, r[0], BED[3] - 10.0, false), Some(Target::Note(36)));
+        assert_eq!(hit(36, r[0], BED[3] - 10.0), Some(Target::Note(36)));
         for note in 0..128u8 {
             let root = (note / 12 * 12).min(84);
             let r = rect(root, note).expect("visible");
@@ -799,7 +886,7 @@ mod tests {
                 r[3] - 10.0
             };
             assert_eq!(
-                hit(root, (r[0] + r[2]) / 2.0, y, false),
+                hit(root, (r[0] + r[2]) / 2.0, y),
                 Some(Target::Note(note)),
                 "{note}"
             );
@@ -807,9 +894,9 @@ mod tests {
         assert_eq!(shifted(84, true), 84);
         assert_eq!(shifted(0, false), 0);
         assert_eq!(
-            hit(84, BED[2] - 5.0, BED[3] - 10.0, false),
+            hit(84, BED[2] - 5.0, BED[3] - 10.0),
             Some(Target::Note(127))
         );
-        assert_eq!(hit(36, 100.0, 1400.0, false), None);
+        assert_eq!(hit(36, 100.0, 1400.0), None);
     }
 }

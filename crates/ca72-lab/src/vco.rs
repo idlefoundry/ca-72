@@ -95,6 +95,10 @@ pub struct Controls {
     pub range: Range,
     /// Rectangular width bias (22B): 0, -1.5 or -2.5 V from the waveform switch.
     pub width: f64,
+    /// Transcribe the physical fixed selector (dwg1448), retaining its source resistance.
+    /// False is an explicitly ideal bench input, including arbitrary continuous biases.
+    pub fixed_width: bool,
+    pub pulse: ca72::pulse::PulseCircuit,
 }
 
 impl Default for Controls {
@@ -108,6 +112,8 @@ impl Default for Controls {
             ext: 0.0,
             range: Range::R4,
             width: 0.0,
+            fixed_width: false,
+            pulse: ca72::pulse::PulseCircuit::default(),
         }
     }
 }
@@ -169,11 +175,31 @@ pub fn netlist(trims: &Trims, ctl: &Controls, supplies: Supplies, solver: Solver
         ext = ctl.ext,
         width = ctl.width,
     ));
+    if ctl.fixed_width {
+        let old = format!("vwidth width 0 {}", ctl.width);
+        let divider = match ctl.width {
+            -1.5 => "r034 0 width 1.5k\nr033 width tapn 1k\nr032 tapn vn 7.5k",
+            -2.5 => "r034 0 tapw 1.5k\nr033 tapw width 1k\nr032 width vn 7.5k",
+            0.0 => "vwidth width 0 0",
+            _ => panic!("a fixed selector must use a drawn width tap"),
+        };
+        s = s.replace(&old, divider);
+    }
     let vco = |trim: &str| {
         format!(
             "x1 sum pos {trim} ramp buf saw tri rect width vp vn m5 m4 mm_vco \
-             r11={} a8={} tc20={}\n",
-            trims.r11, trims.a8, trims.tc20
+             r11={} a8={} tc20={} pr1={} pr40={} pr44={} pr39={} pr35={} pr2={} pr13={} pr22={}\n",
+            trims.r11,
+            trims.a8,
+            trims.tc20,
+            ctl.pulse.r1,
+            ctl.pulse.r40,
+            ctl.pulse.r44,
+            ctl.pulse.r39,
+            ctl.pulse.r35,
+            ctl.pulse.r2,
+            ctl.pulse.r13,
+            ctl.pulse.r22
         )
     };
     match ctl.osc {
