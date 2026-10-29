@@ -16847,3 +16847,14 @@ press-and-hold without movement, then drags through the old pop-up's dial. It ex
 both a redraw and no redraw between the press and move, verifies the main value changes
 without changing either depth, and checks hover returns after release. It fails before
 the fix and passes afterwards.
+
+## R-WINDOWS-RELEASE-PAYLOAD. Keep the helper and bridge in CI artifacts and manual ZIPs
+
+The 0.3.0 tag's three platform build/test/validator jobs passed, but draft assembly failed:
+`CA-72-Windows` omitted ca72-fx-helper.exe although windows-zip.sh requires it. The installer
+contains it. The manual ZIP script also omitted ca72-mcp.exe. Both executables now travel in
+the binary artifact and manual ZIP; Linux binary artifacts retain their equivalents too.
+A fixture test checks all payload bytes, every internal checksum, source provenance and the
+Windows upload list. CA72_SOURCE_COMMIT permits packaging existing verified CI binaries
+without incorrectly attributing their source to the packaging-fix checkout. This changes
+packaging only; binaries from the original tagged CI remain unchanged.
