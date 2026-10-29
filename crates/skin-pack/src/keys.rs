@@ -2,9 +2,16 @@
 
 use crate::signature::TrustedKey;
 
-/// Release step: the owner replaces `None` with the line printed by `pack_keygen`.
-/// No development or test key belongs in this slot. Release builds fail until it is filled.
-pub const IDLE_FOUNDRY_KEY: Option<TrustedKey> = None;
+/// The owner's production public key, supplied on 2026-10-28 using `pack_keygen`.
+/// Only the public half belongs here; no development or test key belongs in this slot.
+pub const IDLE_FOUNDRY_KEY: Option<TrustedKey> = Some(TrustedKey {
+    id: "idlefoundry-1",
+    public: [
+        222, 120, 217, 252, 170, 64, 64, 227, 24, 61, 46, 186, 215, 248, 146, 145, 157, 221, 64,
+        50, 197, 56, 49, 222, 111, 24, 34, 75, 71, 65, 166, 134,
+    ],
+    first_party: true,
+});
 
 /// Idle Foundry's first key, then any later keys added before they are used. For a rotation,
 /// keep this key and add `idlefoundry-2`; a future marketplace key has `first_party: false`.
@@ -41,6 +48,11 @@ pub fn check_release_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_shipped_first_party_key_passes_the_release_gate() {
+        assert_eq!(check_release_key(IDLE_FOUNDRY_KEY, TRUSTED_KEYS), Ok(()));
+    }
 
     #[test]
     fn release_requires_a_first_party_key_in_the_trust_list() {
