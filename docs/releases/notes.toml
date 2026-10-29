@@ -129,4 +129,5 @@ bug_fixes = [
   "Linux standalone: a held computer key plays its note once, and Z and X move one octave a press.",
   "The Audio Unit no longer crashes when a host prepares it on a thread with a small stack.",
   "A standalone left hidden on a Mac with no audio running quits cleanly, its session saved, instead of stopping at an error.",
+  "An agent that stops reading replies no longer prevents closing the standalone or switching AGENTS off.",
 ]

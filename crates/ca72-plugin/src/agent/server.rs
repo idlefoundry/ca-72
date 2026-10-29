@@ -32,6 +32,8 @@ pub const TIMEOUT: Duration = Duration::from_secs(10);
 pub const MAX_CLIENTS: usize = 8;
 /// How often a waiting thread looks up (the server stopping, its client gone).
 const SLICE: Duration = Duration::from_millis(100);
+/// An idle socket read or write must yield, including while an editor is closing.
+const IO_TIMEOUT: Duration = Duration::from_millis(200);
 
 const WAITING: u8 = 0;
 const TAKEN: u8 = 1;
@@ -301,6 +303,11 @@ fn listen(
     while !stop.load(Ordering::Acquire) {
         match listener.accept() {
             Ok((mut stream, _)) => {
+                // Bound every reply, including BUSY on the listener thread. A bridge may
+                // remain connected without reading; shutdown still has to join this work.
+                if stream.set_write_timeout(Some(IO_TIMEOUT)).is_err() {
+                    continue;
+                }
                 threads.retain(|t| !t.is_finished());
                 if clients.load(Ordering::Acquire) >= MAX_CLIENTS {
                     let e = ApiError::new(
@@ -352,10 +359,7 @@ fn response(id: Value, r: Reply) -> Value {
 #[cfg(any(unix, windows))]
 fn connection(stream: super::Stream, inbox: &Inbox, stop: &AtomicBool, record: &Record) {
     use std::io::{Read, Write};
-    if stream.set_nonblocking(false).is_err()
-        || stream
-            .set_read_timeout(Some(Duration::from_millis(200)))
-            .is_err()
+    if stream.set_nonblocking(false).is_err() || stream.set_read_timeout(Some(IO_TIMEOUT)).is_err()
     {
         return;
     }
@@ -510,7 +514,7 @@ fn request(
 mod tests {
     use super::*;
     use crate::agent::Stream;
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
 
     fn server() -> (tempfile::TempDir, Server) {
         let t = tempfile::tempdir().expect("tempdir");
@@ -685,5 +689,47 @@ mod tests {
             let v: Value = serde_json::from_str(&l).expect("json");
             assert_eq!(v["error"]["code"], json!(codes::NO_INSTANCE));
         }
+    }
+
+    /// A bridge that stops reading a large answer must not hold the editor open on quit.
+    #[test]
+    fn stopping_does_not_wait_for_a_client_to_read_its_answer() {
+        let (_t, s) = server();
+        let (mut c, _r) = connect(&s);
+        c.set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        c.set_write_timeout(Some(Duration::from_secs(5)))
+            .expect("write timeout");
+        let id = "x".repeat(700 * 1024);
+        let ping = json!({"jsonrpc": "2.0", "id": id, "method": "ping"});
+        writeln!(c, "{ping}").expect("ping");
+        // The answer has started. Leave the remaining bytes unread and the peer open.
+        c.read_exact(&mut [0u8; 1]).expect("answer starts");
+        let (done, result) = sync_channel(1);
+        let shutdown = std::thread::spawn(move || {
+            drop(s);
+            let _ = done.send(());
+        });
+        let stopped = result.recv_timeout(Duration::from_secs(2)).is_ok();
+        // Also release a broken implementation before asserting, so the test cannot hang.
+        let _ = c.shutdown(std::net::Shutdown::Both);
+        shutdown.join().expect("shutdown thread");
+        assert!(stopped, "shutdown waited for a client that was not reading");
+    }
+
+    #[test]
+    fn a_client_reading_a_large_answer_receives_it_whole() {
+        let (_t, s) = server();
+        let (mut c, mut r) = connect(&s);
+        c.set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        c.set_write_timeout(Some(Duration::from_secs(5)))
+            .expect("write timeout");
+        let id = "x".repeat(700 * 1024);
+        let ping = json!({"jsonrpc": "2.0", "id": id, "method": "ping"});
+        writeln!(c, "{ping}").expect("ping");
+        let answer = line(&mut r);
+        assert_eq!(answer["id"], ping["id"]);
+        assert_eq!(answer["result"], json!({}));
     }
 }

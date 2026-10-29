@@ -16813,3 +16813,18 @@ it without referring to an absent factory variant. The factory set now contains
 those counts; the original candidate measurements remain historical records.
 The factory-library selection test asserts Gatekeeper is present and Gated Chords
 is absent. Existing user presets and host projects are not rewritten by this change.
+
+## R-AGENT-WRITE-TIMEOUT. A bridge cannot hold shutdown open by not reading
+
+**Release review, 2026-10-28 (#125):** a valid ping with a 700 KiB string ID produces
+an answer larger than the socket's output buffer. A connected bridge that stops reading
+could leave its server thread blocked in a write; disabling AGENTS or closing the editor
+then waited forever while joining that thread. Socket reads already had a timeout.
+
+Every accepted connection now has a 200 ms write timeout, before either the listener's
+BUSY reply or its connection thread can write. A stalled write closes that connection;
+other clients keep working. The read timeout is unchanged. This affects no sound or saved
+state. The regression keeps the unread client connected while dropping the server and
+requires shutdown within two seconds, then releases the client even on failure. It fails
+on the old code and passes with the timeout; a companion test checks that a client reading
+the same large answer receives the complete response.
