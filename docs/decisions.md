@@ -16801,3 +16801,15 @@ skin pack or publish a release.
 with warnings denied and CA72_PUBLIC_RELEASE=1; all 87 skin-pack tests pass with that
 release gate enabled; check_release_key passes with CA72_PUBLIC_RELEASE=1 and separately
 with CA72_REQUIRE_NOTARIZATION=1. The five release-gate workflow tests also pass.
+
+
+## R-GATEKEEPER-ONLY. Gatekeeper is the factory gate preset
+
+**Owner, 2026-10-28:** Gatekeeper replaces Gated Chords; both were not intended to
+ship together. Remove Gated Chords from the factory generator and its level cache.
+Keep Gatekeeper's synth settings and gain curves exactly as approved, and describe
+it without referring to an absent factory variant. The factory set now contains
+42 sounds, 23 added since 0.2.8. README, release notes and bundled highlights use
+those counts; the original candidate measurements remain historical records.
+The factory-library selection test asserts Gatekeeper is present and Gated Chords
+is absent. Existing user presets and host projects are not rewritten by this change.
