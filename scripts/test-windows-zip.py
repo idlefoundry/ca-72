@@ -5,7 +5,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-import tomllib
+import re
 import unittest
 import zipfile
 
@@ -33,7 +33,7 @@ class WindowsZip(unittest.TestCase):
                 p.write_bytes(data)
             env = dict(os.environ, CA72_SOURCE_COMMIT='a' * 40)
             subprocess.run(['bash', str(project / 'scripts/windows-zip.sh'), str(source)], env=env, check=True, capture_output=True)
-            version = tomllib.loads((ROOT / 'Cargo.toml').read_text())['workspace']['package']['version']
+            version = re.search(r'^version = "([^"]+)"$', (ROOT / 'Cargo.toml').read_text(), re.MULTILINE).group(1)
             with zipfile.ZipFile(project / f'target/packages/CA-72-{version}-Windows-x86_64.zip') as archive:
                 for name, data in files.items():
                     self.assertEqual(archive.read(name), data)
