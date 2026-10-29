@@ -9,13 +9,15 @@
 #
 # The README names the commit, and in CI the run; CA72_WINDOWS_ARTIFACT_ID and
 # CA72_WINDOWS_ARTIFACT_SHA256, when set, the artifact and its ZIP's checksum. Needs zip and
-# sha256sum.
+# sha256sum. CA72_SOURCE_COMMIT names the original binary source when repackaging
+# an existing CI artifact from a newer packaging checkout.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 bundles="$(cd "$1" && pwd)"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -n 1)"
-commit="$(git -C "$root" rev-parse HEAD)"
+# When assembling an existing CI build, name its source rather than the packaging checkout.
+commit="${CA72_SOURCE_COMMIT:-$(git -C "$root" rev-parse HEAD)}"
 repo=idlefoundry/ca-72
 tag="v$version"
 name="CA-72-$version-Windows-x86_64"
@@ -31,6 +33,7 @@ cp "$bundles/CA-72.exe" CA-72.exe
 cp "$bundles/CA-72.ico" CA-72.ico
 # The standalone loads effects in its helper, beside it (docs/fx-host.md).
 cp "$bundles/ca72-fx-helper.exe" ca72-fx-helper.exe
+cp "$bundles/ca72-mcp.exe" ca72-mcp.exe
 [ -f "$binary" ] || { echo "windows-zip: no $binary in $bundles" >&2; exit 1; }
 mkdir -p CA-72.vst3/Contents/Resources
 # The CLAP and the VST3 are one library (nih-plug exports both entry points).

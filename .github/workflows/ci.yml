@@ -84,6 +84,7 @@ jobs:
         run: |
           python3 scripts/test-notices.py
           python3 scripts/test-standalone-install.py
+          python3 scripts/test-windows-zip.py
           python3 scripts/test-release-gate.py
           python3 scripts/notices.py --check
 
@@ -110,8 +111,12 @@ jobs:
             target/bundled/CA-72.component
             target/bundled/CA-72.app
             target/bundled/CA-72.exe
+            target/bundled/ca72-mcp.exe
+            target/bundled/ca72-fx-helper.exe
             target/bundled/CA-72.ico
             target/bundled/ca72-standalone
+            target/bundled/ca72-mcp
+            target/bundled/ca72-fx-helper
             target/bundled/CA-72.desktop
             target/bundled/com.idlefoundry.ca72.png
           if-no-files-found: error
