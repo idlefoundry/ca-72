@@ -18464,3 +18464,65 @@ already on `main`), `check_release_key` ready for release.
 
 **Not tried:** Windows and macOS (CI), and a build of the plug-in's bundles; nothing in the
 plug-in's code or its packs changed.
+
+## R-LIGHT-STAGES. The light model's stages public, for Olifant
+
+**The owner, 2026-11-12** (in Olifant's record, its R4): the light models' stages are made
+public in the CA-72's and the CA-74's crates ("option A"), so that Olifant, Idle Foundry's
+modular synthesizer, can use each as a module of its own at its LO. The CA-74's is its
+R-LIGHT-STAGES (idlefoundry/ca-74#14).
+
+**Agent decisions, 2026-11-12** (not separately approved). In `ca72::light`, each stage public
+with a constructor, its step and its laws, the light voice built of the same code (except
+where said), so that the arithmetic is the voice's and a change to one is a change to the
+other:
+- **The oscillator:** `Osc` with `new`, `tick(dt, inv)`, `peak`, `phase`, `set_phase`,
+  `set_waveform` (the switch) and `set_continuous` (CONTINUOUS: R-CONTINUOUS-WAVE); its laws
+  `oscillator_increment(semitones, rate)` (a pitch from key 69 on 8' to the increment and its
+  reciprocal, taken out of `Light::control`), `pitch_offset` (RANGE, FREQUENCY and TUNE),
+  `continuous_waveform(o, at, moving)` (taken out of `light_shape`), `continuous_ratios`
+  and `source_ohms` (taken out of `Light::set_panel`), `rect_law` and `channel`.
+  `set_waveform` and `set_continuous` are new: the voice sets the same fields itself
+  (`light_stages` checks them against the switch's waveforms, to the bit).
+- **The noise:** `Noise` with `new`, `set_seed` (taken out of `Light::set_seed`) and `tick`;
+  `NoiseLaw::new(rate)`; `noise_gain(volume, pink)` (out of `set_panel`); the mixer's hiss's
+  scale `HISS` and its seed, which the ladder sings from.
+- **The filter:** `Ladder` with `new`, `tick` and `taps`; `shaped` (FILTER MODE and POLES);
+  the laws `knob_current`, `contour_current`, `cutoff_points`, `node_log2`, `emphasis_law`
+  (out of `set_panel`), `ladder_coefficients(log2, emphasis, corner, filter_rate)` (out of
+  `Light::coefficients`), `passband` and `ring_lift` (out of `Light::control`), `pair_limit`
+  and `drive_top` (out of `set_limit` and `set_drive`); `FILTER_OVERSAMPLE`. **New, used by no
+  code here:** `LadderFilter`, the ladder between its resamplers at the voice's rate with its
+  input pair's drive, passband, output coupling and FILTER MODE HI's branch, as the voice's
+  filter runs with nothing crossfading. The voice keeps its own loop (`ladder_step`), which
+  crossfades a change of FILTER MODE or POLES (R-POLES) and borrows the whole voice;
+  `LadderFilter` takes a change at once.
+- **The contours:** `Contour` with `at_rest`, `start` (the voice now calls it at the
+  trigger's rise), `tick` and `volts`; `ContourLaw::new(knobs, decay_switch, which, rate)`. The
+  trigger stays the voice's; its times are `laws::TRIGGER_ON`, `TRIGGER_OFF` and `REARM`.
+- **The VCA:** `vca_gain` and `Vca` (`new`, `tick`, `reset`), the gain, the output's coupling
+  and the thump taken out of `Light::tick` into a struct the voice now holds.
+- Not public: the keys, glide, MODULATION's routing, EXTERNAL INPUT, FEEDBACK, A-440 and the
+  late contours (R-LATENCY): the voice's, not stages; Olifant has its own.
+
+**Evidence (Linux, the desktop, 2026-11-12):** every factory preset rendered at LO before (the
+branch's base, d268d22) and after (`CA72_POTATO=1`, `preset_render`, ten voices, four seconds):
+42 of 42 the same to the bit, by the test's own comparison and by `cmp`, the renders in
+`/mnt/lab/artifacts/ca-72/olifant-light-stages/`. `tests/light_stages.rs`, the stages through
+their public API alone: the oscillator within 0.2 cent of equal temperament from -24 to +19
+semitones at 44.1 and 48 kHz; CONTINUOUS at a place the switch's waveform and between two their
+blend, to the bit; the filter at EMPHASIS 10 ringing within 1 % of `laws::CUTOFF_LOG2` and
+0.3 % of the light voice's ring at CUTOFF 3, 5 and 7, and falling 6 dB an octave a pole (4 and
+2 poles, within 2 dB); both contours the voice's to the bit beside it over 2.5 s, with the
+DECAY switch on and off; the noise white within 1.5 dB and pink 9 dB down (within 2) over three
+octaves; the VCA's gain 1 at 4.455 V and the level through it `laws::OUT`. Each check was seen to
+fail with the code broken on purpose (the pitch law's 12 as 12.01: 2.0 cents; the filter's
+output from its second stage: -11.6 dB an octave; the contours' gate a sample late). The light voice's laws measured before and after
+(`potato_match`, by hand, `CA72_LIGHT_JSON`): the same JSON to the byte (189 KB), the report
+the same but for its timings. `cargo test -p ca72` (debug): 147 passed, 21 ignored (by hand);
+`cargo test -p ca72-plugin --lib`: 650 passed, 32 ignored; `cargo test -p ca72-lab --test
+light_triangle_source`: 1 passed. `cargo fmt --check` clean;
+`cargo clippy --workspace --all-targets --exclude ca72-plugin -- -D warnings` clean; the
+plug-in's (untouched) has one warning, `audio_refused`, already on `main` (R-KIT-SKIN-PACK).
+Not run: HI and ULTRA renders (their code is untouched; `voice.rs` calls `rect_law`, unchanged),
+the Mac, Windows.

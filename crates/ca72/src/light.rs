@@ -17,6 +17,26 @@
 //! another is held does not start the contours again), the contours re-armed once the trigger
 //! contact has been open 11.5 ms; GLIDE moves the pitch as the circuit's hold does. Nothing here
 //! allocates once made.
+//!
+//! **The stages, public** (decisions.md R-LIGHT-STAGES), for an instrument that uses each as a
+//! module of its own (Olifant, Idle Foundry's modular synthesizer, at its LO): the voice is
+//! made of them and their laws, the same arithmetic. In the bus's units (a sawtooth at its
+//! peak 1, before its mixer channel) unless said:
+//! - an oscillator, [`Osc`], at [`oscillator_increment`]'s step for a pitch, with its waveform
+//!   from the switch ([`Osc::set_waveform`]) or CONTINUOUS ([`continuous_waveform`],
+//!   [`continuous_ratios`], [`Osc::set_continuous`]; the rectangle's width by [`rect_law`]);
+//!   a key's offset from the panel by [`pitch_offset`], a channel's gain by [`channel`] and
+//!   [`source_ohms`];
+//! - the noise, [`Noise`] with [`NoiseLaw`], its channel's gain by [`noise_gain`], and the
+//!   mixer's own hiss ([`HISS`]) that the ladder sings from;
+//! - the filter, [`LadderFilter`] (the input pair, [`Ladder`], FILTER MODE and POLES by
+//!   [`shaped`], its passband and output coupling, at [`FILTER_OVERSAMPLE`] times the rate)
+//!   with [`ladder_coefficients`] for a cutoff (CUTOFF by [`knob_current`], the contour by
+//!   [`contour_current`], both through [`node_log2`]), [`emphasis_law`], [`passband`],
+//!   [`ring_lift`], [`pair_limit`] and [`drive_top`];
+//! - a contour, [`Contour`] with [`ContourLaw`], in volts (the trigger's times are
+//!   [`laws::TRIGGER_ON`], [`laws::TRIGGER_OFF`] and [`laws::REARM`]);
+//! - the VCA, [`Vca`] ([`vca_gain`] on the loudness contour's volts), its output 1.0 = 5 V.
 
 use crate::resample::{BlepTables, Decimator, Interpolator};
 use crate::tuning::FREQ_CENTRE;
@@ -36,8 +56,9 @@ pub const CONTROL_EVERY: usize = 16;
 /// The contours' past outputs kept, samples (more than [`Light`]'s filter's delay).
 const LATE_PAST: usize = 64;
 
-/// Keep the nonlinear ladder's ultrasonic harmonics out of the output band.
-const FILTER_OVERSAMPLE: usize = 8;
+/// Keep the nonlinear ladder's ultrasonic harmonics out of the output band: the filter runs
+/// at this many times the voice's rate.
+pub const FILTER_OVERSAMPLE: usize = 8;
 
 /// FILTER MODULATION's line against the voice's rate, where it meets the cutoff's law.
 const LINE_OVERSAMPLE: usize = 2;
@@ -411,7 +432,7 @@ pub mod laws {
 /// corners kept in hertz), the red's pole and gain, and the bands' (white's high-pass and
 /// low-pass, pink's).
 #[derive(Debug, Clone, Copy)]
-struct NoiseLaw {
+pub struct NoiseLaw {
     scale: f32,
     poles: [f32; 3],
     gains: [f32; 3],
@@ -420,7 +441,9 @@ struct NoiseLaw {
 }
 
 impl NoiseLaw {
-    fn new(rate: f64) -> NoiseLaw {
+    /// The coefficients at the voice's rate `rate`, Hz (made once: not on the audio thread's
+    /// every sample).
+    pub fn new(rate: f64) -> NoiseLaw {
         // (At 48 kHz each factor is 1 exactly: the coefficients as they were.)
         let r = (48_000.0 / rate) as f32;
         let pole = |p: f32| p.powf(r);
@@ -547,8 +570,10 @@ fn interpolate(xs: &[f64], ys: &[f64], x: f64) -> f64 {
 }
 
 /// A mixer channel's gain for its VOLUME (25K linear, its wiper through `series` ohm to the
-/// bus, the source `source` ohm behind it), against the same at 10 for the sawtooth's.
-fn channel(volume: f64, source: f64, series: f64) -> f32 {
+/// bus, the source `source` ohm behind it), against the same at 10 for the sawtooth's. The
+/// oscillators' channels are through 33K (`series` 33e3; VOLUME after its knob's law,
+/// [`volume_track`]); oscillator 3's then times [`laws::OSC3_LEVEL`].
+pub fn channel(volume: f64, source: f64, series: f64) -> f32 {
     let law = |p: f64, source: f64| {
         let p = p.clamp(0.0, 1.0);
         let (up, down) = (source + 25e3 * (1.0 - p), (25e3 * p).max(1e-3));
@@ -559,16 +584,18 @@ fn channel(volume: f64, source: f64, series: f64) -> f32 {
 
 /// The filter's control node takes currents into its SCALE network (about 2.1K, against
 /// which the panel's 33K to 300K hardly load it): CUTOFF's, from its wiper (the hardware
-/// reference's track, `cutoff_track`) across +-10 V through R55 200K, A.
-fn knob_current(cutoff: f64) -> f64 {
+/// reference's track, `cutoff_track`) across +-10 V through R55 200K, A. `cutoff` is the knob,
+/// 0 to 1.
+pub fn knob_current(cutoff: f64) -> f64 {
     let w = cutoff_track(cutoff);
     (-10.0 + 20.0 * w) / (200e3 + 5e3 * w * (1.0 - w))
 }
 
 /// The filter contour's current into the control node, A a volt of contour: AMOUNT OF
 /// CONTOUR's wiper (the hardware reference's track, [`contour_amount_track`]) through R74
-/// with the pot's own resistance in series ([`crate::voice::contour_input`]).
-fn contour_current(amount: f64) -> f64 {
+/// with the pot's own resistance in series ([`crate::voice::contour_input`]). `amount` is the
+/// knob, 0 to 1; the current is this times the filter contour's volts.
+pub fn contour_current(amount: f64) -> f64 {
     let t = contour_amount_track(amount);
     t / (crate::vcf::R74 + 5e3 * t * (1.0 - t))
 }
@@ -577,8 +604,9 @@ fn contour_current(amount: f64) -> f64 {
 /// CUTOFF's own currents (`at`, [`knob_current`] at each of its points), straight between
 /// them, beyond its ends at their slopes. So the contour moves the filter as CUTOFF would by
 /// the same current, as in the circuit, where the converter's law is not exponential at the
-/// bottom.
-fn node_log2(at: &[f64; 21], current: f64) -> f64 {
+/// bottom. `at` is [`cutoff_points`]; `current` CUTOFF's ([`knob_current`]) plus the
+/// contour's ([`contour_current`] times its volts), A.
+pub fn node_log2(at: &[f64; 21], current: f64) -> f64 {
     let c = &laws::CUTOFF_LOG2;
     let k = match at.iter().position(|&a| a > current) {
         Some(0) => 0,
@@ -589,6 +617,11 @@ fn node_log2(at: &[f64; 21], current: f64) -> f64 {
     let (x0, x1) = (at[k], at[k + 1]);
     let (y0, y1) = (f64::from(c[k]), f64::from(c[k + 1]));
     y0 + (y1 - y0) * (current - x0) / (x1 - x0)
+}
+
+/// CUTOFF's currents at [`laws::CUTOFF_LOG2`]'s points, for [`node_log2`] (made once).
+pub fn cutoff_points() -> [f64; 21] {
+    core::array::from_fn(|i| knob_current(i as f64 / 20.0))
 }
 
 /// The keys as the engine plays them: which are held (a bit a MIDI note), lowest first.
@@ -775,9 +808,14 @@ fn around_fillet(t: &BlepTables, p: f32, at: f32, inv: f32, width: f32) -> f32 {
     sum
 }
 
-/// An oscillator: its phase (0..1) and waveform.
+/// An oscillator: its phase (0..1) and waveform, band-limited (BLEP and BLAMP, no delay: the
+/// phase tells where each edge is). Public for an instrument that uses it as a stage of its own
+/// (decisions.md R-LIGHT-STAGES): made by [`Osc::new`], its waveform set by
+/// [`Osc::set_waveform`] or [`Osc::set_continuous`], run by [`Osc::tick`] at
+/// [`oscillator_increment`]'s step. Its output is in the bus's units at the waveform's own
+/// level (a sawtooth from 1 to -1, the triangle 0.895 of it), before the mixer's channel.
 #[derive(Debug, Clone, Copy)]
-struct Osc {
+pub struct Osc {
     phase: f32,
     wave: Waveform,
     /// The rectangle's duty cycle and level ([`rect_law`]): its switch's, or CONTINUOUS's
@@ -799,7 +837,7 @@ struct Osc {
 impl Osc {
     /// One sample at increment `dt` (cycles a sample, under a half) and its reciprocal.
     #[inline(always)]
-    fn tick(&mut self, dt: f32, inv: f32) -> f32 {
+    pub fn tick(&mut self, dt: f32, inv: f32) -> f32 {
         let mut p = self.phase + dt;
         if p >= 1.0 {
             p -= 1.0;
@@ -869,7 +907,7 @@ impl Osc {
     }
 
     /// Its waveform's level at its peak (oscillator 3's swing as a modulation source).
-    fn peak(&self) -> f32 {
+    pub fn peak(&self) -> f32 {
         match self.wave {
             Waveform::Triangle => laws::TRIANGLE,
             Waveform::SharkTooth => laws::SHARK_TRIANGLE + laws::SHARK_SAWTOOTH,
@@ -879,8 +917,47 @@ impl Osc {
         }
     }
 
+    /// Where its cycle is, 0..1 (0 the sawtooth's top, just after its reset).
+    pub fn phase(&self) -> f32 {
+        self.phase
+    }
+
+    /// Puts its cycle at `at` (0..1), as the voice's [`Light::start_oscillators_at`] does.
+    pub fn set_phase(&mut self, at: f32) {
+        self.phase = at;
+    }
+
+    /// The waveform switch's own position: `wave`, its rectangle at the switch's width, no
+    /// blend.
+    pub fn set_waveform(&mut self, wave: Waveform) {
+        self.wave = wave;
+        self.shape = None;
+        (self.duty, self.level) = rect_law(wave.width());
+    }
+
+    /// CONTINUOUS (decisions.md R-CONTINUOUS-WAVE) where [`continuous_waveform`] puts it for
+    /// shape `at` (0 to 3 and on, the switch's places): `wave` and `shape` as it returns them;
+    /// `third` for oscillator 3 (its second and third places a reverse shark tooth and its
+    /// reverse sawtooth); `ratios` each place's level through the mixer against the
+    /// sawtooth's ([`continuous_ratios`], or `[1.0; 4]` with `shape` `None`); the rectangle's
+    /// width from `at` ([`crate::voice::shape_bias`]).
+    pub fn set_continuous(
+        &mut self,
+        wave: Waveform,
+        shape: Option<f32>,
+        third: bool,
+        ratios: [f32; 4],
+        at: f64,
+    ) {
+        self.wave = wave;
+        self.shape = shape;
+        self.third = third;
+        self.ratios = ratios;
+        (self.duty, self.level) = rect_law(crate::voice::shape_bias(at));
+    }
+
     /// An oscillator on `wave` at phase 0, its rectangle the switch's.
-    fn new(wave: Waveform) -> Self {
+    pub fn new(wave: Waveform) -> Self {
         let (duty, level) = rect_law(wave.width());
         Osc {
             phase: 0.0,
@@ -911,15 +988,28 @@ fn light_depth(wheel: f64) -> f64 {
 /// two places or moved by MOD with the wheel forward (`depth` above 0), where its shape is,
 /// the waveform the nearest place is named for its swing as a modulation source.
 fn light_shape(o: usize, p: &Panel, depth: f64) -> (Waveform, Option<f32>) {
-    use crate::voice::{ModSwing, shape_at, shape_place};
+    use crate::voice::{ModSwing, shape_at};
     let s = p.shape[o];
     if !s.continuous {
         return (p.osc[o].waveform, None);
     }
-    let at = shape_at(s, ModSwing::default());
+    continuous_waveform(
+        o,
+        shape_at(s, ModSwing::default()),
+        s.modulated && depth > 0.0,
+    )
+}
+
+/// Oscillator `o`'s (0, 1 or 2) waveform with CONTINUOUS at shape `at` (the switch's places
+/// 0 to 3, [`crate::voice::shape_at`]; 3 and on the rectangle at its width), `moving` while
+/// MOD moves it: at one of the switch's places, or past SQUARE, still, that place's waveform
+/// and no blend (`None`); else the waveform the nearest place is named for (its swing as a
+/// modulation source) and where the shape is. For [`Osc::set_continuous`].
+pub fn continuous_waveform(o: usize, at: f64, moving: bool) -> (Waveform, Option<f32>) {
+    use crate::voice::shape_place;
     let nearest =
         |at: f64| shape_place(o, (at.round() as usize).min(3)).unwrap_or(Waveform::ReverseSawtooth);
-    if s.modulated && depth > 0.0 {
+    if moving {
         return (nearest(at), Some(at as f32));
     }
     if at >= 3.0 {
@@ -936,7 +1026,7 @@ fn light_shape(o: usize, p: &Panel, depth: f64) -> (Waveform, Option<f32>) {
 /// -2.5 V, exactly; straight between them, and on past the narrow one as from the wide one
 /// to it, to CONTINUOUS's floor (decisions.md R-CONTINUOUS-WAVE; the circuit's duty is straight
 /// in the bias: the comparator's threshold moves 0.998 V a volt along a straight ramp).
-pub(crate) fn rect_law(bias: f64) -> (f32, f32) {
+pub fn rect_law(bias: f64) -> (f32, f32) {
     let knots = [
         (0.0, laws::DUTY[0], laws::SQUARE),
         (-1.5, laws::DUTY[1], laws::WIDE),
@@ -951,14 +1041,23 @@ pub(crate) fn rect_law(bias: f64) -> (f32, f32) {
 
 /// The mixer's own noise on the bus in the bus's units, a uniform generator's scale at 48 kHz:
 /// the circuit's [`crate::voice::MIXER_HISS`] against its bus's 0.0319 mA RMS for a sawtooth at
-/// VOLUME 10 (both uniform and sawtooth 1/sqrt(3) of their peak RMS).
-const HISS: f64 = crate::voice::MIXER_HISS / 0.0319e-3;
+/// VOLUME 10 (both uniform and sawtooth 1/sqrt(3) of their peak RMS). At a rate, times
+/// sqrt(rate / 48 kHz), on a uniform generator from -1 to 1, added to the bus: the ladder's
+/// self-oscillation starts from it.
+pub const HISS: f64 = crate::voice::MIXER_HISS / 0.0319e-3;
 /// Its generator's seed, apart from the noise's.
-const HISS_SEED: u32 = 0x6869_7373;
+pub const HISS_SEED: u32 = 0x6869_7373;
 
-/// White noise (xorshift), and pink and red from it (filtered), with the white's band.
+/// The noise generator's seed before [`Noise::set_seed`].
+const NOISE_SEED: u32 = 0x4D6F_6F67;
+
+/// White noise (xorshift), and pink and red from it (filtered), with the white's band. Public
+/// for an instrument that uses it as a stage of its own (decisions.md R-LIGHT-STAGES): made by
+/// [`Noise::new`], seeded by [`Noise::set_seed`], run by [`Noise::tick`] with a [`NoiseLaw`] at
+/// the rate; into the bus through [`noise_gain`]. (The red is MODULATION's noise source, the
+/// pink's filtered; the panel's PINK plays the pink, WHITE the white.)
 #[derive(Debug, Clone, Copy)]
-struct Noise {
+pub struct Noise {
     state: u32,
     pink: [f32; 3],
     red: f32,
@@ -969,7 +1068,32 @@ struct Noise {
     pink_lp: f32,
 }
 
+impl Default for Noise {
+    fn default() -> Noise {
+        Noise::new()
+    }
+}
+
 impl Noise {
+    /// At rest, its generator on the voice's own seed.
+    pub fn new() -> Noise {
+        Noise {
+            state: NOISE_SEED,
+            pink: [0.0; 3],
+            red: 0.0,
+            hp: (0.0, 0.0),
+            lp: 0.0,
+            pink_hp: (0.0, 0.0),
+            pink_lp: 0.0,
+        }
+    }
+
+    /// Its generator on its own stream from `seed`, as [`Light::set_seed`] seeds a voice's.
+    pub fn set_seed(&mut self, seed: u64) {
+        let s = (seed ^ (seed >> 32)) as u32;
+        self.state = if s == 0 { NOISE_SEED } else { s };
+    }
+
     #[inline(always)]
     fn white(&mut self) -> f32 {
         let mut x = self.state;
@@ -983,7 +1107,7 @@ impl Noise {
     /// White (its band), pink (its) and red, each in its generator's units; `c` the
     /// generators' coefficients at the rate.
     #[inline(always)]
-    fn tick(&mut self, c: &NoiseLaw) -> (f32, f32, f32) {
+    pub fn tick(&mut self, c: &NoiseLaw) -> (f32, f32, f32) {
         let w = self.white() * c.scale;
         let b = &mut self.pink;
         b[0] = c.poles[0] * b[0] + w * c.gains[0];
@@ -1003,10 +1127,23 @@ impl Noise {
     }
 }
 
+/// The noise's channel into the bus for its VOLUME knob `volume` (0 to 1), PINK or WHITE: the
+/// generator's output ([`Noise::tick`]'s white or pink) times this is on the bus's units.
+pub fn noise_gain(volume: f64, pink: bool) -> f32 {
+    let (ohms, level) = if pink {
+        (laws::NOISE_OHMS.1, laws::PINK)
+    } else {
+        (laws::NOISE_OHMS.0, laws::WHITE)
+    };
+    channel(volume_track(volume), ohms, 11e3) / channel(1.0, ohms, 11e3) * level
+}
+
 /// The ladder: four one-pole stages, trapezoidal, the loop solved without delay for its
 /// nonlinear input pair; the loop's feedback through its own limit (how loud it rings).
+/// Public for an instrument that uses it as a stage of its own (decisions.md R-LIGHT-STAGES),
+/// at [`FILTER_OVERSAMPLE`] times the voice's rate; [`LadderFilter`] runs it as the voice does.
 #[derive(Debug, Clone, Copy, Default)]
-struct Ladder {
+pub struct Ladder {
     s: [f32; 4],
     /// The last sample's input pair's output and its four stages' (FILTER POLES's taps and
     /// the mixes' terms: decisions.md R-POLES).
@@ -1016,11 +1153,11 @@ struct Ladder {
 impl Ladder {
     /// One sample of input `x` (the pair's units) at stage gain `g` (G / (1 + G) of the
     /// prewarped coefficient G) and loop gain `k`: the fourth stage's output. The input pair
-    /// takes the input less the loop's feedback through its knee ([`pair`], off its centre by
+    /// takes the input less the loop's feedback through its knee (a tanh, off its centre by
     /// `bias`; `limit` its limit, the limit's reciprocal and its output at the bias alone), as
     /// the circuit's does: driven hard, it squashes the resonance and loses less bass.
     #[inline(always)]
-    fn tick(&mut self, x: f32, g: f32, k: f32, bias: f32, limit: (f32, f32, f32)) -> f32 {
+    pub fn tick(&mut self, x: f32, g: f32, k: f32, bias: f32, limit: (f32, f32, f32)) -> f32 {
         let s = &mut self.s;
         let h = 1.0 - g;
         let g2 = g * g;
@@ -1084,17 +1221,29 @@ impl Ladder {
     }
 }
 
+impl Ladder {
+    /// At rest.
+    pub fn new() -> Ladder {
+        Ladder::default()
+    }
+
+    /// The last sample's input pair's output and its four stages' ([`shaped`]'s taps).
+    pub fn taps(&self) -> &[f32; 5] {
+        &self.taps
+    }
+}
+
 /// FILTER MODE and FILTER POLES (1 to 4).
-type Shape = (FilterMode, u8);
+pub type Shape = (FilterMode, u8);
 
 /// A one-pole high-pass's coefficient, last input and output.
 type Coupling = (f32, f32, f32);
 
 /// The ladder's output in FILTER MODE and FILTER POLES `shape` (decisions.md R-POLES), from
 /// its fourth stage's `y` and its `taps`: LO (and HI) the stage FILTER POLES picks, BAND and
-/// STEEP HIGH and NOTCH the circuit's mixes ([`crate::vcf::mix`]) of the stages.
+/// STEEP HIGH and NOTCH the circuit's mixes (`vcf.rs`'s `mix`) of the stages.
 #[inline(always)]
-fn shaped(shape: Shape, y: f32, taps: &[f32; 5]) -> f32 {
+pub fn shaped(shape: Shape, y: f32, taps: &[f32; 5]) -> f32 {
     match shape {
         (FilterMode::Lo | FilterMode::Hi, crate::vcf::POLES) => y,
         (FilterMode::Lo | FilterMode::Hi, n) => taps[usize::from(n)],
@@ -1105,9 +1254,15 @@ fn shaped(shape: Shape, y: f32, taps: &[f32; 5]) -> f32 {
     }
 }
 
-/// A contour generator: its level (V) and whether it is in its attack.
+/// A contour generator: its level (V) and whether it is in its attack. Public for an
+/// instrument that uses it as a stage of its own (decisions.md R-LIGHT-STAGES): made at rest
+/// by [`Contour::at_rest`], started by [`Contour::start`] when its gate rises, run a sample at
+/// a time by [`Contour::tick`] with a [`ContourLaw`] at the rate. Its gate is the trigger's,
+/// which follows the keys [`laws::TRIGGER_ON`] late on and [`laws::TRIGGER_OFF`] off, and
+/// starts an attack only once it has been open [`laws::REARM`] (the voice's own trigger; an
+/// instrument with its own gate may start every one).
 #[derive(Debug, Clone, Copy)]
-struct Contour {
+pub struct Contour {
     volts: f64,
     /// The timing capacitor's absorbed charge: each of its three branches' voltage.
     absorbed: [f64; 3],
@@ -1119,7 +1274,7 @@ struct Contour {
 /// A contour's coefficients a sample (the attack's, the decay's, the release's), and the
 /// levels it aims at, stops at, holds and rests at (V).
 #[derive(Debug, Clone, Copy, Default)]
-struct ContourLaw {
+pub struct ContourLaw {
     attack: f64,
     decay: f64,
     release: f64,
@@ -1135,7 +1290,10 @@ struct ContourLaw {
 }
 
 impl ContourLaw {
-    fn new(k: ContourKnobs, decay_switch: bool, which: usize, rate: f64) -> ContourLaw {
+    /// The contour's law for its knobs `k` (0 to 1 each), the DECAY switch, which contour
+    /// (`which` 0 the filter's, 1 the loudness's: their laws and levels differ) and the rate,
+    /// Hz (made when the knobs change: not on every sample).
+    pub fn new(k: ContourKnobs, decay_switch: bool, which: usize, rate: f64) -> ContourLaw {
         type Law = [(f64, f64)];
         let (attack_law, decay_law): (&Law, &Law) = if which == 0 {
             (&FILTER_ATTACK, &FILTER_DECAY)
@@ -1186,7 +1344,7 @@ impl ContourLaw {
 
 impl Contour {
     /// At rest: where the circuit's rests with these settings (its DECAY and the switch).
-    fn at_rest(law: &ContourLaw) -> Contour {
+    pub fn at_rest(law: &ContourLaw) -> Contour {
         Contour {
             volts: law.released,
             absorbed: [law.released; 3],
@@ -1195,9 +1353,20 @@ impl Contour {
         }
     }
 
-    /// A sample on, its gate high or low.
+    /// Its gate's rise: an attack if `attack` (the trigger re-armed), else on from where it is
+    /// to the sustain.
+    pub fn start(&mut self, attack: bool) {
+        self.attacking = attack;
+    }
+
+    /// Its level, V.
+    pub fn volts(&self) -> f64 {
+        self.volts
+    }
+
+    /// A sample on, its gate high or low: its level, V.
     #[inline(always)]
-    fn tick(&mut self, gate: bool, law: &ContourLaw) -> f64 {
+    pub fn tick(&mut self, gate: bool, law: &ContourLaw) -> f64 {
         if gate {
             self.fresh = false;
             if self.attacking {
@@ -1332,12 +1501,11 @@ pub struct Light {
     hiss: (u32, f32),
     /// FEEDBACK's cable at the rate, samples.
     feedback_delay: f32,
-    /// The output's high-passes (its droop): the filter's coupling and the one after the VCA,
-    /// each its coefficient, last input and output; FILTER MODE HI's direct branch's
-    /// coupling likewise, and that branch's gain from the bus (control rate); the input
-    /// pair's offset at rest.
+    /// The output's high-pass before the VCA (its droop, the filter's coupling: its
+    /// coefficient, last input and output; the one after is the VCA's); FILTER MODE HI's
+    /// direct branch's coupling likewise, and that branch's gain from the bus (control rate);
+    /// the input pair's offset at rest.
     coupling: (f32, f32, f32),
-    droop: (f32, f32, f32),
     mode: (f32, f32, f32),
     direct: f32,
     /// FILTER MODE and FILTER POLES as the filter has them, and while a change crossfades
@@ -1350,10 +1518,8 @@ pub struct Light {
     ran: bool,
     /// The filter's passband at its cutoff (control rate).
     pass: f32,
-    /// The thump's band-pass: its coefficients (high-pass, low-pass) and its state (the
-    /// VCA's last gain, the high-pass's output, the low-pass's).
-    thump_c: (f32, f32),
-    thump: (f32, f32, f32),
+    /// The VCA, its output's coupling and its thump.
+    vca: Vca,
     bias: f32,
     ladder: Ladder,
     filter_up: Interpolator,
@@ -1421,8 +1587,9 @@ pub struct Light {
 }
 
 /// Oscillator `o`'s pitch offset from its key on panel `p`, semitones: its RANGE, its
-/// FREQUENCY's law and TUNE's (none for oscillator 3 free of the keys).
-fn pitch_offset(p: &Panel, o: usize) -> f64 {
+/// FREQUENCY's law and TUNE's (none for oscillator 3 free of the keys, which plays
+/// [`laws::OSC3_FREE_KEY`] instead of the key).
+pub fn pitch_offset(p: &Panel, o: usize) -> f64 {
     let cubic = |c: [f64; 4], x: f64| c[0] + x * (c[1] + x * (c[2] + x * c[3]));
     let range = (2.0 - p.osc[o].range.octaves_below_2()) * 12.0;
     let x = p.osc[o].freq.clamp(0.0, 1.0);
@@ -1468,6 +1635,327 @@ pub fn swept_laws(p: &Panel) -> ([f64; 3], f64) {
     )
 }
 
+/// An oscillator's step for a pitch `semitones` from key 69 on 8' (the key less 69, plus its
+/// [`pitch_offset`], the wheel's semitones and ENTROPY's cents over 100) at the voice's rate
+/// `rate`, Hz: its increment a sample (cycles, at most 0.45) and that's reciprocal,
+/// [`Osc::tick`]'s `dt` and `inv` ([`laws::A4`] at 0). The voice works this out every
+/// [`CONTROL_EVERY`] samples and moves the increment there in equal steps, the reciprocal at
+/// once.
+#[inline]
+pub fn oscillator_increment(semitones: f64, rate: f64) -> (f32, f32) {
+    let hz = laws::A4 * f64::from(exp2((semitones / 12.0) as f32));
+    let to = ((hz / rate) as f32).min(0.45);
+    (to, 1.0 / to.max(1e-9))
+}
+
+/// A waveform's source resistance behind its mixer channel, ohm ([`channel`]'s `source`).
+pub fn source_ohms(wave: Waveform) -> f64 {
+    match wave {
+        Waveform::Triangle => laws::SOURCE_OHMS[0],
+        Waveform::Sawtooth | Waveform::ReverseSawtooth => laws::SOURCE_OHMS[1],
+        Waveform::SharkTooth => laws::SOURCE_OHMS[3],
+        _ => laws::SOURCE_OHMS[2],
+    }
+}
+
+/// CONTINUOUS's places' levels through the mixer against the sawtooth's at VOLUME's law
+/// `volume` ([`volume_track`] of the knob), for [`Osc::set_continuous`]; the channel's gain is
+/// then the sawtooth's (decisions.md R-CONTINUOUS-WAVE).
+pub fn continuous_ratios(volume: f64) -> [f32; 4] {
+    let at = |ohms: f64| channel(volume, ohms, 33e3) / channel(volume, laws::SOURCE_OHMS[1], 33e3);
+    [
+        at(laws::SOURCE_OHMS[0]),
+        at(laws::SOURCE_OHMS[3]),
+        1.0,
+        at(laws::SOURCE_OHMS[2]),
+    ]
+}
+
+/// EMPHASIS's knob `emphasis` (0 to 1) as the ladder's loop gain at each of
+/// [`laws::LOOP_AT_LOG2`]'s cutoffs, and how much of the corner's rise above the ring's pitch
+/// it leaves (1 below 7, 0 from the ringing threshold), for [`ladder_coefficients`] and
+/// [`ring_lift`].
+pub fn emphasis_law(emphasis: f64) -> ([f64; 10], f64) {
+    // (EMPHASIS as the knob drawn with its generic taper would set R14.)
+    let emphasis = 1.0 - (1.0 + 80.0 * emphasis_r14(emphasis) / 50e3).ln() / 81f64.ln();
+    let corner = ((0.744 - emphasis) / 0.044).clamp(0.0, 1.0);
+    let mut gains = [0.0; 10];
+    for ((k, row), &log2) in gains.iter_mut().zip(&laws::LOOP).zip(&laws::LOOP_AT_LOG2) {
+        let threshold = interpolate(&laws::THRESHOLD_AT_LOG2, &laws::THRESHOLD, log2);
+        let shift = interpolate(&laws::THRESHOLD_AT_LOG2, &laws::SHIFT, log2);
+        let near = 1.0 - ((threshold - emphasis) / laws::EMPHASIS_NEAR).clamp(0.0, 1.0);
+        let at = interpolate(&laws::EMPHASIS_AT, row, emphasis + near * shift);
+        // (Past the threshold, `RING_GAIN` of the rise beyond it.)
+        *k = laws::LOOP_SCALE
+            * if at > 4.0 {
+                4.0 + (at - 4.0) * laws::RING_GAIN
+            } else {
+                at
+            };
+    }
+    (gains, corner)
+}
+
+/// The ladder's stage gain and loop gain ([`Ladder::tick`]'s `g` and `k`, [`LadderFilter::tick`]'s)
+/// for a cutoff of `log2` (log2 of the ring's pitch, Hz: [`node_log2`], plus KEYBOARD
+/// CONTROL's share of the keys' octaves from [`laws::TRACKING_FROM`], plus any octaves
+/// modulation adds), [`emphasis_law`]'s loop gains and corner share, at the filter's rate
+/// `filter_rate` ([`FILTER_OVERSAMPLE`] times the voice's), Hz.
+#[inline(always)]
+pub fn ladder_coefficients(
+    log2: f64,
+    emphasis: &[f64; 10],
+    corner: f64,
+    filter_rate: f64,
+) -> (f32, f32) {
+    let corner = interpolate(&laws::CORNER_AT_LOG2, &laws::CORNER, log2) * corner
+        + interpolate(&laws::RING_RAISE_AT_LOG2, &laws::RING_RAISE, log2) * (1.0 - corner);
+    let frequency_log = log2 + corner;
+    let frequency_log = if frequency_log > laws::CUTOFF_SAT_AT[0] {
+        interpolate(&laws::CUTOFF_SAT_AT, &laws::CUTOFF_SAT, frequency_log)
+    } else {
+        frequency_log
+    };
+    let hz = f64::from(exp2(frequency_log as f32));
+    let w = (std::f64::consts::PI * hz / filter_rate).min(1.4);
+    // tan by its Padé form, close enough below 1.4 for the ladder's tuning.
+    let w2 = w * w;
+    let t = w * (15.0 - w2) / (15.0 - 6.0 * w2);
+    let t = if t.is_finite() && t > 0.0 { t } else { 1e3 };
+    // The loop's gain at this cutoff, between the fitted ones.
+    let k = interpolate(&laws::LOOP_AT_LOG2, emphasis, log2);
+    ((t / (1.0 + t)) as f32, k as f32)
+}
+
+/// The filter's passband against the open filter's at a cutoff of `log2` (as
+/// [`ladder_coefficients`] takes it): the ladder's output times this.
+pub fn passband(log2: f64) -> f32 {
+    let pass = interpolate(&laws::PASS_AT_LOG2, &laws::PASS_DB, log2);
+    f64::from(exp2((pass * (std::f64::consts::LOG2_10 / 20.0)) as f32)) as f32
+}
+
+/// Past EMPHASIS's ringing threshold, how much the input pair's limit is raised for the
+/// ring's level at a cutoff of `log2`, `corner` [`emphasis_law`]'s share (at 1, not ringing:
+/// 1). The pair's limit is [`pair_limit`] of [`drive_top`] times this.
+pub fn ring_lift(log2: f64, corner: f64) -> f32 {
+    let ringing = 1.0 - corner;
+    if ringing > 0.0 {
+        let lift = interpolate(&laws::RING_LEVEL_AT_LOG2, &laws::RING_LEVEL, log2);
+        (1.0 + ringing * (lift - 1.0)) as f32
+    } else {
+        1.0
+    }
+}
+
+/// The input pair's limit as [`Ladder::tick`] takes it, for its top `top` ([`drive_top`]
+/// times [`ring_lift`]): the top, its reciprocal and its output at [`laws::BIAS`] alone.
+pub fn pair_limit(top: f32) -> (f32, f32, f32) {
+    (top, 1.0 / top, top * tanh(laws::BIAS / top))
+}
+
+/// The plug-in's DRIVE at gain `gain` (1: the circuit): the input pair's top lowered to its
+/// [`laws::DRIVE_CEILING`] power.
+pub fn drive_top(gain: f64) -> f32 {
+    gain.max(1e-3).powf(laws::DRIVE_CEILING).min(1.0) as f32
+}
+
+/// The VCA's gain on the loudness contour's `loud` volts ([`laws::VCA_GAIN`]; 1 at 4.455 V).
+#[inline(always)]
+pub fn vca_gain(loud: f64) -> f32 {
+    let g = &laws::VCA_GAIN;
+    let v = (loud.max(0.0) * (1.0 / laws::VCA_STEP)) as f32;
+    let i = (v as usize).min(g.len() - 2);
+    let f = (v - i as f32).min(1.0);
+    g[i] + (g[i + 1] - g[i]) * f
+}
+
+/// The VCA and the output after it: the filter's output times [`laws::OUT`] and the gain on
+/// the loudness contour ([`vca_gain`]), the output's coupling ([`laws::DROOP_HZ`]) and the
+/// VCA's thump (its gain through a band-pass, [`laws::THUMP`]). Public for an instrument that
+/// uses it as a stage of its own (decisions.md R-LIGHT-STAGES); the voice's own.
+#[derive(Debug, Clone, Copy)]
+pub struct Vca {
+    /// The output's high-pass: its coefficient, last input and output.
+    droop: (f32, f32, f32),
+    /// The thump's band-pass: its coefficients (high-pass, low-pass) and its state (the VCA's
+    /// last gain, the high-pass's output, the low-pass's).
+    thump_c: (f32, f32),
+    thump: (f32, f32, f32),
+}
+
+impl Vca {
+    /// At rest, at the voice's rate `rate`, Hz.
+    pub fn new(rate: f64) -> Vca {
+        Vca {
+            droop: (
+                (-std::f64::consts::TAU * laws::DROOP_HZ / rate).exp() as f32,
+                0.0,
+                0.0,
+            ),
+            thump_c: (
+                (-1.0 / (laws::THUMP_TIMES.0 * rate)).exp() as f32,
+                (1.0 - (-1.0 / (laws::THUMP_TIMES.1 * rate)).exp()) as f32,
+            ),
+            thump: (0.0, 0.0, 0.0),
+        }
+    }
+
+    /// Back to rest.
+    pub fn reset(&mut self) {
+        self.droop = (self.droop.0, 0.0, 0.0);
+        self.thump = (0.0, 0.0, 0.0);
+    }
+
+    /// One sample: `y` the filter's output ([`LadderFilter::tick`]), `loud` the loudness
+    /// contour, V. The output, 1.0 = 5 V.
+    #[inline(always)]
+    pub fn tick(&mut self, y: f32, loud: f64) -> f32 {
+        let gain = vca_gain(loud);
+        // The output's coupling (the rest of the waveforms' droop).
+        let y = y * laws::OUT * gain;
+        let (a, x0, y0) = self.droop;
+        let coupled = a * (y0 + y - x0);
+        self.droop = (a, y, coupled);
+        // The VCA's thump: its gain through the band-pass.
+        let ((ha, lb), (g0, h0, l0)) = (self.thump_c, self.thump);
+        let h = ha * (h0 + gain - g0);
+        let l = l0 + lb * (h - l0);
+        self.thump = (gain, h, l);
+        coupled + laws::THUMP * l
+    }
+}
+
+/// The light filter alone, at the voice's rate: [`Ladder`] at [`FILTER_OVERSAMPLE`] times it
+/// between its resamplers, its input pair driven as the voice drives it ([`laws::DRIVE`] and
+/// DRIVE's gain), FILTER MODE and POLES ([`shaped`]), the passband ([`passband`]), the output
+/// coupling ([`laws::COUPLING_HZ`]) and FILTER MODE HI's direct branch: the voice's filter as
+/// it runs with no change crossfading (the voice crossfades a change of FILTER MODE or POLES,
+/// decisions.md R-POLES; this takes one at once). Public for an instrument that uses it as a
+/// stage of its own (decisions.md R-LIGHT-STAGES).
+///
+/// Its input is the bus (the channels' sum and the mixer's hiss, [`HISS`], in the bus's
+/// units: a sawtooth at VOLUME 10 is 1 at its peak); the circuit's input stage is the
+/// ladder's input pair, its tanh, in [`Ladder::tick`]. Its output is the ladder's, coupled,
+/// where the circuit's output stage meets the VCA ([`Vca::tick`], which scales it by
+/// [`laws::OUT`]). It is [`LadderFilter::delay`] late.
+#[derive(Debug, Clone)]
+pub struct LadderFilter {
+    up: Interpolator,
+    down: Decimator,
+    ladder: Ladder,
+    coupling: Coupling,
+    mode: Coupling,
+    direct: f32,
+    shape: Shape,
+    pass: f32,
+    drive: f32,
+    limit: (f32, f32, f32),
+}
+
+impl LadderFilter {
+    /// At rest at the voice's rate `rate`, Hz: LO, four poles, DRIVE 1, the passband 1.
+    pub fn new(rate: f64) -> LadderFilter {
+        let filter_rate = rate * FILTER_OVERSAMPLE as f64;
+        let bias = tanh(laws::BIAS);
+        let slope = 1.0 - bias * bias;
+        LadderFilter {
+            up: Interpolator::sparse(FILTER_OVERSAMPLE),
+            down: Decimator::sparse(FILTER_OVERSAMPLE),
+            ladder: Ladder::default(),
+            coupling: (
+                (-std::f64::consts::TAU * laws::COUPLING_HZ / filter_rate).exp() as f32,
+                0.0,
+                0.0,
+            ),
+            mode: (
+                (-std::f64::consts::TAU * laws::MODE_HZ / filter_rate).exp() as f32,
+                0.0,
+                0.0,
+            ),
+            // (The open ladder's passband at EMPHASIS 0, as the voice's.)
+            direct: laws::MODE_GAIN * laws::DRIVE * slope
+                / (1.0 + (laws::LOOP[9][0] * laws::LOOP_SCALE) as f32),
+            shape: (FilterMode::Lo, crate::vcf::POLES),
+            pass: 1.0,
+            drive: 1.0,
+            limit: pair_limit(1.0),
+        }
+    }
+
+    /// Its delay, samples at the voice's rate: its resamplers' (the ladder's own phase not
+    /// counted).
+    pub fn delay(&self) -> f64 {
+        self.up.delay() + self.down.delay()
+    }
+
+    /// FILTER MODE and FILTER POLES (1 to 4), at once.
+    pub fn set_shape(&mut self, mode: FilterMode, poles: u8) {
+        self.shape = (mode, poles.clamp(1, 4));
+    }
+
+    /// The passband at the cutoff ([`passband`]).
+    pub fn set_passband(&mut self, pass: f32) {
+        self.pass = pass;
+    }
+
+    /// DRIVE's gain (1 the circuit) and the ring's lift ([`ring_lift`]): the bus into the
+    /// input pair raised by `gain`, the pair's limit [`pair_limit`] of [`drive_top`] times the
+    /// lift.
+    pub fn set_drive(&mut self, gain: f64, ring_lift: f32) {
+        let gain = gain.max(1e-3);
+        self.drive = gain as f32;
+        let top = drive_top(gain) * ring_lift;
+        if top != self.limit.0 {
+            self.limit = pair_limit(top);
+        }
+    }
+
+    /// Back to rest.
+    pub fn reset(&mut self) {
+        self.ladder = Ladder::default();
+        self.up.reset();
+        self.down.reset();
+        self.coupling = (self.coupling.0, 0.0, 0.0);
+        self.mode = (self.mode.0, 0.0, 0.0);
+    }
+
+    /// One sample at the voice's rate: `bus` in, the ladder at stage gain `g` and loop gain
+    /// `k` ([`ladder_coefficients`]) through each of its steps.
+    #[inline]
+    pub fn tick(&mut self, bus: f32, g: f32, k: f32) -> f32 {
+        let mut inputs = [0.0; FILTER_OVERSAMPLE];
+        self.up.push(f64::from(bus), &mut inputs);
+        let mut filtered = 0.0;
+        for input in inputs {
+            let bus = input as f32;
+            let y = self.ladder.tick(
+                laws::DRIVE * self.drive * bus,
+                g.clamp(0.0, 0.999),
+                k,
+                laws::BIAS,
+                self.limit,
+            );
+            let y = shaped(self.shape, y, &self.ladder.taps) * self.pass;
+            let (a, x0, y0) = self.coupling;
+            let lo = a * (y0 + y - x0);
+            self.coupling = (a, y, lo);
+            let y = if self.shape.0 == FilterMode::Hi {
+                let (a, x0, y0) = self.mode;
+                let d = self.direct * bus;
+                let direct = a * (y0 + d - x0);
+                self.mode = (a, d, direct);
+                direct - lo
+            } else {
+                self.mode.1 = 0.0;
+                self.mode.2 = 0.0;
+                lo
+            };
+            filtered = self.down.push(f64::from(y)).unwrap_or(filtered);
+        }
+        filtered as f32
+    }
+}
+
 impl Light {
     /// A voice at `rate` Hz, at rest, with the default panel.
     pub fn new(rate: f64) -> Light {
@@ -1508,15 +1996,7 @@ impl Light {
             dt: [0.0; 3],
             dt_step: [0.0; 3],
             inv: [0.0; 3],
-            noise: Noise {
-                state: 0x4D6F_6F67,
-                pink: [0.0; 3],
-                red: 0.0,
-                hp: (0.0, 0.0),
-                lp: 0.0,
-                pink_hp: (0.0, 0.0),
-                pink_lp: 0.0,
-            },
+            noise: Noise::new(),
             noise_c: NoiseLaw::new(rate),
             hiss: (HISS_SEED, (HISS * (rate / 48e3).sqrt()) as f32),
             feedback_delay: (interpolate(&laws::FEEDBACK_AT, &laws::FEEDBACK_DELAY, rate)
@@ -1524,11 +2004,6 @@ impl Light {
                 .max(1.0) as f32,
             coupling: (
                 (-std::f64::consts::TAU * laws::COUPLING_HZ / filter_rate).exp() as f32,
-                0.0,
-                0.0,
-            ),
-            droop: (
-                (-std::f64::consts::TAU * laws::DROOP_HZ / rate).exp() as f32,
                 0.0,
                 0.0,
             ),
@@ -1543,11 +2018,7 @@ impl Light {
             fade_step: (1.0 / (crate::vcf::SHAPE_FADE * filter_rate)) as f32,
             ran: false,
             pass: 1.0,
-            thump_c: (
-                (-1.0 / (laws::THUMP_TIMES.0 * rate)).exp() as f32,
-                (1.0 - (-1.0 / (laws::THUMP_TIMES.1 * rate)).exp()) as f32,
-            ),
-            thump: (0.0, 0.0, 0.0),
+            vca: Vca::new(rate),
             bias: tanh(laws::BIAS),
             ladder: Ladder::default(),
             filter_up,
@@ -1578,7 +2049,7 @@ impl Light {
             detune: [0.0; 3],
             cutoff_offset: 0.0,
             cutoff_swept: 0.0,
-            cutoff_at: core::array::from_fn(|i| knob_current(i as f64 / 20.0)),
+            cutoff_at: cutoff_points(),
             node_log2: f64::from(laws::CUTOFF_LOG2[20]),
             timed: [None; 3],
             timed_resets: [(0.0, 0); 3],
@@ -1667,7 +2138,7 @@ impl Light {
     pub fn set_drive(&mut self, gain: f64) {
         let gain = gain.max(1e-3);
         self.drive = gain as f32;
-        self.drive_top = gain.powf(laws::DRIVE_CEILING).min(1.0) as f32;
+        self.drive_top = drive_top(gain);
         // (The engine calls this every block: the ring's lift stays in the limit.)
         self.set_limit();
     }
@@ -1676,7 +2147,7 @@ impl Light {
     fn set_limit(&mut self) {
         let top = self.drive_top * self.ring_lift;
         if top != self.limit.0 {
-            self.limit = (top, 1.0 / top, top * tanh(laws::BIAS / top));
+            self.limit = pair_limit(top);
         }
     }
 
@@ -1693,8 +2164,8 @@ impl Light {
 
     /// Seeds the noise (each voice its own stream).
     pub fn set_seed(&mut self, seed: u64) {
+        self.noise.set_seed(seed);
         let s = (seed ^ (seed >> 32)) as u32;
-        self.noise.state = if s == 0 { 0x4D6F_6F67 } else { s };
         let h = s ^ HISS_SEED;
         self.hiss.0 = if h == 0 { HISS_SEED } else { h };
     }
@@ -1759,32 +2230,14 @@ impl Light {
             };
             (self.osc[o].duty, self.osc[o].level) = rect_law(bias);
             self.set.offset[o] = pitch_offset(p, o);
-            let source = match wave {
-                Waveform::Triangle => laws::SOURCE_OHMS[0],
-                Waveform::Sawtooth | Waveform::ReverseSawtooth => laws::SOURCE_OHMS[1],
-                Waveform::SharkTooth => laws::SOURCE_OHMS[3],
-                _ => laws::SOURCE_OHMS[2],
-            };
+            let source = source_ohms(wave);
             let level = if o == 2 { laws::OSC3_LEVEL } else { 1.0 };
             let volume = volume_track(p.osc[o].volume);
             // (Blending, each place's level through the mixer against the sawtooth's, the
             // gain the sawtooth's: CONTINUOUS's places' sources, R-CONTINUOUS-WAVE.)
             let (source, ratios) = match shape {
                 None => (source, [1.0; 4]),
-                Some(_) => {
-                    let at = |ohms: f64| {
-                        channel(volume, ohms, 33e3) / channel(volume, laws::SOURCE_OHMS[1], 33e3)
-                    };
-                    (
-                        laws::SOURCE_OHMS[1],
-                        [
-                            at(laws::SOURCE_OHMS[0]),
-                            at(laws::SOURCE_OHMS[3]),
-                            1.0,
-                            at(laws::SOURCE_OHMS[2]),
-                        ],
-                    )
-                }
+                Some(_) => (laws::SOURCE_OHMS[1], continuous_ratios(volume)),
             };
             self.osc[o].ratios = ratios;
             self.set.gain[o] = if p.osc[o].on {
@@ -1795,12 +2248,7 @@ impl Light {
         }
         self.set.follows = [true, true, p.osc3_control];
         self.set.noise = if p.noise_on {
-            let (ohms, level) = if p.noise_pink {
-                (laws::NOISE_OHMS.1, laws::PINK)
-            } else {
-                (laws::NOISE_OHMS.0, laws::WHITE)
-            };
-            channel(volume_track(p.noise_volume), ohms, 11e3) / channel(1.0, ohms, 11e3) * level
+            noise_gain(p.noise_volume, p.noise_pink)
         } else {
             0.0
         };
@@ -1829,28 +2277,7 @@ impl Light {
             (true, true) => laws::KEYBOARD_CONTROL[2],
         };
         self.set.contour = contour_current(p.contour_amount);
-        // (EMPHASIS as the knob drawn with its generic taper would set R14.)
-        let emphasis = 1.0 - (1.0 + 80.0 * emphasis_r14(p.emphasis) / 50e3).ln() / 81f64.ln();
-        self.set.corner = ((0.744 - emphasis) / 0.044).clamp(0.0, 1.0);
-        for ((k, row), &log2) in self
-            .set
-            .emphasis
-            .iter_mut()
-            .zip(&laws::LOOP)
-            .zip(&laws::LOOP_AT_LOG2)
-        {
-            let threshold = interpolate(&laws::THRESHOLD_AT_LOG2, &laws::THRESHOLD, log2);
-            let shift = interpolate(&laws::THRESHOLD_AT_LOG2, &laws::SHIFT, log2);
-            let near = 1.0 - ((threshold - emphasis) / laws::EMPHASIS_NEAR).clamp(0.0, 1.0);
-            let at = interpolate(&laws::EMPHASIS_AT, row, emphasis + near * shift);
-            // (Past the threshold, `RING_GAIN` of the rise beyond it.)
-            *k = laws::LOOP_SCALE
-                * if at > 4.0 {
-                    4.0 + (at - 4.0) * laws::RING_GAIN
-                } else {
-                    at
-                };
-        }
+        (self.set.emphasis, self.set.corner) = emphasis_law(p.emphasis);
         // (The wheel as the drawing's would set its resistance.)
         let r = crate::modulation::mod_wheel_r(p.mod_wheel);
         self.set.depth = depth;
@@ -2043,11 +2470,10 @@ impl Light {
         self.line_up.reset();
         self.line_live = false;
         self.coupling = (self.coupling.0, 0.0, 0.0);
-        self.droop = (self.droop.0, 0.0, 0.0);
+        self.vca.reset();
         self.mode = (self.mode.0, 0.0, 0.0);
         self.fade = None;
         self.ran = false;
-        self.thump = (0.0, 0.0, 0.0);
         self.ext_hp = (self.ext_hp.0, 0.0, 0.0);
         self.pre_hp = (self.pre_hp.0, 0.0, 0.0);
         self.fed_back = [0.0; 128];
@@ -2094,10 +2520,9 @@ impl Light {
                 laws::OSC3_FREE_KEY
             };
             let semis = key - 69.0 + self.set.offset[o] + self.detune[o] / 100.0;
-            let hz = laws::A4 * f64::from(exp2((semis / 12.0) as f32));
-            let to = ((hz / self.rate) as f32).min(0.45);
+            let (to, inv) = oscillator_increment(semis, self.rate);
             self.dt_step[o] = (to - self.dt[o]) / CONTROL_EVERY as f32;
-            self.inv[o] = 1.0 / to.max(1e-9);
+            self.inv[o] = inv;
         }
         let knob = if self.cutoff_swept != 0.0 {
             self.set.cutoff + self.cutoff_swept
@@ -2112,16 +2537,9 @@ impl Light {
             + self.set.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0
             + self.cutoff_offset;
         // The passband at this cutoff.
-        let pass = interpolate(&laws::PASS_AT_LOG2, &laws::PASS_DB, log2);
-        self.pass = f64::from(exp2((pass * (std::f64::consts::LOG2_10 / 20.0)) as f32)) as f32;
+        self.pass = passband(log2);
         // Past the threshold, the pair's limit for the ring's level at this cutoff.
-        let ringing = 1.0 - self.set.corner;
-        self.ring_lift = if ringing > 0.0 {
-            let lift = interpolate(&laws::RING_LEVEL_AT_LOG2, &laws::RING_LEVEL, log2);
-            (1.0 + ringing * (lift - 1.0)) as f32
-        } else {
-            1.0
-        };
+        self.ring_lift = ring_lift(log2, self.set.corner);
         self.set_limit();
     }
 
@@ -2134,23 +2552,12 @@ impl Light {
             + s.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0
             + self.cutoff_offset
             + extra;
-        let corner = interpolate(&laws::CORNER_AT_LOG2, &laws::CORNER, log2) * s.corner
-            + interpolate(&laws::RING_RAISE_AT_LOG2, &laws::RING_RAISE, log2) * (1.0 - s.corner);
-        let frequency_log = log2 + corner;
-        let frequency_log = if frequency_log > laws::CUTOFF_SAT_AT[0] {
-            interpolate(&laws::CUTOFF_SAT_AT, &laws::CUTOFF_SAT, frequency_log)
-        } else {
-            frequency_log
-        };
-        let hz = f64::from(exp2(frequency_log as f32));
-        let w = (std::f64::consts::PI * hz / (self.rate * FILTER_OVERSAMPLE as f64)).min(1.4);
-        // tan by its Padé form, close enough below 1.4 for the ladder's tuning.
-        let w2 = w * w;
-        let t = w * (15.0 - w2) / (15.0 - 6.0 * w2);
-        let t = if t.is_finite() && t > 0.0 { t } else { 1e3 };
-        // The loop's gain at this cutoff, between the fitted ones.
-        let k = interpolate(&laws::LOOP_AT_LOG2, &s.emphasis, log2);
-        ((t / (1.0 + t)) as f32, k as f32)
+        ladder_coefficients(
+            log2,
+            &s.emphasis,
+            s.corner,
+            self.rate * FILTER_OVERSAMPLE as f64,
+        )
     }
 
     /// One step of the ladder at stage gain `g` and loop gain `k`, its input `bus` at the
@@ -2298,7 +2705,7 @@ impl Light {
                 self.trigger = gate;
                 if gate {
                     for c in &mut self.contours {
-                        c.attacking = self.attack;
+                        c.start(self.attack);
                     }
                 }
             }
@@ -2535,22 +2942,7 @@ impl Light {
         }
         let y = filtered as f32;
         // The VCA on the loudness contour.
-        let g = &laws::VCA_GAIN;
-        let v = (loud.max(0.0) * (1.0 / laws::VCA_STEP)) as f32;
-        let i = (v as usize).min(g.len() - 2);
-        let f = (v - i as f32).min(1.0);
-        let gain = g[i] + (g[i + 1] - g[i]) * f;
-        // The output's coupling (the rest of the waveforms' droop).
-        let y = y * laws::OUT * gain;
-        let (a, x0, y0) = self.droop;
-        let coupled = a * (y0 + y - x0);
-        self.droop = (a, y, coupled);
-        // The VCA's thump: its gain through the band-pass.
-        let ((ha, lb), (g0, h0, l0)) = (self.thump_c, self.thump);
-        let h = ha * (h0 + gain - g0);
-        let l = l0 + lb * (h - l0);
-        self.thump = (gain, h, l);
-        let mut out = f64::from(coupled + laws::THUMP * l);
+        let mut out = f64::from(self.vca.tick(y, loud));
         if self.panel.a440 {
             let (phase, step) = self.a440;
             let p = phase + step;
