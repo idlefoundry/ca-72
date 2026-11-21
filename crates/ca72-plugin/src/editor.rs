@@ -15251,6 +15251,57 @@ mod tests {
     }
 
     #[test]
+    fn vst3_reopens_at_the_chosen_size_and_new_instances_inherit_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let params = Arc::new(Ca72Params::default());
+        let meters = Arc::new(Meters::default());
+        let mut editor = Ca72Editor::new(params.clone(), meters.clone());
+        editor.screen = |_| Some((2560.0, 1440.0));
+        let (width, _) = editor.opening();
+        assert_ne!(width, DEFAULT_WIDTH, "Fit to Screen differs from 100%");
+
+        let host = Arc::new(Host {
+            api: Some(PluginApi::Vst3),
+            deferred: AtomicBool::new(true),
+            ..Default::default()
+        });
+        let mut editing = Editing::new(
+            host.clone(),
+            params,
+            meters.clone(),
+            (width, width, 1.0),
+            Library::at(dir.path().join("Presets")),
+            |_| Some((2560.0, 1440.0)),
+        );
+        editing.settings_file = Some(path.clone());
+        editor.open.store(true, Ordering::Release);
+
+        let key = on_strip(&editing, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut editing, key);
+        menu_item(&mut editing, "SIZE\u{2026}");
+        menu_item(&mut editing, "100%");
+        editing.grip();
+        assert_eq!(host.resizes.load(Ordering::Relaxed), 1);
+        let (request, (width, _)) = editor.resize_request();
+        assert_eq!(width, DEFAULT_WIDTH);
+        editor.resize_result(request, true);
+
+        drop(editor.closing());
+        drop(editing);
+        assert_eq!(editor.opening().0, DEFAULT_WIDTH, "same instance reopens");
+
+        let mut fresh = Ca72Editor::with_settings(
+            Arc::new(Ca72Params::default()),
+            meters,
+            Arc::new(LocalNotes::default()),
+            Settings::read(&path),
+        );
+        fresh.screen = editor.screen;
+        assert_eq!(fresh.opening().0, DEFAULT_WIDTH, "new instance opens");
+    }
+
+    #[test]
     fn only_an_accepted_width_becomes_the_default() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
