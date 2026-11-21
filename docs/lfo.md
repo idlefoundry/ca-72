@@ -276,8 +276,9 @@ one a session brought there listed `inert`).
   trace one cycle from PHASE, `lfo::settings(..).cycle_at(x)` (R-LFO's corrections: the owner,
   2026-10-20, "it should be 1"); the orb from the last `Scope::read` (read at most 30 times a
   second, only while the page shows) along that cycle by `phase` less PHASE (`lfo_page::orb_at`;
-  an ENV at the cycle's end once over); at `value`, its wake at `fade`'s gain (FADE shows as the
-  orb under the trace, rising into it or sinking away), or on the trace while it does not move. MODULATES from
+  an ENV at the cycle's end once over). Unassigned RETRIG and ENV scopes use elapsed time
+  from the note trigger. The orb sits on the trace, with its wake dimmed by FADE's gain
+  during motion. MODULATES from
   `Patch::assignments(Source::Lfo(n))`. UNI's trace and orb lie above the centre line (0..1);
   muted (`Column::on` off), the trace is drawn at about a third, the orb goes once faded out,
   and MODULATES reads MUTED, dim. A UNI LFO's rings run one way (`Ring::one_way`, as a macro's),

@@ -1482,6 +1482,7 @@ pub struct Scope {
     since: [AtomicU32; LFOS],
     fade: [AtomicU32; LFOS],
     moving: AtomicU8,
+    preview: AtomicU8,
     shape: [AtomicU32; LFOS],
     offset: [AtomicU32; LFOS],
     level: [AtomicU32; LFOS],
@@ -1504,6 +1505,8 @@ pub struct Reading {
     pub since: f32,
     pub fade: f32,
     pub moving: bool,
+    /// A note-triggered scope without a modulation assignment uses elapsed note time.
+    pub preview: bool,
     pub shape: f32,
     pub offset: f32,
     pub level: f32,
@@ -1520,6 +1523,7 @@ impl Scope {
             since: f(&self.since),
             fade: f(&self.fade),
             moving: self.moving.load(Ordering::Relaxed) & (1 << lfo.min(7)) != 0,
+            preview: self.preview.load(Ordering::Relaxed) & (1 << lfo.min(7)) != 0,
             shape: f(&self.shape),
             offset: f(&self.offset),
             level: f(&self.level),
@@ -1533,7 +1537,7 @@ impl Scope {
     }
 
     pub fn publish(&self, r: &[Reading; LFOS]) {
-        let (mut moving, mut moved) = (0u8, 0u8);
+        let (mut moving, mut moved, mut preview) = (0u8, 0u8, 0u8);
         for (k, r) in r.iter().enumerate() {
             self.value[k].store(r.value.to_bits(), Ordering::Relaxed);
             self.phase[k].store(r.phase.to_bits(), Ordering::Relaxed);
@@ -1544,9 +1548,11 @@ impl Scope {
             self.level[k].store(r.level.to_bits(), Ordering::Relaxed);
             moving |= u8::from(r.moving) << k;
             moved |= u8::from(r.moved) << k;
+            preview |= u8::from(r.preview) << k;
         }
         self.moving.store(moving, Ordering::Relaxed);
         self.moved.store(moved, Ordering::Relaxed);
+        self.preview.store(preview, Ordering::Relaxed);
     }
 }
 
@@ -1939,6 +1945,8 @@ pub struct Gen {
     cycles: f64,
     since: f64,
     started: bool,
+    /// The note trigger on the engine sample clock, for scopes with no assignment.
+    started_at: u64,
     out: f64,
     /// Where it was in its cycle at its last value (PHASE included), for the scope.
     at: f64,
@@ -1950,12 +1958,13 @@ pub struct Gen {
 
 impl Gen {
     /// A new note starts it: RETRIG and ENV from PHASE, FADE from its start.
-    pub fn start(&mut self, s: &Settings) {
+    pub fn start(&mut self, s: &Settings, sample: u64) {
         if s.mode != Mode::Free {
             self.cycles = 0.0;
         }
         self.since = 0.0;
         self.started = true;
+        self.started_at = sample;
     }
 
     /// Its value now, on the clock `clock` (cycles, if timed and FREE: its place on the host's
@@ -2017,6 +2026,7 @@ impl Gen {
             since: self.since as f32,
             fade: s.fade_gain(self.since, self.started) as f32,
             moving,
+            preview: false,
             shape: s.at as f32,
             offset: s.phase as f32,
             level: s.level as f32,
@@ -2331,10 +2341,10 @@ pub struct Bank {
 impl Bank {
     /// Every key starts RETRIG's phase and FADE. `full` is the main contours' trigger:
     /// from silence or RETRIGGER on, FREE's FADE and ENV start too (R-LFO-NOTE-RETRIG).
-    pub fn start_shared(&mut self, l: &Lfos, full: bool) {
+    pub fn start_shared(&mut self, l: &Lfos, full: bool, sample: u64) {
         for (g, s) in self.shared.iter_mut().zip(&l.lfo) {
             if full || s.mode == Mode::Retrig {
-                g.start(s);
+                g.start(s, sample);
             }
         }
         if self.cross.on {
@@ -2349,11 +2359,11 @@ impl Bank {
 
     /// Every key starts voice `k`'s RETRIG sources; `full` starts its other sources too.
     /// Newly assigned polyphonic voices always receive a full trigger.
-    pub fn start_voice(&mut self, l: &Lfos, k: usize, full: bool) {
+    pub fn start_voice(&mut self, l: &Lfos, k: usize, full: bool, sample: u64) {
         if let Some(v) = self.voices.get_mut(k) {
             for (g, s) in v.iter_mut().zip(&l.lfo) {
                 if full || s.mode == Mode::Retrig {
-                    g.start(s);
+                    g.start(s, sample);
                 }
             }
             self.latest = k;
@@ -2457,9 +2467,9 @@ impl Bank {
     }
 
     /// The scope's readings: the shared copies', or the latest voice's where MONO is off;
-    /// moving where assigned and running; at its LEVEL (its FADE's gain too), with the settings
+    /// moving where assigned and running; output at its LEVEL, with the settings
     /// in force (on the ticks, as the sources have moved them).
-    pub fn readings(&self, l: &Lfos) -> [Reading; LFOS] {
+    pub fn readings(&self, l: &Lfos, sample: u64, rate: f64) -> [Reading; LFOS] {
         std::array::from_fn(|k| {
             let latest = self.latest.min(VOICES - 1);
             let s = match (self.cross.on, l.lfo[k].mono) {
@@ -2475,7 +2485,12 @@ impl Bank {
             let assigned = l.lfo_active(k);
             let mut r = g.reading(s, assigned && g.moving(s));
             r.value *= s.level as f32;
-            r.fade *= s.level as f32;
+            if !assigned && s.mode != Mode::Free && g.started {
+                let since = sample.saturating_sub(g.started_at) as f64 / rate;
+                r.since = since as f32;
+                r.fade = s.fade_gain(since, true) as f32;
+                r.preview = true;
+            }
             // (What its trace is drawn from, as in force; moved where a source moves them.)
             (r.shape, r.offset, r.level) = (s.at as f32, s.phase as f32, s.level as f32);
             r.moved = self.cross.on && l.trace_moved(k);
@@ -4095,7 +4110,7 @@ mod tests {
             };
             let mut g = Gen::default();
             if start {
-                g.start(&set);
+                g.start(&set, 0);
             }
             g.advance(&set, 0.0, (after * 1000.0) as usize, 0.001);
             g.value(&set, None, 0.001)

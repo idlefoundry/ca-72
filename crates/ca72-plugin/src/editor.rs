@@ -17227,7 +17227,7 @@ mod tests {
         assert_eq!(at90.columns[1].trace, at90.columns[0].trace);
         assert_eq!(at90.columns[2].trace, at90.columns[0].trace);
         assert_ne!(at90.columns[3].trace, at90.columns[0].trace);
-        // The orb: where the reading has the LFO in its cycle, at its output.
+        // The orb: where the reading has the LFO in its cycle, on the trace.
         params
             .lfo_patch
             .assign(Source::Lfo(0), T::Cutoff, 0.4)
@@ -17253,16 +17253,19 @@ mod tests {
         e.modulating.due = None;
         e.read_lfos(Instant::now());
         let s = e.lfo_scene_now();
-        let set = |n| crate::lfo::settings(&params, n, crate::lfo::Edges::Soft);
-        assert_eq!(s.columns[0].orb, Some((0.5, f64::from(0.3f32))));
+        let sample = |n: usize, x: f64| {
+            let i = (x * (TRACE_POINTS - 1) as f64).round() as usize;
+            f64::from(s.columns[n].trace[i])
+        };
+        assert_eq!(s.columns[0].orb, Some((0.5, sample(0, 0.5))));
         assert_eq!(s.columns[0].orb_fade, 1.0);
         // (ENV assigned, its cycle over: held at the cycle's end, on the trace.)
-        assert_eq!(s.columns[1].orb, Some((1.0, set(1).cycle_at(1.0))));
+        assert_eq!(s.columns[1].orb, Some((1.0, sample(1, 1.0))));
         assert_eq!(s.columns[1].orb_fade, 1.0);
-        assert_eq!(s.columns[2].orb, Some((0.25, f64::from(0.1f32))));
+        assert_eq!(s.columns[2].orb, Some((0.25, sample(2, 0.25))));
         assert_eq!(
             s.columns[2].orb_fade, 0.5,
-            "FADE fading in: its wake so high"
+            "FADE fading in: its wake is dimmed"
         );
     }
 
@@ -17286,38 +17289,37 @@ mod tests {
         };
         for mode in [Mode::Free, Mode::Retrig] {
             let s = set(0.25, mode);
-            assert_eq!(orb_at(&s, &r(0.25, 0.1, true), 120.0, true), 0.0);
-            assert_eq!(orb_at(&s, &r(0.75, 0.1, true), 120.0, true), 0.5);
-            assert!((orb_at(&s, &r(0.1, 0.1, true), 120.0, true) - 0.85).abs() < 1e-6);
+            assert_eq!(orb_at(&s, &r(0.25, 0.1, true), 120.0), 0.0);
+            assert_eq!(orb_at(&s, &r(0.75, 0.1, true), 120.0), 0.5);
+            assert!((orb_at(&s, &r(0.1, 0.1, true), 120.0) - 0.85).abs() < 1e-6);
             // (PHASE in f32 as the reading's: its start not read as just short of the end.)
             let third = set(1.0 / 3.0, mode);
             let start = r((1.0f64 / 3.0) as f32, 0.0, true);
-            assert_eq!(orb_at(&third, &start, 120.0, true), 0.0);
+            assert_eq!(orb_at(&third, &start, 120.0), 0.0);
         }
         let env = set(0.5, Mode::Env);
-        assert!((orb_at(&env, &r(0.8, 0.15, true), 120.0, true) - 0.3).abs() < 1e-6);
-        assert_eq!(orb_at(&env, &r(0.5, 2.0, false), 120.0, true), 1.0, "over");
+        assert!((orb_at(&env, &r(0.8, 0.15, true), 120.0) - 0.3).abs() < 1e-6);
+        assert_eq!(orb_at(&env, &r(0.5, 2.0, false), 120.0), 1.0, "over");
+        assert_eq!(orb_at(&env, &r(0.5, 0.0, false), 120.0), 1.0, "never begun");
         assert_eq!(
-            orb_at(&env, &r(0.5, 0.0, false), 120.0, false),
-            1.0,
-            "never begun"
-        );
-        assert_eq!(
-            orb_at(&env, &r(0.5, 0.25, false), 120.0, false),
+            orb_at(
+                &env,
+                &Reading {
+                    preview: true,
+                    ..r(0.5, 0.25, false)
+                },
+                120.0
+            ),
             0.5,
             "not assigned"
         );
         let at0 = set(0.0, Mode::Env);
         assert_eq!(
-            orb_at(&at0, &r(0.0, 0.499, true), 120.0, true),
+            orb_at(&at0, &r(0.0, 0.499, true), 120.0),
             1.0,
             "its last instant"
         );
-        assert_eq!(
-            orb_at(&at0, &r(0.0, 0.0, true), 120.0, true),
-            0.0,
-            "its first"
-        );
+        assert_eq!(orb_at(&at0, &r(0.0, 0.0, true), 120.0), 0.0, "its first");
     }
 
     /// No tip on the LFO page covers a scope (the owner, 2026-10-20, saw MODE's over its
