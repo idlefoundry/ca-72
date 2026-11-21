@@ -1894,6 +1894,109 @@ fn an_automated_offline_bounce_makes_no_click_in_any_blocks() {
     });
 }
 
+/// Issue #56: exercise QUALITY automation inside a host block. Leaving LO lifts the
+/// note, so strike it again at HI before the held HI/ULTRA transitions.
+#[test]
+fn quality_switches_offline_without_a_burst_or_persistent_distortion() {
+    const LO: f64 = 0.0;
+    const HI: f64 = 1.0;
+    const ULTRA: f64 = 2.0;
+    let cold_ultra = session(&[("quality", ULTRA), ("poly", 0.0)]);
+    let cold_hi = session(&[("quality", HI), ("poly", 0.0)]);
+    let cold_lo = session(&[("quality", LO), ("poly", 0.0)]);
+    let note_on = In::Note(0, CLAP_EVENT_NOTE_ON, -1, 0, 57, 0.8);
+    let note_off = In::Note(0, CLAP_EVENT_NOTE_OFF, -1, 0, 57, 0.0);
+    let peak = |audio: &[f32]| audio.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+    // Third-difference RMS detects excess high-frequency energy without relying on the
+    // two oscillator phases lining up after a switch.
+    let edge_rms = |audio: &[f32]| {
+        let energy: f64 = audio
+            .windows(8)
+            .step_by(2)
+            .flat_map(|w| {
+                [0, 1].map(|i| {
+                    let [a, b, c, d] = [w[i], w[i + 2], w[i + 4], w[i + 6]].map(f64::from);
+                    (d - 3.0 * c + 3.0 * b - a).powi(2)
+                })
+            })
+            .sum();
+        (energy / (audio.len() - 6) as f64).sqrt()
+    };
+    for rate in [44_100.0, 48_000.0, 96_000.0] {
+        for block in [64, 100, 256, 1024] {
+            let ms = |millis| (rate * millis / 1000.0) as u32;
+            let inside_block = |millis| ms(millis) / block * block + block / 2;
+            let [hi, ultra, back_hi, back_lo] = [60.0, 150.0, 310.0, 470.0].map(inside_block);
+            let strike = hi + ms(15.0);
+            let render = |state: &[u8], events: &[(u32, In)]| {
+                let p = bouncing(rate, block);
+                assert!(p.load(state));
+                let out = bounce(&p, events, ms(590.0), &mut || block, &mut || {});
+                assert!(out.iter().all(|v| v.is_finite()), "{rate} Hz / {block}");
+                out
+            };
+            let switched = render(
+                &cold_lo,
+                &[
+                    (ms(5.0), note_on),
+                    (hi, In::Param(0, "quality", HI)),
+                    (strike - 1, note_off),
+                    (strike, note_on),
+                    (ultra, In::Param(0, "quality", ULTRA)),
+                    (back_hi, In::Param(0, "quality", HI)),
+                    (back_lo, In::Param(0, "quality", LO)),
+                ],
+            );
+            let ultra_ref = render(&cold_ultra, &[(strike, note_on)]);
+            let hi_ref = render(&cold_hi, &[(strike, note_on)]);
+            let lo_ref = render(&cold_lo, &[(ms(5.0), note_on)]);
+            let reference_peak = [peak(&ultra_ref), peak(&hi_ref), peak(&lo_ref)]
+                .into_iter()
+                .fold(0.0f32, f32::max);
+            let window = |at: u32, len: u32| (2 * at) as usize..(2 * (at + len)) as usize;
+            let peaks = [hi, ultra, back_hi, back_lo].map(|at| {
+                let near = peak(&switched[window(at - ms(5.0), ms(55.0))]);
+                assert!(
+                    near <= reference_peak * 1.122,
+                    "{rate} Hz / {block}, switch at {at}: peak {near}, reference {reference_peak}"
+                );
+                near
+            });
+            // Compare the same held note after both HI/ULTRA handoffs, once the fade
+            // and filters settle. A silent cold reference would invalidate the comparison.
+            let mut settled = [(0.0, 0.0); 2];
+            for (i, (at, reference)) in [(ultra, &ultra_ref), (back_hi, &hi_ref)]
+                .into_iter()
+                .enumerate()
+            {
+                let tail = window(at + ms(90.0), ms(50.0));
+                let (actual, expected) = (&switched[tail.clone()], &reference[tail]);
+                let expected_rms = rms(expected);
+                let expected_edge = edge_rms(expected);
+                assert!(
+                    expected_rms > 0.001 && expected_edge > 0.0,
+                    "{rate} Hz / {block}: silent reference"
+                );
+                let level_db = 20.0 * (rms(actual) / expected_rms).log10();
+                let edge_db = 20.0 * (edge_rms(actual) / expected_edge).log10();
+                assert!(
+                    level_db.abs() < 1.5 && edge_db.abs() < 3.0,
+                    "{rate} Hz / {block}, switch at {at}: RMS {level_db:+.2} dB, edge {edge_db:+.2} dB"
+                );
+                settled[i] = (level_db, edge_db);
+            }
+            eprintln!(
+                "{rate} Hz / {block}: switch peaks {peaks:.6?}, cold ULTRA peak {:.6}, reference peak {reference_peak:.6}, settled (RMS, edge) dB {settled:+.3?}",
+                peak(&ultra_ref)
+            );
+            assert!(
+                peak(&switched) < 1.0 && reference_peak < 1.0,
+                "{rate} Hz / {block}: exceeded full scale"
+            );
+        }
+    }
+}
+
 /// A parameter's change that is the first event of the host's block, at a later sample, is set
 /// at its sample (`third_party/nih-plug/PATCHES.md`, change 18): the block is the same to the
 /// bit as the host's two blocks either side of the change, and not as the change at the
