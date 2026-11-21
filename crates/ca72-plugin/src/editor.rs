@@ -6265,11 +6265,21 @@ const REPAINT: Option<Duration> = if cfg!(target_os = "linux") {
 /// shown meanwhile; the window seen again is shown whole at once.
 const HIDDEN_DRAW: Duration = Duration::from_millis(250);
 
-/// The tests' counts of the frames drawn and shown by the editors' windows (R-EDITOR-CPU).
-#[cfg(test)]
-static DRAWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-#[cfg(test)]
-static SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Drive and observe the Windows editor's frame pacing on the fixture's UI thread.
+#[cfg(all(test, target_os = "windows"))]
+#[derive(Clone, Copy, Default)]
+struct FrameProbe {
+    now: Option<Instant>,
+    callbacks: u64,
+    drawn: u64,
+    shown: u64,
+    first_partial: Option<bool>,
+}
+
+#[cfg(all(test, target_os = "windows"))]
+thread_local! {
+    static FRAME_PROBE: std::cell::Cell<FrameProbe> = std::cell::Cell::new(FrameProbe::default());
+}
 
 /// How long after a frame is first shown at a size (the window opened, PANEL, SIZE, the grip)
 /// it is shown again at every frame, on X11: what is shown before the host's window has taken
@@ -6329,6 +6339,13 @@ impl WindowHandler for PanelWindow {
         self.editing.grip();
         self.follow(window);
         let now = Instant::now();
+        #[cfg(all(test, target_os = "windows"))]
+        let now = FRAME_PROBE.with(|probe| {
+            let mut frame = probe.get();
+            frame.callbacks += 1;
+            probe.set(frame);
+            frame.now.unwrap_or(now)
+        });
         // Unseen, drawn only now and then and not shown; seen again, shown whole.
         // A remote AU view may be visible through its host's proxy while its native backing
         // window is occluded. Keep presenting when that window cannot describe visibility.
@@ -6354,8 +6371,12 @@ impl WindowHandler for PanelWindow {
                     self.editing.context.native_window_occlusion_reliable(),
                 ));
         }
-        #[cfg(test)]
-        DRAWN.fetch_add(1, Ordering::Relaxed);
+        #[cfg(all(test, target_os = "windows"))]
+        FRAME_PROBE.with(|probe| {
+            let mut frame = probe.get();
+            frame.drawn += 1;
+            probe.set(frame);
+        });
         let changed = self.editing.draw();
         // A drawer that has just slid shut has asked the host for the shorter window: the
         // editor's view follows in the same frame, before anything is shown. A frame between
@@ -6368,12 +6389,18 @@ impl WindowHandler for PanelWindow {
         // (Shown again whole when due: X11 may have dropped any of it.)
         let due = repaint_due(self.shown, self.settle, now);
         if seen && (changed || due) {
-            #[cfg(test)]
-            SHOWN.fetch_add(1, Ordering::Relaxed);
+            let partial = changed && !due;
+            #[cfg(all(test, target_os = "windows"))]
+            FRAME_PROBE.with(|probe| {
+                let mut frame = probe.get();
+                frame.shown += 1;
+                frame.first_partial.get_or_insert(partial);
+                probe.set(frame);
+            });
             if self.shown.is_none() {
                 self.settle = SETTLE.map(|for_| now + for_);
             }
-            self.present(changed && !due);
+            self.present(partial);
             self.shown = Some(now);
         }
         self.editing.measure_when_done();
@@ -19903,62 +19930,77 @@ mod windows_window_tests {
     fn an_unseen_window_draws_seldom_and_is_whole_when_seen_again() {
         use winapi::um::winuser::{SW_MINIMIZE, SW_RESTORE, ShowWindow};
         let o = Opened::new(false, HostWindow::Dialog);
-        let play = |levels: f32, ms: u64| {
-            let until = Instant::now() + Duration::from_millis(ms);
-            let mut k = 0u32;
-            while Instant::now() < until {
-                let mut l = [0.0f32; LEVELS];
-                for (v, l) in l.iter_mut().enumerate().take(4) {
-                    *l = levels * (0.6 + 0.4 * ((k as usize + v) % 3) as f32 / 2.0);
+        let counts = || FRAME_PROBE.with(std::cell::Cell::get);
+        let set_time = |now, reset_presentations| {
+            FRAME_PROBE.with(|probe| {
+                let mut frame = probe.get();
+                frame.now = Some(now);
+                if reset_presentations {
+                    frame.first_partial = None;
                 }
-                o.meters.publish(0.0, (0.5, 0.0), 0b1111);
-                o.meters.publish_levels(&l, levels);
-                pump(Duration::from_millis(30));
-                k += 1;
-            }
+                probe.set(frame);
+            });
         };
-        let counts = || (DRAWN.load(Ordering::Relaxed), SHOWN.load(Ordering::Relaxed));
-        play(0.6, 800);
-        let (d0, s0) = counts();
-        play(0.6, 2000);
-        let (d1, s1) = counts();
+        // Wait for Windows to deliver a frame callback. The timeout is a hang bound;
+        // the test makes no assumption about how many callbacks Windows can deliver in it.
+        let next_frame = || {
+            let previous = counts().callbacks;
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while counts().callbacks == previous {
+                assert!(Instant::now() < deadline, "no Windows frame callback");
+                pump(Duration::from_millis(10));
+            }
+            counts()
+        };
+
+        let now = Instant::now();
+        set_time(now, false);
+        let before = counts();
+        let seen = next_frame();
+        assert_eq!(
+            seen.drawn - before.drawn,
+            seen.callbacks - before.callbacks,
+            "every visible callback draws"
+        );
+        assert!(seen.shown > 0, "the visible window presented a frame");
+
         // SAFETY: the test's own window.
         unsafe { ShowWindow(o.parent, SW_MINIMIZE) };
-        play(0.6, 400);
-        let (d2, s2) = counts();
-        play(0.6, 2000);
-        let (d3, s3) = counts();
-        let (seen, unseen) = (d1 - d0, d3 - d2);
-        println!(
-            "2 s seen: {seen} frames drawn, {} shown; 2 s unseen: {unseen} drawn, {} shown",
-            s1 - s0,
-            s3 - s2
-        );
-        assert!(seen >= 40, "{seen} frames drawn in 2 s while seen");
-        assert!(unseen <= 12, "{unseen} frames drawn in 2 s while unseen");
-        assert_eq!(s3 - s2, 0, "frames shown while unseen");
+        o.meters.publish(0.0, (0.5, 0.0), 0b1111);
+        let mut levels = [0.0; LEVELS];
+        levels[..4].fill(0.6);
+        o.meters.publish_levels(&levels, 0.6);
+
+        let hidden = next_frame();
+        assert_eq!(hidden.drawn, seen.drawn + 1, "first hidden draw");
+        assert_eq!(hidden.shown, seen.shown, "no presentation while hidden");
+        let next_draw = now + Duration::from_millis(250);
+        set_time(next_draw - Duration::from_nanos(1), false);
+        let early = next_frame();
+        assert_eq!(early.drawn, hidden.drawn, "hidden draw before it was due");
+        assert_eq!(early.shown, hidden.shown, "no presentation while hidden");
+        set_time(next_draw, true);
+        let due = next_frame();
+        assert_eq!(due.drawn, hidden.drawn + 1, "hidden draw when due");
+        assert_eq!(due.shown, hidden.shown, "no presentation while hidden");
+
+        // Restore at the same instant as the last hidden draw. The visible callback
+        // should draw immediately and present the entire panel.
         // SAFETY: the test's own window.
         unsafe { ShowWindow(o.parent, SW_RESTORE) };
-        play(0.0, 300);
-        // Still (as `the_window_shown_in_places_is_the_window_shown_whole` waits for it), then
-        // the window shown whole by Windows' own repaint: the same pixels.
-        let span = Duration::from_secs_f64(crate::opening::DOZE_AFTER + 1.0);
-        let until = Instant::now() + Duration::from_secs(20);
-        let mut still = every_pixel(&o);
-        let mut since = Instant::now();
-        while since.elapsed() < span {
-            pump(Duration::from_millis(400));
-            let now = every_pixel(&o);
-            if now != still {
-                assert!(Instant::now() < until, "the window never still");
-                (still, since) = (now, Instant::now());
-            }
-        }
+        let restored = next_frame();
+        assert!(restored.drawn > due.drawn, "visible draws resume at once");
+        assert_eq!(
+            restored.first_partial,
+            Some(false),
+            "the first presentation on restore is a whole frame"
+        );
+        let still = every_pixel(&o);
         assert!(colours(&still) >= 100, "the panel shown again");
+        // Repaint synchronously so both captures observe the same rendered frame.
         let flags = RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN;
         // SAFETY: the test's own windows.
         unsafe { RedrawWindow(o.parent, null_mut(), null_mut(), flags) };
-        pump(Duration::from_millis(200));
         let whole = every_pixel(&o);
         let apart = still.iter().zip(&whole).filter(|(a, b)| a != b).count();
         assert_eq!(
