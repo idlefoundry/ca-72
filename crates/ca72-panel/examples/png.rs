@@ -876,7 +876,8 @@ pub fn lfo_example() -> ca72_panel::strip::lfo::LfoScene {
         // (ENV's orb held at its cycle's end; a FADE is fading in or out, a little way into it.)
         let orb = if mode == 1.0 { 1.0 } else { orb };
         let gain = if fade != 0.0 { 0.6 } else { 1.0 };
-        c.orb = Some((orb, out(orb) * gain));
+        let sample = (orb * (TRACE_POINTS - 1) as f64).round() as usize;
+        c.orb = Some((orb, f64::from(c.trace[sample])));
         c.orb_fade = gain;
         c.colour = rgb(words.get(n).copied().unwrap_or("amber"));
         c.continuous = continuous;

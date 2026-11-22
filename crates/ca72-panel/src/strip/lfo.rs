@@ -3,8 +3,8 @@
 //! kept beside it. Four columns, one an LFO, each top to bottom:
 //!
 //! - its scope (a CRT in the LFO's phosphor colour: graticule, the glowing trace of one cycle
-//!   of its waveform from PHASE, and an orb along it where the LFO is in its cycle, at its
-//!   output: under the trace while FADE fades it in or out, stopped at the cycle's end in ENV), MODE (the panel's three-position toggle: FREE, RETRIG, ENV) and MONO beside it;
+//!   of its waveform from PHASE, and an orb along it where the LFO is in its cycle. FADE dims
+//!   the orb's wake, and ENV stops at the cycle's end), MODE (FREE, RETRIG, ENV) and MONO beside it;
 //! - WAVEFORM (the oscillators' switch, STEPPED or CONTINUOUS), RATE (Hz, or its note values
 //!   while its timed key is on), PHASE;
 //! - FADE, the OUT jack its assignments are dragged from, and the MODULATES screen.
@@ -251,10 +251,9 @@ pub struct Column {
     /// The trace: the waveform (-1..1; 0..1 UNI) at [`TRACE_POINTS`] even steps over one cycle
     /// from PHASE.
     pub trace: Vec<f32>,
-    /// The orb: how far along the trace (0..1), and the output there (-1..1); none, no orb.
+    /// The orb: how far along the trace (0..1), and its height there (-1..1); none, no orb.
     pub orb: Option<(f64, f64)>,
-    /// FADE's gain at the orb (0..1): its wake drawn at so much of the trace's height, as the
-    /// orb rides at the output.
+    /// FADE's gain at the orb (0..1), applied to the brightness of the wake.
     pub orb_fade: f64,
     /// What MODULATES reads, and whether lit (dim: NOT IN USE).
     pub screen: String,
@@ -616,7 +615,7 @@ impl LfoRenderer {
         out
     }
 
-    /// Column `n`'s orb at `x` along its trace (0..1), the output `v` there: its patch cut from
+    /// Column `n`'s orb at `x` along its trace (0..1), at height `v`: its patch cut from
     /// the still screen, its wake along the trace behind it, the orb, the glass over them.
     fn orb_patch(&mut self, n: usize, col: &Column, x: f64, v: f64) -> Option<Patch> {
         let s = self.scale;
@@ -635,12 +634,7 @@ impl LfoRenderer {
         let (ox, oy) = at(i, v);
         let i0 = i.saturating_sub(k / 9);
         let wake: Vec<(f32, f32)> = (i0..=i)
-            .map(|j| {
-                at(
-                    j,
-                    f64::from(col.trace[j.min(col.trace.len() - 1)]) * col.orb_fade,
-                )
-            })
+            .map(|j| at(j, f64::from(col.trace[j.min(col.trace.len() - 1)])))
             .collect();
         let r = (ORB_R * s) as f32;
         let mut b = [ox - r, oy - r, ox + r, oy + r];
@@ -678,7 +672,7 @@ impl LfoRenderer {
                     pb.line_to(q.0 - off.0, q.1 - off.1);
                 }
                 let Some(path) = pb.finish() else { continue };
-                let alpha = 0.75 * (j + 1) as f32 / segs as f32;
+                let alpha = 0.75 * (j + 1) as f32 / segs as f32 * col.orb_fade as f32;
                 for (width, k) in [(6.5 * s as f32, 0.3f32), (3.2 * s as f32, 1.0)] {
                     let mut paint = Paint::default();
                     let c = if k < 1.0 { ph.bloom } else { ph.core };

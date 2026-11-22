@@ -66,26 +66,48 @@ pub(super) fn label(patch: &lfo::Patch, s: Source) -> String {
     }
 }
 
-/// Where a scope's orb is along its one cycle (0..1 from PHASE; decisions.md R-LFO): where the
-/// LFO is in its cycle, its reading's `phase`. An ENV holds at its cycle's end: there once its
-/// cycle is over (`assigned`, no longer moving) or never begun; one not assigned, as far
-/// through it as its time since the note has it.
-pub(super) fn orb_at(set: &lfo::Settings, r: &Reading, tempo: f64, assigned: bool) -> f64 {
-    let through = f64::from(r.since) * set.hz_at(tempo);
-    // (PHASE in f32 as the reading's phase is, so that a cycle's start reads 0, not just short
-    // of 1.)
-    let x = (f64::from(r.phase) - f64::from(set.phase as f32)).rem_euclid(1.0);
-    if set.mode == lfo::Mode::Env {
-        return if r.moving {
-            // (Its last instant in f32 can read as the next cycle's start.)
-            if x < 0.25 && through > 0.75 { 1.0 } else { x }
-        } else if assigned || r.since <= 0.0 {
-            1.0
-        } else {
+/// Position through the cycle from PHASE. An unassigned note-triggered LFO uses its
+/// note age, since the engine can skip advancing its generator.
+pub(super) fn orb_at(set: &lfo::Settings, r: &Reading, tempo: f64) -> f64 {
+    if r.preview {
+        let through = f64::from(r.since) * set.hz_at(tempo);
+        return if set.mode == lfo::Mode::Env {
             through.min(1.0)
+        } else {
+            through.rem_euclid(1.0)
         };
     }
+    // Match the reading's f32 phase so a cycle's start reads exactly 0.
+    let x = (f64::from(r.phase) - f64::from(set.phase as f32)).rem_euclid(1.0);
+    if set.mode == lfo::Mode::Env {
+        // The last instant can round to the next cycle's start.
+        let through = f64::from(r.since) * set.hz_at(tempo);
+        if !r.moving || (x < 0.25 && through > 0.75) {
+            return 1.0;
+        }
+        return x;
+    }
     if x > 1.0 - 1e-6 { 0.0 } else { x }
+}
+
+/// Place the dot on the same trace sample the panel draws at this phase.
+fn scope_orb(
+    set: &lfo::Settings,
+    r: &Reading,
+    tempo: f64,
+    trace: &[f32],
+) -> (Option<(f64, f64)>, f64) {
+    let x = orb_at(set, r, tempo);
+    let i = (x * (trace.len() - 1) as f64).round() as usize;
+    let gain = if r.moving || (r.preview && (set.mode != lfo::Mode::Env || x < 1.0)) {
+        f64::from(r.fade).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    (
+        (set.on || r.moving).then_some((x, f64::from(trace[i]))),
+        gain,
+    )
 }
 
 /// What an LFO's trace is drawn from (decisions.md R-LFO's corrections; the owner, 2026-10-20:
@@ -599,20 +621,11 @@ impl Editing {
             // a source moving its PHASE, shape or LEVEL, the cycle as the engine plays it now.)
             let (drawn, level) = drawn_settings(&set, &r);
             let trace = trace_of(&drawn, level, r.moved);
-            let assigned = (self.params.lfo_patch.assignments(Source::Lfo(n)).iter())
-                .flatten()
-                .any(|a| a.depth != 0.0);
-            let x = orb_at(&drawn, &r, tempo, assigned);
-            // (Moving, at its output, FADE's gain and EDGES in it; still, on the trace.)
-            let (y, gain) = if r.moving {
-                (f64::from(r.value), f64::from(r.fade).clamp(0.0, 1.0))
-            } else {
-                (drawn.cycle_at(x) * level, 1.0)
-            };
             let v = |k: usize| self.scene.values[lfo_index(n, k)];
             let continuous = q.shape_mode.value() == WaveMode::Continuous;
             let keys = self.params.lfo_keys(n);
-            let on = keys.on.value();
+            let on = set.on;
+            let (orb, gain) = scope_orb(&drawn, &r, tempo, &trace);
             let (screen, in_use) =
                 screen_text(&self.params.lfo_patch, n, on, self.playing.standalone);
             *col = Column {
@@ -637,7 +650,7 @@ impl Editing {
                 mono: q.mono.value(),
                 trace,
                 // (Muted and faded out: none.)
-                orb: (on || r.moving).then_some((x, y)),
+                orb,
                 uni: keys.polarity.value() == lfo::Polarity::Uni,
                 on,
                 orb_fade: gain,
@@ -1562,6 +1575,71 @@ mod tests {
     use crate::engine::{Controls, Engine, Event};
     use crate::lfo::{Assignment, Edges, LfoKnob, Mode, Settings, Target};
 
+    fn scope_at_note_age(
+        mode: Mode,
+        fade: f64,
+        assigned: bool,
+        check: impl FnOnce(&Settings, &Reading, &[f32]),
+    ) {
+        let set = Settings {
+            phase: 0.125,
+            hz: 2.0,
+            mode,
+            fade,
+            ..Settings::default()
+        };
+        let mut c = Controls {
+            entropy: 0.0,
+            potato: true,
+            ..Controls::default()
+        };
+        c.lfo.lfo[0] = set;
+        if assigned {
+            c.lfo.to[0][0] = Some(Assignment {
+                target: Target::Cutoff,
+                depth: 0.3,
+            });
+        }
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 3);
+        e.event(Event::Note { key: 60, on: true });
+        let (mut l, mut r) = ([0.0; 6_000], [0.0; 6_000]);
+        e.render(&[], &mut l, &mut r);
+        e.end_block(l.len());
+        let scope = lfo::Scope::default();
+        scope.publish(&e.lfo_readings());
+        let trace = trace_of(&set, 1.0, false);
+        check(&set, &scope.read(0), &trace);
+    }
+
+    #[test]
+    fn unassigned_note_triggered_lfos_show_a_travelling_dot() {
+        for mode in [Mode::Retrig, Mode::Env] {
+            scope_at_note_age(mode, 0.0, false, |set, reading, trace| {
+                let (orb, _) = scope_orb(set, reading, 120.0, trace);
+                let (x, y) = orb.expect("the enabled LFO has a dot");
+                assert!((x - 0.25).abs() < 1e-6, "{mode:?} dot phase was {x}");
+                let i = (x * (TRACE_POINTS - 1) as f64).round() as usize;
+                assert_eq!(y, f64::from(trace[i]));
+            });
+        }
+    }
+
+    #[test]
+    fn high_fade_scales_the_wake_without_displacing_the_dot() {
+        for (mode, fade) in [(Mode::Free, 10.0), (Mode::Retrig, 10.0), (Mode::Env, -10.0)] {
+            scope_at_note_age(mode, fade, true, |set, reading, trace| {
+                let (orb, gain) = scope_orb(set, reading, 120.0, trace);
+                let (x, y) = orb.expect("the enabled LFO has a dot");
+                let i = (x * (TRACE_POINTS - 1) as f64).round() as usize;
+                assert_eq!(y, f64::from(trace[i]), "{mode:?} dot left the trace");
+                let expected = if fade > 0.0 { 0.0125 } else { 0.9875 };
+                assert!((gain - expected).abs() < 1e-6, "{mode:?} wake gain {gain}");
+            });
+        }
+    }
+
     /// LFO 1 CONTINUOUS, its shape moved by LFO 2 (and its PHASE and LEVEL by LFO 3), as the
     /// owner's picture had it (decisions.md R-LFO's corrections: "the oscilloscope wave isn't
     /// changing to match the actual pattern that's happening at the moment"): at every reading,
@@ -1617,7 +1695,7 @@ mod tests {
             let set = c.lfo.lfo[0];
             let (drawn, level) = drawn_settings(&set, &reading);
             let trace = trace_of(&drawn, level, true);
-            let x = orb_at(&drawn, &reading, 120.0, true);
+            let x = orb_at(&drawn, &reading, 120.0);
             let at = |trace: &[f32]| {
                 let f = x * (TRACE_POINTS - 1) as f64;
                 let i = (f.floor() as usize).min(TRACE_POINTS - 2);

@@ -2574,7 +2574,8 @@ impl Engine {
 
     /// Each LFO's present reading, for the editor's scopes (decisions.md R-LFO).
     pub fn lfo_readings(&self) -> [crate::lfo::Reading; crate::lfo::LFOS] {
-        self.bank.readings(&self.base.lfo)
+        self.bank
+            .readings(&self.base.lfo, self.played, self.lfo_rate())
     }
 
     /// The rate the LFOs keep time by.
@@ -2735,7 +2736,7 @@ impl Engine {
                 let new = on && (phrase || self.controls.panel.retrigger);
                 if on {
                     self.lfo_catch_up();
-                    self.bank.start_shared(&self.base.lfo, new);
+                    self.bank.start_shared(&self.base.lfo, new, self.played);
                 }
                 if self.slots.is_empty() {
                     return;
@@ -2743,7 +2744,7 @@ impl Engine {
                 if self.controls.unison || !self.controls.poly {
                     if on {
                         for k in 0..self.instruments() {
-                            self.bank.start_voice(&self.base.lfo, k, new);
+                            self.bank.start_voice(&self.base.lfo, k, new, self.played);
                         }
                     }
                     self.one_note(i32::from(key), on);
@@ -3048,7 +3049,8 @@ impl Engine {
         (s.expression, s.fresh) = (e, true);
         s.velocity.take(v, true);
         // (Its own LFOs start with each note it takes: decisions.md R-LFO.)
-        self.bank.start_voice(&self.base.lfo, pick, true);
+        self.bank
+            .start_voice(&self.base.lfo, pick, true, self.played);
     }
 
     /// The voices POLY plays.
