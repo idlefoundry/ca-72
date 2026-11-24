@@ -8,28 +8,31 @@ import bpy
 # Editable glTF PBR defaults also serve as the baseline for Cycles.
 # Values are sRGB hex, roughness, metallic and dielectric specular IOR level.
 FINISHES = {
-    "Rocker_Actuator": ("#3a7eb5", 0.62, 0.0, 0.24),
-    "Rocker_Power_Black": ("#202020", 0.62, 0.0, 0.25),
-    "Rocker_Bezel": ("#19191a", 0.62, 0.0, 0.25),
-    "Rocker_Well": ("#101011", 0.82, 0.0, 0.20),
-    "Nickel_Chrome": ("#f1f0ed", 0.08, 0.99, 0.50),
-    "Nickel_Chrome_Satin": ("#eeedeb", 0.19, 0.99, 0.50),
+    "Rocker_Actuator": ("#3a7eb5", 0.62, 0.0, 0.10),
+    "Rocker_Power_Black": ("#262628", 0.58, 0.0, 0.04),
+    "Rocker_Bezel": ("#101011", 0.64, 0.0, 0.11),
+    "Rocker_Well": ("#0d0d0e", 0.82, 0.0, 0.10),
+    "Nickel_Chrome": ("#a6a5a3", 0.08, 0.99, 0.50),
+    "Nickel_Chrome_Satin": ("#717172", 0.19, 0.99, 0.50),
     "Toggle_Inner_Dark": ("#292729", 0.43, 0.75, 0.50),
 }
 
 
-def _linear_rgba(color_hex):
+def _linear_rgba(color_hex, reflectance=1.0):
     channels = (int(color_hex[i:i + 2], 16) / 255.0 for i in (1, 3, 5))
     linear = tuple(
         ((c + 0.055) / 1.055) ** 2.4 if c > 0.04045 else c / 12.92
         for c in channels
     )
-    return (*linear, 1.0)
+    return (*(c * reflectance for c in linear), 1.0)
 
 
 def _base_finish(material, name, color_hex=None):
     color, roughness, metallic, specular = FINISHES[name]
-    rgba = _linear_rgba(color_hex or color)
+    # Calibrate the nylon pigment in linear light so custom tints keep their hue
+    # under the full-energy studio rig. glTF defaults use the same reflectance.
+    reflectance = 0.40 if name == "Rocker_Actuator" else 1.0
+    rgba = _linear_rgba(color_hex or color, reflectance)
     material.use_nodes = True
     material.diffuse_color = rgba
     material.roughness = roughness
@@ -178,7 +181,8 @@ def add_toggle_reflection_cards(scene, *, across=False):
     tree.nodes.clear()
     emission = tree.nodes.new("ShaderNodeEmission")
     emission.inputs["Color"].default_value = (1.0, 0.97, 0.94, 1.0)
-    emission.inputs["Strength"].default_value = 0.58
+    # Retain the shaft's silver band with the lower-reflectance chrome finish.
+    emission.inputs["Strength"].default_value = 1.20
     output = tree.nodes.new("ShaderNodeOutputMaterial")
     tree.links.new(emission.outputs["Emission"], output.inputs["Surface"])
     white.cycles.emission_sampling = "NONE"

@@ -80,10 +80,12 @@ def rounded_rectangle(x, y, z, radius):
     return points
 
 
-def build_rocker_bezel(dim, bezel, well):
+def build_rocker_bezel(dim, bezel, well, *, power):
     half_w, half_h = dim["w"] / 2, dim["h"] / 2
     outer_x, outer_y = half_w + dim["bezel_pad"], half_h + dim["bezel_pad"]
-    inner_x, inner_y = half_w + 0.00013, half_h + 0.00013
+    # Widen the colored rocker opening inside the existing mounting footprint.
+    opening = 0.00013 if power else 0.00044
+    inner_x, inner_y = half_w + opening, half_h + opening
     top, floor = 0.00122, -0.00485
     # Thin flat lip, small mould breaks and a full-depth pocket for the pressed skirt.
     rings = [
@@ -115,12 +117,14 @@ def power_rib_profile():
 def build_rocker_actuator(dim, material, *, vertical, ribbed=False):
     w, h, height = dim["w"], dim["h"], dim["height"]
     length, width = (h, w) if vertical else (w, h)
-    half_length = length / 2 - 0.00066
-    half_width = width / 2 - 0.00021
-
     if ribbed:
+        half_length = length / 2 - 0.00066
+        half_width = width / 2 - 0.00021
         profile = power_rib_profile()
     else:
+        # Leave room lengthwise for the crown to swing past the inner mould break.
+        half_length = length / 2 - 0.00023
+        half_width = width / 2 + 0.00022
         profile = [(i / 48, 0.0) for i in range(-48, 49)]
 
     # Closely space samples along the long edges for the mould chamfer and rib runout.
@@ -358,7 +362,9 @@ def main():
     for part in ("rocker_horiz", "rocker_vert", "rocker_power"):
         power = part == "rocker_power"
         finish = "Rocker_Power_Black" if power else "Rocker_Actuator"
-        bezel = build_rocker_bezel(dims[part], materials["Rocker_Bezel"], materials["Rocker_Well"])
+        bezel = build_rocker_bezel(
+            dims[part], materials["Rocker_Bezel"], materials["Rocker_Well"], power=power,
+        )
         actuator = build_rocker_actuator(
             dims[part], materials[finish], vertical=part != "rocker_horiz", ribbed=power,
         )

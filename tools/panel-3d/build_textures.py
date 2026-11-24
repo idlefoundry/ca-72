@@ -29,11 +29,13 @@ def enamel_pebbles(w, h, pitch, rng):
     for dy in (-1, 0, 1):
         for dx in (-1, 0, 1):
             index = row + dy + 1, col + dx + 1
-            distance = (xf - dx - seeds_x[index]) ** 2 + (yf - dy - seeds_y[index]) ** 2
+            offset_x = xf - dx - seeds_x[index]
+            offset_y = yf - dy - seeds_y[index]
+            distance = offset_x ** 2 + offset_y ** 2 + 0.78 * offset_x * offset_y
             second = np.minimum(second, np.maximum(first, distance))
             np.minimum(first, distance, out=first)
-    roundness = np.clip((np.sqrt(second) - np.sqrt(first)) * 1.75, 0, 1)
-    return roundness * (2 - roundness) - 0.5
+    gap = np.sqrt(second) - np.sqrt(first)
+    return np.clip(gap * 2.35, 0, 1)
 
 
 def write_maps(tex_dir, name, albedo, roughness, height):
@@ -61,21 +63,26 @@ def print_colors(ink, base, lettering, texture, ink_texture):
 
 
 def build_faceplate_pbr(tex_dir):
-    ink = ink_mask(tex_dir / "silkscreen_mask.png")
-    h, w = ink.shape
+    mask = tex_dir / "silkscreen_mask.png"
+    with Image.open(mask) as image:
+        alpha = image.convert("RGBA").getchannel("A")
+    # Oversample the relief so the fine baked wrinkle survives the texture filter.
+    w, h = alpha.width * 2, alpha.height * 2
+    ink = np.asarray(alpha.resize((w, h), Image.Resampling.BICUBIC), dtype=np.float32) / 255
     rng = np.random.default_rng(7201)
-    pebble = enamel_pebbles(w, h, 4, rng)
-    crinkle = enamel_pebbles(w, h, 7, rng)
-    scatter = enamel_pebbles(w, h, 2, rng)
+    pebble = enamel_pebbles(w, h, 3, rng)
+    crinkle = enamel_pebbles(w, h, 5, rng)
     specks = rng.random((h, w), dtype=np.float32) - 0.5
     handling = value_noise(w, h, 45, 12, rng)
-    grain = 0.43 * pebble + 0.17 * crinkle + 0.29 * scatter + 0.11 * specks
+    grain = 0.74 * pebble + 0.26 * crinkle
     albedo = print_colors(
-        ink, (30, 29, 28), (237, 233, 223), 7.0 * grain + 1.4 * handling, 4.0 * grain,
+        ink, (13, 13, 14), (237, 233, 223), 10 * (grain - 0.5) + 3 * specks + 2 * handling,
+        4 * (grain - 0.5),
     )
-    finish = 0.58 + 0.10 * grain + 0.025 * handling
-    roughness = finish * (1 - ink) + (0.51 + 0.045 * grain) * ink
-    height = 0.45 + 0.75 * grain * (1 - 0.39 * ink) + 0.15 * ink
+    # Baked crests burnish to satin while the narrow seams stay matte.
+    finish = 0.69 - 0.29 * grain + 0.019 * handling
+    roughness = finish * (1 - ink) + (0.48 - 0.045 * grain) * ink
+    height = 0.16 + (0.64 * grain + 0.09 * specks) * (1 - 0.64 * ink) + 0.16 * ink
     write_maps(tex_dir, "panel", albedo, roughness, height)
     print(f"Built pebbled enamel and silkscreen ({w}×{h})")
 
@@ -88,7 +95,7 @@ def build_nameplate_pbr(tex_dir):
         0.71 * value_noise(w, h, max(8, w // 98), h, rng)
         + 0.29 * value_noise(w, h, max(8, w // 31), h // 3, rng)
     )
-    albedo = print_colors(ink, (23, 23, 23), (230, 225, 214), 11 * tooling, 5 * tooling)
+    albedo = print_colors(ink, (16, 16, 17), (230, 225, 214), 10 * tooling, 5 * tooling)
     roughness = (0.45 + 0.07 * tooling) * (1 - ink) + 0.43 * ink
     height = 0.50 + 0.38 * tooling - 0.11 * ink
     write_maps(tex_dir, "plate", albedo, roughness, height)

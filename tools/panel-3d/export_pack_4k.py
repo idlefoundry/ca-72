@@ -36,114 +36,21 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-def srgb_to_lin(c: float) -> float:
-    return ((c + 0.055) / 1.055) ** 2.4 if c > 0.04045 else c / 12.92
-
-
-def hex_to_lin(hx: str):
-    r = int(hx[1:3], 16) / 255.0
-    g = int(hx[3:5], 16) / 255.0
-    b = int(hx[5:7], 16) / 255.0
-    return (srgb_to_lin(r), srgb_to_lin(g), srgb_to_lin(b), 1.0)
-
-
-def configure_cycles_device(scene):
-    scene.render.engine = "CYCLES"
-    prefs = bpy.context.preferences.addons["cycles"].preferences
-    for backend in ("OPTIX", "CUDA"):
-        try:
-            prefs.compute_device_type = backend
-            prefs.refresh_devices()
-            gpu_devs = [d for d in prefs.devices if d.type == backend]
-            if gpu_devs:
-                for d in prefs.devices:
-                    d.use = (d.type == backend)
-                scene.cycles.device = "GPU"
-                scene.cycles.use_denoising = True
-                if backend == "OPTIX":
-                    scene.cycles.denoiser = "OPTIX"
-                else:
-                    scene.cycles.denoiser = "OPENIMAGEDENOISE"
-                return backend
-        except Exception:
-            pass
-    scene.cycles.device = "CPU"
-    scene.cycles.use_denoising = True
-    scene.cycles.denoiser = "OPENIMAGEDENOISE"
-    return "CPU"
-
-
-def reset_scene(samples, transparent=False):
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    scene = bpy.context.scene
-    backend = configure_cycles_device(scene)
-    scene.cycles.samples = samples
-    scene.cycles.max_bounces = 8
-    scene.cycles.diffuse_bounces = 4
-    scene.cycles.glossy_bounces = 4
-    scene.cycles.transmission_bounces = 6
-    scene.render.film_transparent = transparent
-    scene.render.image_settings.file_format = "PNG"
-    scene.render.image_settings.color_mode = "RGBA" if transparent else "RGB"
-    scene.render.image_settings.compression = 85
-    scene.view_settings.view_transform = "AgX"
-    scene.view_settings.look = "AgX - Medium High Contrast"
-    scene.view_settings.exposure = -0.30
-    return scene, backend
-
-
-def setup_studio_lights(scene, center=(0.0, 0.0, 0.0), scale_ref=1.0):
-    """Exact same studio lighting rig for BOTH static face-3d.png and every moving sprite atlas.
-    Broad high KeySoftbox prevents left-to-right washed-out grey hotspots while sculpting 3D relief.
-    """
-    world = bpy.data.worlds.new("StudioWorld")
-    world.use_nodes = True
-    scene.world = world
-    bg = world.node_tree.nodes.get("Background")
-    bg.inputs["Color"].default_value = (0.014, 0.015, 0.018, 1.0)
-    bg.inputs["Strength"].default_value = 0.65
-
-    cx, cy, cz = center
-
-    def area(name, offset, energy, size_x, size_y, color):
-        ldata = bpy.data.lights.new(name, type="AREA")
-        ldata.energy = energy
-        ldata.shape = "RECTANGLE"
-        ldata.size = size_x
-        ldata.size_y = size_y
-        ldata.color = color
-        lobj = bpy.data.objects.new(name, ldata)
-        scene.collection.objects.link(lobj)
-        loc = Vector((cx + offset[0], cy + offset[1], cz + offset[2]))
-        lobj.location = loc
-        direction = Vector((cx, cy, cz)) - loc
-        lobj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
-        return lobj
-
-    # Scaled cleanly for the 0.71m Minimoog panel width: broad overhead softbox, modest watts
-    # Direction matches shadow catcher cleanup vector: light from upper-left (-0.60, +0.80) -> shadow down-right (+0.60, -0.80 in Y-up = +dx, +dy in screen)
-    area("KeySoftbox",  (-0.24,  0.34, 0.62), 11.5, 0.72, 0.36, (1.00, 0.96, 0.91))
-    area("FillSoftbox", ( 0.42, -0.28, 0.48),  3.8, 0.76, 0.42, (0.82, 0.90, 1.00))
-    area("RimStrip",    ( 0.00,  0.50, 0.28),  6.2, 0.95, 0.12, (1.00, 0.93, 0.85))
-
-
-def make_ortho_cam(scene, cx, cy, w_px, h_px, px_per_m):
-    cam_data = bpy.data.cameras.new("OrthoCam")
-    cam_data.type = "ORTHO"
-    cam_data.clip_start = 0.01
-    cam_data.clip_end = 5.0
-    cam_data.sensor_fit = "HORIZONTAL"
-    cam_data.ortho_scale = w_px / px_per_m
-    cam = bpy.data.objects.new("OrthoCam", cam_data)
-    scene.collection.objects.link(cam)
-    cam.location = (cx, cy, 0.95)
-    cam.rotation_euler = (0.0, 0.0, 0.0)
-    scene.camera = cam
-    scene.render.resolution_x = w_px
-    scene.render.resolution_y = h_px
-    scene.render.resolution_percentage = 100
-    return cam
+from studio_rig import (
+    srgb_to_lin,
+    hex_to_lin,
+    configure_cycles_device,
+    reset_scene,
+    setup_studio_lights,
+    make_ortho_cam,
+)
+from shaders_knobs import apply_knob_shaders
+from shaders_switches import apply_switch_shaders, add_toggle_reflection_cards
+from shaders_cabinet import apply_cabinet_shaders
 
 
 def import_glb_collection(assets_dir: Path, name: str):
@@ -173,93 +80,6 @@ def instantiate(col, name, loc=(0.0, 0.0, 0.0), rot_z_deg=0.0):
     return inst
 
 
-def enhance_spun_aluminum_material(mat):
-    """Upgrade the knob's Moog_Spun_Aluminum material to a physically-based radial lathe-turned
-    anisotropic aluminum shader so Cycles renders the iconic studio-locked bowtie sheen + micro grooves!
-    """
-    nt = mat.node_tree
-    nt.nodes.clear()
-    out = nt.nodes.new("ShaderNodeOutputMaterial")
-    bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled")
-    bsdf.inputs["Base Color"].default_value = (
-        srgb_to_lin(202 / 255),
-        srgb_to_lin(203 / 255),
-        srgb_to_lin(198 / 255),
-        1.0,
-    )
-    bsdf.inputs["Metallic"].default_value = 0.96
-    bsdf.inputs["Roughness"].default_value = 0.24
-    if "Anisotropic" in bsdf.inputs:
-        bsdf.inputs["Anisotropic"].default_value = 0.88
-    if "Anisotropic Rotation" in bsdf.inputs:
-        bsdf.inputs["Anisotropic Rotation"].default_value = 0.25
-
-    # Radial tangent around object Z axis creates authentic spun-lathe bowtie reflection!
-    tangent = nt.nodes.new("ShaderNodeTangent")
-    tangent.direction_type = "RADIAL"
-    tangent.axis = "Z"
-    if "Tangent" in bsdf.inputs:
-        nt.links.new(tangent.outputs["Tangent"], bsdf.inputs["Tangent"])
-
-    # Fine microscopic concentric lathe turning grooves (realistic silky spun aluminum, no bullseye ripples!)
-    tc = nt.nodes.new("ShaderNodeTexCoord")
-    wave = nt.nodes.new("ShaderNodeTexWave")
-    wave.wave_type = "RINGS"
-    wave.rings_direction = "Z"
-    wave.wave_profile = "SIN"
-    wave.inputs["Scale"].default_value = 1450.0
-    wave.inputs["Detail"].default_value = 3.0
-    wave.inputs["Detail Scale"].default_value = 2.0
-    nt.links.new(tc.outputs["Object"], wave.inputs["Vector"])
-
-    # Subtle roughness modulation along microscopic lathe rings
-    mr = nt.nodes.new("ShaderNodeMapRange")
-    mr.inputs["To Min"].default_value = 0.20
-    mr.inputs["To Max"].default_value = 0.27
-    nt.links.new(wave.outputs["Fac"], mr.inputs["Value"])
-    nt.links.new(mr.outputs["Result"], bsdf.inputs["Roughness"])
-
-    bump = nt.nodes.new("ShaderNodeBump")
-    bump.inputs["Strength"].default_value = 0.016
-    bump.inputs["Distance"].default_value = 0.00002
-    nt.links.new(wave.outputs["Fac"], bump.inputs["Height"])
-    nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
-
-    nt.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
-
-
-def apply_pbr_textures(mat, alb_path: Path, rgh_path: Path, bmp_path: Path,
-                       metallic=0.0, coat=0.0, coat_rough=0.20, bump_str=0.14, bump_dist=0.00025):
-    nt = mat.node_tree
-    nt.nodes.clear()
-    out = nt.nodes.new("ShaderNodeOutputMaterial")
-    bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled")
-    bsdf.inputs["Metallic"].default_value = metallic
-    if coat > 0.0 and "Coat Weight" in bsdf.inputs:
-        bsdf.inputs["Coat Weight"].default_value = coat
-        bsdf.inputs["Coat Roughness"].default_value = coat_rough
-    nt.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
-
-    tex_alb = nt.nodes.new("ShaderNodeTexImage")
-    tex_alb.image = bpy.data.images.load(str(alb_path))
-    tex_alb.image.colorspace_settings.name = "sRGB"
-    nt.links.new(tex_alb.outputs["Color"], bsdf.inputs["Base Color"])
-
-    tex_rgh = nt.nodes.new("ShaderNodeTexImage")
-    tex_rgh.image = bpy.data.images.load(str(rgh_path))
-    tex_rgh.image.colorspace_settings.name = "Non-Color"
-    nt.links.new(tex_rgh.outputs["Color"], bsdf.inputs["Roughness"])
-
-    tex_bmp = nt.nodes.new("ShaderNodeTexImage")
-    tex_bmp.image = bpy.data.images.load(str(bmp_path))
-    tex_bmp.image.colorspace_settings.name = "Non-Color"
-    bump = nt.nodes.new("ShaderNodeBump")
-    bump.inputs["Strength"].default_value = bump_str
-    bump.inputs["Distance"].default_value = bump_dist
-    nt.links.new(tex_bmp.outputs["Color"], bump.inputs["Height"])
-    nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
-
-
 def add_shadow_catcher():
     bpy.ops.mesh.primitive_plane_add(size=0.40, location=(0.0, 0.0, 0.0))
     plane = bpy.context.active_object
@@ -268,8 +88,8 @@ def add_shadow_catcher():
     mat = bpy.data.materials.new("CatcherMat")
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    bsdf.inputs["Base Color"].default_value = (0.025, 0.025, 0.028, 1.0)
-    bsdf.inputs["Roughness"].default_value = 0.50
+    bsdf.inputs["Base Color"].default_value = (0.008, 0.008, 0.009, 1.0)
+    bsdf.inputs["Roughness"].default_value = 0.58
     plane.data.materials.append(mat)
     return plane
 
@@ -351,24 +171,11 @@ class PackExporter:
         dmat.node_tree.nodes.get("Principled BSDF").inputs["Base Color"].default_value = (0.008, 0.009, 0.010, 1.0)
         desk.data.materials.append(dmat)
 
-        # Import cabinet & apply oiled American black walnut PBR maps
-        cab_objs, cab_col = import_glb_collection(self.assets_dir, "cabinet")
-        for m in bpy.data.materials:
-            if m.name.startswith("Walnut_"):
-                apply_pbr_textures(
-                    m,
-                    self.tex_dir / "walnut_albedo.png",
-                    self.tex_dir / "walnut_roughness.png",
-                    self.tex_dir / "walnut_bump.png",
-                    metallic=0.0,
-                    coat=0.26,
-                    coat_rough=0.22,
-                    bump_str=0.22,
-                    bump_dist=0.00040,
-                )
+        # Import cabinet (walnut rails, cheeks, brushed aluminum trim)
+        _, cab_col = import_glb_collection(self.assets_dir, "cabinet")
         instantiate(cab_col, "Cabinet")
 
-        # High-resolution (5760x1473) anodized black aluminum silkscreen faceplate
+        # High-resolution (5760x1473) fine-pebbled baked black enamel faceplate + silkscreen
         y_face_center = self.panel_to_blender(self.cx_u, self.face_h_u * 0.5, 0.0)[1]
         bpy.ops.mesh.primitive_plane_add(size=1.0, location=(0.0, y_face_center, 0.00008))
         fp = bpy.context.active_object
@@ -377,30 +184,10 @@ class PackExporter:
         bpy.ops.object.transform_apply(scale=True)
         fp_mat = bpy.data.materials.new("Faceplate_PBR")
         fp_mat.use_nodes = True
-        apply_pbr_textures(
-            fp_mat,
-            self.tex_dir / "panel_albedo.png",
-            self.tex_dir / "panel_roughness.png",
-            self.tex_dir / "panel_bump.png",
-            metallic=0.24,
-            bump_str=0.14,
-            bump_dist=0.00022,
-        )
         fp.data.materials.append(fp_mat)
 
         # Name plate mounted on top walnut rail (z = 0.0072)
         _, plate_col = import_glb_collection(self.assets_dir, "name_plate")
-        for m in bpy.data.materials:
-            if m.name.startswith("Plate_Face"):
-                apply_pbr_textures(
-                    m,
-                    self.tex_dir / "plate_albedo.png",
-                    self.tex_dir / "plate_roughness.png",
-                    self.tex_dir / "plate_bump.png",
-                    metallic=0.35,
-                    bump_str=0.12,
-                    bump_dist=0.00018,
-                )
         fix = self.spec["fixtures"]
         pl_tl = fix["plate_top_left"]
         pl_sz = fix["plate_size"]
@@ -413,7 +200,10 @@ class PackExporter:
             _, col = import_glb_collection(self.assets_dir, nm)
             tpls[nm] = col
 
-        # Unlit physical 3D faceted jewels + ultra bezel (lit in linear light in Rust!)
+        # Apply shared Cycles shaders across cabinet, walnut, enamel faceplate, nameplate, glass lamps, chrome jack & screws
+        apply_cabinet_shaders(bpy.data.materials, self.tex_dir)
+
+        # Unlit physical 3D optical jewels + ultra amber lamp with internal bulb & filament (lit in linear light in Rust!)
         instantiate(tpls["jewel_power"], "Jewel_Power", self.panel_to_blender(*fix["lamp"], 0.0001))
         instantiate(tpls["jewel_overload"], "Jewel_Overload", self.panel_to_blender(*fix["overload"], 0.0001))
         instantiate(tpls["ultra_bezel"], "Ultra_Bezel", self.panel_to_blender(*fix["ultra"], 0.0001))
@@ -437,11 +227,16 @@ class PackExporter:
         scene, _ = reset_scene(self.samples_sprite, transparent=True)
         setup_studio_lights(scene, (0.0, 0.0, 0.0))
         add_shadow_catcher()
-        _, col = import_glb_collection(self.assets_dir, glb_name)
-        for m in bpy.data.materials:
-            if "Spun_Aluminum" in m.name:
-                enhance_spun_aluminum_material(m)
-        knob = instantiate(col, "Knob", (0.0, 0.0, 0.00005), 0.0)
+
+        before = set(bpy.data.objects)
+        bpy.ops.import_scene.gltf(filepath=str(self.assets_dir / f"{glb_name}.glb"))
+        added = [o for o in bpy.data.objects if o not in before]
+        apply_knob_shaders(bpy.data.materials)
+
+        knob_roots = [o for o in added if o.parent is None]
+        for r in knob_roots:
+            r.location = (r.location.x, r.location.y, r.location.z + 0.00005)
+            r.rotation_mode = "XYZ"
 
         ax, ay = anchor_xy
         cam_cx = (cell_size * 0.5 - ax) / self.px_per_m
@@ -456,10 +251,11 @@ class PackExporter:
             scene.render.filepath = str(tmp_png)
             for i, deg in enumerate(angles_deg):
                 # Clockwise positive dial deg = negative Z rotation in Blender
-                knob.rotation_euler = (0.0, 0.0, math.radians(-deg))
+                for r in knob_roots:
+                    r.rotation_euler = (0.0, 0.0, math.radians(-deg))
                 bpy.ops.render.render(write_still=True)
-                r, c = divmod(i, cols)
-                atlas[r * cell_size : (r + 1) * cell_size, c * cell_size : (c + 1) * cell_size] = read_png_rgba(tmp_png)
+                row_i, col_i = divmod(i, cols)
+                atlas[row_i * cell_size : (row_i + 1) * cell_size, col_i * cell_size : (col_i + 1) * cell_size] = read_png_rgba(tmp_png)
 
         save_rgba_png(atlas, self.out_dir / out_name, mode="RGBA")
         print(f"EXPORTED {out_name} ({cols}x{rows}, {len(angles_deg)} frames) in {time.time() - t0:.1f}s", flush=True)
@@ -486,14 +282,12 @@ class PackExporter:
         before = set(bpy.data.objects)
         bpy.ops.import_scene.gltf(filepath=str(self.assets_dir / f"{glb_name}.glb"))
         added = [o for o in bpy.data.objects if o not in before]
+        apply_switch_shaders(bpy.data.materials, color_hex=color_hex)
+
         actuator = None
         for o in added:
             if o.type == "MESH" and "actuator" in o.name.lower():
                 actuator = o
-                if color_hex is not None and o.data.materials:
-                    bsdf = o.data.materials[0].node_tree.nodes.get("Principled BSDF")
-                    if bsdf:
-                        bsdf.inputs["Base Color"].default_value = hex_to_lin(color_hex)
 
         ax, ay = anchor_xy
         cam_cx = (cell_w * 0.5 - ax) / self.px_per_m
@@ -550,11 +344,14 @@ class PackExporter:
         t0 = time.time()
         scene, _ = reset_scene(self.samples_sprite, transparent=True)
         setup_studio_lights(scene, (0.0, 0.0, 0.0))
+        add_toggle_reflection_cards(scene, across=across)
         add_shadow_catcher()
 
         before = set(bpy.data.objects)
         bpy.ops.import_scene.gltf(filepath=str(self.assets_dir / "toggle_bat.glb"))
         added = [o for o in bpy.data.objects if o not in before]
+        apply_switch_shaders(bpy.data.materials)
+
         lever = None
         for o in added:
             if o.type == "MESH" and "lever" in o.name.lower():
@@ -636,21 +433,21 @@ class PackExporter:
         )
 
         # 3. Classic Minimoog colored rockers (native horizontal & vertical orientations!)
-        # Authentic vintage Minimoog colors (rich cerulean blue, vermilion orange-red, warm ivory)
+        # Calibrated matte-pebbled vintage Minimoog nylon hues (cerulean blue, vermilion orange, warm ivory)
         sprites["rocker_horiz_blue"] = self.render_rocker_atlas(
-            "rocker_horiz", "#2f77b8", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-blue-atlas.png"
+            "rocker_horiz", "#3a7eb5", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-blue-atlas.png"
         )
         sprites["rocker_horiz_red"] = self.render_rocker_atlas(
-            "rocker_horiz", "#df3d1c", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-red-atlas.png"
+            "rocker_horiz", "#df451d", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-red-atlas.png"
         )
         sprites["rocker_horiz_ivory"] = self.render_rocker_atlas(
-            "rocker_horiz", "#dfd6bc", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-ivory-atlas.png"
+            "rocker_horiz", "#dcd3ba", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-ivory-atlas.png"
         )
         sprites["rocker_vert_red"] = self.render_rocker_atlas(
-            "rocker_vert", "#df3d1c", "top", 136, 208, (60, 96), (56 * u, 116 * u), "rocker-vert-red-atlas.png"
+            "rocker_vert", "#df451d", "top", 136, 208, (60, 96), (56 * u, 116 * u), "rocker-vert-red-atlas.png"
         )
         sprites["rocker_vert_blue"] = self.render_rocker_atlas(
-            "rocker_vert", "#2f77b8", "bottom", 136, 208, (60, 96), (56 * u, 116 * u), "rocker-vert-blue-atlas.png"
+            "rocker_vert", "#3a7eb5", "bottom", 136, 208, (60, 96), (56 * u, 116 * u), "rocker-vert-blue-atlas.png"
         )
         sprites["rocker_power"] = self.render_rocker_atlas(
             "rocker_power", None, "top", 120, 216, (52, 100), (48 * u, 124 * u), "rocker-power-atlas.png"
@@ -765,7 +562,7 @@ class PackExporter:
                 "bezel_outer_r": round(20.0 * u, 2),
                 "color_srgb": [255, 36, 18],
                 "core_srgb": [255, 224, 170],
-                "faceted": True,
+                "faceted": False,
                 "default_drive": 0.92,
             },
             {
@@ -776,7 +573,7 @@ class PackExporter:
                 "bezel_outer_r": round(24.0 * u, 2),
                 "color_srgb": [255, 28, 12],
                 "core_srgb": [255, 212, 148],
-                "faceted": True,
+                "faceted": False,
                 "default_drive": 0.0,
             },
             {
@@ -817,8 +614,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, default=Path("target/panel-3d"))
     parser.add_argument("--face-w", type=int, default=int(os.environ.get("CA72_FACE_W", "3840")))
-    parser.add_argument("--samples-face", type=int, default=int(os.environ.get("CA72_SAMPLES_FACE", "64")))
-    parser.add_argument("--samples-sprite", type=int, default=int(os.environ.get("CA72_SAMPLES_SPRITE", "32")))
+    parser.add_argument("--samples-face", type=int, default=int(os.environ.get("CA72_SAMPLES_FACE", "256")))
+    parser.add_argument("--samples-sprite", type=int, default=int(os.environ.get("CA72_SAMPLES_SPRITE", "48")))
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else sys.argv[1:]
     args = parser.parse_args(argv)
 

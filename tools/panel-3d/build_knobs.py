@@ -37,6 +37,7 @@ class KnobMesh:
         self.vertices = []
         self.faces = []
         self.slots = []
+        self.creases = set()
 
     def loop(self, points):
         start = len(self.vertices)
@@ -51,6 +52,9 @@ class KnobMesh:
         for i in range(len(lower)):
             j = (i + 1) % len(lower)
             self.face((lower[i], lower[j], upper[j], upper[i]), slot)
+
+    def crease(self, ring):
+        self.creases.update((min(a, b), max(a, b)) for a, b in zip(ring, ring[1:] + ring[:1]))
 
     def fan(self, ring, z, slot=BODY):
         center, = self.loop([(0, 0, z)])
@@ -87,12 +91,16 @@ class KnobMesh:
             mesh.materials.append(material)
         for poly, slot in zip(mesh.polygons, self.slots, strict=True):
             poly.material_index = slot
-            poly.use_smooth = slot != CAP
+            poly.use_smooth = True
 
         bm = bmesh.new()
         try:
             bm.from_mesh(mesh)
             bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+            for edge in bm.edges:
+                a, b = (vert.index for vert in edge.verts)
+                if (min(a, b), max(a, b)) in self.creases:
+                    edge.smooth = False
             assert_solid(bm, name)
             bm.to_mesh(mesh)
         finally:
@@ -131,7 +139,7 @@ def angles(flutes, segments_per_flute):
 
 def ring(mesh, azimuths, radius, z, flutes=0, depth=0.0):
     return mesh.loop(
-        (*polar(radius - depth * abs(math.sin(flutes * a / 2)) ** 2.8, a), z)
+        (*polar(radius - depth * abs(math.cos(flutes * a / 2)) ** 2.2, a), z)
         for a in azimuths
     )
 
@@ -142,24 +150,37 @@ def polar(radius, azimuth):
 
 
 def cap_lip_radius(cap_radius):
-    return cap_radius * 1.055
+    return cap_radius * 1.063
 
 
 def add_cap(mesh, azimuths, lip, radius, height):
-    # The face sits below the thermoset lip, with a dark relief cut around the
-    # silver edge. The top face is flat from the machined bevel to its center.
+    # An exposed 45-degree chamfer sits inside a narrow molding relief. The
+    # cap face has a 0.125 mm dish, measured from the chamfer to its center.
+    edge_z = height - 0.00004
+    groove_z = height - radius * 0.048
+    chamfer = radius * 0.018
+    arris = radius * 0.005
+    face_radius = radius - chamfer - arris
     profile = [
-        (radius * 1.025, height, BODY),
-        (radius * 1.012, height - 0.00012, BODY),
-        (radius, height - 0.00012, BODY),
-        (radius, height - 0.000075, BEVEL),
-        (radius * 0.985, height - 0.00004, BEVEL),
+        (radius * 1.049, height - radius * 0.004, BODY),
+        (radius * 1.025, groove_z, BODY),
+        (radius, groove_z, BODY),
+        (radius, edge_z - chamfer - arris * 0.42, BEVEL),
+        (radius - chamfer, edge_z - arris * 0.42, BEVEL),
+        (face_radius, edge_z, BEVEL),
     ]
     for r, z, slot in profile:
         next_ring = ring(mesh, azimuths, r, z)
         mesh.bridge(lip, next_ring, slot)
+        mesh.crease(next_ring)
         lip = next_ring
-    mesh.fan(lip, height - 0.00004, CAP)
+    dish = 0.000125
+    for step in range(15, 0, -1):
+        t = step / 16
+        next_ring = ring(mesh, azimuths, face_radius * t, edge_z - dish * (1.0 - t * t))
+        mesh.bridge(lip, next_ring, CAP)
+        lip = next_ring
+    mesh.fan(lip, edge_z - dish, CAP)
 
 
 def build_skirted(name, dim, materials):
@@ -167,16 +188,16 @@ def build_skirted(name, dim, materials):
     large = name == "knob_big"
     flutes = 14 if large else 10
     azimuths = angles(flutes, 36)
-    grip = base * (0.855 if large else 0.785)
-    depth = base * (0.050 if large else 0.068)
-    # The drawing provides the mounted envelope. Match the exposed cap and
-    # pigment to the worn hardware artwork within that envelope.
-    cap = base * (0.715 if large else 0.605)
+    grip = base * (0.835 if large else 0.772)
+    depth = base * (0.073 if large else 0.078)
+    cap = dim["cap_radius"]
+    dot_radius, dot_y = dim["dot_radius"], dim["dot_radius_pos"]
     mesh = KnobMesh()
 
-    # Molded heel and rolled rim. The upper skirt is a smooth shallow cone.
-    skirt_inside, skirt_outside = grip + base * 0.012, base * 0.984
-    skirt_low, skirt_high = height * 0.104, height * 0.147
+    # The indicator sits on a shallow conical skirt with a narrow molded lip.
+    skirt_inside = dot_y - dot_radius - base * 0.011
+    skirt_outside = base * 0.981
+    skirt_low, skirt_high = height * 0.106, height * 0.147
 
     def skirt_z(x, y):
         t = (skirt_outside - math.hypot(x, y)) / (skirt_outside - skirt_inside)
@@ -184,19 +205,18 @@ def build_skirted(name, dim, materials):
 
     outer = [
         ring(mesh, azimuths, base * 0.969, 0.0),
-        ring(mesh, azimuths, base * 0.990, height * 0.008),
+        ring(mesh, azimuths, base * 0.993, height * 0.009),
         ring(mesh, azimuths, base, height * 0.027),
-        ring(mesh, azimuths, base, height * 0.067),
-        ring(mesh, azimuths, base * 0.995, height * 0.084),
+        ring(mesh, azimuths, base, height * 0.078),
+        ring(mesh, azimuths, base * 0.995, height * 0.094),
         ring(mesh, azimuths, skirt_outside, skirt_low),
     ]
     mesh.fan(outer[0], 0.0)
     for a, b in pairwise(outer):
         mesh.bridge(a, b)
+    mesh.crease(outer[-1])
 
     inner = ring(mesh, azimuths, skirt_inside, skirt_high)
-    dot_radius = min(dim["dot_radius"], base * (0.040 if large else 0.052))
-    dot_y = max(dim["dot_radius_pos"], (skirt_inside + skirt_outside) * 0.5)
     dot_outline = []
     for a in angles(1, 64):
         x, dy = polar(dot_radius, a)
@@ -215,21 +235,31 @@ def build_skirted(name, dim, materials):
                 samples.append((x, y))
     mesh.top_surface(outer[-1], inner, dot, samples, skirt_z, INK)
 
-    # Flutes begin above the circular skirt and soften into the cap surround.
+    # The drum rises out of a recessed circular foot. Tight pairs of profile
+    # rings define the flute shoulders without smearing the tapered sidewall.
+    mesh.crease(inner)
+    for r, z in (
+        (skirt_inside - base * 0.009, height * 0.137),
+        (skirt_inside - base * 0.018, height * 0.137),
+        (skirt_inside - base * 0.024, height * 0.158),
+    ):
+        next_ring = ring(mesh, azimuths, r, z)
+        mesh.bridge(inner, next_ring)
+        inner = next_ring
     profile = [
-        (grip, 0.165, 0.26),
-        (grip, 0.216, 0.76),
-        (grip, 0.270, 1.00),
-        (grip * 0.993, 0.420, 1.00),
-        (grip * 0.965, 0.840, 0.89),
-        (grip * 0.961, 0.935, 0.80),
-        (grip * 0.949, 0.978, 0.69),
-        (grip * 0.928, 0.998, 0.58),
-        (cap_lip_radius(cap), 1.0, 0.0),
+        (grip * 0.980, 0.194, 0.90, True),
+        (grip, 0.224, 1.00, False),
+        (grip * 0.995, 0.420, 1.00, False),
+        (grip * 0.976, 0.935, 0.77, False),
+        (grip * 0.967, 0.970, 0.67, True),
+        (grip * 0.947, 0.994, 0.53, True),
+        (cap_lip_radius(cap), 1.0, 0.0, False),
     ]
-    for r, z, d in profile:
+    for r, z, d, sharp in profile:
         next_ring = ring(mesh, azimuths, r, height * z, flutes, depth * d)
         mesh.bridge(inner, next_ring)
+        if sharp:
+            mesh.crease(next_ring)
         inner = next_ring
     add_cap(mesh, azimuths, inner, cap, height)
     return mesh.create(name, materials)
@@ -245,25 +275,25 @@ def capsule_loop(y0, y1, width):
 
 def build_pointer(name, dim, materials):
     body, tip, height = dim["body_radius"], dim["tip_radius"], dim["height"]
-    cap = body * 0.47
+    cap = dim["cap_radius"]
     lip = cap_lip_radius(cap)
     flutes = dim["flute_count"]
     azimuths = angles(flutes, 48)
     mesh = KnobMesh()
-    depth = body * 0.064
+    depth = body * 0.077
 
     # A tapered fin with straight flanks tangent to a circular nose. Blend its
     # outline into the scalloped drum, at every height, as one molded shell.
-    nose_radius = body * 0.089
+    nose_radius = body * 0.063
     nose_center = tip - nose_radius
-    flank = 0.23
+    flank = 0.30
     flank_offset = flank * nose_center + nose_radius * math.hypot(1, flank)
     tangent_x = nose_radius / math.hypot(1, flank)
     tangent_y = nose_center + flank * tangent_x
     tangent_angle = math.atan2(tangent_x, tangent_y)
 
     def outline(a):
-        scalloped = body - depth * abs(math.sin(flutes * a / 2)) ** 2.8
+        scalloped = body - depth * abs(math.sin(flutes * a / 2)) ** 2.2
         cosine = math.cos(a)
         if cosine <= 0:
             return scalloped
@@ -272,21 +302,21 @@ def build_pointer(name, dim, materials):
             fin = nose_center * cosine + math.sqrt(nose_radius ** 2 - (nose_center * sine) ** 2)
         else:
             fin = flank_offset / (sine + flank * cosine)
-        seam = body * 0.046
+        seam = body * 0.022
         blend = max(seam - abs(fin - scalloped), 0.0) / seam
         return max(fin, scalloped) + blend * blend * seam * 0.25
 
     def deck_z(x, y):
         r = math.hypot(x, y)
-        shoulder = smoothstep((r - lip) / (body - lip))
-        round_body = height * (1.0 - 0.405 * shoulder)
+        shoulder = unit((r - lip) / (body - lip))
+        round_body = height * (1.0 - 0.405 * shoulder * (0.50 + 0.50 * shoulder))
         if y <= 0.0:
             return round_body
         ridge = height * (1.0 - 0.344 * unit((y - lip) / (tip - lip)))
-        # Round the ridgeline into its steep sides and into the crown at the cap.
+        # A narrow bevel joins the steep flanks to the fin's sloping deck.
         width = flank_offset - flank * min(y, nose_center)
-        flank_blend = smoothstep((1.0 - abs(x) / width) / 0.48)
-        return mix(round_body, ridge, flank_blend * smoothstep((y - lip * 0.9) / (body * 0.17)))
+        flank_blend = smoothstep((0.98 - abs(x) / width) / 0.25)
+        return mix(round_body, ridge, flank_blend * smoothstep((y - lip * 0.9) / (body * 0.13)))
 
     perimeter = [outline(a) for a in azimuths]
     outer = []
@@ -295,29 +325,30 @@ def build_pointer(name, dim, materials):
             (*polar(r - inset * body, a), z_fraction * height)
             for a, r in zip(azimuths, perimeter, strict=True)
         ))
+    deck_outline = [r - body * 0.027 for r in perimeter]
+    deck_points = [polar(r, a) for a, r in zip(azimuths, deck_outline, strict=True)]
     outer.append(mesh.loop(
-        (x, y, deck_z(x, y) - height * 0.07)
-        for x, y in (polar(r, a) for a, r in zip(azimuths, perimeter, strict=True))
+        (*polar(r, a), deck_z(*point) - body * 0.020)
+        for a, r, point in zip(azimuths, perimeter, deck_points, strict=True)
     ))
-    deck_outline = [r - body * 0.018 for r in perimeter]
-    outer.append(mesh.loop(
-        (x, y, deck_z(x, y))
-        for x, y in (polar(r, a) for a, r in zip(azimuths, deck_outline, strict=True))
-    ))
+    outer.append(mesh.loop((*point, deck_z(*point)) for point in deck_points))
     mesh.fan(outer[0], 0.0)
     for a, b in pairwise(outer):
         mesh.bridge(a, b)
+    mesh.crease(outer[-2])
+    mesh.crease(outer[-1])
 
     # Cut the stripe into the curved surface. The paint shares its groove floor
     # with the surrounding dark walls, so the GLB stays one watertight shell.
     scale = dim["scale"]
-    half_width = 0.00038 * scale
-    y0 = lip + 0.00165 * scale
-    y1 = tip - 0.00085 * scale
-    groove_width = half_width + 0.000088 * scale
+    half_width = 0.00031 * scale
+    y0 = lip + 0.00175 * scale
+    y1 = tip - 0.00087 * scale
+    groove_width = half_width + 0.00011 * scale
+    groove_depth = 0.00013 * scale
     groove = mesh.loop((x, y, deck_z(x, y)) for x, y in capsule_loop(y0, y1, groove_width))
     inlay = mesh.loop(
-        (x, y, deck_z(x, y) - 0.00009 * scale)
+        (x, y, deck_z(x, y) - groove_depth)
         for x, y in capsule_loop(y0, y1, half_width)
     )
     cap_lip = ring(mesh, azimuths, lip, height)
@@ -331,8 +362,10 @@ def build_pointer(name, dim, materials):
                 samples.append((x, y))
     mesh.top_surface(outer[-1], cap_lip, groove, samples, deck_z, None)
     mesh.bridge(groove, inlay)
+    mesh.crease(groove)
+    mesh.crease(inlay)
     floor = mesh.loop(
-        (0.0, y, deck_z(0.0, y) - 0.00009 * scale)
+        (0.0, y, deck_z(0.0, y) - groove_depth)
         for y in (y0, y1)
     )
     half = len(inlay) // 2

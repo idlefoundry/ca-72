@@ -41,7 +41,7 @@ def mesh_object(name, vertices, faces, material):
     return obj
 
 
-def lathe(name, profile, material, segments=192, closed=False):
+def lathe(name, profile, material, segments=192, closed=False, knurl_rows=range(0)):
     """Turn a profile around Z, with optional angular variation in radius and height."""
     vertices = []
     rings = []
@@ -61,7 +61,8 @@ def lathe(name, profile, material, segments=192, closed=False):
 
     faces = []
     ends = rings[1:] + [rings[0]] if closed else rings[1:]
-    for a, b in zip(rings, ends):
+    flat_faces = set()
+    for row, (a, b) in enumerate(zip(rings, ends)):
         for i in range(segments):
             j = (i + 1) % segments
             if len(a) == 1:
@@ -70,10 +71,17 @@ def lathe(name, profile, material, segments=192, closed=False):
                 face = (a[i], b[0], a[j])
             else:
                 face = (a[i], b[i], b[j], a[j])
+            if row in knurl_rows:
+                # Split each cell along the trough shared by two neighboring diamonds.
+                if (i + row - knurl_rows.start) % 2 == 0:
+                    face = face[1:] + face[:1]
+                flat_faces.update((len(faces), len(faces) + 1))
+                faces.extend((face[:3], (face[0], face[2], face[3])))
+                continue
             faces.append(face)
     obj = mesh_object(name, vertices, faces, material)
     for face in obj.data.polygons:
-        face.use_smooth = True
+        face.use_smooth = face.index not in flat_faces
     return obj
 
 
@@ -200,59 +208,71 @@ def build_name_plate(dim, mats):
     return plate
 
 
-def knurled_band(radius, lo, hi, teeth, depth, diamond=False):
-    def row(phase, relief):
-        def cut(angle):
-            tooth = angle * teeth / 2
-            if diamond:
-                peak = min(abs(math.cos(tooth + phase)), abs(math.cos(tooth - phase)))
-            else:
-                peak = abs(math.cos(tooth))
-            return radius - depth * (1 - peak * relief)
-        return cut
+def diamond_knurl(teeth, rows):
+    """Raised diamond tips on alternating rings of a turned metal blank."""
+    profile = []
+    for index, (root, crest, height) in enumerate(rows):
+        def radius(angle, root=root, crest=crest, parity=index % 2):
+            column = round(angle * 2 * teeth / math.tau)
+            return root if (column + parity) % 2 else crest
 
-    steps = 10 if diamond else 4
-    return [
-        (row(math.pi * (i / steps - 0.5), min(1, 0.42 + 0.38 * min(i, steps - i))), lo + (hi - lo) * i / steps)
-        for i in range(steps + 1)
-    ]
-
-
-def facet_knurl(obj, lo, hi):
-    for face in obj.data.polygons:
-        if lo < face.center.z < hi:
-            face.use_smooth = False
+        profile.append((radius, height))
+    return profile
 
 
 def build_jack_quarter(dim, mats):
     outer, sleeve = dim["outer_radius"], dim["sleeve_radius"]
     bore, h = dim["bore_radius"], dim["height"]
     chrome = mats["Chrome_Polished"]
+    teeth = 56
+    band = diamond_knurl(teeth, [
+        (outer - 0.00060, outer - 0.00060, 0.00027),
+        (outer - 0.00040, outer - 0.00004, 0.00069),
+        (outer - 0.00038, outer, 0.00111),
+        (outer - 0.00045, outer - 0.00006, 0.00153),
+        (outer - 0.00056, outer - 0.00016, 0.00194),
+        (outer - 0.00072, outer - 0.00032, 0.00231),
+        (outer - 0.00100, outer - 0.00100, 0.00260),
+    ])
     nut = lathe("Jack_KnurledRingNut", [
-        (sleeve - 0.00010, 0), (outer - 0.00033, 0),
-        *knurled_band(outer, 0.00025, 0.00190, 64, 0.00027),
-        (outer - 0.00027, 0.00213), (outer - 0.00043, 0.00226),
-        (sleeve + 0.00077, 0.00274), (sleeve + 0.00057, 0.00276),
-        (sleeve + 0.00042, 0.00268), (sleeve + 0.00025, 0.00263),
-        (sleeve - 0.00010, 0.00267),
-    ], mats["Chrome_Satin"], segments=512, closed=True)
-    facet_knurl(nut, 0.00025, 0.00190)
+        (sleeve - 0.00010, 0), (outer - 0.00063, 0), *band,
+        (outer - 0.00107, 0.00266), (outer - 0.00113, 0.00273),
+        (sleeve - 0.00010, 0.00280),
+    ], chrome, segments=2 * teeth, closed=True, knurl_rows=range(2, 2 + len(band) - 1))
 
-    # Six shallow concentric turnings above the ring nut, followed by a rolled lip.
-    thread = []
-    for turn in range(6):
-        z = 0.00292 + 0.00035 * turn
-        thread.extend(((sleeve - 0.00018, z), (sleeve, z + 0.00013), (sleeve, z + 0.00020)))
+    across_flats = dim["nut_across_flats"] * 0.80
+
+    def hex_edge(inset):
+        def radius(angle):
+            sector = (angle + math.pi / 6) % (math.pi / 3) - math.pi / 6
+            return (across_flats / 2 - inset) / math.cos(min(abs(sector), math.radians(29)))
+
+        return radius
+
+    collar = lathe("Jack_HexCollar", [
+        (sleeve - 0.00005, 0.00269), (hex_edge(0.00022), 0.00269),
+        (hex_edge(0), 0.00288), (hex_edge(0), 0.00313),
+        (hex_edge(0.00023), 0.00357), (sleeve + 0.00015, 0.00360),
+        (sleeve - 0.00005, 0.00347),
+    ], chrome, segments=192, closed=True)
+
+    # The visible lead-in continues up the chamfer, so the turning rings read head-on.
+    threads = []
+    for turn in range(4):
+        r = sleeve - 0.00029 * turn
+        z = 0.00375 + 0.00028 * turn
+        threads.extend(((r, z), (r - 0.00006, z + 0.00015), (r - 0.00015, z + 0.000025)))
     barrel = lathe("Jack_ThreadedBushing", [
         (bore + 0.00048, 0.00022), (sleeve - 0.00015, 0.00022),
-        *thread, (sleeve - 0.00008, h - 0.00030),
-        (sleeve - 0.00020, h - 0.00008), (sleeve - 0.00037, h),
-        (bore + 0.00088, h), (bore + 0.00071, h - 0.00012),
-    ], chrome, segments=224, closed=True)
+        (sleeve - 0.00015, 0.00337), (sleeve + 0.00003, 0.00346),
+        *threads, (bore + 0.00082, h - 0.00016),
+        (bore + 0.00068, h), (bore + 0.00038, h),
+        (bore + 0.00025, h - 0.00012), (bore + 0.00023, h - 0.00045),
+    ], mats["Chrome_Satin"], segments=224, closed=True)
 
     insulator = lathe("Jack_InsulatingSocket", [
-        (0, 0), (bore + 0.00053, 0), (bore + 0.00060, h - 0.00075),
-        (bore + 0.00068, h - 0.00039), (bore + 0.00020, h - 0.00034),
+        (0, 0), (bore + 0.00053, 0), (bore + 0.00035, h - 0.00075),
+        (bore + 0.00029, h - 0.00039), (bore + 0.00020, h - 0.00034),
         (bore, h - 0.00047), (bore, 0.00028), (0, 0.00028),
     ], mats["Jack_Bore"], segments=160)
 
@@ -261,9 +281,9 @@ def build_jack_quarter(dim, mats):
     count = 22
     for i in range(count + 1):
         t = i / count
-        y = bore * (-0.98 + 0.70 * t)
-        z = 0.00038 + 0.0022 * math.sin(math.pi * t / 1.74)
-        half_width = 0.00082 + 0.00016 * math.sin(math.pi * t)
+        y = bore * (-0.98 + 0.53 * t)
+        z = 0.00038 + 0.00175 * math.sin(math.pi * t / 1.74)
+        half_width = 0.00070 + 0.00012 * math.sin(math.pi * t)
         vertices.extend([(-half_width, y, z), (half_width, y, z),
                          (half_width, y, z + 0.00015), (-half_width, y, z + 0.00015)])
     faces = [(0, 1, 2, 3)]
@@ -275,7 +295,7 @@ def build_jack_quarter(dim, mats):
     leaf = mesh_object("Jack_SprungNickelContact", vertices, faces, mats["Jack_Contact"])
     for face in leaf.data.polygons:
         face.use_smooth = len(face.vertices) == 4 and face.index % 2 == 1
-    return [nut, barrel, insulator, leaf]
+    return [nut, collar, barrel, insulator, leaf]
 
 
 def glass_dome(name, radius, rise, seat, thickness, material, segments=224):
@@ -294,50 +314,73 @@ def build_lamp(name, dim, mats, glass_name, ultra=False):
     bezel, dome, h = dim["bezel_radius"], dim["dome_radius"], dim["height"]
     seat = h * (0.55 if ultra else 0.65)
     metal = mats["Chrome_Polished"]
+    knurl_rows = range(0)
+    segments = 224
     if ultra:
+        teeth = 72
+        segments = 2 * teeth
+        band = diamond_knurl(teeth, [
+            (bezel - 0.00075, bezel - 0.00075, 0.00027),
+            (bezel - 0.00044, bezel - 0.00007, 0.00077),
+            (bezel - 0.00040, bezel, 0.00127),
+            (bezel - 0.00049, bezel - 0.00006, 0.00177),
+            (bezel - 0.00053, bezel - 0.00010, 0.00227),
+            (bezel - 0.00062, bezel - 0.00018, 0.00277),
+            (bezel - 0.00074, bezel - 0.00028, 0.00327),
+            (bezel - 0.00098, bezel - 0.00098, seat - 0.00040),
+        ])
+        knurl_rows = range(2, 2 + len(band) - 1)
         outside = [
-            (bezel - 0.00031, 0),
-            *knurled_band(bezel, 0.00029, seat - 0.00031, 72, 0.00024, diamond=True),
-            (bezel - 0.00028, seat - 0.00010), (bezel - 0.00044, seat + 0.00003),
-            (bezel - 0.00058, seat + 0.00010),
+            (bezel - 0.00076, 0), *band,
+            (bezel - 0.00103, seat - 0.00027),
+            (dome + 0.00083, seat + 0.00039), (dome + 0.00069, seat + 0.00046),
         ]
     else:
         outside = [
             (bezel - 0.00024, 0), (bezel - 0.00006, 0.00017), (bezel, 0.00031),
-            (bezel, seat - 0.00051), (bezel - 0.00012, seat - 0.00012),
-            (bezel - 0.00028, seat + 0.00011), (bezel - 0.00041, seat + 0.00022),
+            (bezel, seat - 0.00067), (bezel - 0.00007, seat - 0.00054),
+            (bezel - 0.00018, seat - 0.00053), (bezel - 0.00025, seat - 0.00049),
+            (bezel - 0.00037, seat - 0.00027), (bezel - 0.00052, seat + 0.00005),
+            (bezel - 0.00063, seat + 0.00024), (bezel - 0.00076, seat + 0.00039),
+            (bezel - 0.00088, seat + 0.00045),
         ]
     ring = lathe(f"{name}_ChromeBezel", [
         (dome - 0.00019, 0), *outside,
-        (dome + 0.00048, seat + 0.00025), (dome + 0.00035, seat + 0.00020),
-        (dome + 0.00027, seat + 0.00008), (dome + 0.00020, seat + 0.00013),
-        (dome + 0.00008, seat), (dome + 0.00006, seat - 0.00026),
+        (dome + 0.00044, seat + 0.00041), (dome + 0.00031, seat + 0.00035),
+        (dome + 0.00015, seat + 0.00011), (dome + 0.00008, seat - 0.00025),
         (dome - 0.00019, seat - 0.00039),
-    ], metal, segments=576 if ultra else 224, closed=True)
-    if ultra:
-        facet_knurl(ring, 0.00029, seat - 0.00031)
+    ], metal, segments=segments, closed=True, knurl_rows=knurl_rows)
     gasket = lathe(f"{name}_LensRetainer", [
         (dome - 0.00016, seat - 0.00035), (dome + 0.00018, seat - 0.00035),
         (dome + 0.00022, seat - 0.00012), (dome + 0.00012, seat + 0.000045),
         (dome - 0.000065, seat + 0.000045),
     ], mats["Lamp_Retainer"], closed=True)
     lens = glass_dome(
-        f"{name}_Glass", dome, h - seat, seat, 0.00068 if ultra else 0.00061, mats[glass_name],
+        f"{name}_Glass", dome, h - seat, seat, 0.00065 if ultra else 0.00074, mats[glass_name],
     )
 
-    reflector_mat = mats["Ultra_Reflector" if ultra else "Jewel_Reflector"]
+    shoulder = dome * (0.66 if ultra else 0.56)
     reflector = lathe(f"{name}_OpticalCup", [
         (0, 0.00011), (dome * 0.92, 0.00011), (dome * 0.95, 0.00022),
-        (dome * 0.95, seat - 0.0004), (dome * 0.90, seat - 0.00033),
-        (dome * 0.87, seat - 0.00046), (dome * 0.85, seat - 0.00072),
-        (dome * 0.84, seat - 0.00073), (dome * 0.80, seat - 0.00072),
-        (dome * 0.77, seat - 0.00115), (dome * 0.65, seat - 0.00170),
-        (dome * 0.46, seat - 0.00245), (dome * 0.26, seat - 0.00268),
+        (dome * 0.95, seat - 0.00045), (dome * 0.87, seat - 0.00040),
+        (dome * 0.80, seat - 0.00059), (dome * 0.78, seat - 0.00085),
+        (dome * 0.73, seat - 0.00087), (dome * 0.70, seat - 0.00094),
+        (shoulder, seat - 0.00166), (shoulder * 0.90, seat - 0.00182),
+        (shoulder * 0.87, seat - 0.00201), (shoulder * 0.72, seat - 0.00204),
+        (shoulder * 0.59, seat - 0.00257), (dome * 0.26, seat - 0.00268),
         (0, seat - 0.00269),
-    ], reflector_mat)
+    ], mats["Ultra_Reflector" if ultra else "Jewel_Reflector"])
     parts = [ring, gasket, lens, reflector]
     if ultra:
         parts.extend(build_ultra_bulb(dome, seat, mats))
+    else:
+        socket = lathe(f"{name}_DarkRubySocket", [
+            (0, seat - 0.00272), (dome * 0.32, seat - 0.00272),
+            (dome * 0.35, seat - 0.00232), (dome * 0.32, seat - 0.00222),
+            (dome * 0.23, seat - 0.00218), (dome * 0.19, seat - 0.00230),
+            (dome * 0.11, seat - 0.00244), (0, seat - 0.00245),
+        ], mats["Jewel_Socket"])
+        parts.append(socket)
     return parts
 
 
@@ -370,44 +413,49 @@ def build_ultra_bulb(dome, seat, mats):
     # The bulb's axis lies upright on the panel, suspended beneath the amber cover.
     bulb_y = -dome * 0.48
     bulb_z = seat - 0.00008
-    r = dome * 0.31
-    rise = dome * 0.72
-    bulb = glass_dome("Ultra_ClearBulbEnvelope", r, rise, 0, 0.00016, mats["Ultra_Bulb_Glass"], segments=128)
+    scale = 1.35
+    r = dome * 0.31 * scale
+    rise = dome * 0.72 * scale
+    bulb = glass_dome("Ultra_ClearBulbEnvelope", r, rise, 0, 0.00016 * scale, mats["Ultra_Bulb_Glass"], segments=128)
     bulb.scale.y = 0.75
     bulb.rotation_euler.x = -math.pi / 2
     bulb.location = (0, bulb_y, bulb_z)
 
     base = lathe("Ultra_BulbBrassBase", [
-        (0, -0.00115), (r * 0.82, -0.00115), (r * 0.88, -0.00098),
-        (r * 0.88, -0.00016), (r * 0.82, -0.00004), (0, -0.00004),
+        (radius * r, depth * scale)
+        for radius, depth in (
+            (0, -0.00128), (0.71, -0.00128), (0.81, -0.00119), (0.84, -0.00105),
+            (0.79, -0.00092), (0.79, -0.00082), (0.84, -0.00073),
+            (0.87, -0.00025), (0.82, -0.00009), (0, -0.00009),
+        )
     ], mats["Ultra_Brass_Cup"], segments=96)
     base.location = bulb.location
     base.rotation_euler = bulb.rotation_euler
     base.scale.y = bulb.scale.y
 
     tungsten = mats["Ultra_Filament"]
-    end_x = 0.00071
+    end_x = 0.00071 * scale
     filament_y = bulb_y + rise * 0.57
     supports = [
         wire(f"Ultra_Support_{label}", [
-            (sign * 0.00038, bulb_y - 0.00014, bulb_z),
-            (sign * 0.00050, bulb_y + 0.00094, bulb_z),
-            (sign * 0.00065, filament_y - 0.00046, bulb_z),
+            (sign * 0.00038 * scale, bulb_y - 0.00014 * scale, bulb_z),
+            (sign * 0.00050 * scale, bulb_y + 0.00094 * scale, bulb_z),
+            (sign * 0.00065 * scale, filament_y - 0.00046 * scale, bulb_z),
             (sign * end_x, filament_y, bulb_z),
-        ], 0.000062, tungsten)
+        ], 0.000062 * scale, tungsten)
         for sign, label in ((-1, "L"), (1, "R"))
     ]
     path = []
     for i in range(201):
         t = i / 200
         phase = math.tau * 12 * t
-        coil = 0.000063 * min(1, 25 * t, 25 * (1 - t))
+        coil = 0.000063 * scale * min(1, 25 * t, 25 * (1 - t))
         path.append((
             end_x * (2 * t - 1),
-            filament_y + 0.00016 * math.sin(math.pi * t) + coil * math.sin(phase),
+            filament_y + 0.00016 * scale * math.sin(math.pi * t) + coil * math.sin(phase),
             bulb_z + coil * math.cos(phase),
         ))
-    filament = wire("Ultra_CoiledTungstenFilament", path, 0.000026, tungsten, sides=8)
+    filament = wire("Ultra_CoiledTungstenFilament", path, 0.000026 * scale, tungsten, sides=8)
     return [bulb, base, *supports, filament]
 
 

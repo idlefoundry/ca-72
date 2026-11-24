@@ -163,13 +163,13 @@ def calibrate_faceplate(raw_path: Path, dst_path: Path, manifest: dict) -> None:
     right_med = float(np.median(luma[:, (3 * sw) // 4 :][dark_mask[:, (3 * sw) // 4 :]]))
     print(f"Faceplate steel median sRGB before calibration: left={left_med:.1f}, right={right_med:.1f}")
 
-    # Gently calibrate aluminum pixels inside faceplate rect toward rich matte studio charcoal:
-    # Target left ~ 46 sRGB -> right ~ 35 sRGB (smooth gradient, zero blown-out grey hotspot!)
+    # Gently preserve rich deep baked-enamel black across the full panel width:
+    # Target left ~ 36 sRGB -> right ~ 30 sRGB (deep pebbled vintage enamel, zero washed-out grey!)
     yy, xx = np.mgrid[my0:my1, mx0:mx1].astype(np.float32)
     u = np.clip((xx - mx0) / max(1.0, float(mx1 - mx0)), 0.0, 1.0)
     cur_grad = left_med * (1.0 - u) + right_med * u
-    tgt_grad = 46.0 * (1.0 - u) + 34.0 * u
-    ratio = np.clip(tgt_grad / np.maximum(12.0, cur_grad), 0.72, 1.35)
+    tgt_grad = 36.0 * (1.0 - u) + 30.0 * u
+    ratio = np.clip(tgt_grad / np.maximum(12.0, cur_grad), 0.72, 1.25)
 
     # Mask smoothly so bright white silkscreen ink (> 110 sRGB) stays 100% crisp and untouched
     steel_w = 1.0 - smoothstep(68.0, 118.0, luma)
