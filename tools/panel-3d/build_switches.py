@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Build closed-manifold Y-up metric GLB models for CA-72's classic Minimoog switches:
-  - rocker_horiz.glb  (horizontal sculpted concave rocker paddle + recessed matte bezel)
-  - rocker_vert.glb   (vertical sculpted concave rocker paddle + recessed matte bezel)
-  - rocker_power.glb  (vertical black ribbed POWER rocker paddle + recessed matte bezel)
-  - toggle_bat.glb    (chrome hex nut + keyed washer + threaded bushing + tapered bat lever)
-"""
+"""Build the four CA-72 switch GLBs in metres, with Y up at export."""
 
 import argparse
 import json
@@ -15,526 +10,365 @@ from pathlib import Path
 import bpy
 import bmesh
 
-
-def srgb_to_lin(c: float) -> float:
-    return ((c + 0.055) / 1.055) ** 2.4 if c > 0.04045 else c / 12.92
+from shaders_switches import FINISHES, new_switch_material
 
 
-def make_material(name, rgba, roughness, metallic=0.0, coat=0.0, coat_rough=0.14):
-    mat = bpy.data.materials.new(name)
-    mat.use_nodes = True
-    mat.diffuse_color = rgba
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    bsdf.inputs["Base Color"].default_value = rgba
-    bsdf.inputs["Roughness"].default_value = roughness
-    bsdf.inputs["Metallic"].default_value = metallic
-    if coat > 0.0 and "Coat Weight" in bsdf.inputs:
-        bsdf.inputs["Coat Weight"].default_value = coat
-        bsdf.inputs["Coat Roughness"].default_value = coat_rough
-    return mat
-
-
-def validate_mesh(obj):
-    bm = bmesh.new()
-    try:
-        bm.from_mesh(obj.data)
-        bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
-        non_man = [e for e in bm.edges if not e.is_manifold or not e.is_contiguous]
-        if non_man:
-            raise ValueError(f"{obj.name}: {len(non_man)} non-manifold edges")
-        vol = bm.calc_volume(signed=True)
-        if vol <= 0:
-            raise ValueError(f"{obj.name}: non-positive volume {vol}")
-        bm.to_mesh(obj.data)
-    finally:
-        bm.free()
-    obj.data.update()
-
-
-def create_mesh_obj(name, verts, faces, mat, smooth=True):
+def create_mesh(name, verts, faces, materials, material_indices=None, sharp_angle=32):
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(verts, [], faces)
     if mesh.validate():
-        raise ValueError(f"{name}: invalid mesh")
-    mesh.materials.append(mat)
-    for p in mesh.polygons:
-        p.use_smooth = smooth
+        raise ValueError(f"{name}: invalid geometry")
+    for material in materials:
+        mesh.materials.append(material)
+    for face in mesh.polygons:
+        face.use_smooth = True
+        if material_indices is not None:
+            face.material_index = material_indices[face.index]
+
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(mesh)
+        bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+        if any(not edge.is_manifold or not edge.is_contiguous for edge in bm.edges):
+            raise ValueError(f"{name}: open or inconsistently oriented surface")
+        if bm.calc_volume(signed=True) <= 0:
+            raise ValueError(f"{name}: non-positive signed volume")
+        bm.to_mesh(mesh)
+    finally:
+        bm.free()
+    mesh.update()
+    mesh.set_sharp_from_angle(angle=math.radians(sharp_angle))
+
     obj = bpy.data.objects.new(name, mesh)
     bpy.context.collection.objects.link(obj)
-    validate_mesh(obj)
     return obj
 
 
-def build_rocker_bezel(name, w, h, pad, mat_bezel, mat_well):
-    """Build closed-manifold rectangular recessed bezel frame around a rocker opening."""
-    # Outer bezel dimensions and inner cavity dimensions
-    ox, oy = w * 0.5 + pad, h * 0.5 + pad
-    ix, iy = w * 0.5 - 0.00035, h * 0.5 - 0.00035
-    z_top = 0.00145
-    z_well = 0.00025
-    ch = 0.00035  # chamfer
+def loft(name, rings, materials, *, caps=None, span_materials=None, sharp_angle=32):
+    """Connect equally sampled rings, closing at two poles or around a bore."""
+    width = len(rings[0])
+    verts = [point for ring in rings for point in ring]
+    faces, material_indices = [], []
+    spans = len(rings) if caps is None else len(rings) - 1
+    for span in range(spans):
+        first = span * width
+        last = (span + 1) % len(rings) * width
+        for i in range(width):
+            j = (i + 1) % width
+            faces.append((first + i, first + j, last + j, last + i))
+            material_indices.append(0 if span_materials is None else span_materials[span])
 
-    def rect_ring(rx, ry, z, r_corner=0.0006):
-        # 16-vertex rounded rectangle CCW
-        pts = []
-        corners = [(rx - r_corner, ry - r_corner, 0),
-                   (-rx + r_corner, ry - r_corner, math.pi * 0.5),
-                   (-rx + r_corner, -ry + r_corner, math.pi),
-                   (rx - r_corner, -ry + r_corner, math.pi * 1.5)]
-        for cx, cy, a0 in corners:
-            for k in range(4):
-                a = a0 + (math.pi * 0.5) * k / 3.0
-                pts.append((cx + r_corner * math.cos(a), cy + r_corner * math.sin(a), z))
-        return pts
+    if caps is not None:
+        bottom, top = len(verts), len(verts) + 1
+        verts.extend(((0, 0, caps[0]), (0, 0, caps[1])))
+        last = (len(rings) - 1) * width
+        for i in range(width):
+            j = (i + 1) % width
+            faces.extend(((bottom, j, i), (top, last + i, last + j)))
+            material_indices.extend((0, 0 if span_materials is None else span_materials[-1]))
 
+    return create_mesh(name, verts, faces, materials, material_indices, sharp_angle)
+
+
+def rounded_rectangle(x, y, z, radius):
+    points = []
+    for quadrant, (sign_x, sign_y) in enumerate(((1, 1), (-1, 1), (-1, -1), (1, -1))):
+        cx, cy = sign_x * (x - radius), sign_y * (y - radius)
+        for step in range(6):
+            angle = math.pi / 2 * (quadrant + step / 5)
+            points.append((cx + radius * math.cos(angle), cy + radius * math.sin(angle), z))
+    return points
+
+
+def build_rocker_bezel(dim, bezel, well):
+    half_w, half_h = dim["w"] / 2, dim["h"] / 2
+    outer_x, outer_y = half_w + dim["bezel_pad"], half_h + dim["bezel_pad"]
+    inner_x, inner_y = half_w + 0.00013, half_h + 0.00013
+    top, floor = 0.00122, -0.00485
+    # Thin flat lip, small mould breaks and a full-depth pocket for the pressed skirt.
     rings = [
-        rect_ring(ox, oy, 0.0, 0.0007),
-        rect_ring(ox, oy, z_top - ch, 0.0007),
-        rect_ring(ox - ch, oy - ch, z_top, 0.0005),
-        rect_ring(ix + ch * 0.6, iy + ch * 0.6, z_top, 0.0004),
-        rect_ring(ix, iy, z_top - ch * 0.6, 0.00035),
-        rect_ring(ix, iy, z_well, 0.00035),
+        rounded_rectangle(outer_x, outer_y, floor - 0.00035, 0.00034),
+        rounded_rectangle(outer_x, outer_y, top - 0.00016, 0.00034),
+        rounded_rectangle(outer_x - 0.00016, outer_y - 0.00016, top, 0.00024),
+        rounded_rectangle(inner_x + 0.00012, inner_y + 0.00012, top, 0.00023),
+        rounded_rectangle(inner_x, inner_y, top - 0.00012, 0.00018),
+        rounded_rectangle(inner_x, inner_y, floor, 0.00018),
     ]
-    n = len(rings[0])
-    verts = [p for ring in rings for p in ring]
-    bot_c = len(verts)
-    verts.append((0.0, 0.0, 0.0))
-    well_c = len(verts)
-    verts.append((0.0, 0.0, z_well))
+    return loft("Rocker_Bezel", rings, [bezel, well], caps=(floor - 0.00035, floor),
+                span_materials=[0, 0, 0, 0, 1])
 
+
+def power_rib_profile():
+    """Sample 13 trapezoidal ribs per half, including the fine bevel of each crest."""
+    samples = [(u, 0.0) for u in (0.0, 0.035, 0.072, 0.091, 0.104)]
+    start, pitch = 0.112, 0.063
+    for i in range(13):
+        for phase, relief in (
+            (0.00, 0.00), (0.13, 0.09), (0.25, 0.83), (0.33, 1.00),
+            (0.60, 1.00), (0.70, 0.83), (0.85, 0.09), (0.94, 0.00),
+        ):
+            samples.append((start + (i + phase) * pitch, 0.00019 * relief))
+    samples.extend((u, 0.0) for u in (0.933, 0.949, 0.970, 0.986, 1.0))
+    return [(-u, z) for u, z in reversed(samples[1:])] + samples
+
+
+def build_rocker_actuator(dim, material, *, vertical, ribbed=False):
+    w, h, height = dim["w"], dim["h"], dim["height"]
+    length, width = (h, w) if vertical else (w, h)
+    half_length = length / 2 - 0.00066
+    half_width = width / 2 - 0.00021
+
+    if ribbed:
+        profile = power_rib_profile()
+    else:
+        profile = [(i / 48, 0.0) for i in range(-48, 49)]
+
+    # Closely space samples along the long edges for the mould chamfer and rib runout.
+    across = [-1, -0.981, -0.95, -0.91, -0.87, -0.72, -0.38, 0,
+              0.38, 0.72, 0.87, 0.91, 0.95, 0.981, 1]
+
+    def point(u, v, relief):
+        a, b = abs(u), abs(v)
+        # The broad moulded faces meet at the hinge. Round the outboard lip over
+        # a short run so the raised end has a crown and the pressed face lies low.
+        run = max(0.0, a - 0.091) if ribbed else a
+        rise = math.hypot(run, 0.055) - 0.055
+        roll = max(0.0, (a - 0.82) / 0.18)
+        edge = max(0.0, (b - 0.93) / 0.07)
+        z = height * (0.293 + 0.345 * rise - 0.162 * roll ** 2.5)
+        z -= 0.00026 * edge ** 1.6
+        z += relief * min(1.0, (1.0 - b) / 0.09)
+        x = u * half_length - u * (b ** 12) * 0.00013
+        y = v * half_width - v * (a ** 35) * 0.00013
+        return (-y, x, z) if vertical else (x, y, z)
+
+    verts = [point(u, v, z) for u, z in profile for v in across]
+    rows, cols = len(profile), len(across)
     faces = []
-    fmats = []
-    for i in range(n):
-        ni = (i + 1) % n
-        faces.append((bot_c, ni, i))
-        fmats.append(0)
-    for r in range(len(rings) - 1):
-        a0 = r * n
-        b0 = (r + 1) * n
-        m_idx = 1 if r >= 4 else 0
-        for i in range(n):
-            ni = (i + 1) % n
-            faces.append((a0 + i, a0 + ni, b0 + ni, b0 + i))
-            fmats.append(m_idx)
-    last = (len(rings) - 1) * n
-    for i in range(n):
-        ni = (i + 1) % n
-        faces.append((well_c, last + i, last + ni))
-        fmats.append(1)
-
-    mesh = bpy.data.meshes.new(name)
-    mesh.from_pydata(verts, [], faces)
-    mesh.materials.append(mat_bezel)
-    mesh.materials.append(mat_well)
-    for poly in mesh.polygons:
-        poly.use_smooth = True
-        poly.material_index = fmats[poly.index]
-    obj = bpy.data.objects.new(name, mesh)
-    bpy.context.collection.objects.link(obj)
-    validate_mesh(obj)
-    return obj
-
-
-def build_rocker_actuator(name, length, width, height, mat_actuator, along_y=False, ribbed=False):
-    """Build sculpted concave Minimoog rocker actuator centered at its internal hinge pivot (0,0,0).
-    When `along_y=False`, length runs along X (horizontal rocker).
-    When `along_y=True`, length runs along Y (vertical rocker).
-    """
-    hl = length * 0.5 - 0.00055
-    hw = width * 0.5 - 0.00055
-    # Authentic Minimoog Carling/Switchcraft rocker profile:
-    # Smooth concave saddle top with gently rising rounded crests toward both ends,
-    # deeper skirt body descending into bezel well.
-    nu = 28  # samples along length
-    nv = 14  # samples across width
-    z_bot = -0.0022
-
-    def top_z(u_norm, v_norm):
-        """u_norm, v_norm in [-1, 1]."""
-        # Concave saddle along length + rounded lip dropoff near outer ends
-        au = abs(u_norm)
-        # Saddle rises from center (0.0038) to crest at |u|=0.78 (0.0056), then rounds smoothly over end
-        if au <= 0.80:
-            t = au / 0.80
-            z = height * (0.50 + 0.24 * (t ** 1.85))
-        else:
-            t = (au - 0.80) / 0.20
-            z = height * (0.74 - 0.14 * (t ** 2.2))
-        # Subtle ergonomic transverse rounding along long edges
-        av = abs(v_norm)
-        edge_drop = height * 0.11 * (max(0.0, (av - 0.72) / 0.28) ** 2.0)
-        z -= edge_drop
-        if ribbed and 0.30 <= au <= 0.84 and av <= 0.82:
-            # 4 crisp tactile grip ribs near each end of the black POWER rocker
-            rib_phase = (au - 0.30) / (0.84 - 0.30) * 4.0 * math.tau
-            z += 0.00028 * max(0.0, math.sin(rib_phase))
-        return z
-
-    # Build structured closed manifold box grid (top surface, bottom surface, 4 sidewalls)
-    # Using a parametric (u, v) grid with chamfered perimeter
-    us = [(-1.0 + 2.0 * i / nu) for i in range(nu + 1)]
-    vs = [(-1.0 + 2.0 * j / nv) for j in range(nv + 1)]
-
-    # Slight taper inward near top for molded draft angle
-    def map_xy(u, v, draft=1.0):
-        # Soft corner rounding in XY
-        ax, ay = u * hl * draft, v * hw * draft
-        return (ay, ax) if along_y else (ax, ay)
-
-    # Top grid vertices: (nu+1) x (nv+1)
-    verts = []
-    for i, u in enumerate(us):
-        for j, v in enumerate(vs):
-            x, y = map_xy(u, v, draft=0.96)
-            verts.append((x, y, top_z(u, v)))
-    # Bottom grid vertices: (nu+1) x (nv+1)
-    bot_off = len(verts)
-    for i, u in enumerate(us):
-        for j, v in enumerate(vs):
-            x, y = map_xy(u, v, draft=1.00)
-            verts.append((x, y, z_bot))
-
-    cols = nv + 1
-    faces = []
-    # Top faces (+Z outward)
-    for i in range(nu):
-        for j in range(nv):
+    for i in range(rows - 1):
+        for j in range(cols - 1):
             a = i * cols + j
-            b = (i + 1) * cols + j
-            c = (i + 1) * cols + (j + 1)
-            d = i * cols + (j + 1)
-            if along_y:
-                faces.append((a, d, c, b))
-            else:
-                faces.append((a, b, c, d))
-    # Bottom faces (-Z outward)
-    for i in range(nu):
-        for j in range(nv):
-            a = bot_off + i * cols + j
-            b = bot_off + (i + 1) * cols + j
-            c = bot_off + (i + 1) * cols + (j + 1)
-            d = bot_off + i * cols + (j + 1)
-            if along_y:
-                faces.append((a, b, c, d))
-            else:
-                faces.append((a, d, c, b))
-    # Sidewalls: j=0, j=nv, i=0, i=nu
-    for i in range(nu):
-        t0, t1 = i * cols + 0, (i + 1) * cols + 0
-        b0, b1 = bot_off + t0, bot_off + t1
-        faces.append((b0, b1, t1, t0) if not along_y else (t0, t1, b1, b0))
+            faces.append((a, a + cols, a + cols + 1, a + 1))
 
-        t0, t1 = i * cols + nv, (i + 1) * cols + nv
-        b0, b1 = bot_off + t0, bot_off + t1
-        faces.append((t0, t1, b1, b0) if not along_y else (b0, b1, t1, t0))
+    # Follow the cap perimeter with a mould break and drafted skirt.
+    perimeter = (
+        [i * cols for i in range(rows)]
+        + [(rows - 1) * cols + j for j in range(1, cols)]
+        + [i * cols + cols - 1 for i in range(rows - 2, -1, -1)]
+        + list(range(cols - 2, 0, -1))
+    )
+    for scale, z_offset, fixed_z in ((1.001, -0.00012, None), (0.979, 0.0, -0.00110)):
+        start = len(verts)
+        for index in perimeter:
+            x, y, z = verts[index]
+            verts.append((scale * x, scale * y, z + z_offset if fixed_z is None else fixed_z))
+        for i, a in enumerate(perimeter):
+            j = (i + 1) % len(perimeter)
+            faces.append((a, start + i, start + j, perimeter[j]))
+        perimeter = list(range(start, len(verts)))
 
-    for j in range(nv):
-        t0, t1 = 0 * cols + j, 0 * cols + (j + 1)
-        b0, b1 = bot_off + t0, bot_off + t1
-        faces.append((t0, t1, b1, b0) if not along_y else (b0, b1, t1, t0))
-
-        t0, t1 = nu * cols + j, nu * cols + (j + 1)
-        b0, b1 = bot_off + t0, bot_off + t1
-        faces.append((b0, b1, t1, t0) if not along_y else (t0, t1, b1, b0))
-
-    obj = create_mesh_obj(name, verts, faces, mat_actuator, smooth=True)
-    # Place actuator pivot at Z = 0.0018 above faceplate
-    obj.location = (0.0, 0.0, 0.0018)
-    return obj
+    bottom_center = len(verts)
+    verts.append((0, 0, -0.00110))
+    for i, a in enumerate(perimeter):
+        faces.append((a, bottom_center, perimeter[(i + 1) % len(perimeter)]))
+    actuator = create_mesh("Rocker_Actuator", verts, faces, [material], sharp_angle=46)
+    actuator.location.z = 0.00132
+    return actuator
 
 
-def build_toggle_bat(dim, mat_chrome, mat_chrome_satin, mat_dark):
-    """Build classic turned chrome bat-handle toggle switch:
-      - Toggle_Hardware: keyed anti-rotation washer + chamfered hex nut + threaded bushing + pivot well
-      - Toggle_Lever:    tapered turned chrome bat handle (pivot at Z=0.0044)
-    """
-    r_wash = dim["washer_radius"]
-    af = dim["nut_across_flats"]
-    r_hex = af / math.sqrt(3.0)  # circumradius of hex nut
-    r_bush = dim["bushing_radius"]
-    l_len = dim["lever_length"] * 0.84
-    r_base = dim["lever_base_radius"]
-    r_tip = dim["lever_tip_radius"] * 1.02
+def polar_ring(radius_at, z_at, count):
+    points = []
+    for i in range(count):
+        angle = math.tau * i / count
+        r = radius_at(angle)
+        points.append((r * math.cos(angle), r * math.sin(angle), z_at(angle)))
+    return points
 
-    parts = []
 
-    # 1. Keyed flat washer (Z = 0 .. 0.00065)
-    segs = 48
-    w_prof = [
-        (r_wash - 0.00012, 0.0000),
-        (r_wash,           0.00012),
-        (r_wash,           0.00055),
-        (r_wash - 0.00015, 0.00068),
-        (r_bush * 0.90,    0.00068),
+def round_ring(radius, z, count=96):
+    return polar_ring(lambda _: radius, lambda _: z, count)
+
+
+def angular_distance(angle, center, period=math.tau):
+    return abs((angle - center + period / 2) % period - period / 2)
+
+
+def build_washer(radius, bushing_radius, satin):
+    def outer(r, theta):
+        # Small indexing notch with a radiused root at the edge of the stamping.
+        t = max(0, 1 - (angular_distance(theta, math.pi / 2) / 0.105) ** 2)
+        return r - 0.00028 * t
+
+    def bore(r, theta):
+        # The internal key engages the slot in the bushing's mounting journal.
+        key = max(0, min(1, (0.17 - angular_distance(theta, math.pi / 2)) / 0.045))
+        return r - 0.00030 * key
+
+    profile = [
+        (outer, radius - 0.00009, 0.0),
+        (outer, radius, 0.00009),
+        (outer, radius, 0.00050),
+        (outer, radius - 0.00008, 0.00060),
+        (bore, bushing_radius + 0.00009, 0.00060),
+        (bore, bushing_radius + 0.00009, 0.0),
     ]
-    wverts = [
-        (r * math.cos(math.tau * i / segs), r * math.sin(math.tau * i / segs), z)
-        for (r, z) in w_prof
-        for i in range(segs)
+    rings = [polar_ring(lambda a: shape(r, a), lambda _: z, 120) for shape, r, z in profile]
+    return loft("Toggle_Washer", rings, [satin])
+
+
+def build_nut(across_flats, bushing_radius, satin):
+    apothem = across_flats / 2
+    corner = apothem / math.cos(math.pi / 6)
+    shoulder = apothem - 0.00016
+
+    def hex_radius(angle):
+        # Flat normals are spaced every 60 degrees, with small clipped corners.
+        flat = apothem / math.cos(angular_distance(angle, 0, math.pi / 3))
+        cut = (corner - 0.000085) / math.cos(angular_distance(angle, math.pi / 6, math.pi / 3))
+        return min(flat, cut)
+
+    height = 0.00283
+    bore = bushing_radius + 0.00003
+    rings = [
+        polar_ring(lambda a: hex_radius(a) - 0.00013, lambda _: 0.00060, 120),
+        polar_ring(hex_radius, lambda _: 0.00074, 120),
+        # Intersect the flats with a turning cone to produce the circular top shoulder.
+        polar_ring(hex_radius, lambda a: height - 0.92 * (hex_radius(a) - shoulder), 120),
+        round_ring(shoulder, height, 120),
+        round_ring(bore + 0.000075, height, 120),
+        round_ring(bore, height - 0.00010, 120),
+        round_ring(bore, 0.00060, 120),
     ]
-    wbc = len(wverts); wverts.append((0.0, 0.0, 0.0))
-    wtc = len(wverts); wverts.append((0.0, 0.0, 0.00068))
-    wfaces = []
-    for i in range(segs):
-        ni = (i + 1) % segs
-        wfaces.append((wbc, ni, i))
-    for r in range(len(w_prof) - 1):
-        a0, b0 = r * segs, (r + 1) * segs
-        for i in range(segs):
-            ni = (i + 1) % segs
-            wfaces.append((a0 + i, a0 + ni, b0 + ni, b0 + i))
-    last = (len(w_prof) - 1) * segs
-    for i in range(segs):
-        ni = (i + 1) % segs
-        wfaces.append((wtc, last + i, last + ni))
-    parts.append(create_mesh_obj("Toggle_Washer", wverts, wfaces, mat_chrome_satin, smooth=True))
+    return loft("Toggle_HexNut", rings, [satin], sharp_angle=24)
 
-    # 2. Chamfered 6-sided chrome hex mounting nut (Z = 0.00065 .. 0.0033)
-    #    Use 6-vertex hex with subtle corner rounding (24 verts) + top machined chamfer!
-    def hex_ring(radius, z, flat_k=1.0):
-        # Exact 6-sided hex rotated 30 deg so flat faces sit cleanly left/right
-        pts = []
-        for k in range(6):
-            a = math.radians(30.0 + 60.0 * k)
-            pts.append((radius * math.cos(a), radius * math.sin(a), z))
-        return pts
 
-    h_rings = [
-        hex_ring(r_hex * 0.97, 0.00065),
-        hex_ring(r_hex,        0.00090),
-        hex_ring(r_hex,        0.00285),
-        hex_ring(r_hex * 0.91, 0.00330),
-        hex_ring(r_bush * 0.95, 0.00330),
+def build_bushing(radius, satin, dark):
+    count = 120
+    pitch = 0.00053
+    thread_bottom, thread_top = 0.00278, 0.00485
+
+    def journal(theta):
+        slot = max(0, min(1, (0.185 - angular_distance(theta, math.pi / 2)) / 0.045))
+        return radius - 0.00024 * slot
+
+    def thread_ring(z):
+        def threaded_radius(theta):
+            phase = (z - thread_bottom) / pitch - theta / math.tau
+            crest = max(0.0, min(1.0, (0.43 - abs(phase - round(phase))) / 0.30))
+            runout = min(1, (z - thread_bottom) / (0.5 * pitch), (thread_top - z) / (0.65 * pitch))
+            return radius - 0.00015 * runout * (1 - crest)
+        return polar_ring(threaded_radius, lambda _: z, count)
+
+    rings = [polar_ring(journal, lambda _: z, count) for z in (0.0, 0.00061)]
+    for step in range(81):
+        rings.append(thread_ring(thread_bottom + (thread_top - thread_bottom) * step / 80))
+    rings.extend(round_ring(r, z, count) for r, z in (
+        (radius - 0.00016, 0.00495),
+        (radius - 0.00017, 0.00511),
+        (radius - 0.000035, 0.00521),
+        (radius - 0.000035, 0.00539),
+        (radius - 0.00016, 0.00553),
+        (radius - 0.00049, 0.00553),
+        (radius - 0.00066, 0.00537),
+        (radius - 0.00072, 0.00515),
+        (radius - 0.00092, 0.00510),
+        (radius - 0.00100, 0.00455),
+        (radius - 0.00117, 0.00325),
+    ))
+    span_materials = [0] * (len(rings) - 4) + [1] * 3
+    return loft("Toggle_Bushing", rings, [satin, dark], caps=(0, 0.00325),
+                span_materials=span_materials, sharp_angle=34)
+
+
+def build_lever(dim, chrome):
+    pivot_z = 0.00461
+    length = dim["lever_length"] * 0.84
+    ball = dim["lever_base_radius"] * 0.92
+    tip_radius = dim["lever_tip_radius"]
+    # A shallow domed end uses the spec's crown curvature without a ball-shaped grip.
+    tip_width = tip_radius * 0.54
+    tip_height = tip_width ** 2 / tip_radius
+    neck = dim["lever_base_radius"] * 0.66
+    shoulder = length - tip_height
+    profile = []
+    # Spherical pivot with its equator at the local origin.
+    for i in range(14):
+        angle = math.radians(-84 + i * 10)
+        profile.append((ball * math.cos(angle), ball * math.sin(angle)))
+    profile.extend(((neck, 0.00114), (neck, 0.00155)))
+    for i in range(1, 25):
+        t = i / 24
+        flare = t * (1.32 - 0.32 * t)
+        profile.append((neck + (tip_width - neck) * flare, 0.00155 + (shoulder - 0.00155) * t))
+    for i in range(1, 18):
+        angle = math.pi / 2 * i / 18
+        profile.append((tip_width * math.cos(angle), shoulder + tip_height * math.sin(angle)))
+
+    lever = loft("Toggle_Lever", [round_ring(r, z) for r, z in profile], [chrome],
+                 caps=(-ball, length))
+    lever.location.z = pivot_z
+    return lever
+
+
+def build_toggle(dim, chrome, satin, dark):
+    bushing_radius = dim["bushing_radius"]
+    parts = [
+        build_washer(dim["washer_radius"], bushing_radius, satin),
+        build_nut(dim["nut_across_flats"], bushing_radius, satin),
+        build_bushing(bushing_radius, satin, dark),
     ]
-    hverts = [p for ring in h_rings for p in ring]
-    hbc = len(hverts); hverts.append((0.0, 0.0, 0.00065))
-    htc = len(hverts); hverts.append((0.0, 0.0, 0.00330))
-    hfaces = []
-    for i in range(6):
-        ni = (i + 1) % 6
-        hfaces.append((hbc, ni, i))
-    for r in range(len(h_rings) - 1):
-        a0, b0 = r * 6, (r + 1) * 6
-        for i in range(6):
-            ni = (i + 1) % 6
-            hfaces.append((a0 + i, a0 + ni, b0 + ni, b0 + i))
-    last = (len(h_rings) - 1) * 6
-    for i in range(6):
-        ni = (i + 1) % 6
-        hfaces.append((htc, last + i, last + ni))
-    # Flat-shaded hex faces catch ultra-crisp chrome facet reflections!
-    parts.append(create_mesh_obj("Toggle_HexNut", hverts, hfaces, mat_chrome, smooth=False))
-
-    # 3. Threaded chrome bushing + recessed dark pivot cup (Z = 0.0031 .. 0.0056)
-    b_prof = [
-        (r_bush,           0.0031, 0),
-        (r_bush * 0.94,    0.0035, 0),
-        (r_bush,           0.0039, 0),
-        (r_bush * 0.94,    0.0043, 0),
-        (r_bush,           0.0047, 0),
-        (r_bush * 0.94,    0.0051, 0),
-        (r_bush * 0.97,    0.0054, 0),
-        (r_bush * 0.82,    0.0056, 0),
-        (r_bush * 0.68,    0.0054, 1),
-        (r_bush * 0.62,    0.0036, 1),
-    ]
-    bverts = [
-        (r * math.cos(math.tau * i / segs), r * math.sin(math.tau * i / segs), z)
-        for (r, z, _) in b_prof
-        for i in range(segs)
-    ]
-    bbc = len(bverts); bverts.append((0.0, 0.0, 0.0031))
-    btc = len(bverts); bverts.append((0.0, 0.0, 0.0036))
-    bfaces, bfmats = [], []
-    for i in range(segs):
-        ni = (i + 1) % segs
-        bfaces.append((bbc, ni, i)); bfmats.append(0)
-    for r in range(len(b_prof) - 1):
-        a0, b0 = r * segs, (r + 1) * segs
-        m = b_prof[r][2]
-        for i in range(segs):
-            ni = (i + 1) % segs
-            bfaces.append((a0 + i, a0 + ni, b0 + ni, b0 + i)); bfmats.append(m)
-    last = (len(b_prof) - 1) * segs
-    for i in range(segs):
-        ni = (i + 1) % segs
-        bfaces.append((btc, last + i, last + ni)); bfmats.append(1)
-
-    bmesh_d = bpy.data.meshes.new("Toggle_Bushing")
-    bmesh_d.from_pydata(bverts, [], bfaces)
-    bmesh_d.materials.append(mat_chrome_satin)
-    bmesh_d.materials.append(mat_dark)
-    for p in bmesh_d.polygons:
-        p.use_smooth = True
-        p.material_index = bfmats[p.index]
-    bush_obj = bpy.data.objects.new("Toggle_Bushing", bmesh_d)
-    bpy.context.collection.objects.link(bush_obj)
-    validate_mesh(bush_obj)
-    parts.append(bush_obj)
-
-    # Join static hardware parts into Toggle_Hardware
     bpy.ops.object.select_all(action="DESELECT")
-    for o in parts:
-        o.select_set(True)
+    for obj in parts:
+        obj.select_set(True)
     bpy.context.view_layer.objects.active = parts[0]
     bpy.ops.object.join()
-    hw = parts[0]
-    hw.name = "Toggle_Hardware"
-
-    # 4. Tapered chrome bat-handle lever (origin at internal pivot Z = 0.0044)
-    #    Extends from z = -0.0012 (pivot ball) up to z = l_len (spherical bat tip)
-    l_segs = 36
-    l_prof = []
-    # Pivot ball base
-    l_prof.append((r_base * 0.70, -0.0010))
-    l_prof.append((r_base * 0.95, 0.0000))
-    # Tapered conical bat shaft
-    shaft_end = l_len - r_tip
-    for k in range(1, 10):
-        t = k / 9.0
-        z = t * shaft_end
-        # Smooth iconic bat flare curve
-        r = r_base + (r_tip - r_base) * (t ** 0.92)
-        l_prof.append((r, z))
-    # Hemispherical polished bat tip
-    for k in range(1, 10):
-        phi = (math.pi * 0.5) * k / 10.0
-        r = r_tip * math.cos(phi)
-        z = shaft_end + r_tip * math.sin(phi)
-        l_prof.append((r, z))
-
-    lverts = [
-        (r * math.cos(math.tau * i / l_segs), r * math.sin(math.tau * i / l_segs), z)
-        for (r, z) in l_prof
-        for i in range(l_segs)
-    ]
-    lbc = len(lverts); lverts.append((0.0, 0.0, -0.0011))
-    ltc = len(lverts); lverts.append((0.0, 0.0, l_len))
-    lfaces = []
-    for i in range(l_segs):
-        ni = (i + 1) % l_segs
-        lfaces.append((lbc, ni, i))
-    for r in range(len(l_prof) - 1):
-        a0, b0 = r * l_segs, (r + 1) * l_segs
-        for i in range(l_segs):
-            ni = (i + 1) % l_segs
-            lfaces.append((a0 + i, a0 + ni, b0 + ni, b0 + i))
-    last = (len(l_prof) - 1) * l_segs
-    for i in range(l_segs):
-        ni = (i + 1) % l_segs
-        lfaces.append((ltc, last + i, last + ni))
-    lever = create_mesh_obj("Toggle_Lever", lverts, lfaces, mat_chrome, smooth=True)
-    lever.location = (0.0, 0.0, 0.0044)
-    return [hw, lever]
+    hardware = parts[0]
+    hardware.name = "Toggle_Hardware"
+    return [hardware, build_lever(dim, chrome)]
 
 
-def export_glb(objs, out_path: Path):
+def export_glb(objects, path):
     bpy.ops.object.select_all(action="DESELECT")
-    for o in objs:
-        o.select_set(True)
-    bpy.context.view_layer.objects.active = objs[0]
-    res = bpy.ops.export_scene.gltf(
-        filepath=str(out_path),
-        export_format="GLB",
-        export_yup=True,
-        export_materials="EXPORT",
-        export_normals=True,
-        use_selection=True,
+    for obj in objects:
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = objects[0]
+    result = bpy.ops.export_scene.gltf(
+        filepath=str(path), export_format="GLB", export_yup=True, use_selection=True,
     )
-    if res != {"FINISHED"}:
-        raise RuntimeError(f"Failed to export {out_path}")
-    print(f"Exported {out_path.name} ({out_path.stat().st_size:,} bytes)", flush=True)
+    if result != {"FINISHED"}:
+        raise RuntimeError(f"Failed to export {path}")
+    print(f"Exported {path.name} ({path.stat().st_size:,} bytes)", flush=True)
+    for obj in objects:
+        bpy.data.objects.remove(obj, do_unlink=True)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, default=Path("target/panel-3d"))
-    argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else sys.argv[1:]
+    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
     args = parser.parse_args(argv)
-
-    spec = json.loads((args.out / "spec.json").read_text())
-    dims = spec["part_dimensions_meters"]
-    assets_dir = args.out / "assets"
-    assets_dir.mkdir(parents=True, exist_ok=True)
+    dims = json.loads((args.out / "spec.json").read_text())["part_dimensions_meters"]
+    assets = args.out / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.context.scene.unit_settings.system = "METRIC"
+    materials = {name: new_switch_material(name) for name in FINISHES}
 
-    mat_bezel = make_material(
-        "Rocker_Bezel",
-        (srgb_to_lin(16 / 255), srgb_to_lin(16 / 255), srgb_to_lin(17 / 255), 1.0),
-        roughness=0.48,
-        metallic=0.0,
-    )
-    mat_well = make_material("Rocker_Well", (0.004, 0.004, 0.004, 1.0), roughness=0.85)
-    # Default blue actuator material (exporter tints cleanly for blue/red/ivory!)
-    mat_act = make_material(
-        "Rocker_Actuator",
-        (srgb_to_lin(52 / 255), srgb_to_lin(118 / 255), srgb_to_lin(178 / 255), 1.0),
-        roughness=0.22,
-        metallic=0.0,
-        coat=0.35,
-        coat_rough=0.14,
-    )
-    mat_power_act = make_material(
-        "Rocker_Power_Black",
-        (srgb_to_lin(22 / 255), srgb_to_lin(22 / 255), srgb_to_lin(23 / 255), 1.0),
-        roughness=0.30,
-        metallic=0.0,
-        coat=0.20,
-        coat_rough=0.18,
-    )
-    mat_chrome = make_material(
-        "Nickel_Chrome",
-        (srgb_to_lin(226 / 255), srgb_to_lin(225 / 255), srgb_to_lin(220 / 255), 1.0),
-        roughness=0.11,
-        metallic=0.98,
-    )
-    mat_chrome_satin = make_material(
-        "Nickel_Chrome_Satin",
-        (srgb_to_lin(208 / 255), srgb_to_lin(207 / 255), srgb_to_lin(202 / 255), 1.0),
-        roughness=0.22,
-        metallic=0.96,
-    )
-    mat_dark = make_material("Toggle_Inner_Dark", (0.005, 0.005, 0.006, 1.0), roughness=0.80)
+    for part in ("rocker_horiz", "rocker_vert", "rocker_power"):
+        power = part == "rocker_power"
+        finish = "Rocker_Power_Black" if power else "Rocker_Actuator"
+        bezel = build_rocker_bezel(dims[part], materials["Rocker_Bezel"], materials["Rocker_Well"])
+        actuator = build_rocker_actuator(
+            dims[part], materials[finish], vertical=part != "rocker_horiz", ribbed=power,
+        )
+        export_glb([bezel, actuator], assets / f"{part}.glb")
 
-    # 1. Horizontal rocker
-    rh = dims["rocker_horiz"]
-    objs = [
-        build_rocker_bezel("Rocker_Bezel", rh["w"], rh["h"], rh["bezel_pad"], mat_bezel, mat_well),
-        build_rocker_actuator("Rocker_Actuator", rh["w"], rh["h"], rh["height"], mat_act, along_y=False),
-    ]
-    export_glb(objs, assets_dir / "rocker_horiz.glb")
-    for o in objs:
-        bpy.data.objects.remove(o, do_unlink=True)
-
-    # 2. Vertical colored rocker
-    rv = dims["rocker_vert"]
-    objs = [
-        build_rocker_bezel("Rocker_Bezel", rv["w"], rv["h"], rv["bezel_pad"], mat_bezel, mat_well),
-        build_rocker_actuator("Rocker_Actuator", rv["h"], rv["w"], rv["height"], mat_act, along_y=True),
-    ]
-    export_glb(objs, assets_dir / "rocker_vert.glb")
-    for o in objs:
-        bpy.data.objects.remove(o, do_unlink=True)
-
-    # 3. Vertical black ribbed POWER rocker
-    rp = dims["rocker_power"]
-    objs = [
-        build_rocker_bezel("Rocker_Bezel", rp["w"], rp["h"], rp["bezel_pad"], mat_bezel, mat_well),
-        build_rocker_actuator(
-            "Rocker_Actuator", rp["h"], rp["w"], rp["height"], mat_power_act, along_y=True, ribbed=True
-        ),
-    ]
-    export_glb(objs, assets_dir / "rocker_power.glb")
-    for o in objs:
-        bpy.data.objects.remove(o, do_unlink=True)
-
-    # 4. Chrome bat-handle toggle
-    objs = build_toggle_bat(dims["toggle"], mat_chrome, mat_chrome_satin, mat_dark)
-    export_glb(objs, assets_dir / "toggle_bat.glb")
-    for o in objs:
-        bpy.data.objects.remove(o, do_unlink=True)
+    toggle = build_toggle(
+        dims["toggle"], materials["Nickel_Chrome"], materials["Nickel_Chrome_Satin"],
+        materials["Toggle_Inner_Dark"],
+    )
+    export_glb(toggle, assets / "toggle_bat.glb")
 
 
 if __name__ == "__main__":
