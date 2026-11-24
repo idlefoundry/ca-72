@@ -6,10 +6,10 @@
 
 use std::path::PathBuf;
 
+use ca72_panel::Arrangement;
 use ca72_panel::art::{self, Layout, Lettering, PH, PLATE_H, PLATE_W, PW, TOP};
 use ca72_panel::controls::{Colour, Kind, Orient, Place};
 use ca72_panel::fonts::{FAMILY, Fonts};
-use ca72_panel::Arrangement;
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
 use serde_json::json;
@@ -138,6 +138,8 @@ fn main() {
         }));
     }
 
+    // The c. 1974 Echo Tone close-up gives the relative diameters and witness-dot positions.
+    // The detached Syntaur #4734 selector shows the full round skirt and narrower cap.
     let spec = json!({
         "format": "ca72-3d-spec-v1",
         "scale_m_per_unit": scale_m_per_unit,
@@ -166,34 +168,32 @@ fn main() {
         "part_dimensions_meters": {
             "knob_std": {
                 "base_radius": art::STD.skirt * scale_m_per_unit,
-                "cap_radius": 34.5 * scale_m_per_unit,
-                "dot_radius_pos": 43.0 * scale_m_per_unit,
-                "dot_radius": 4.4 * scale_m_per_unit,
+                "cap_radius": 32.5 * scale_m_per_unit,
+                "dot_radius_pos": 48.5 * scale_m_per_unit,
+                "dot_radius": 2.2 * scale_m_per_unit,
                 "height": 0.0152,
-                "flute_count": 9,
+                "flute_count": 8,
             },
             "knob_big": {
                 "base_radius": art::BIG.skirt * scale_m_per_unit,
-                "cap_radius": 46.5 * scale_m_per_unit,
-                "dot_radius_pos": 55.0 * scale_m_per_unit,
-                "dot_radius": 5.2 * scale_m_per_unit,
+                "cap_radius": 42.0 * scale_m_per_unit,
+                "dot_radius_pos": 58.5 * scale_m_per_unit,
+                "dot_radius": 2.5 * scale_m_per_unit,
                 "height": 0.0165,
-                "flute_count": 9,
+                "flute_count": 8,
             },
             "knob_pointer": {
-                "body_radius": 50.0 * scale_m_per_unit,
-                "tip_radius": 64.0 * scale_m_per_unit,
-                "cap_radius": 26.0 * scale_m_per_unit,
+                "body_radius": 58.0 * scale_m_per_unit,
+                "tip_radius": 58.0 * scale_m_per_unit,
+                "cap_radius": 23.5 * scale_m_per_unit,
                 "height": 0.0152,
-                "flute_count": 9,
                 "scale": 1.0,
             },
             "knob_pointer_small": {
-                "body_radius": 50.0 * 0.75 * scale_m_per_unit,
-                "tip_radius": 64.0 * 0.75 * scale_m_per_unit,
-                "cap_radius": 26.0 * 0.75 * scale_m_per_unit,
+                "body_radius": 58.0 * 0.75 * scale_m_per_unit,
+                "tip_radius": 58.0 * 0.75 * scale_m_per_unit,
+                "cap_radius": 23.5 * 0.75 * scale_m_per_unit,
                 "height": 0.0132,
-                "flute_count": 9,
                 "scale": 0.75,
             },
             "rocker_horiz": {

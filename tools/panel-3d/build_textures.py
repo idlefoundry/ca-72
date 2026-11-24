@@ -15,27 +15,31 @@ def value_noise(w, h, cols, rows, rng):
     return np.asarray(Image.fromarray(grid).resize((w, h), Image.Resampling.BICUBIC))
 
 
-def enamel_pebbles(w, h, pitch, rng):
-    """Sample jittered cells in native texels. The gap to the next seed gives the shallow valleys."""
+def wrinkle_enamel(w, h, pitch, rng):
+    """Sample warped cell ridges in native texels."""
     y, x = np.ogrid[:h, :w]
-    row, col = y // pitch, x // pitch
-    yf = (y % pitch).astype(np.float32) / pitch
-    xf = (x % pitch).astype(np.float32) / pitch
     shape = ((h - 1) // pitch + 3, (w - 1) // pitch + 3)
     seeds_x = rng.uniform(0.04, 0.96, shape).astype(np.float32)
     seeds_y = rng.uniform(0.04, 0.96, shape).astype(np.float32)
     first = np.full((h, w), np.inf, dtype=np.float32)
     second = first.copy()
+    # Distort the crests at roughly three points per cell. The perspective
+    # photographs show curved ridges of unequal width and occasional breaks.
+    xf = (x % pitch).astype(np.float32) / pitch
+    xf = xf + 0.85 * value_noise(w, h, w // (pitch // 3), h // (pitch // 3), rng)
+    yf = (y % pitch).astype(np.float32) / pitch
+    yf = yf + 0.70 * value_noise(w, h, w // (pitch // 3), h // (pitch // 3), rng)
+    row, col = y // pitch, x // pitch
     for dy in (-1, 0, 1):
         for dx in (-1, 0, 1):
             index = row + dy + 1, col + dx + 1
             offset_x = xf - dx - seeds_x[index]
             offset_y = yf - dy - seeds_y[index]
-            distance = offset_x ** 2 + offset_y ** 2 + 0.78 * offset_x * offset_y
+            distance = offset_x ** 2 + offset_y ** 2 + 0.46 * offset_x * offset_y
             second = np.minimum(second, np.maximum(first, distance))
             np.minimum(first, distance, out=first)
     gap = np.sqrt(second) - np.sqrt(first)
-    return np.clip(gap * 2.35, 0, 1)
+    return np.exp(-5.4 * gap)
 
 
 def write_maps(tex_dir, name, albedo, roughness, height):
@@ -70,21 +74,22 @@ def build_faceplate_pbr(tex_dir):
     w, h = alpha.width * 2, alpha.height * 2
     ink = np.asarray(alpha.resize((w, h), Image.Resampling.BICUBIC), dtype=np.float32) / 255
     rng = np.random.default_rng(7201)
-    pebble = enamel_pebbles(w, h, 3, rng)
-    crinkle = enamel_pebbles(w, h, 5, rng)
-    specks = rng.random((h, w), dtype=np.float32) - 0.5
+    # A 0.68 m plate maps 22 texels to about 1.3 mm of wrinkle pitch.
+    # Fine grain in the valleys remains subordinate to the fused crests.
+    ridge = wrinkle_enamel(w, h, round(w * 0.0013 / 0.68), rng)
+    density = value_noise(w, h, w // 28, h // 28, rng)
+    grain = ridge * (0.78 + 0.40 * density)
+    fine = value_noise(w, h, w // 4, h // 4, rng)
     handling = value_noise(w, h, 45, 12, rng)
-    grain = 0.74 * pebble + 0.26 * crinkle
     albedo = print_colors(
-        ink, (13, 13, 14), (237, 233, 223), 10 * (grain - 0.5) + 3 * specks + 2 * handling,
-        4 * (grain - 0.5),
+        ink, (19, 19, 19), (228, 224, 211), 8 * (grain - 0.28) + 3 * fine + 4 * handling,
+        4 * (grain - 0.28),
     )
-    # Baked crests burnish to satin while the narrow seams stay matte.
-    finish = 0.69 - 0.29 * grain + 0.019 * handling
-    roughness = finish * (1 - ink) + (0.48 - 0.045 * grain) * ink
-    height = 0.16 + (0.64 * grain + 0.09 * specks) * (1 - 0.64 * ink) + 0.16 * ink
+    finish = 0.69 - 0.17 * grain + 0.035 * handling
+    roughness = finish * (1 - ink) + (0.56 - 0.045 * grain) * ink
+    height = 0.16 + (0.66 * grain + 0.10 * fine) * (1 - 0.48 * ink) + 0.10 * ink
     write_maps(tex_dir, "panel", albedo, roughness, height)
-    print(f"Built pebbled enamel and silkscreen ({w}×{h})")
+    print(f"Built wrinkle enamel and silkscreen ({w}×{h})")
 
 
 def build_nameplate_pbr(tex_dir):
@@ -136,6 +141,7 @@ def build_walnut_pbr(tex_dir):
 
     # Very fine, broken pores continue where the source resolves only the larger fibers.
     albedo -= (4.0 * pores)[..., None]
+    albedo *= np.array([1.10, 0.99, 0.88], dtype=np.float32)
     height = 0.55 + 0.11 * fibers - 0.32 * pores + 0.07 * vessels
     roughness = 0.60 - 0.047 * fibers + 0.085 * pores + 0.027 * vessels
     for pixels in (albedo, roughness, height):

@@ -154,7 +154,7 @@
         112,
         112
       ],
-      "body_r": 75.57,
+      "body_r": 68.49,
       "cols": 6,
       "rows": 1,
       "frames": 6,
@@ -176,7 +176,7 @@
         84,
         84
       ],
-      "body_r": 56.68,
+      "body_r": 51.37,
       "cols": 4,
       "rows": 1,
       "frames": 4,
@@ -1037,7 +1037,7 @@
         224,
         170
       ],
-      "faceted": false,
+      "faceted": true,
       "default_drive": 0.92
     },
     {
@@ -1059,7 +1059,7 @@
         212,
         148
       ],
-      "faceted": false,
+      "faceted": true,
       "default_drive": 0.0
     },
     {
@@ -1082,7 +1082,7 @@
         192
       ],
       "faceted": false,
-      "default_drive": 0.72
+      "default_drive": 0.0
     }
   ]
 }

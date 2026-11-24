@@ -7,19 +7,21 @@ import bpy
 
 # Linear RGB, roughness, metallic, and dielectric specular IOR level.
 SURFACES = {
-    "Faceplate_PBR": ((0.004, 0.004, 0.0045), 0.57, 0.0, 0.37),
+    "Faceplate_PBR": ((0.0065, 0.0065, 0.0065), 0.62, 0.0, 0.31),
     "Walnut_Horiz": ((0.10, 0.062, 0.039), 0.60, 0.0, 0.25),
     "Walnut_Vert": ((0.10, 0.062, 0.039), 0.60, 0.0, 0.25),
-    "Aluminum_Trim": ((0.46, 0.47, 0.48), 0.28, 0.97, 0.50),
+    "Aluminum_Trim": ((0.23, 0.225, 0.212), 0.37, 0.88, 0.50),
     "Steel_Backing": ((0.016, 0.016, 0.017), 0.61, 0.20, 0.35),
     "Plate_Face": ((0.005, 0.005, 0.0055), 0.45, 0.24, 0.085),
     "Plate_Chamfer": ((0.82, 0.84, 0.85), 0.23, 0.97, 0.50),
     "Chrome_Polished": ((0.86, 0.87, 0.88), 0.075, 0.99, 0.50),
     "Chrome_Satin": ((0.66, 0.67, 0.68), 0.16, 0.99, 0.50),
+    "Pilot_Nickel": ((0.33, 0.31, 0.27), 0.26, 0.94, 0.50),
+    "Overload_Bezel": ((0.13, 0.12, 0.10), 0.31, 0.86, 0.50),
     "Jack_Bore": ((0.011, 0.011, 0.012), 0.79, 0.0, 0.24),
     "Jack_Contact": ((0.58, 0.56, 0.50), 0.24, 0.94, 0.50),
     "Jewel_Ruby_Unlit": ((0.82, 0.34, 0.34), 0.026, 0.0, 0.075),
-    "Jewel_Overload_Unlit": ((0.78, 0.30, 0.31), 0.028, 0.0, 0.075),
+    "Jewel_Overload_Unlit": ((0.45, 0.20, 0.14), 0.044, 0.0, 0.060),
     "Jewel_Reflector": ((0.12, 0.017, 0.021), 0.32, 0.75, 0.28),
     "Jewel_Socket": ((0.029, 0.006, 0.009), 0.38, 0.46, 0.28),
     "Lamp_Retainer": ((0.021, 0.017, 0.014), 0.41, 0.52, 0.30),
@@ -40,7 +42,7 @@ GLASS = {
 }
 
 TEXTURED = {
-    "Faceplate_PBR": ("panel", 0.00016, 0.86, 1.0),
+    "Faceplate_PBR": ("panel", 0.00009, 0.72, 1.0),
     "Walnut_Horiz": ("walnut", 0.000050, 0.48, 0.28),
     "Walnut_Vert": ("walnut", 0.000050, 0.48, 0.28),
     "Plate_Face": ("plate", 0.000012, 0.30, 1.0),
@@ -64,8 +66,7 @@ def surface(material, name):
     bsdf.inputs["Coat Weight"].default_value = 0
     tree.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
     if name == "Faceplate_PBR":
-        # Effective index of the porous black finish, calibrated with the studio world.
-        bsdf.inputs["IOR"].default_value = 1.14
+        bsdf.inputs["IOR"].default_value = 1.46
     if name in GLASS:
         transmission, ior, tint, density = GLASS[name]
         bsdf.inputs["Transmission Weight"].default_value = transmission
@@ -145,16 +146,6 @@ def image_maps(tree, bsdf, tex_dir, texture, distance, strength, reflectance_gai
             tree.links.new(source, exposure.inputs[0])
             source = exposure.outputs["Vector"]
         tree.links.new(source, destination)
-        if texture == "panel" and suffix == "roughness":
-            # Dense enamel crests reflect more light than the porous seams.
-            density = tree.nodes.new("ShaderNodeMapRange")
-            density.interpolation_type = "SMOOTHERSTEP"
-            density.inputs["From Min"].default_value = 0.41
-            density.inputs["From Max"].default_value = 0.57
-            density.inputs["To Min"].default_value = 1.55
-            density.inputs["To Max"].default_value = 1.07
-            tree.links.new(source, density.inputs["Value"])
-            tree.links.new(density.outputs["Result"], bsdf.inputs["IOR"])
     tree.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
 
 

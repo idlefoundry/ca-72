@@ -10,7 +10,6 @@ Outputs into <out_dir>/vst-pack-raw/ (ready for `calibrate_shadows.py`):
   - knob-std-atlas.png             (7x7 = 49 frames, -150..+150 deg, 224x224 RGBA)
   - knob-big-atlas.png             (7x7 = 49 frames, -150..+150 deg, 256x256 RGBA)
   - knob-pointer-atlas.png         (6x1 = 6 exact SIX detents, 256x256 RGBA)
-  - knob-pointer-cont-atlas.png    (7x7 = 49 frames across CONTINUOUS waveform sweep, 256x256 RGBA)
   - knob-pointer-small-atlas.png   (4x1 = 4 exact middle detents, 192x192 RGBA)
   - rocker-horiz-blue-atlas.png    (2x1 = OFF/ON, 208x128 RGBA)
   - rocker-horiz-red-atlas.png     (2x1 = OFF/ON, 208x128 RGBA)
@@ -175,7 +174,7 @@ class PackExporter:
         _, cab_col = import_glb_collection(self.assets_dir, "cabinet")
         instantiate(cab_col, "Cabinet")
 
-        # High-resolution (5760x1473) fine-pebbled baked black enamel faceplate + silkscreen
+        # High-resolution wrinkle enamel and vector silkscreen.
         y_face_center = self.panel_to_blender(self.cx_u, self.face_h_u * 0.5, 0.0)[1]
         bpy.ops.mesh.primitive_plane_add(size=1.0, location=(0.0, y_face_center, 0.00008))
         fp = bpy.context.active_object
@@ -410,8 +409,6 @@ class PackExporter:
         cont_angles = [round(-150.0 + 300.0 * i / 48.0, 4) for i in range(49)]
         six_angles = [float(a) for a in self.spec["six_angles_deg"]]
         four_angles = six_angles[1:5]
-        # Continuous waveform sweep from SIX[0] (-83.75) to SIX[0] + 5.95 * 33.5 (+115.575)
-        cont_wave_angles = [round(six_angles[0] + (5.95 * 33.5) * i / 48.0, 4) for i in range(49)]
 
         u = self.px_per_unit
         sprites = {}
@@ -425,26 +422,30 @@ class PackExporter:
         )
 
         # 2. Classic Minimoog wedge-pointer rotary selectors (6 exact detents + 4 middle detents)
-        sprites["knob_pointer"] = self.render_knob_atlas(
-            "knob_pointer", six_angles, 256, (112, 112), 6, "knob-pointer-atlas.png", 64.0 * u
-        )
-        sprites["knob_pointer_small"] = self.render_knob_atlas(
-            "knob_pointer_small", four_angles, 192, (84, 84), 4, "knob-pointer-small-atlas.png", 48.0 * u
-        )
+        dims = self.spec["part_dimensions_meters"]
+        for part, detents, cell, anchor in (
+            ("knob_pointer", six_angles, 256, 112),
+            ("knob_pointer_small", four_angles, 192, 84),
+        ):
+            body_r = dims[part]["body_radius"] * self.px_per_m
+            sprites[part] = self.render_knob_atlas(
+                part, detents, cell, (anchor, anchor), len(detents),
+                f"{part.replace('_', '-')}-atlas.png", body_r,
+            )
 
         # 3. Classic Minimoog colored rockers (native horizontal & vertical orientations!)
-        # Calibrated matte-pebbled vintage Minimoog nylon hues (cerulean blue, vermilion orange, warm ivory)
+        # Calibrated against the cerulean and orange rockers in the 1974 close-ups.
         sprites["rocker_horiz_blue"] = self.render_rocker_atlas(
             "rocker_horiz", "#3a7eb5", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-blue-atlas.png"
         )
         sprites["rocker_horiz_red"] = self.render_rocker_atlas(
-            "rocker_horiz", "#df451d", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-red-atlas.png"
+            "rocker_horiz", "#ed4106", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-red-atlas.png"
         )
         sprites["rocker_horiz_ivory"] = self.render_rocker_atlas(
             "rocker_horiz", "#dcd3ba", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-ivory-atlas.png"
         )
         sprites["rocker_vert_red"] = self.render_rocker_atlas(
-            "rocker_vert", "#df451d", "top", 136, 208, (60, 96), (56 * u, 116 * u), "rocker-vert-red-atlas.png"
+            "rocker_vert", "#ed4106", "top", 136, 208, (60, 96), (56 * u, 116 * u), "rocker-vert-red-atlas.png"
         )
         sprites["rocker_vert_blue"] = self.render_rocker_atlas(
             "rocker_vert", "#3a7eb5", "bottom", 136, 208, (60, 96), (56 * u, 116 * u), "rocker-vert-blue-atlas.png"
@@ -562,7 +563,7 @@ class PackExporter:
                 "bezel_outer_r": round(20.0 * u, 2),
                 "color_srgb": [255, 36, 18],
                 "core_srgb": [255, 224, 170],
-                "faceted": False,
+                "faceted": True,
                 "default_drive": 0.92,
             },
             {
@@ -573,7 +574,7 @@ class PackExporter:
                 "bezel_outer_r": round(24.0 * u, 2),
                 "color_srgb": [255, 28, 12],
                 "core_srgb": [255, 212, 148],
-                "faceted": False,
+                "faceted": True,
                 "default_drive": 0.0,
             },
             {
@@ -585,7 +586,7 @@ class PackExporter:
                 "color_srgb": [255, 162, 34],
                 "core_srgb": [255, 240, 192],
                 "faceted": False,
-                "default_drive": 0.72,
+                "default_drive": 0.0,
             },
         ]
 

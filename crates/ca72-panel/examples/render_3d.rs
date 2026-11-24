@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use ca72_panel::panel3d::{
-    FaceRect, Panel3DAssets, Panel3DRenderer, Panel3DState, blit_dirty_to_u32,
+    DragController, FaceRect, Panel3DAssets, Panel3DRenderer, Panel3DState, blit_dirty_to_u32,
     render_knob_smooth, render_lamp_linear,
 };
 use resvg::tiny_skia::{Color, Pixmap};
@@ -152,15 +152,13 @@ fn main() {
         ("main_output", 1.0),
         ("a440", 0.0),
         ("feedback", 0.25),
-        ("quality", 1.0),           // ULTRA (toggle UP)
-        ("power", 1.0),             // POWER ON
+        ("quality", 0.5), // HI, with the ULTRA indicator off
+        ("power", 1.0),   // POWER ON
     ];
     for &(param, val) in patch {
         state.set_control(&manifest, param, val);
     }
-    state.set_lamp(&manifest, "power", 0.94);
-    state.set_lamp(&manifest, "overload", 0.42);
-    state.set_lamp(&manifest, "ultra", 0.85);
+    state.set_lamp(&manifest, "power", 0.78);
 
     let t_full = Instant::now();
     let initial_dirty = renderer.render_dirty(&state);
@@ -300,7 +298,24 @@ fn main() {
         idle_ms
     );
 
-    // Verify dirty-rect frame matches a fresh full render bit-for-bit!
+    // Small increments must accumulate past one detent in the actual pack.
+    let selector = manifest
+        .controls
+        .iter()
+        .position(|control| control.param == "osc1_range")
+        .expect("RANGE control");
+    let [x, y] = manifest.controls[selector].pos;
+    let mut drag = DragController::default();
+    assert_eq!(drag.begin_drag(&manifest, &mut state, x, y), Some(selector));
+    for _ in 0..35 {
+        drag.update_drag(&manifest, &mut state, 1.0, 0.0, false);
+    }
+    drag.end_drag(&manifest, &mut state);
+    assert_eq!(state.values[selector], 0.8, "RANGE moved one exact detent");
+    assert!(!renderer.render_dirty(&state).is_empty());
+    println!("VERIFIED: 35 one-pixel RANGE drag events moved one detent.");
+
+    // Verify dirty-rect frame matches a fresh full render bit-for-bit.
     let dirty_bytes = renderer.frame().data().to_vec();
     renderer.invalidate_all();
     renderer.render_dirty(&state);

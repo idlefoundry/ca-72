@@ -82,11 +82,12 @@ def rounded_rectangle(x, y, z, radius):
 
 def build_rocker_bezel(dim, bezel, well, *, power):
     half_w, half_h = dim["w"] / 2, dim["h"] / 2
-    outer_x, outer_y = half_w + dim["bezel_pad"], half_h + dim["bezel_pad"]
-    # Widen the colored rocker opening inside the existing mounting footprint.
+    pad = dim["bezel_pad"] if power else dim["bezel_pad"] * 0.87
+    outer_x, outer_y = half_w + pad, half_h + pad
+    # The coloured switches sit in shallow, narrow snap-in lips.
     opening = 0.00013 if power else 0.00044
     inner_x, inner_y = half_w + opening, half_h + opening
-    top, floor = 0.00122, -0.00485
+    top, floor = (0.00122 if power else 0.00072), -0.00485
     # Thin flat lip, small mould breaks and a full-depth pocket for the pressed skirt.
     rings = [
         rounded_rectangle(outer_x, outer_y, floor - 0.00035, 0.00034),
@@ -109,7 +110,7 @@ def power_rib_profile():
             (0.00, 0.00), (0.13, 0.09), (0.25, 0.83), (0.33, 1.00),
             (0.60, 1.00), (0.70, 0.83), (0.85, 0.09), (0.94, 0.00),
         ):
-            samples.append((start + (i + phase) * pitch, 0.00019 * relief))
+            samples.append((start + (i + phase) * pitch, 0.00023 * relief))
     samples.extend((u, 0.0) for u in (0.933, 0.949, 0.970, 0.986, 1.0))
     return [(-u, z) for u, z in reversed(samples[1:])] + samples
 
@@ -128,19 +129,28 @@ def build_rocker_actuator(dim, material, *, vertical, ribbed=False):
         profile = [(i / 48, 0.0) for i in range(-48, 49)]
 
     # Closely space samples along the long edges for the mould chamfer and rib runout.
-    across = [-1, -0.981, -0.95, -0.91, -0.87, -0.72, -0.38, 0,
-              0.38, 0.72, 0.87, 0.91, 0.95, 0.981, 1]
+    across = [-1, -0.982, -0.954, -0.925, -0.89, -0.85, -0.80, -0.746, -0.71, -0.42, 0,
+              0.42, 0.71, 0.746, 0.80, 0.85, 0.89, 0.925, 0.954, 0.982, 1]
 
     def point(u, v, relief):
         a, b = abs(u), abs(v)
-        # The broad moulded faces meet at the hinge. Round the outboard lip over
-        # a short run so the raised end has a crown and the pressed face lies low.
+        # The actuator is a shallow saddle. At a detent one arm settles
+        # almost flat while the opposite arm climbs to the rolled end.
         run = max(0.0, a - 0.091) if ribbed else a
-        rise = math.hypot(run, 0.055) - 0.055
-        roll = max(0.0, (a - 0.82) / 0.18)
-        edge = max(0.0, (b - 0.93) / 0.07)
-        z = height * (0.293 + 0.345 * rise - 0.162 * roll ** 2.5)
-        z -= 0.00026 * edge ** 1.6
+        rise = math.hypot(run, 0.035) - 0.035
+        if ribbed:
+            roll = max(0.0, (a - 0.86) / 0.14)
+            edge = max(0.0, (b - 0.92) / 0.08)
+            z = height * (0.293 + 0.345 * rise - 0.15 * roll ** 2.2)
+            z -= 0.00028 * edge ** 1.55
+        else:
+            # The wider draft on the side of the crown remains visible
+            # in a flat view, especially where it wraps around the tip.
+            roll = max(0.0, (a - 0.72) / 0.28)
+            edge_start = 0.85 - 0.12 * a
+            edge = max(0.0, (b - edge_start) / (1.0 - edge_start))
+            z = height * (0.304 + 0.401 * rise - 0.25 * roll ** 2.05)
+            z -= (0.00036 + 0.00072 * a) * edge ** 1.7
         z += relief * min(1.0, (1.0 - b) / 0.09)
         x = u * half_length - u * (b ** 12) * 0.00013
         y = v * half_width - v * (a ** 35) * 0.00013
@@ -286,7 +296,7 @@ def build_bushing(radius, satin, dark):
 
 def build_lever(dim, chrome):
     pivot_z = 0.00461
-    length = dim["lever_length"] * 0.84
+    length = dim["lever_length"]
     ball = dim["lever_base_radius"] * 0.92
     tip_radius = dim["lever_tip_radius"]
     # A shallow domed end uses the spec's crown curvature without a ball-shaped grip.

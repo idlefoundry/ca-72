@@ -14,10 +14,10 @@ INDICATOR = "Moog_White_Indicator"
 
 # Material order is also the order of the face slots in build_knobs.py.
 FINISHES = {
-    THERMOSET: ((19, 19, 20), 0.39, 0.0, 0.42),
-    CHAMFER: ((229, 230, 227), 0.19, 0.97, 0.5),
-    ALUMINUM: ((213, 214, 211), 0.19, 0.99, 0.5),
-    INDICATOR: ((237, 233, 219), 0.48, 0.0, 0.30),
+    THERMOSET: ((13, 13, 14), 0.32, 0.0, 0.42),
+    CHAMFER: ((221, 221, 216), 0.26, 0.98, 0.5),
+    ALUMINUM: ((225, 224, 221), 0.23, 1.0, 0.5),
+    INDICATOR: ((232, 222, 199), 0.47, 0.0, 0.30),
 }
 
 
@@ -127,10 +127,10 @@ def satin_reflection(tree, bsdf):
     tint.label = "Satin faces and grazing edges"
     tint.location = (-325, -490)
     tint.interpolation_type = "SMOOTHSTEP"
-    tint.inputs["From Min"].default_value = 0.07
-    tint.inputs["From Max"].default_value = 0.30
-    tint.inputs["To Min"].default_value = 0.17
-    tint.inputs["To Max"].default_value = 0.95
+    tint.inputs["From Min"].default_value = 0.045
+    tint.inputs["From Max"].default_value = 0.32
+    tint.inputs["To Min"].default_value = 0.30
+    tint.inputs["To Max"].default_value = 0.86
     tree.links.new(facing.outputs["Facing"], tint.inputs["Value"])
     tree.links.new(tint.outputs["Result"], bsdf.inputs["Specular Tint"])
 
@@ -152,38 +152,27 @@ def angular_sheen(tree, coords):
     tree.links.new(split.outputs["Y"], angle.inputs[0])
     tree.links.new(split.outputs["X"], angle.inputs[1])
     doubled = tree.nodes.new("ShaderNodeMath")
-    doubled.operation = "MULTIPLY"
+    doubled.operation = "MULTIPLY_ADD"
     doubled.location = (-300, -790)
     doubled.inputs[1].default_value = 2.0
+    doubled.inputs[2].default_value = 0.33
     tree.links.new(angle.outputs[0], doubled.inputs[0])
-    lobes = tree.nodes.new("ShaderNodeMath")
-    lobes.operation = "MULTIPLY"
-    lobes.location = (-125, -790)
-    lobes.inputs[1].default_value = 2.0
-    tree.links.new(doubled.outputs[0], lobes.inputs[0])
     sheen = tree.nodes.new("ShaderNodeMath")
     sheen.operation = "COSINE"
     sheen.location = (45, -790)
-    tree.links.new(lobes.outputs[0], sheen.inputs[0])
+    tree.links.new(doubled.outputs[0], sheen.inputs[0])
 
-    # Account for the broad key and the weaker opposite diagonal fill.
-    diagonal = tree.nodes.new("ShaderNodeMath")
-    diagonal.operation = "SINE"
-    diagonal.location = (-125, -1000)
-    tree.links.new(doubled.outputs[0], diagonal.inputs[0])
-    balance = tree.nodes.new("ShaderNodeMath")
-    balance.operation = "MULTIPLY_ADD"
-    balance.location = (220, -790)
-    balance.inputs[1].default_value = -0.72
-    tree.links.new(diagonal.outputs[0], balance.inputs[0])
-    tree.links.new(sheen.outputs[0], balance.inputs[2])
+    # Opposed bright sectors and grey sectors are still visible when the
+    # broad area light's directly reflected streak is off the normal.
     ramp = tree.nodes.new("ShaderNodeMapRange")
-    ramp.label = "Spun reflection contrast"
+    ramp.label = "Brushed aluminum directional return"
     ramp.location = (400, -660)
-    ramp.inputs["From Min"].default_value = -1.72
-    ramp.inputs["To Min"].default_value = 1.14
-    ramp.inputs["To Max"].default_value = 0.62
-    tree.links.new(balance.outputs[0], ramp.inputs["Value"])
+    ramp.interpolation_type = "SMOOTHSTEP"
+    ramp.inputs["From Min"].default_value = -0.80
+    ramp.inputs["From Max"].default_value = 0.85
+    ramp.inputs["To Min"].default_value = 0.42
+    ramp.inputs["To Max"].default_value = 1.32
+    tree.links.new(sheen.outputs[0], ramp.inputs["Value"])
     return ramp.outputs["Result"]
 
 
@@ -227,10 +216,10 @@ def apply_knob_shaders(materials):
         if name == THERMOSET:
             wear = noise(tree, local, 610, "Handling wear", 260)
             grain = noise(tree, local, 19800, "Compression-molded grain", -130)
-            color = color_variation(tree, wear, (17, 17, 18), (22, 22, 23), 260)
+            color = color_variation(tree, wear, (11, 11, 12), (18, 18, 19), 260)
             tree.links.new(color, bsdf.inputs["Base Color"])
             finish = blend_factors(tree, wear, grain, 0.25, -40)
-            roughness_variation(tree, bsdf, finish, 0.35, 0.43, -30)
+            roughness_variation(tree, bsdf, finish, 0.27, 0.38, -30)
             bump(tree, bsdf, grain, 0.17, 0.000030, -370)
             satin_reflection(tree, bsdf)
         elif name == INDICATOR:
@@ -239,16 +228,16 @@ def apply_knob_shaders(materials):
             bump(tree, bsdf, grain, 0.12, 0.000006, -70)
         elif name == ALUMINUM:
             spun.add(material)
-            feed = turning_marks(tree, local, 645, 0.62, "Lathe feed", 260)
-            brush = turning_marks(tree, local, 1980, 0.33, "Fine turning marks", -80)
+            feed = turning_marks(tree, local, 645, 0.0, "Lathe feed", 260)
+            brush = turning_marks(tree, local, 1980, 0.0, "Fine turning marks", -80)
             rings = blend_factors(tree, feed, brush, 0.80, 20)
             tool_marks = irregular_turning_marks(tree, local)
             rings = blend_factors(tree, rings, tool_marks, 0.59, -120)
-            roughness_variation(tree, bsdf, rings, 0.168, 0.21, 20)
+            roughness_variation(tree, bsdf, rings, 0.19, 0.27, 20)
             bump(tree, bsdf, rings, 0.030, 0.000030, -270)
             patina = noise(tree, local, 880, "Faint aluminum patina", -460)
             finish = blend_factors(tree, rings, patina, 0.35, 260)
-            color = color_variation(tree, finish, (204, 206, 203), (222, 223, 220), 270)
+            color = color_variation(tree, finish, (209, 209, 206), (232, 231, 226), 270)
             contrast = tree.nodes.new("ShaderNodeMixRGB")
             contrast.blend_type = "MULTIPLY"
             contrast.location = (150, 240)

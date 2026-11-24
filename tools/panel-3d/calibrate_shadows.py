@@ -13,9 +13,8 @@ Follows every lesson in `vst-3d-ui` Section 4:
      - Shadow bottom-right arc uses a single continuous smooth curve (`shadow_gain ~ 0.50`,
        `smoothstep ** 1.55`),
      - Feathers strictly to 0 alpha well before all 4 cell borders (`border_max_alpha == 0` verified!).
-5. Calibrates faceplate anodized aluminum luminance inside `faceplate_rect_px` (masking out
-   bright silkscreen, chrome hardware, and wood rails) to a rich studio charcoal gradient
-   (~50 sRGB left -> ~36 sRGB right) with zero blown-out grey washout.
+5. Calibrates wrinkle enamel luminance inside `faceplate_rect_px` (masking out
+   bright silkscreen, chrome hardware, and wood rails) to ~36 sRGB left -> ~30 sRGB right.
 """
 
 import argparse
@@ -140,9 +139,7 @@ def clean_rocker_cell(cell: np.ndarray, ax: float, ay: float, body_w: float, bod
 
 
 def calibrate_faceplate(raw_path: Path, dst_path: Path, manifest: dict) -> None:
-    """Measure left/right median anodized aluminum luminance and smoothly map dark metal pixels
-    (excluding silkscreen & bright chrome fixtures) to a rich cohesive studio gradient (~48 -> ~34 sRGB).
-    """
+    """Match the median of the wrinkle enamel to the vintage panel's charcoal finish."""
     img = Image.open(raw_path).convert("RGB")
     arr = np.asarray(img, dtype=np.float32)
     h, w, _ = arr.shape
@@ -154,22 +151,26 @@ def calibrate_faceplate(raw_path: Path, dst_path: Path, manifest: dict) -> None:
     my0 = fy0 + int(round(20 * manifest["face"]["px_per_unit"]))
     my1 = fy1 - int(round(20 * manifest["face"]["px_per_unit"]))
 
-    sub = arr[my0:my1, mx0:mx1, :]
-    luma = 0.2126 * sub[:, :, 0] + 0.7152 * sub[:, :, 1] + 0.0722 * sub[:, :, 2]
-    # Select dark anodized aluminum pixels (exclude bright white silkscreen > 95 and chrome)
+    def luminance(rgb):
+        return 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
+
+    interior = arr[my0:my1, mx0:mx1, :]
+    luma = luminance(interior)
+    # Exclude chrome and silkscreen from the measurements.
     dark_mask = (luma >= 8.0) & (luma <= 88.0)
-    sw = sub.shape[1]
+    sw = interior.shape[1]
     left_med = float(np.median(luma[:, : sw // 4][dark_mask[:, : sw // 4]]))
     right_med = float(np.median(luma[:, (3 * sw) // 4 :][dark_mask[:, (3 * sw) // 4 :]]))
     print(f"Faceplate steel median sRGB before calibration: left={left_med:.1f}, right={right_med:.1f}")
 
-    # Gently preserve rich deep baked-enamel black across the full panel width:
-    # Target left ~ 36 sRGB -> right ~ 30 sRGB (deep pebbled vintage enamel, zero washed-out grey!)
-    yy, xx = np.mgrid[my0:my1, mx0:mx1].astype(np.float32)
-    u = np.clip((xx - mx0) / max(1.0, float(mx1 - mx0)), 0.0, 1.0)
+    # Apply the correction out to the physical edges. Applying it only to the
+    # measurement inset leaves a bright rectangular band around the faceplate.
+    sub = arr[fy0:fy1, fx0:fx1, :]
+    luma = luminance(sub)
+    u = np.linspace(0.0, 1.0, sub.shape[1], dtype=np.float32)
     cur_grad = left_med * (1.0 - u) + right_med * u
     tgt_grad = 36.0 * (1.0 - u) + 30.0 * u
-    ratio = np.clip(tgt_grad / np.maximum(12.0, cur_grad), 0.72, 1.25)
+    ratio = np.clip(tgt_grad / np.maximum(12.0, cur_grad), 0.50, 1.25)
 
     # Mask smoothly so bright white silkscreen ink (> 110 sRGB) stays 100% crisp and untouched
     steel_w = 1.0 - smoothstep(68.0, 118.0, luma)
@@ -178,11 +179,10 @@ def calibrate_faceplate(raw_path: Path, dst_path: Path, manifest: dict) -> None:
     steel_w *= 1.0 - smoothstep(14.0, 32.0, chroma)
 
     gain = 1.0 + (ratio - 1.0) * steel_w
-    arr[my0:my1, mx0:mx1, :] = np.clip(sub * gain[:, :, None], 0.0, 255.0)
+    sub[:] = np.clip(sub * gain[:, :, None], 0.0, 255.0)
 
     # Verify post-calibration steel luminance
-    sub2 = arr[my0:my1, mx0:mx1, :]
-    luma2 = 0.2126 * sub2[:, :, 0] + 0.7152 * sub2[:, :, 1] + 0.0722 * sub2[:, :, 2]
+    luma2 = luminance(interior)
     left_med2 = float(np.median(luma2[:, : sw // 4][dark_mask[:, : sw // 4]]))
     right_med2 = float(np.median(luma2[:, (3 * sw) // 4 :][dark_mask[:, (3 * sw) // 4 :]]))
     print(f"Faceplate steel median sRGB after calibration:  left={left_med2:.1f}, right={right_med2:.1f}")

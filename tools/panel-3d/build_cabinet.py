@@ -123,6 +123,8 @@ def build_cabinet(spec, mats):
     y_face_top = y_top - top_h
     y_face_bottom = y_face_top - face_h
     y_bottom = -y_top
+    cheek_h = face_h
+    cheek_y = (y_face_top + y_face_bottom) / 2
 
     backing = beveled_box(
         "Chassis_Backing", (face_w, face_h, depth / 2),
@@ -135,10 +137,10 @@ def build_cabinet(spec, mats):
     along = 0.965 / width
     across = along * (1400 / 788) * 2.2
     for name, grain_axis, size, center, lip, bevel, band, grain_offset in (
-        ("TopRail", 0, (face_w, top_h), (0, y_top - top_h / 2), 0.0072, 0.00145, 0.84, 0.50),
-        ("BottomRail", 0, (face_w, bottom_h), (0, y_bottom + bottom_h / 2), 0.0052, 0.00095, 0.62, 0.50),
-        ("Cheek_Left", 1, (cheek_w, height), (-(width - cheek_w) / 2, 0), 0.0082, 0.00175, 0.42, 0.36),
-        ("Cheek_Right", 1, (cheek_w, height), ((width - cheek_w) / 2, 0), 0.0082, 0.00175, 0.28, 0.64),
+        ("TopRail", 0, (width, top_h), (0, y_top - top_h / 2), 0.0072, 0.00185, 0.84, 0.50),
+        ("BottomRail", 0, (width, bottom_h), (0, y_bottom + bottom_h / 2), 0.0041, 0.00105, 0.62, 0.50),
+        ("Cheek_Left", 1, (cheek_w, cheek_h), (-(width - cheek_w) / 2, cheek_y), 0.0049, 0.00165, 0.42, 0.36),
+        ("Cheek_Right", 1, (cheek_w, cheek_h), ((width - cheek_w) / 2, cheek_y), 0.0049, 0.00165, 0.28, 0.64),
     ):
         material = mats["Walnut_Horiz" if grain_axis == 0 else "Walnut_Vert"]
         board = beveled_box(
@@ -158,7 +160,7 @@ def build_cabinet(spec, mats):
     bottom_trim = pu["trim_bottom_h"] * unit
     trim_h = face_h - bottom_trim
     trim_y = y_face_top - trim_h / 2
-    trim_z = 0.00095
+    trim_z = 0.00135
     for where, size, center, axis in (
         ("Left", (left_w, trim_h), ((left_w - face_w) / 2, trim_y), 1),
         ("Right", (right_w, trim_h), ((face_w - right_w) / 2, trim_y), 1),
@@ -166,7 +168,7 @@ def build_cabinet(spec, mats):
     ):
         trim = beveled_box(
             f"Trim_{where}", (*size, trim_z), (*center, trim_z / 2),
-            mats["Aluminum_Trim"], 0.00019, segments=3,
+            mats["Aluminum_Trim"], 0.00035, segments=5,
         )
         mesh_uv(trim, lambda v: (0.5 + v[axis] / size[axis], 0.5 + v[1 - axis] / size[1 - axis]))
         parts.append(trim)
@@ -298,22 +300,31 @@ def build_jack_quarter(dim, mats):
     return [nut, collar, barrel, insulator, leaf]
 
 
-def glass_dome(name, radius, rise, seat, thickness, material, segments=224):
-    def layer(r, z, height):
+def glass_dome(name, radius, rise, seat, thickness, material, segments=224, *, faceted=False):
+    def layer(r, z, height, steps):
         return [
             (r * math.cos(angle), z + height * math.sin(angle))
-            for angle in (i * math.pi / 64 for i in range(32))
+            for angle in (i * math.pi / (2 * steps) for i in range(steps))
         ] + [(0, z + height)]
 
-    outer = layer(radius, seat, rise)
-    inner = layer(radius - thickness, seat - 0.00006, rise - thickness)
-    return lathe(name, [*reversed(outer), (radius - 0.00006, seat - 0.00012), *inner], material, segments)
+    outer = layer(radius, seat, rise, 32)
+    inner = layer(radius - thickness, seat - 0.00006, rise - thickness, 5 if faceted else 32)
+    profile = [*reversed(outer), (radius - 0.00006, seat - 0.00012), *inner]
+    dome = lathe(name, profile, material, 24 if faceted else segments)
+    if faceted:
+        # The molded outside stays smooth. The prism faces are on the inside of the cap.
+        first_prism = (len(outer) + 1) * 24
+        for face in dome.data.polygons[first_prism:]:
+            face.use_smooth = False
+    return dome
 
 
 def build_lamp(name, dim, mats, glass_name, ultra=False):
     bezel, dome, h = dim["bezel_radius"], dim["dome_radius"], dim["height"]
     seat = h * (0.55 if ultra else 0.65)
-    metal = mats["Chrome_Polished"]
+    metal = mats["Chrome_Polished" if ultra else (
+        "Overload_Bezel" if glass_name == "Jewel_Overload_Unlit" else "Pilot_Nickel"
+    )]
     knurl_rows = range(0)
     segments = 224
     if ultra:
@@ -357,6 +368,7 @@ def build_lamp(name, dim, mats, glass_name, ultra=False):
     ], mats["Lamp_Retainer"], closed=True)
     lens = glass_dome(
         f"{name}_Glass", dome, h - seat, seat, 0.00065 if ultra else 0.00074, mats[glass_name],
+        faceted=not ultra,
     )
 
     shoulder = dome * (0.66 if ultra else 0.56)

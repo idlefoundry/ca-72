@@ -8,12 +8,12 @@ import bpy
 # Editable glTF PBR defaults also serve as the baseline for Cycles.
 # Values are sRGB hex, roughness, metallic and dielectric specular IOR level.
 FINISHES = {
-    "Rocker_Actuator": ("#3a7eb5", 0.62, 0.0, 0.10),
-    "Rocker_Power_Black": ("#262628", 0.58, 0.0, 0.04),
-    "Rocker_Bezel": ("#101011", 0.64, 0.0, 0.11),
+    "Rocker_Actuator": ("#3a7eb5", 0.47, 0.0, 0.17),
+    "Rocker_Power_Black": ("#181819", 0.42, 0.0, 0.18),
+    "Rocker_Bezel": ("#101011", 0.51, 0.0, 0.18),
     "Rocker_Well": ("#0d0d0e", 0.82, 0.0, 0.10),
-    "Nickel_Chrome": ("#a6a5a3", 0.08, 0.99, 0.50),
-    "Nickel_Chrome_Satin": ("#717172", 0.19, 0.99, 0.50),
+    "Nickel_Chrome": ("#b5b4b1", 0.09, 0.99, 0.50),
+    "Nickel_Chrome_Satin": ("#a1a2a0", 0.17, 0.99, 0.50),
     "Toggle_Inner_Dark": ("#292729", 0.43, 0.75, 0.50),
 }
 
@@ -97,7 +97,7 @@ def _nylon(tree, bsdf, vector, colored):
     roughness = bsdf.inputs["Roughness"].default_value
     rough = _map(tree, wear, "Satin roughness", roughness - 0.04, roughness + 0.04, (-390, 0))
     tree.links.new(rough, bsdf.inputs["Roughness"])
-    _bump(tree, bsdf, grain, 0.46, 0.000038)
+    _bump(tree, bsdf, grain, 0.28, 0.000021)
 
     pigment = tree.nodes.new("ShaderNodeMixRGB")
     pigment.label = "Moulding and handling variation"
@@ -105,12 +105,12 @@ def _nylon(tree, bsdf, vector, colored):
     pigment.blend_type = "MULTIPLY"
     pigment.inputs[0].default_value = 1.0
     pigment.inputs[1].default_value = bsdf.inputs["Base Color"].default_value
-    variation = _map(tree, wear, "Pigment variation", 0.91, 1.07, (-390, 285))
+    variation = _map(tree, wear, "Pigment variation", 0.95, 1.04, (-390, 285))
     tree.links.new(variation, pigment.inputs[2])
     tree.links.new(pigment.outputs[0], bsdf.inputs["Base Color"])
 
     if colored:
-        bsdf.inputs["Subsurface Weight"].default_value = 0.055
+        bsdf.inputs["Subsurface Weight"].default_value = 0.025
         bsdf.inputs["Subsurface Radius"].default_value = (1.0, 0.44, 0.24)
         bsdf.inputs["Subsurface Scale"].default_value = 0.00028
 
