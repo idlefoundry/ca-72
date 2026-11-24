@@ -227,6 +227,8 @@ pub struct StripRenderer {
     /// The drawing's strip with the still parts over it.
     base: Option<Pixmap>,
     lighting: Lighting,
+    /// A Cycles cap for the live lit state, with the unlit hardware already in the base.
+    cycles_tab: Option<Pixmap>,
     glass: Pixmap,
     button: Pixmap,
     lit_tab: Option<Pixmap>,
@@ -295,6 +297,7 @@ impl StripRenderer {
                 TAB.0 / TAB.1,
                 AMBER,
             )),
+            cycles_tab: None,
             glass: png(GLASS),
             button,
             lit_tab: None,
@@ -313,6 +316,14 @@ impl StripRenderer {
             own_lit: false,
             rail: Rail::Plugin,
         }
+    }
+
+    /// The live strip artwork over an underlay containing the modeled caps, bezels and glass.
+    /// The lit tab uses the same geometry as the underlay's unlit tabs.
+    pub fn with_cycles_hardware(scale: f64, lit_tab: Pixmap) -> Self {
+        let mut strip = Self::new(scale);
+        strip.cycles_tab = Some(lit_tab);
+        strip
     }
 
     /// Drawn in `look`'s pictures, colours and typeface for the strip, where it has them
@@ -744,7 +755,7 @@ impl StripRenderer {
         if self.lit_tab.is_none() {
             let px = |v: f64| (v * s).round().max(1.0) as u32;
             self.lit_tab = Some(plugin_kit_materials::resample(
-                &self.lighting.lit,
+                self.cycles_tab.as_ref().unwrap_or(&self.lighting.lit),
                 px(TAB.0),
                 px(TAB.1),
             ));
@@ -860,30 +871,30 @@ impl StripRenderer {
             return;
         };
         let at = |(x, y): (f64, f64)| (x, y - PANEL_H);
-        // The tabs, unlit.
-        for b in Bank::ALL {
-            for i in 0..b.words().len() {
-                sprite(&mut still, &self.lighting.unlit, s, at(b.tab(i)), TAB);
-            }
-        }
-        // The keys: the charcoal cap, drawn out wider for SAVE and GLOBAL.
-        for (x, w, _) in self.keys() {
-            let cap = widened(&self.button, w / KEY_HEIGHT);
-            sprite(&mut still, &cap, s, at((x, super::RAIL_Y)), (w, KEY_HEIGHT));
-        }
-        // The glass.
-        for r in Readout::ALL {
-            let (x, y, w, h) = r.window();
-            glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 5.0);
-        }
-        let (x, y, w, h) = DISPLAY;
-        glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 5.0);
-        // The name's: its bezel on the rail's wood, then its glass.
-        let mut bezel = Svg::default();
-        super::name_bezel(&mut bezel, self.rail, -PANEL_H);
-        svg_over(&self.options, &mut still, s, &bezel.0);
         let (x, y, w, h) = self.rail.name();
-        glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 3.0);
+        if self.cycles_tab.is_none() {
+            // The tabs, unlit, and the charcoal keys.
+            for b in Bank::ALL {
+                for i in 0..b.words().len() {
+                    sprite(&mut still, &self.lighting.unlit, s, at(b.tab(i)), TAB);
+                }
+            }
+            for (x, w, _) in self.keys() {
+                let cap = widened(&self.button, w / KEY_HEIGHT);
+                sprite(&mut still, &cap, s, at((x, super::RAIL_Y)), (w, KEY_HEIGHT));
+            }
+            // The glass and the name's bezel.
+            for r in Readout::ALL {
+                let (x, y, w, h) = r.window();
+                glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 5.0);
+            }
+            let (dx, dy, dw, dh) = DISPLAY;
+            glass(&mut still, &self.glass, s, (dx, dy - PANEL_H, dw, dh), 5.0);
+            let mut bezel = Svg::default();
+            super::name_bezel(&mut bezel, self.rail, -PANEL_H);
+            svg_over(&self.options, &mut still, s, &bezel.0);
+            glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 3.0);
+        }
         // The name's dots, every one faintly there.
         let r = DOT * 0.36 * s;
         let mut unlit = PathBuilder::new();

@@ -3160,6 +3160,12 @@ list that drops down over the strip inside the window."
   begun as the editor opens, so the drawer's first opening draws only its lit dots: 28 ms. It is
   shared by the editors open at the same scale.
 
+**Lower Cycles study (2026-11-24).** The dedicated full-panel preview fits a second rendered
+section beneath the upper face. Its dimensions and print come from the official plug-in
+layout. The walnut rail, wheels, switches, jacks, caps and glass are modeled. The lower knobs
+share the upper knob atlas. The strip compositor draws the preset name, keys' print, selected
+tabs, readouts and voice display over that hardware using the existing strip scene.
+
 ## R45. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
 **The owner, 2026-10-09:** "we need to add all the same stereo controls that we added to the

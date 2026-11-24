@@ -27,6 +27,22 @@ pub fn jack_at() -> (f64, f64) {
     (lx + art::LH_JACK, ly + art::LH_VELOCITY)
 }
 
+/// The meter's windows as (left, top, width, height) in the drawing.
+pub fn lamp_windows() -> impl Iterator<Item = (f64, f64, f64, f64)> {
+    windows(jack_at())
+}
+
+fn windows((x, y): (f64, f64)) -> impl Iterator<Item = (f64, f64, f64, f64)> {
+    (0..LAMPS).map(move |i| {
+        (
+            x + LAMP_LEFT + LAMP_PITCH * i as f64,
+            y + LAMP_TOP,
+            LAMP_W,
+            LAMP_H,
+        )
+    })
+}
+
 /// Whether (x, y) in the drawing is on the jack (a little beyond its nut, as an LFO's OUT).
 pub fn hit_jack(x: f64, y: f64) -> bool {
     let (jx, jy) = jack_at();
@@ -63,24 +79,23 @@ pub fn meter(lit: usize, rgb: [u8; 3]) -> Layer {
         "<filter id='vlit' x='-1' y='-1' width='3' height='3'><feDropShadow dx='0' dy='0' \
          stdDeviation='2.5' flood-color='{colour}'/></filter>"
     ));
-    for i in 0..LAMPS {
-        let x = LAMP_LEFT + LAMP_PITCH * i as f64;
+    for (i, (x, y, w, h)) in windows((0.0, 0.0)).enumerate() {
         s.0.push_str(&format!(
             "<rect x='{}' y='{}' width='{}' height='{}' rx='2' fill='#140c08' stroke='#000' \
              stroke-width='1.5'/>",
             N(x),
-            N(LAMP_TOP),
-            N(LAMP_W),
-            N(LAMP_H)
+            N(y),
+            N(w),
+            N(h)
         ));
         let on = i < lit;
         s.0.push_str(&format!(
             "<rect x='{}' y='{}' width='{}' height='{}' rx='1.5' fill='{colour}' \
              fill-opacity='{}'{}/>",
             N(x + 1.5),
-            N(LAMP_TOP + 1.5),
-            N(LAMP_W - 3.0),
-            N(LAMP_H - 3.0),
+            N(y + 1.5),
+            N(w - 3.0),
+            N(h - 3.0),
             if on { "1" } else { "0.12" },
             if on { " filter='url(#vlit)'" } else { "" }
         ));
