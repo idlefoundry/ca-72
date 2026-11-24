@@ -1,13 +1,15 @@
 //! Compose the 4K Cycles upper panel and lower extension, with live strip artwork.
 //!
 //! cargo run --release -p ca72-panel --example render_full_3d -- <upper pack> <lower build> <output>
+//!
+//! On Linux, use `--window` in place of `<output>` for an interactive visual preview.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use ca72_panel::art::PANEL_H;
-use ca72_panel::panel3d::{FaceSpec, Panel3DAssets, Panel3DRenderer, Panel3DState};
+use ca72_panel::panel3d::{FaceRect, FaceSpec, Panel3DAssets, Panel3DRenderer, Panel3DState};
 use ca72_panel::presets::BarScene;
 use ca72_panel::strip::{self, Field, StripRenderer, StripScene};
 use resvg::tiny_skia::{IntRect, Pixmap, PixmapPaint, Transform};
@@ -162,71 +164,61 @@ fn put(frame: &mut Pixmap, part: &Pixmap, x: i32, y: i32) {
     );
 }
 
+#[path = "full_3d/preview.rs"]
+mod preview;
+
+#[cfg(target_os = "linux")]
+#[path = "full_3d/x11.rs"]
+mod x11;
+
 fn main() {
     let paths: Vec<_> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     let [upper_dir, lower_dir, output] = paths.as_slice() else {
-        panic!("usage: render_full_3d <upper pack> <lower build> <output>");
+        panic!("usage: render_full_3d <upper pack> <lower build> <output | --window>");
     };
+    let mut panel = preview::Preview::load(upper_dir, lower_dir);
+    if output == Path::new("--window") {
+        #[cfg(target_os = "linux")]
+        {
+            x11::open(panel).expect("open the CA-72 preview");
+            return;
+        }
+        #[cfg(not(target_os = "linux"))]
+        panic!("the native review window is available on Linux");
+    }
     std::fs::create_dir_all(output).expect("create output directory");
-    let upper = Panel3DAssets::load_from_dir(upper_dir).expect("load upper Cycles pack");
-    let layout: LowerLayout = serde_json::from_slice(
-        &std::fs::read(lower_dir.join("lower.json")).expect("read lower layout"),
-    )
-    .expect("parse lower layout");
-    let scale = f64::from(upper.manifest.face.px_per_unit);
-    let top_h = upper.manifest.face.faceplate_rect_px[3].round() as u32;
-    let lower = lower_assets(&upper, lower_dir, layout);
-    let left = lower.manifest.face.faceplate_rect_px[0].round() as i32;
-    let lower_state = Panel3DState::from_defaults(&lower.manifest);
-    assert_eq!(lower_state.values.len(), strip::KNOBS.len());
-    let mut lower = Panel3DRenderer::new(lower);
-    lower.render_dirty(&lower_state);
-
-    let tab = Pixmap::load_png(lower_dir.join("lower-tab-lit.png")).expect("load lit 3D tab");
-    let mut strip = StripRenderer::with_cycles_hardware(scale, tab);
-    strip.set_under_top((PANEL_H * scale).round() as i32);
-    let (w, h) = strip::strip_size(scale);
-    assert_eq!(h, lower.frame().height());
-    let under = lower
-        .frame()
-        .clone_rect(IntRect::from_xywh(left, 0, w, h).expect("strip bounds"))
-        .expect("strip inside the cheeks");
-    let scene = demo_strip();
-    let now = Instant::now();
-    assert!(strip.render_at(&scene, &under, None, now));
-    let shown = strip.frame().clone();
-
-    let state = upper_state(&upper);
-    let mut upper = Panel3DRenderer::new(upper);
-    upper.render_dirty(&state);
-    let w = upper.frame().width();
-    assert_eq!(w, lower.frame().width());
-    let mut full = Pixmap::new(w, top_h + h).expect("full 4K-wide panel");
-    put(&mut full, upper.frame(), 0, 0);
-    put(&mut full, lower.frame(), 0, top_h as i32);
-    put(&mut full, &shown, left, top_h as i32);
-    full.save_png(output.join("ca72-full-3d-4k.png"))
+    panel
+        .frame
+        .save_png(output.join("ca72-full-3d-4k.png"))
         .expect("save full 4K panel");
-    full.clone_rect(IntRect::from_xywh(0, top_h as i32, w, h).expect("lower crop"))
-        .expect("full lower strip")
+    panel
+        .frame
+        .clone_rect(
+            IntRect::from_xywh(
+                0,
+                panel.top,
+                panel.frame.width(),
+                panel.lower.frame().height(),
+            )
+            .expect("nonempty lower panel dimensions"),
+        )
+        .expect("lower crop")
         .save_png(output.join("ca72-lower-3d-4k.png"))
         .expect("save lower strip");
 
-    // Exercise an actual tab and readout update over the modeled strip.
-    assert!(!strip.render_at(&scene, &under, None, now));
-    let mut changed = scene;
-    changed.mode = Some(2);
-    changed.readouts[0] = ("5".into(), true);
-    assert!(strip.render_at(&changed, &under, None, now));
-    assert_ne!(strip.frame().data(), shown.data());
-    let patch = strip.damage().expect("tab/readout damage");
-    assert!(patch[0] > 0 && patch[2] < strip.frame().width() as i32);
-    let mut changed_knob = lower_state;
-    changed_knob.set_control(lower.manifest(), "voices", 0.45);
-    assert!(!lower.render_dirty(&changed_knob).is_empty());
+    assert!(panel.redraw().is_empty());
+    let before = panel.frame.clone();
+    panel.scene.mode = Some(2);
+    panel
+        .lower_state
+        .set_control(panel.lower.manifest(), "voices", 0.45);
+    panel.refresh_readout("voices");
+    let damage = panel.redraw();
+    assert!(!damage.is_empty() && damage.iter().all(|r| r.y0 >= panel.top));
+    assert_ne!(panel.frame.data(), before.data());
     println!(
         "{} × {}. Verified lower knob, tab and readout updates.",
-        full.width(),
-        full.height()
+        panel.frame.width(),
+        panel.frame.height()
     );
 }

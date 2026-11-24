@@ -25,5 +25,8 @@ toml = "0.7"
 ttf-parser = "0.25"
 tempfile = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+x11rb = "0.13.0"
+
 [lints]
 workspace = true

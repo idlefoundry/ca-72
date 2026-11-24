@@ -366,6 +366,7 @@ dependencies = [
  "tempfile",
  "toml",
  "ttf-parser",
+ "x11rb",
 ]
 
 [[package]]
