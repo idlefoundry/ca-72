@@ -362,6 +362,7 @@ dependencies = [
  "resvg",
  "rustybuzz",
  "serde",
+ "serde_json",
  "tempfile",
  "toml",
  "ttf-parser",

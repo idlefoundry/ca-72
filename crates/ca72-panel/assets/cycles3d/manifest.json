@@ -1,0 +1,1088 @@
+{
+  "format": "ca72-3d-sprite-pack-v1",
+  "projection": "flat-orthographic-0deg",
+  "face": {
+    "file": "face-3d.png",
+    "w": 3840,
+    "h": 1135,
+    "px_per_m": 5397.0046,
+    "px_per_unit": 1.180812,
+    "faceplate_rect_px": [
+      85.02,
+      153.63,
+      3754.98,
+      1092.37
+    ]
+  },
+  "sprites": {
+    "knob_std": {
+      "file": "knob-std-atlas.png",
+      "kind": "knob",
+      "cell_w": 224,
+      "cell_h": 224,
+      "anchor": [
+        96,
+        96
+      ],
+      "body_r": 63.76,
+      "cols": 7,
+      "rows": 7,
+      "frames": 49,
+      "angles_deg": [
+        -150.0,
+        -143.75,
+        -137.5,
+        -131.25,
+        -125.0,
+        -118.75,
+        -112.5,
+        -106.25,
+        -100.0,
+        -93.75,
+        -87.5,
+        -81.25,
+        -75.0,
+        -68.75,
+        -62.5,
+        -56.25,
+        -50.0,
+        -43.75,
+        -37.5,
+        -31.25,
+        -25.0,
+        -18.75,
+        -12.5,
+        -6.25,
+        0.0,
+        6.25,
+        12.5,
+        18.75,
+        25.0,
+        31.25,
+        37.5,
+        43.75,
+        50.0,
+        56.25,
+        62.5,
+        68.75,
+        75.0,
+        81.25,
+        87.5,
+        93.75,
+        100.0,
+        106.25,
+        112.5,
+        118.75,
+        125.0,
+        131.25,
+        137.5,
+        143.75,
+        150.0
+      ]
+    },
+    "knob_big": {
+      "file": "knob-big-atlas.png",
+      "kind": "knob",
+      "cell_w": 256,
+      "cell_h": 256,
+      "anchor": [
+        112,
+        112
+      ],
+      "body_r": 76.75,
+      "cols": 7,
+      "rows": 7,
+      "frames": 49,
+      "angles_deg": [
+        -150.0,
+        -143.75,
+        -137.5,
+        -131.25,
+        -125.0,
+        -118.75,
+        -112.5,
+        -106.25,
+        -100.0,
+        -93.75,
+        -87.5,
+        -81.25,
+        -75.0,
+        -68.75,
+        -62.5,
+        -56.25,
+        -50.0,
+        -43.75,
+        -37.5,
+        -31.25,
+        -25.0,
+        -18.75,
+        -12.5,
+        -6.25,
+        0.0,
+        6.25,
+        12.5,
+        18.75,
+        25.0,
+        31.25,
+        37.5,
+        43.75,
+        50.0,
+        56.25,
+        62.5,
+        68.75,
+        75.0,
+        81.25,
+        87.5,
+        93.75,
+        100.0,
+        106.25,
+        112.5,
+        118.75,
+        125.0,
+        131.25,
+        137.5,
+        143.75,
+        150.0
+      ]
+    },
+    "knob_pointer": {
+      "file": "knob-pointer-atlas.png",
+      "kind": "knob",
+      "cell_w": 256,
+      "cell_h": 256,
+      "anchor": [
+        112,
+        112
+      ],
+      "body_r": 75.57,
+      "cols": 6,
+      "rows": 1,
+      "frames": 6,
+      "angles_deg": [
+        -83.75,
+        -50.25,
+        -16.75,
+        16.75,
+        50.25,
+        83.75
+      ]
+    },
+    "knob_pointer_small": {
+      "file": "knob-pointer-small-atlas.png",
+      "kind": "knob",
+      "cell_w": 192,
+      "cell_h": 192,
+      "anchor": [
+        84,
+        84
+      ],
+      "body_r": 56.68,
+      "cols": 4,
+      "rows": 1,
+      "frames": 4,
+      "angles_deg": [
+        -50.25,
+        -16.75,
+        16.75,
+        50.25
+      ]
+    },
+    "rocker_horiz_blue": {
+      "file": "rocker-horiz-blue-atlas.png",
+      "kind": "rocker",
+      "orient": "right",
+      "cell_w": 208,
+      "cell_h": 128,
+      "anchor": [
+        96,
+        56
+      ],
+      "body_w": 132.25,
+      "body_h": 63.76,
+      "cols": 2,
+      "rows": 1,
+      "frames": 2
+    },
+    "rocker_horiz_red": {
+      "file": "rocker-horiz-red-atlas.png",
+      "kind": "rocker",
+      "orient": "right",
+      "cell_w": 208,
+      "cell_h": 128,
+      "anchor": [
+        96,
+        56
+      ],
+      "body_w": 132.25,
+      "body_h": 63.76,
+      "cols": 2,
+      "rows": 1,
+      "frames": 2
+    },
+    "rocker_horiz_ivory": {
+      "file": "rocker-horiz-ivory-atlas.png",
+      "kind": "rocker",
+      "orient": "right",
+      "cell_w": 208,
+      "cell_h": 128,
+      "anchor": [
+        96,
+        56
+      ],
+      "body_w": 132.25,
+      "body_h": 63.76,
+      "cols": 2,
+      "rows": 1,
+      "frames": 2
+    },
+    "rocker_vert_red": {
+      "file": "rocker-vert-red-atlas.png",
+      "kind": "rocker",
+      "orient": "top",
+      "cell_w": 136,
+      "cell_h": 208,
+      "anchor": [
+        60,
+        96
+      ],
+      "body_w": 66.13,
+      "body_h": 136.97,
+      "cols": 2,
+      "rows": 1,
+      "frames": 2
+    },
+    "rocker_vert_blue": {
+      "file": "rocker-vert-blue-atlas.png",
+      "kind": "rocker",
+      "orient": "bottom",
+      "cell_w": 136,
+      "cell_h": 208,
+      "anchor": [
+        60,
+        96
+      ],
+      "body_w": 66.13,
+      "body_h": 136.97,
+      "cols": 2,
+      "rows": 1,
+      "frames": 2
+    },
+    "rocker_power": {
+      "file": "rocker-power-atlas.png",
+      "kind": "rocker",
+      "orient": "top",
+      "cell_w": 120,
+      "cell_h": 216,
+      "anchor": [
+        52,
+        100
+      ],
+      "body_w": 56.68,
+      "body_h": 146.42,
+      "cols": 2,
+      "rows": 1,
+      "frames": 2
+    },
+    "toggle_vert": {
+      "file": "toggle-vert-atlas.png",
+      "kind": "toggle",
+      "across": false,
+      "cell_w": 128,
+      "cell_h": 168,
+      "anchor": [
+        56,
+        76
+      ],
+      "body_r": 28.34,
+      "cols": 3,
+      "rows": 1,
+      "frames": 3
+    },
+    "toggle_horiz": {
+      "file": "toggle-horiz-atlas.png",
+      "kind": "toggle",
+      "across": true,
+      "cell_w": 168,
+      "cell_h": 128,
+      "anchor": [
+        76,
+        56
+      ],
+      "body_r": 28.34,
+      "cols": 3,
+      "rows": 1,
+      "frames": 3
+    }
+  },
+  "controls": [
+    {
+      "param": "tune",
+      "label": "TUNE",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        355.42,
+        475.99
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "osc_mod",
+      "label": "OSCILLATOR MODULATION",
+      "kind": "rocker",
+      "sprite": "rocker_horiz_red",
+      "pos": [
+        609.3,
+        471.26
+      ],
+      "hit_w": 127.53,
+      "hit_h": 59.04,
+      "orient": "right",
+      "colour": "red",
+      "default": 0.0
+    },
+    {
+      "param": "glide",
+      "label": "GLIDE",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        233.8,
+        720.42
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "mod_mix",
+      "label": "MODULATION MIX",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        477.05,
+        720.42
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "osc1_range",
+      "label": "OSCILLATOR-1 RANGE",
+      "kind": "selector",
+      "sprite": "knob_pointer",
+      "pos": [
+        813.58,
+        346.1
+      ],
+      "hit_r": 70.85,
+      "steps": 6,
+      "places": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "angles_deg": [
+        -83.75,
+        -50.25,
+        -16.75,
+        16.75,
+        50.25,
+        83.75
+      ],
+      "default": 0.4
+    },
+    {
+      "param": "osc2_range",
+      "label": "OSCILLATOR-2 RANGE",
+      "kind": "selector",
+      "sprite": "knob_pointer",
+      "pos": [
+        813.58,
+        590.53
+      ],
+      "hit_r": 70.85,
+      "steps": 6,
+      "places": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "angles_deg": [
+        -83.75,
+        -50.25,
+        -16.75,
+        16.75,
+        50.25,
+        83.75
+      ],
+      "default": 0.4
+    },
+    {
+      "param": "osc3_range",
+      "label": "OSCILLATOR-3 RANGE",
+      "kind": "selector",
+      "sprite": "knob_pointer",
+      "pos": [
+        813.58,
+        833.77
+      ],
+      "hit_r": 70.85,
+      "steps": 6,
+      "places": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "angles_deg": [
+        -83.75,
+        -50.25,
+        -16.75,
+        16.75,
+        50.25,
+        83.75
+      ],
+      "default": 0.4
+    },
+    {
+      "param": "osc2_frequency",
+      "label": "OSCILLATOR-2 FREQUENCY",
+      "kind": "knob",
+      "sprite": "knob_big",
+      "pos": [
+        1053.28,
+        594.07
+      ],
+      "hit_r": 86.2,
+      "default": 0.5
+    },
+    {
+      "param": "osc3_frequency",
+      "label": "OSCILLATOR-3 FREQUENCY",
+      "kind": "knob",
+      "sprite": "knob_big",
+      "pos": [
+        1053.28,
+        839.68
+      ],
+      "hit_r": 86.2,
+      "default": 0.5
+    },
+    {
+      "param": "osc1_waveform",
+      "label": "OSCILLATOR-1 WAVEFORM",
+      "kind": "selector",
+      "sprite": "knob_pointer",
+      "pos": [
+        1290.63,
+        346.1
+      ],
+      "hit_r": 70.85,
+      "steps": 6,
+      "places": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "angles_deg": [
+        -83.75,
+        -50.25,
+        -16.75,
+        16.75,
+        50.25,
+        83.75
+      ],
+      "default": 0.4
+    },
+    {
+      "param": "osc2_waveform",
+      "label": "OSCILLATOR-2 WAVEFORM",
+      "kind": "selector",
+      "sprite": "knob_pointer",
+      "pos": [
+        1290.63,
+        590.53
+      ],
+      "hit_r": 70.85,
+      "steps": 6,
+      "places": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "angles_deg": [
+        -83.75,
+        -50.25,
+        -16.75,
+        16.75,
+        50.25,
+        83.75
+      ],
+      "default": 0.4
+    },
+    {
+      "param": "osc3_waveform",
+      "label": "OSCILLATOR-3 WAVEFORM",
+      "kind": "selector",
+      "sprite": "knob_pointer",
+      "pos": [
+        1290.63,
+        833.77
+      ],
+      "hit_r": 70.85,
+      "steps": 6,
+      "places": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "angles_deg": [
+        -83.75,
+        -50.25,
+        -16.75,
+        16.75,
+        50.25,
+        83.75
+      ],
+      "default": 0.4
+    },
+    {
+      "param": "osc3_control",
+      "label": "OSC. 3 CONTROL",
+      "kind": "rocker",
+      "sprite": "rocker_vert_red",
+      "pos": [
+        651.81,
+        844.4
+      ],
+      "hit_w": 64.94,
+      "hit_h": 131.07,
+      "orient": "top",
+      "colour": "red",
+      "default": 0.0
+    },
+    {
+      "param": "osc1_volume",
+      "label": "OSCILLATOR-1 VOLUME",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        1525.61,
+        354.36
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "osc1_on",
+      "label": "OSCILLATOR-1 ON",
+      "kind": "rocker",
+      "sprite": "rocker_horiz_blue",
+      "pos": [
+        1760.59,
+        354.36
+      ],
+      "hit_w": 127.53,
+      "hit_h": 59.04,
+      "orient": "right",
+      "colour": "blue",
+      "default": 0.0
+    },
+    {
+      "param": "ext_volume",
+      "label": "EXTERNAL INPUT VOLUME",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        1999.11,
+        477.17
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "ext_on",
+      "label": "EXTERNAL INPUT ON",
+      "kind": "rocker",
+      "sprite": "rocker_horiz_blue",
+      "pos": [
+        1760.59,
+        477.17
+      ],
+      "hit_w": 127.53,
+      "hit_h": 59.04,
+      "orient": "right",
+      "colour": "blue",
+      "default": 0.0
+    },
+    {
+      "param": "osc2_volume",
+      "label": "OSCILLATOR-2 VOLUME",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        1525.61,
+        598.79
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "osc2_on",
+      "label": "OSCILLATOR-2 ON",
+      "kind": "rocker",
+      "sprite": "rocker_horiz_blue",
+      "pos": [
+        1760.59,
+        598.79
+      ],
+      "hit_w": 127.53,
+      "hit_h": 59.04,
+      "orient": "right",
+      "colour": "blue",
+      "default": 0.0
+    },
+    {
+      "param": "noise_volume",
+      "label": "NOISE VOLUME",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        1999.11,
+        721.6
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "noise_on",
+      "label": "NOISE ON",
+      "kind": "rocker",
+      "sprite": "rocker_horiz_blue",
+      "pos": [
+        1760.59,
+        721.6
+      ],
+      "hit_w": 127.53,
+      "hit_h": 59.04,
+      "orient": "right",
+      "colour": "blue",
+      "default": 0.0
+    },
+    {
+      "param": "osc3_volume",
+      "label": "OSCILLATOR-3 VOLUME",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        1525.61,
+        842.04
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "osc3_on",
+      "label": "OSCILLATOR-3 ON",
+      "kind": "rocker",
+      "sprite": "rocker_horiz_blue",
+      "pos": [
+        1760.59,
+        842.04
+      ],
+      "hit_w": 127.53,
+      "hit_h": 59.04,
+      "orient": "right",
+      "colour": "blue",
+      "default": 0.0
+    },
+    {
+      "param": "noise_type",
+      "label": "NOISE (WHITE or PINK)",
+      "kind": "rocker",
+      "sprite": "rocker_vert_blue",
+      "pos": [
+        2170.33,
+        721.6
+      ],
+      "hit_w": 51.96,
+      "hit_h": 134.61,
+      "orient": "bottom",
+      "colour": "blue",
+      "default": 0.0
+    },
+    {
+      "param": "filter_mode",
+      "label": "FILTER MODE (LO, BAND, STEEP HIGH or NOTCH)",
+      "kind": "selector",
+      "sprite": "knob_pointer_small",
+      "pos": [
+        2336.83,
+        533.85
+      ],
+      "hit_r": 53.14,
+      "steps": 4,
+      "places": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "angles_deg": [
+        -50.25,
+        -16.75,
+        16.75,
+        50.25
+      ],
+      "default": 0.4
+    },
+    {
+      "param": "filter_mod",
+      "label": "FILTER MODULATION",
+      "kind": "rocker",
+      "sprite": "rocker_horiz_red",
+      "pos": [
+        2336.83,
+        700.34
+      ],
+      "hit_w": 127.53,
+      "hit_h": 59.04,
+      "orient": "right",
+      "colour": "red",
+      "default": 0.0
+    },
+    {
+      "param": "keyboard_control_1",
+      "label": "KEYBOARD CONTROL 1",
+      "kind": "rocker",
+      "sprite": "rocker_horiz_red",
+      "pos": [
+        2336.83,
+        812.52
+      ],
+      "hit_w": 127.53,
+      "hit_h": 56.68,
+      "orient": "right",
+      "colour": "red",
+      "default": 0.0
+    },
+    {
+      "param": "keyboard_control_2",
+      "label": "KEYBOARD CONTROL 2",
+      "kind": "rocker",
+      "sprite": "rocker_horiz_red",
+      "pos": [
+        2336.83,
+        930.6
+      ],
+      "hit_w": 127.53,
+      "hit_h": 56.68,
+      "orient": "right",
+      "colour": "red",
+      "default": 0.0
+    },
+    {
+      "param": "cutoff",
+      "label": "CUTOFF FREQUENCY",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        2542.29,
+        354.36
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "emphasis",
+      "label": "EMPHASIS",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        2778.45,
+        354.36
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "contour_amount",
+      "label": "AMOUNT OF CONTOUR",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        3016.97,
+        354.36
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "filter_attack",
+      "label": "FILTER CONTOUR ATTACK TIME",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        2541.11,
+        576.36
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "filter_decay",
+      "label": "FILTER CONTOUR DECAY TIME",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        2778.45,
+        576.36
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "filter_sustain",
+      "label": "FILTER CONTOUR SUSTAIN LEVEL",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        3016.97,
+        576.36
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "loudness_attack",
+      "label": "LOUDNESS CONTOUR ATTACK TIME",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        2541.11,
+        837.32
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "loudness_decay",
+      "label": "LOUDNESS CONTOUR DECAY TIME",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        2778.45,
+        837.32
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "loudness_sustain",
+      "label": "LOUDNESS CONTOUR SUSTAIN LEVEL",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        3016.97,
+        837.32
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "volume",
+      "label": "MAIN OUTPUT VOLUME",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        3249.59,
+        350.82
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "main_output",
+      "label": "MAIN OUTPUT",
+      "kind": "rocker",
+      "sprite": "rocker_horiz_blue",
+      "pos": [
+        3453.87,
+        348.46
+      ],
+      "hit_w": 129.89,
+      "hit_h": 56.68,
+      "orient": "right",
+      "colour": "blue",
+      "default": 0.0
+    },
+    {
+      "param": "a440",
+      "label": "A-440",
+      "kind": "rocker",
+      "sprite": "rocker_horiz_blue",
+      "pos": [
+        3251.96,
+        596.43
+      ],
+      "hit_w": 132.25,
+      "hit_h": 59.04,
+      "orient": "right",
+      "colour": "blue",
+      "default": 0.0
+    },
+    {
+      "param": "feedback",
+      "label": "FEEDBACK (the phones' VOLUME: the output into EXTERNAL INPUT)",
+      "kind": "knob",
+      "sprite": "knob_std",
+      "pos": [
+        3249.59,
+        838.5
+      ],
+      "hit_r": 73.21,
+      "default": 0.5
+    },
+    {
+      "param": "quality",
+      "label": "QUALITY (ULTRA, HI or LO)",
+      "kind": "toggle",
+      "sprite": "toggle_vert",
+      "pos": [
+        3654.61,
+        467.72
+      ],
+      "hit_w": 59.04,
+      "hit_h": 95.45,
+      "across": false,
+      "steps": 3,
+      "default": 0.5
+    },
+    {
+      "param": "filter_poles",
+      "label": "FILTER POLES (1 to 4)",
+      "kind": "selector",
+      "sprite": "knob_pointer_small",
+      "pos": [
+        2336.83,
+        342.56
+      ],
+      "hit_r": 53.14,
+      "steps": 4,
+      "places": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "angles_deg": [
+        -50.25,
+        -16.75,
+        16.75,
+        50.25
+      ],
+      "default": 0.4
+    },
+    {
+      "param": "power",
+      "label": "POWER",
+      "kind": "rocker",
+      "sprite": "rocker_power",
+      "pos": [
+        3654.61,
+        838.5
+      ],
+      "hit_w": 56.68,
+      "hit_h": 146.42,
+      "orient": "top",
+      "colour": "black",
+      "default": 1.0
+    }
+  ],
+  "lamps": [
+    {
+      "id": "power",
+      "name": "POWER",
+      "pos": [
+        3654.61,
+        656.65
+      ],
+      "dome_r": 15.94,
+      "bezel_outer_r": 23.62,
+      "color_srgb": [
+        255,
+        36,
+        18
+      ],
+      "core_srgb": [
+        255,
+        224,
+        170
+      ],
+      "faceted": true,
+      "default_drive": 0.92
+    },
+    {
+      "id": "overload",
+      "name": "OVERLOAD",
+      "pos": [
+        2167.97,
+        477.17
+      ],
+      "dome_r": 18.89,
+      "bezel_outer_r": 28.34,
+      "color_srgb": [
+        255,
+        28,
+        12
+      ],
+      "core_srgb": [
+        255,
+        212,
+        148
+      ],
+      "faceted": true,
+      "default_drive": 0.0
+    },
+    {
+      "id": "ultra",
+      "name": "QUALITY / ULTRA",
+      "pos": [
+        3654.61,
+        262.26
+      ],
+      "dome_r": 40.15,
+      "bezel_outer_r": 51.96,
+      "color_srgb": [
+        255,
+        162,
+        34
+      ],
+      "core_srgb": [
+        255,
+        240,
+        192
+      ],
+      "faceted": false,
+      "default_drive": 0.72
+    }
+  ]
+}
