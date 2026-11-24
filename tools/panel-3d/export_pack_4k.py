@@ -194,17 +194,16 @@ class PackExporter:
 
         # Static hardware fixtures on faceplate & walnut rail
         tpls = {}
-        for nm in ("jewel_power", "jewel_overload", "ultra_bezel", "jack_quarter", "screw_phillips"):
+        for nm in ("jewel_power", "jewel_overload", "jack_quarter", "screw_phillips"):
             _, col = import_glb_collection(self.assets_dir, nm)
             tpls[nm] = col
 
         # Apply shared Cycles shaders across cabinet, walnut, enamel faceplate, nameplate, glass lamps, chrome jack & screws
         apply_cabinet_shaders(bpy.data.materials, self.tex_dir)
 
-        # Unlit physical 3D optical jewels + ultra amber lamp with internal bulb & filament (lit in linear light in Rust!)
+        # Unlit optical jewels. QUALITY's opening is composited from the worn artwork.
         instantiate(tpls["jewel_power"], "Jewel_Power", self.panel_to_blender(*fix["lamp"], 0.0001))
         instantiate(tpls["jewel_overload"], "Jewel_Overload", self.panel_to_blender(*fix["overload"], 0.0001))
-        instantiate(tpls["ultra_bezel"], "Ultra_Bezel", self.panel_to_blender(*fix["ultra"], 0.0001))
 
         # 1/4" Chrome PHONES jack
         if fix["phones"] is not None:
@@ -443,13 +442,13 @@ class PackExporter:
             "rocker_horiz", "#3a7eb5", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-blue-atlas.png"
         )
         sprites["rocker_horiz_red"] = self.render_rocker_atlas(
-            "rocker_horiz", "#ed4106", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-red-atlas.png"
+            "rocker_horiz", "#f05d0c", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-red-atlas.png"
         )
         sprites["rocker_horiz_ivory"] = self.render_rocker_atlas(
             "rocker_horiz", "#dcd3ba", "right", 208, 128, (96, 56), (112 * u, 54 * u), "rocker-horiz-ivory-atlas.png"
         )
         sprites["rocker_vert_red"] = self.render_rocker_atlas(
-            "rocker_vert", "#ed4106", "top", 136, 208, (60, 96), (56 * u, 116 * u), "rocker-vert-red-atlas.png"
+            "rocker_vert", "#f05d0c", "top", 136, 208, (60, 96), (56 * u, 116 * u), "rocker-vert-red-atlas.png"
         )
         sprites["rocker_vert_blue"] = self.render_rocker_atlas(
             "rocker_vert", "#3a7eb5", "bottom", 136, 208, (60, 96), (56 * u, 116 * u), "rocker-vert-blue-atlas.png"
@@ -581,17 +580,6 @@ class PackExporter:
                 "faceted": True,
                 "default_drive": 0.0,
             },
-            {
-                "id": "ultra",
-                "name": "QUALITY / ULTRA",
-                "pos": self.panel_to_face_px(*fix["ultra"]),
-                "dome_r": round(34.0 * u, 2),
-                "bezel_outer_r": round(44.0 * u, 2),
-                "color_srgb": [255, 162, 34],
-                "core_srgb": [255, 240, 192],
-                "faceted": False,
-                "default_drive": 0.0,
-            },
         ]
 
         face_tl = self.panel_to_face_px(0.0, 0.0)
@@ -610,6 +598,7 @@ class PackExporter:
             "sprites": sprites,
             "controls": controls_manifest,
             "lamps": lamps_manifest,
+            "quality_opening": self.panel_to_face_px(*fix["ultra"]),
         }
         (self.out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         print("CA72_4K_EXPORT_COMPLETE", flush=True)

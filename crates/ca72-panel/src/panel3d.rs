@@ -18,6 +18,13 @@ use std::path::Path;
 use resvg::tiny_skia::Pixmap;
 use serde::{Deserialize, Serialize};
 
+use crate::Arrangement;
+use crate::art;
+use crate::controls::Control;
+use crate::render::Renderer;
+use crate::skin::Skin;
+use crate::ultra::{Opening, ultra_worn};
+
 /// Axis-aligned rectangle in native face pixels (`[x0, y0, x1, y1]`, exclusive max).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FaceRect {
@@ -61,6 +68,9 @@ pub struct Manifest {
     pub sprites: HashMap<String, SpriteSpec>,
     pub controls: Vec<ControlSpec>,
     pub lamps: Vec<LampSpec>,
+    /// The center of the QUALITY opening, in face pixels. Older packs bake the lamp into the face.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality_opening: Option<[f32; 2]>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -190,6 +200,9 @@ impl Panel3DAssets {
 pub struct Panel3DState {
     pub values: Vec<f32>,
     pub lamp_drives: Vec<f32>,
+    /// Scene supplied by the caller for animation or hiding the opening. When absent, the
+    /// renderer shows the resting indicator for the current QUALITY detent.
+    pub quality_opening: Option<Opening>,
 }
 
 impl Panel3DState {
@@ -197,6 +210,7 @@ impl Panel3DState {
         Self {
             values: manifest.controls.iter().map(|c| c.default).collect(),
             lamp_drives: manifest.lamps.iter().map(|l| l.default_drive).collect(),
+            quality_opening: None,
         }
     }
 
@@ -684,6 +698,88 @@ pub struct Panel3DRenderer {
     frame: Pixmap,
     caches: Vec<ControlCache>,
     prev_state: Option<Panel3DState>,
+    quality: Option<QualityOpening>,
+}
+
+struct QualityOpening {
+    painter: Renderer,
+    control: usize,
+    switch: Control,
+    scale: f64,
+    origin: (f64, f64),
+    shown: Option<Opening>,
+    layers: Vec<(i32, i32, Pixmap)>,
+}
+
+impl QualityOpening {
+    fn new(manifest: &Manifest) -> Option<Self> {
+        let [x, y] = manifest.quality_opening?;
+        let control = manifest.controls.iter().position(|c| c.param == "quality")?;
+        let switch = *Arrangement::official()
+            .controls
+            .iter()
+            .find(|c| c.param == "quality")?;
+        let scale = f64::from(manifest.face.px_per_unit);
+        Some(Self {
+            painter: Renderer::for_parts(Skin::Worn, scale),
+            control,
+            switch,
+            scale,
+            origin: (f64::from(x) / scale, f64::from(y) / scale),
+            shown: None,
+            layers: Vec::new(),
+        })
+    }
+
+    fn paint_switch(&mut self, pos: [f32; 2], value: f32) -> Option<(i32, i32, Pixmap)> {
+        let mut layer = art::control_worn(&self.switch, f64::from(value), 0.0);
+        layer.origin = (f64::from(pos[0]) / self.scale, f64::from(pos[1]) / self.scale);
+        self.painter.paint_layer(&layer)
+    }
+
+    fn rect(&self) -> Option<FaceRect> {
+        let (x, y, pixels) = self.layers.first()?;
+        Some(FaceRect {
+            x0: *x,
+            y0: *y,
+            x1: x + pixels.width() as i32,
+            y1: y + pixels.height() as i32,
+        })
+    }
+
+    fn update(&mut self, state: &Panel3DState) -> Option<FaceRect> {
+        let opening = state.quality_opening.unwrap_or_else(|| {
+            let value = state.values.get(self.control).copied().unwrap_or(0.5);
+            match (value.clamp(0.0, 1.0) * 2.0).round() as u32 {
+                0 => Opening {
+                    hamster: 1.0,
+                    asleep: 1.0,
+                    ..Opening::default()
+                },
+                1 => Opening {
+                    lamp: 1.0,
+                    ..Opening::default()
+                },
+                _ => Opening {
+                    coil: 1.0,
+                    ..Opening::default()
+                },
+            }
+        });
+        if self.shown == Some(opening) {
+            return None;
+        }
+        let previous = self.rect();
+        self.shown = Some(opening);
+        self.layers.clear();
+        if !opening.hidden {
+            self.layers.extend(ultra_worn(&opening).into_iter().filter_map(|mut layer| {
+                layer.origin = self.origin;
+                self.painter.paint_layer(&layer)
+            }));
+        }
+        previous.into_iter().chain(self.rect()).reduce(FaceRect::union)
+    }
 }
 
 impl std::fmt::Debug for Panel3DRenderer {
@@ -698,6 +794,7 @@ impl std::fmt::Debug for Panel3DRenderer {
 impl Panel3DRenderer {
     pub fn new(assets: Panel3DAssets) -> Self {
         let frame = assets.face.clone();
+        let quality = QualityOpening::new(&assets.manifest);
         let caches = assets
             .manifest
             .controls
@@ -716,6 +813,7 @@ impl Panel3DRenderer {
             frame,
             caches,
             prev_state: None,
+            quality,
         }
     }
 
@@ -752,6 +850,22 @@ impl Panel3DRenderer {
             return;
         }
         let c = &self.assets.manifest.controls[idx];
+        if let Some(quality) = &mut self.quality
+            && quality.control == idx
+            && let Some((x, y, px)) = quality.paint_switch(c.pos, val)
+        {
+            self.caches[idx] = ControlCache {
+                rect: FaceRect {
+                    x0: x,
+                    y0: y,
+                    x1: x + px.width() as i32,
+                    y1: y + px.height() as i32,
+                },
+                last_val: Some(val),
+                pixmap: Some(px),
+            };
+            return;
+        }
         let Some(sp) = self.assets.manifest.sprites.get(&c.sprite) else {
             return;
         };
@@ -827,6 +941,12 @@ impl Panel3DRenderer {
             }
         }
 
+        if let Some(rect) = self.quality.as_mut().and_then(|quality| quality.update(state))
+            && let Some(rect) = rect.clamp(fw, fh)
+        {
+            dirty.push(rect);
+        }
+
         self.prev_state = Some(state.clone());
         if dirty.is_empty() {
             return dirty;
@@ -841,6 +961,13 @@ impl Panel3DRenderer {
                     && let Some(px) = &cache.pixmap
                 {
                     composite_clipped(&mut self.frame, px, cache.rect.x0, cache.rect.y0, clip);
+                }
+            }
+            if let Some(quality) = &self.quality
+                && quality.rect().is_some_and(|rect| rect.intersects(clip))
+            {
+                for (x, y, pixels) in &quality.layers {
+                    composite_clipped(&mut self.frame, pixels, *x, *y, clip);
                 }
             }
             for (i, lamp) in self.assets.manifest.lamps.iter().enumerate() {
@@ -1155,6 +1282,7 @@ mod tests {
                 faceted: true,
                 default_drive: 0.9,
             }],
+            quality_opening: None,
         }
     }
 

@@ -6,6 +6,8 @@
 //!   - strip_lamp_brightness.png   (4-stage 0%/22%/55%/100% linear-light lamp strip for POWER/OVERLOAD & ULTRA)
 //!   - strip_knob_rotation.png     (5-stage t=0.0/0.25/0.5/0.75/1.0 Catmull-Rom bicubic rotational blend strip)
 //!   - strip_toggle_states.png     (Vertical UP/MID/DOWN & Horizontal LEFT/MID/RIGHT chrome toggle strip)
+//!   - strip_quality_modes.png     (LO, HI and ULTRA through the same opening)
+//!   - strip_power_states.png      (POWER off and on, with the pilot jewel)
 //!
 //! Also benchmarks dirty-rect single-knob drag latency + 16.16 fixed-point softbuffer blit latency.
 //!
@@ -19,6 +21,7 @@ use ca72_panel::panel3d::{
     DragController, FaceRect, Panel3DAssets, Panel3DRenderer, Panel3DState, blit_dirty_to_u32,
     render_knob_smooth, render_lamp_linear,
 };
+use ca72_panel::ultra::Opening;
 use resvg::tiny_skia::{Color, Pixmap};
 
 fn crop_pixmap(src: &Pixmap, x0: u32, y0: u32, w: u32, h: u32) -> Pixmap {
@@ -99,11 +102,31 @@ fn main() {
     let face_copy = assets.face.clone();
     let manifest = assets.manifest.clone();
     let knob_big_atlas = assets.atlases.get("knob_big").expect("knob_big").clone();
-    let knob_big_spec = manifest.sprites.get("knob_big").expect("knob_big spec").clone();
-    let toggle_vert_atlas = assets.atlases.get("toggle_vert").expect("toggle_vert").clone();
-    let toggle_vert_spec = manifest.sprites.get("toggle_vert").expect("toggle_vert spec").clone();
-    let toggle_horiz_atlas = assets.atlases.get("toggle_horiz").expect("toggle_horiz").clone();
-    let toggle_horiz_spec = manifest.sprites.get("toggle_horiz").expect("toggle_horiz spec").clone();
+    let knob_big_spec = manifest
+        .sprites
+        .get("knob_big")
+        .expect("knob_big spec")
+        .clone();
+    let toggle_vert_atlas = assets
+        .atlases
+        .get("toggle_vert")
+        .expect("toggle_vert")
+        .clone();
+    let toggle_vert_spec = manifest
+        .sprites
+        .get("toggle_vert")
+        .expect("toggle_vert spec")
+        .clone();
+    let toggle_horiz_atlas = assets
+        .atlases
+        .get("toggle_horiz")
+        .expect("toggle_horiz")
+        .clone();
+    let toggle_horiz_spec = manifest
+        .sprites
+        .get("toggle_horiz")
+        .expect("toggle_horiz spec")
+        .clone();
 
     let mut renderer = Panel3DRenderer::new(assets);
     let mut state = Panel3DState::from_defaults(&manifest);
@@ -114,15 +137,15 @@ fn main() {
         ("osc_mod", 1.0),
         ("glide", 0.22),
         ("mod_mix", 0.35),
-        ("osc1_range", 0.60),       // 8'
-        ("osc2_range", 0.60),       // 8'
-        ("osc3_range", 0.40),       // 16'
-        ("osc2_frequency", 0.52),   // slight warm detune (+0.28 st, fractional mid-frame!)
-        ("osc3_frequency", 0.48),   // slight warm detune (-0.28 st, fractional mid-frame!)
-        ("osc1_waveform", 0.40),    // Sawtooth
-        ("osc2_waveform", 0.40),    // Sawtooth
-        ("osc3_waveform", 0.60),    // Square
-        ("osc3_control", 1.0),      // ON (top)
+        ("osc1_range", 0.60),     // 8'
+        ("osc2_range", 0.60),     // 8'
+        ("osc3_range", 0.40),     // 16'
+        ("osc2_frequency", 0.52), // slight warm detune (+0.28 st, fractional mid-frame!)
+        ("osc3_frequency", 0.48), // slight warm detune (-0.28 st, fractional mid-frame!)
+        ("osc1_waveform", 0.40),  // Sawtooth
+        ("osc2_waveform", 0.40),  // Sawtooth
+        ("osc3_waveform", 0.60),  // Square
+        ("osc3_control", 1.0),    // ON (top)
         ("osc1_volume", 0.78),
         ("osc1_on", 1.0),
         ("ext_volume", 0.30),
@@ -133,9 +156,9 @@ fn main() {
         ("noise_on", 0.0),
         ("osc3_volume", 0.65),
         ("osc3_on", 1.0),
-        ("noise_type", 1.0),        // PINK (bottom)
-        ("filter_poles", 1.0),      // 4-pole 24dB ladder
-        ("filter_mode", 0.0),       // Lowpass
+        ("noise_type", 1.0),   // PINK (bottom)
+        ("filter_poles", 1.0), // 4-pole 24dB ladder
+        ("filter_mode", 0.0),  // Lowpass
         ("filter_mod", 0.0),
         ("keyboard_control_1", 1.0),
         ("keyboard_control_2", 0.0),
@@ -152,7 +175,7 @@ fn main() {
         ("main_output", 1.0),
         ("a440", 0.0),
         ("feedback", 0.25),
-        ("quality", 0.5), // HI, with the ULTRA indicator off
+        ("quality", 0.5), // HI
         ("power", 1.0),   // POWER ON
     ];
     for &(param, val) in patch {
@@ -186,24 +209,23 @@ fn main() {
         .save_png(out_dir.join("crop_rockers.png"))
         .expect("save crop_rockers");
 
-    // Crop C: Output/Power section (Walnut rail + CA-72 nameplate + screw + ULTRA lamp + QUALITY chrome bat toggle + POWER jewel + POWER black ribbed rocker + 1/4" PHONES jack)
+    // Crop C: Output/Power section, including the QUALITY opening and POWER rocker.
     let crop_right = crop_pixmap(renderer.frame(), 3020, 0, 820, 1135);
     crop_right
         .save_png(out_dir.join("crop_toggles_lamps_jack.png"))
         .expect("save crop_toggles_lamps_jack");
 
     // 3. 4-stage multi-brightness linear-light lamp strip (0% / 22% / 55% / 100%)
-    //    Row 1: OVERLOAD red faceted jewel; Row 2: POWER red faceted jewel; Row 3: ULTRA amber dome
+    // Legacy packs also include the baked amber lamp.
     let tile = 160u32;
     let drives = [0.0f32, 0.22, 0.55, 1.0];
-    let mut lamp_strip = Pixmap::new(tile * 4, tile * 3).expect("lamp strip");
+    let lamps: Vec<_> = ["overload", "power", "ultra"]
+        .into_iter()
+        .filter_map(|id| manifest.lamps.iter().find(|lamp| lamp.id == id))
+        .collect();
+    let mut lamp_strip = Pixmap::new(tile * 4, tile * lamps.len() as u32).expect("lamp strip");
     lamp_strip.fill(Color::from_rgba8(24, 24, 24, 255));
-    for (row, lamp_id) in ["overload", "power", "ultra"].iter().enumerate() {
-        let lamp = manifest
-            .lamps
-            .iter()
-            .find(|l| l.id == *lamp_id)
-            .expect("lamp spec");
+    for (row, lamp) in lamps.into_iter().enumerate() {
         let x0 = (lamp.pos[0].round() as i32 - (tile / 2) as i32).max(0) as u32;
         let y0 = (lamp.pos[1].round() as i32 - (tile / 2) as i32).max(0) as u32;
         for (col, &drv) in drives.iter().enumerate() {
@@ -214,9 +236,19 @@ fn main() {
                 &mut patch_px,
                 &local_lamp,
                 drv,
-                FaceRect { x0: 0, y0: 0, x1: tile as i32, y1: tile as i32 },
+                FaceRect {
+                    x0: 0,
+                    y0: 0,
+                    x1: tile as i32,
+                    y1: tile as i32,
+                },
             );
-            blit_opaque(&mut lamp_strip, &patch_px, col as u32 * tile, row as u32 * tile);
+            blit_opaque(
+                &mut lamp_strip,
+                &patch_px,
+                col as u32 * tile,
+                row as u32 * tile,
+            );
         }
     }
     lamp_strip
@@ -274,6 +306,118 @@ fn main() {
     tog_strip
         .save_png(out_dir.join("strip_toggle_states.png"))
         .expect("save toggle strip");
+
+    if let Some([x, y]) = manifest.quality_opening {
+        let quality = manifest
+            .controls
+            .iter()
+            .find(|c| c.param == "quality")
+            .expect("QUALITY");
+        let (w, h) = (204, 372);
+        let x0 = x.round() as u32 - w / 2;
+        let y0 = y.round() as u32 - 76;
+        let mut strip = Pixmap::new(w * 3, h).expect("QUALITY strip");
+        let mut drag = DragController::default();
+        let mut previous = None;
+        let mut preview = state.clone();
+        for (col, (direction, opening)) in [
+            (
+                1.0,
+                Opening {
+                    hamster: 1.0,
+                    run: 0.8,
+                    stride: 3,
+                    ..Opening::default()
+                },
+            ),
+            (
+                0.0,
+                Opening {
+                    lamp: 1.0,
+                    level: 0.65,
+                    ..Opening::default()
+                },
+            ),
+            (
+                -1.0,
+                Opening {
+                    coil: 1.0,
+                    level: 0.65,
+                    spark: 0.3,
+                    ..Opening::default()
+                },
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let [qx, qy] = quality.pos;
+            let dy = 22.0 * manifest.face.px_per_unit * direction;
+            let idx = drag
+                .begin_drag(&manifest, &mut preview, qx, qy + dy)
+                .expect("QUALITY hit");
+            assert_eq!(preview.values[idx], col as f32 * 0.5);
+
+            assert!(!renderer.render_dirty(&preview).is_empty());
+            let rest = crop_pixmap(renderer.frame(), x0, y0, w, 148);
+            assert_ne!(Some(rest.data()), previous.as_ref().map(Pixmap::data));
+            previous = Some(rest);
+
+            preview.quality_opening = Some(opening);
+            assert!(!renderer.render_dirty(&preview).is_empty());
+            let damage_frame = renderer.frame().clone();
+            renderer.invalidate_all();
+            renderer.render_dirty(&preview);
+            assert_eq!(damage_frame.data(), renderer.frame().data());
+            let patch = crop_pixmap(renderer.frame(), x0, y0, w, h);
+            blit_opaque(&mut strip, &patch, col as u32 * w, 0);
+            preview.quality_opening = None;
+        }
+        strip
+            .save_png(out_dir.join("strip_quality_modes.png"))
+            .expect("save QUALITY strip");
+
+        preview.quality_opening = Some(Opening {
+            hidden: true,
+            ..Opening::default()
+        });
+        assert!(!renderer.render_dirty(&preview).is_empty());
+        let blank = crop_pixmap(renderer.frame(), x0, y0, w, 148);
+        assert_eq!(blank.data(), crop_pixmap(&face_copy, x0, y0, w, 148).data());
+        renderer.invalidate_all();
+        renderer.render_dirty(&preview);
+        assert_eq!(
+            blank.data(),
+            crop_pixmap(renderer.frame(), x0, y0, w, 148).data()
+        );
+        println!("VERIFIED: all QUALITY detents and the hidden opening.");
+    }
+
+    let power = manifest
+        .controls
+        .iter()
+        .find(|c| c.param == "power")
+        .expect("POWER");
+    let [x, y] = power.pos;
+    let (w, h) = (140, 346);
+    let mut strip = Pixmap::new(w * 2, h).expect("POWER strip");
+    let mut preview = state.clone();
+    for (col, value) in [0.0, 1.0].into_iter().enumerate() {
+        preview.set_control(&manifest, "power", value);
+        preview.set_lamp(&manifest, "power", value * 0.78);
+        renderer.render_dirty(&preview);
+        let patch = crop_pixmap(
+            renderer.frame(),
+            x.round() as u32 - w / 2,
+            y.round() as u32 - 255,
+            w,
+            h,
+        );
+        blit_opaque(&mut strip, &patch, col as u32 * w, 0);
+    }
+    strip
+        .save_png(out_dir.join("strip_power_states.png"))
+        .expect("save POWER strip");
 
     // 6. Verify dirty-rect equivalence & benchmark live drag + 16.16 fixed-point softbuffer blit!
     let mut dst_buf = vec![0u32; 1920 * 568];

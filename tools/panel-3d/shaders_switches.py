@@ -8,9 +8,9 @@ import bpy
 # Editable glTF PBR defaults also serve as the baseline for Cycles.
 # Values are sRGB hex, roughness, metallic and dielectric specular IOR level.
 FINISHES = {
-    "Rocker_Actuator": ("#3a7eb5", 0.41, 0.0, 0.22),
-    "Rocker_Power_Black": ("#181819", 0.42, 0.0, 0.18),
-    "Rocker_Bezel": ("#101011", 0.51, 0.0, 0.18),
+    "Rocker_Actuator": ("#3a7eb5", 0.32, 0.0, 0.26),
+    "Rocker_Power_Black": ("#101012", 0.30, 0.0, 0.27),
+    "Rocker_Bezel": ("#101011", 0.42, 0.0, 0.26),
     "Rocker_Well": ("#0d0d0e", 0.82, 0.0, 0.10),
     "Nickel_Chrome": ("#b5b4b1", 0.09, 0.99, 0.50),
     "Nickel_Chrome_Satin": ("#a1a2a0", 0.17, 0.99, 0.50),
@@ -95,9 +95,12 @@ def _nylon(tree, bsdf, vector, colored):
     grain = _noise(tree, vector, "Fine mould grain", 6100, 1.7, (-690, -390))
     wear = _noise(tree, vector, "Uneven satin finish", 1450, 2.1, (-690, 0))
     roughness = bsdf.inputs["Roughness"].default_value
-    rough = _map(tree, wear, "Satin roughness", roughness - 0.04, roughness + 0.04, (-390, 0))
+    variation = 0.04 if colored else 0.022
+    rough = _map(
+        tree, wear, "Satin roughness", roughness - variation, roughness + variation, (-390, 0)
+    )
     tree.links.new(rough, bsdf.inputs["Roughness"])
-    _bump(tree, bsdf, grain, 0.31, 0.000033)
+    _bump(tree, bsdf, grain, 0.21, 0.000024)
 
     pigment = tree.nodes.new("ShaderNodeMixRGB")
     pigment.label = "Moulding and handling variation"
@@ -105,8 +108,8 @@ def _nylon(tree, bsdf, vector, colored):
     pigment.blend_type = "MULTIPLY"
     pigment.inputs[0].default_value = 1.0
     pigment.inputs[1].default_value = bsdf.inputs["Base Color"].default_value
-    variation = _map(tree, wear, "Pigment variation", 0.90, 1.05, (-390, 285))
-    tree.links.new(variation, pigment.inputs[2])
+    pigment_gain = _map(tree, wear, "Pigment variation", 0.94, 1.04, (-390, 285))
+    tree.links.new(pigment_gain, pigment.inputs[2])
     tree.links.new(pigment.outputs[0], bsdf.inputs["Base Color"])
 
     if colored:
@@ -164,6 +167,14 @@ def apply_switch_shaders(materials, color_hex=None):
         vector = coordinates.outputs["Object"]
         if name.startswith("Rocker_"):
             _nylon(tree, bsdf, vector, colored)
+            if name == "Rocker_Power_Black":
+                # A curved edge reflects more strongly than the broad black wing.
+                facing = tree.nodes.new("ShaderNodeLayerWeight")
+                facing.location = (-690, -610)
+                sheen = _map(tree, facing.outputs["Facing"], "Grazing sheen", 0.075, 0.34, (-390, -590))
+                sheen.node.inputs["From Min"].default_value = 0.10
+                sheen.node.inputs["From Max"].default_value = 0.34
+                tree.links.new(sheen, bsdf.inputs["Specular IOR Level"])
         else:
             _chrome(tree, bsdf, vector, satin=name == "Nickel_Chrome_Satin")
 

@@ -82,111 +82,85 @@ def rounded_rectangle(x, y, z, radius):
 
 def build_rocker_bezel(dim, bezel, well, *, power):
     half_w, half_h = dim["w"] / 2, dim["h"] / 2
-    pad = dim["bezel_pad"] if power else dim["bezel_pad"] * 0.87
+    pad = dim["bezel_pad"] * (0.51 if power else 0.47)
     outer_x, outer_y = half_w + pad, half_h + pad
-    # The coloured switches sit in shallow, narrow snap-in lips.
-    opening = 0.00013 if power else 0.00044
-    inner_x, inner_y = half_w + opening, half_h + opening
-    top, floor = (0.00122 if power else 0.00072), -0.00485
-    # Thin flat lip, small mould breaks and a full-depth pocket for the pressed skirt.
+    inner_x, inner_y = half_w + 0.00010, half_h + 0.00010
+    top, floor = (0.00036 if power else 0.00024), -0.00485
+    # A thin aperture lip meets the panel, with a dark housing behind it.
     rings = [
-        rounded_rectangle(outer_x, outer_y, floor - 0.00035, 0.00034),
-        rounded_rectangle(outer_x, outer_y, top - 0.00016, 0.00034),
-        rounded_rectangle(outer_x - 0.00016, outer_y - 0.00016, top, 0.00024),
-        rounded_rectangle(inner_x + 0.00012, inner_y + 0.00012, top, 0.00023),
-        rounded_rectangle(inner_x, inner_y, top - 0.00012, 0.00018),
+        rounded_rectangle(outer_x, outer_y, floor - 0.00035, 0.00027),
+        rounded_rectangle(outer_x, outer_y, top - 0.00009, 0.00027),
+        rounded_rectangle(outer_x - 0.000085, outer_y - 0.000085, top, 0.00023),
+        rounded_rectangle(inner_x + 0.000075, inner_y + 0.000075, top, 0.00020),
+        rounded_rectangle(inner_x, inner_y, top - 0.00009, 0.00018),
         rounded_rectangle(inner_x, inner_y, floor, 0.00018),
     ]
     return loft("Rocker_Bezel", rings, [bezel, well], caps=(floor - 0.00035, floor),
                 span_materials=[0, 0, 0, 0, 1])
 
 
-def power_rib_profile():
-    """Sample 13 trapezoidal ribs per half, including the fine bevel of each crest."""
-    samples = [(u, 0.0) for u in (0.0, 0.035, 0.072, 0.091, 0.104)]
-    start, pitch = 0.112, 0.063
-    for i in range(13):
-        for phase, relief in (
-            (0.00, 0.00), (0.13, 0.09), (0.25, 0.83), (0.33, 1.00),
-            (0.60, 1.00), (0.70, 0.83), (0.85, 0.09), (0.94, 0.00),
-        ):
-            samples.append((start + (i + phase) * pitch, 0.00023 * relief))
-    samples.extend((u, 0.0) for u in (0.933, 0.949, 0.970, 0.986, 1.0))
-    return [(-u, z) for u, z in reversed(samples[1:])] + samples
+def rocker_paddle_profile(length, height):
+    """Cross-section of the rivet-mounted paddle through its pivot."""
+    # Two planar wings meet at a fine molded hinge radius. The nose sweeps
+    # around that pivot, so the raised end can expose its full flank.
+    radius = length / 2 - 0.00020
+    nose_angle = math.radians(24)
+    corner = 0.00027
+    nose_x = radius * math.cos(nose_angle)
+    nose_z = radius * math.sin(nose_angle)
+    deck = height * 0.235
+    slope = (nose_z - deck) / nose_x
+    samples = [(0.0, deck)]
+    for x, factor in ((0.00022, 0.46), (0.00053, 0.72), (0.00086, 0.83)):
+        samples.append((x, deck + slope * x * factor))
+    # A shallow molded crown lets a reflection travel along each wing as it pivots.
+    wing_start, wing_end = samples[-1][0], nose_x - 2 * corner
+    for fraction in (0.25, 0.5, 0.75, 1.0):
+        x = wing_start + (wing_end - wing_start) * fraction
+        crown = 0.00012 * math.sin(math.pi * fraction)
+        samples.append((x, deck + slope * x + crown))
+    samples.extend((
+        (nose_x - 0.66 * corner, nose_z - 0.60 * corner * slope),
+        (nose_x - 0.13 * corner, nose_z - 0.19 * corner),
+    ))
+    for degrees in (23.0, 21.5, 18.0, 14.0, 9.0, 4.0, 0.0, -5.5, -10.0):
+        angle = math.radians(degrees)
+        samples.append((radius * math.cos(angle), radius * math.sin(angle)))
+    return [(-x, z) for x, z in reversed(samples[1:])] + samples
 
 
-def build_rocker_actuator(dim, material, *, vertical, ribbed=False):
+def build_rocker_actuator(dim, material, *, vertical):
     w, h, height = dim["w"], dim["h"], dim["height"]
     length, width = (h, w) if vertical else (w, h)
-    if ribbed:
-        half_length = length / 2 - 0.00066
-        half_width = width / 2 - 0.00021
-        profile = power_rib_profile()
-    else:
-        # Leave room lengthwise for the crown to swing past the inner mould break.
-        half_length = length / 2 - 0.00023
-        half_width = width / 2 + 0.00022
-        profile = [(i / 48, 0.0) for i in range(-48, 49)]
+    half_width = width / 2 - 0.00014
+    profile = rocker_paddle_profile(length, height)
+    end_x = profile[-1][0] - 0.00012
+    profile.extend(((end_x, -0.00250), (-end_x, -0.00250)))
 
-    # Closely space samples along the long edges for the mould chamfer and rib runout.
-    across = [-1, -0.982, -0.954, -0.925, -0.89, -0.85, -0.80, -0.746, -0.71, -0.42, 0,
-              0.42, 0.71, 0.746, 0.80, 0.85, 0.89, 0.925, 0.954, 0.982, 1]
+    # Restrict curvature to the rolled nose and small break around the edge.
+    across = (-1, -0.987, -0.973, -0.952, -0.928, 0, 0.928, 0.952, 0.973, 0.987, 1)
 
-    def point(u, v, relief):
-        a, b = abs(u), abs(v)
-        # The actuator is a shallow saddle. At a detent one arm settles
-        # almost flat while the opposite arm climbs to the rolled end.
-        run = max(0.0, a - 0.091) if ribbed else a
-        rise = math.hypot(run, 0.035) - 0.035
-        if ribbed:
-            roll = max(0.0, (a - 0.86) / 0.14)
-            edge = max(0.0, (b - 0.92) / 0.08)
-            z = height * (0.293 + 0.345 * rise - 0.15 * roll ** 2.2)
-            z -= 0.00028 * edge ** 1.55
-        else:
-            # The wider draft on the side of the crown remains visible
-            # in a flat view, especially where it wraps around the tip.
-            roll = max(0.0, (a - 0.72) / 0.28)
-            edge_start = 0.85 - 0.12 * a
-            edge = max(0.0, (b - edge_start) / (1.0 - edge_start))
-            z = height * (0.304 + 0.401 * rise - 0.25 * roll ** 2.05)
-            z -= (0.00036 + 0.00072 * a) * edge ** 1.7
-        z += relief * min(1.0, (1.0 - b) / 0.09)
-        x = u * half_length - u * (b ** 12) * 0.00013
-        y = v * half_width - v * (a ** 35) * 0.00013
-        return (-y, x, z) if vertical else (x, y, z)
+    def point(x, z, v):
+        edge = max(0.0, (abs(v) - 0.95) / 0.05)
+        end = min(1.0, abs(x) / (length / 2)) ** 10
+        long = x * (1.0 - edge ** 1.7 * end * 0.009)
+        wide = v * (half_width - 0.000085 * end - 0.00012 * max(0.0, -z) / 0.002)
+        high = z - 0.00022 * edge ** 1.7
+        return (-wide, long, high) if vertical else (long, wide, high)
 
-    verts = [point(u, v, z) for u, z in profile for v in across]
-    rows, cols = len(profile), len(across)
+    # Loft the closed paddle section over its width, then close the sidewalls.
+    verts = [point(x, z, v) for v in across for x, z in profile]
+    count = len(profile)
     faces = []
-    for i in range(rows - 1):
-        for j in range(cols - 1):
-            a = i * cols + j
-            faces.append((a, a + cols, a + cols + 1, a + 1))
-
-    # Follow the cap perimeter with a mould break and drafted skirt.
-    perimeter = (
-        [i * cols for i in range(rows)]
-        + [(rows - 1) * cols + j for j in range(1, cols)]
-        + [i * cols + cols - 1 for i in range(rows - 2, -1, -1)]
-        + list(range(cols - 2, 0, -1))
-    )
-    for scale, z_offset, fixed_z in ((1.001, -0.00012, None), (0.979, 0.0, -0.00110)):
-        start = len(verts)
-        for index in perimeter:
-            x, y, z = verts[index]
-            verts.append((scale * x, scale * y, z + z_offset if fixed_z is None else fixed_z))
-        for i, a in enumerate(perimeter):
-            j = (i + 1) % len(perimeter)
-            faces.append((a, start + i, start + j, perimeter[j]))
-        perimeter = list(range(start, len(verts)))
-
-    bottom_center = len(verts)
-    verts.append((0, 0, -0.00110))
-    for i, a in enumerate(perimeter):
-        faces.append((a, bottom_center, perimeter[(i + 1) % len(perimeter)]))
-    actuator = create_mesh("Rocker_Actuator", verts, faces, [material], sharp_angle=46)
-    actuator.location.z = 0.00132
+    for first in range(0, len(verts) - count, count):
+        last = first + count
+        for i in range(count):
+            j = (i + 1) % count
+            faces.append((first + i, first + j, last + j, last + i))
+    faces.append(tuple(reversed(range(count))))
+    faces.append(tuple(range(len(verts) - count, len(verts))))
+    actuator = create_mesh("Rocker_Actuator", verts, faces, [material], sharp_angle=28)
+    actuator.location.z = -0.00032
     return actuator
 
 
@@ -376,7 +350,7 @@ def main():
             dims[part], materials["Rocker_Bezel"], materials["Rocker_Well"], power=power,
         )
         actuator = build_rocker_actuator(
-            dims[part], materials[finish], vertical=part != "rocker_horiz", ribbed=power,
+            dims[part], materials[finish], vertical=part != "rocker_horiz",
         )
         export_glb([bezel, actuator], assets / f"{part}.glb")
 

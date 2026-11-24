@@ -1061,28 +1061,10 @@
       ],
       "faceted": true,
       "default_drive": 0.0
-    },
-    {
-      "id": "ultra",
-      "name": "QUALITY / ULTRA",
-      "pos": [
-        3654.61,
-        262.26
-      ],
-      "dome_r": 40.15,
-      "bezel_outer_r": 51.96,
-      "color_srgb": [
-        255,
-        162,
-        34
-      ],
-      "core_srgb": [
-        255,
-        240,
-        192
-      ],
-      "faceted": false,
-      "default_drive": 0.0
     }
+  ],
+  "quality_opening": [
+    3654.61,
+    262.26
   ]
 }

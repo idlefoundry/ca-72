@@ -3876,6 +3876,12 @@ being placed on them as well? Show me a before/after video once you are done."
   220 Hz, which the drops would only flicker at).
 
 
+**QUALITY in the dedicated Cycles renderer (2026-11-24).** The face leaves room for the
+opening. The compositor uses the worn skin's three switch pictures and its existing artwork
+and layers for the hamster, amber lamp and Tesla coil. Each detent shows its indicator at
+rest. A caller can supply the same `Opening` state as the editor to animate the indicator or
+hide it. Packs without an opening position still render their original face and lamps.
+
 ## R49. INNER: the inner edge of each side's band, and WIDTH, INNER and DETUNE three across
 
 **The owner, 2026-10-10:** "right now, we have a way to control the outer edges, which is
