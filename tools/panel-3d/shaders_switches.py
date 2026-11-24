@@ -8,7 +8,7 @@ import bpy
 # Editable glTF PBR defaults also serve as the baseline for Cycles.
 # Values are sRGB hex, roughness, metallic and dielectric specular IOR level.
 FINISHES = {
-    "Rocker_Actuator": ("#3a7eb5", 0.47, 0.0, 0.17),
+    "Rocker_Actuator": ("#3a7eb5", 0.41, 0.0, 0.22),
     "Rocker_Power_Black": ("#181819", 0.42, 0.0, 0.18),
     "Rocker_Bezel": ("#101011", 0.51, 0.0, 0.18),
     "Rocker_Well": ("#0d0d0e", 0.82, 0.0, 0.10),
@@ -92,12 +92,12 @@ def _bump(tree, bsdf, height, strength, distance):
 
 
 def _nylon(tree, bsdf, vector, colored):
-    grain = _noise(tree, vector, "Fine mould grain", 10400, 1.7, (-690, -390))
+    grain = _noise(tree, vector, "Fine mould grain", 6100, 1.7, (-690, -390))
     wear = _noise(tree, vector, "Uneven satin finish", 1450, 2.1, (-690, 0))
     roughness = bsdf.inputs["Roughness"].default_value
     rough = _map(tree, wear, "Satin roughness", roughness - 0.04, roughness + 0.04, (-390, 0))
     tree.links.new(rough, bsdf.inputs["Roughness"])
-    _bump(tree, bsdf, grain, 0.28, 0.000021)
+    _bump(tree, bsdf, grain, 0.31, 0.000033)
 
     pigment = tree.nodes.new("ShaderNodeMixRGB")
     pigment.label = "Moulding and handling variation"
@@ -105,7 +105,7 @@ def _nylon(tree, bsdf, vector, colored):
     pigment.blend_type = "MULTIPLY"
     pigment.inputs[0].default_value = 1.0
     pigment.inputs[1].default_value = bsdf.inputs["Base Color"].default_value
-    variation = _map(tree, wear, "Pigment variation", 0.95, 1.04, (-390, 285))
+    variation = _map(tree, wear, "Pigment variation", 0.90, 1.05, (-390, 285))
     tree.links.new(variation, pigment.inputs[2])
     tree.links.new(pigment.outputs[0], bsdf.inputs["Base Color"])
 

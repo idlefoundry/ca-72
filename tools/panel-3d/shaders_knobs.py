@@ -14,9 +14,9 @@ INDICATOR = "Moog_White_Indicator"
 
 # Material order is also the order of the face slots in build_knobs.py.
 FINISHES = {
-    THERMOSET: ((13, 13, 14), 0.32, 0.0, 0.42),
-    CHAMFER: ((221, 221, 216), 0.26, 0.98, 0.5),
-    ALUMINUM: ((225, 224, 221), 0.23, 1.0, 0.5),
+    THERMOSET: ((13, 13, 14), 0.29, 0.0, 0.45),
+    CHAMFER: ((221, 221, 216), 0.23, 0.98, 0.5),
+    ALUMINUM: ((226, 225, 222), 0.30, 1.0, 0.5),
     INDICATOR: ((232, 222, 199), 0.47, 0.0, 0.30),
 }
 
@@ -72,13 +72,14 @@ def noise(tree, coords, scale, label, y):
     return node.outputs["Fac"]
 
 
-def roughness_variation(tree, bsdf, amount, low, high, y):
+def remap(tree, amount, limits, y, *, source=(0, 1)):
     mapped = tree.nodes.new("ShaderNodeMapRange")
     mapped.location = (-50, y)
-    mapped.inputs["To Min"].default_value = low
-    mapped.inputs["To Max"].default_value = high
+    mapped.inputs["From Min"].default_value, mapped.inputs["From Max"].default_value = source
+    mapped.inputs["To Min"].default_value, mapped.inputs["To Max"].default_value = limits
+    mapped.interpolation_type = "SMOOTHSTEP"
     tree.links.new(amount, mapped.inputs["Value"])
-    tree.links.new(mapped.outputs["Result"], bsdf.inputs["Roughness"])
+    return mapped.outputs["Result"]
 
 
 def color_variation(tree, amount, low, high, y):
@@ -108,6 +109,15 @@ def bump(tree, bsdf, height, strength, distance, y):
     tree.links.new(node.outputs["Normal"], bsdf.inputs["Normal"])
 
 
+def satin_reflection(tree, bsdf):
+    # The broad center web of the black molding is quiet, but the rolled
+    # shoulders keep enough grazing reflection to describe the scallops.
+    facing = tree.nodes.new("ShaderNodeLayerWeight")
+    facing.location = (-600, -480)
+    tint = remap(tree, facing.outputs["Facing"], (0.38, 0.83), -490, source=(0.10, 0.37))
+    tree.links.new(tint, bsdf.inputs["Specular Tint"])
+
+
 def turning_marks(tree, coords, scale, distortion, label, y):
     lathe = tree.nodes.new("ShaderNodeTexWave")
     lathe.label = label
@@ -120,60 +130,51 @@ def turning_marks(tree, coords, scale, distortion, label, y):
     return lathe.outputs["Fac"]
 
 
-def satin_reflection(tree, bsdf):
-    facing = tree.nodes.new("ShaderNodeLayerWeight")
-    facing.location = (-600, -440)
-    tint = tree.nodes.new("ShaderNodeMapRange")
-    tint.label = "Satin faces and grazing edges"
-    tint.location = (-325, -490)
-    tint.interpolation_type = "SMOOTHSTEP"
-    tint.inputs["From Min"].default_value = 0.045
-    tint.inputs["From Max"].default_value = 0.32
-    tint.inputs["To Min"].default_value = 0.30
-    tint.inputs["To Max"].default_value = 0.86
-    tree.links.new(facing.outputs["Facing"], tint.inputs["Value"])
-    tree.links.new(tint.outputs["Result"], bsdf.inputs["Specular Tint"])
+def crossgrain_scuffs(tree, coords):
+    stretch = tree.nodes.new("ShaderNodeVectorMath")
+    stretch.operation = "MULTIPLY"
+    stretch.location = (-850, -1000)
+    stretch.inputs[1].default_value = (0.30, 7.0, 1.0)
+    tree.links.new(coords, stretch.inputs[0])
+    scuffs = noise(tree, stretch.outputs["Vector"], 1100, "Fine crossgrain scuffs", -1000)
+    return remap(tree, scuffs, (0.0, 1.0), -1000, source=(0.66, 0.80))
 
 
-def angular_sheen(tree, coords):
-    # Keep the reflected bands tied to the studio axes as the knob turns.
+def directional_return(tree, coords, color):
+    # A flat orthographic camera sees very little of the off-axis return from
+    # the brushed grooves. Approximate the remaining two-lobe return in studio
+    # coordinates so the highlights stay still as the part turns.
     frame = tree.nodes.new("ShaderNodeVectorTransform")
     frame.vector_type = "VECTOR"
     frame.convert_from = "OBJECT"
     frame.convert_to = "WORLD"
-    frame.location = (-850, -790)
+    frame.location = (-850, -1360)
     tree.links.new(coords, frame.inputs["Vector"])
-    split = tree.nodes.new("ShaderNodeSeparateXYZ")
-    split.location = (-640, -790)
-    tree.links.new(frame.outputs["Vector"], split.inputs["Vector"])
-    angle = tree.nodes.new("ShaderNodeMath")
-    angle.operation = "ARCTAN2"
-    angle.location = (-470, -790)
-    tree.links.new(split.outputs["Y"], angle.inputs[0])
-    tree.links.new(split.outputs["X"], angle.inputs[1])
-    doubled = tree.nodes.new("ShaderNodeMath")
-    doubled.operation = "MULTIPLY_ADD"
-    doubled.location = (-300, -790)
-    doubled.inputs[1].default_value = 2.0
-    doubled.inputs[2].default_value = 0.33
-    tree.links.new(angle.outputs[0], doubled.inputs[0])
-    sheen = tree.nodes.new("ShaderNodeMath")
-    sheen.operation = "COSINE"
-    sheen.location = (45, -790)
-    tree.links.new(doubled.outputs[0], sheen.inputs[0])
-
-    # Opposed bright sectors and grey sectors are still visible when the
-    # broad area light's directly reflected streak is off the normal.
-    ramp = tree.nodes.new("ShaderNodeMapRange")
-    ramp.label = "Brushed aluminum directional return"
-    ramp.location = (400, -660)
-    ramp.interpolation_type = "SMOOTHSTEP"
-    ramp.inputs["From Min"].default_value = -0.80
-    ramp.inputs["From Max"].default_value = 0.85
-    ramp.inputs["To Min"].default_value = 0.42
-    ramp.inputs["To Max"].default_value = 1.32
-    tree.links.new(sheen.outputs[0], ramp.inputs["Value"])
-    return ramp.outputs["Result"]
+    radial = tree.nodes.new("ShaderNodeVectorMath")
+    radial.operation = "MULTIPLY"
+    radial.location = (-625, -1360)
+    radial.inputs[1].default_value = (1.0, 1.0, 0.0)
+    tree.links.new(frame.outputs["Vector"], radial.inputs[0])
+    normal = tree.nodes.new("ShaderNodeVectorMath")
+    normal.operation = "NORMALIZE"
+    normal.location = (-455, -1360)
+    tree.links.new(radial.outputs["Vector"], normal.inputs[0])
+    align = tree.nodes.new("ShaderNodeVectorMath")
+    align.operation = "DOT_PRODUCT"
+    align.location = (-290, -1360)
+    align.inputs[1].default_value = (0.85, 0.53, 0.0)
+    tree.links.new(normal.outputs["Vector"], align.inputs[0])
+    paired = tree.nodes.new("ShaderNodeMath")
+    paired.operation = "ABSOLUTE"
+    paired.location = (-165, -1360)
+    tree.links.new(align.outputs["Value"], paired.inputs[0])
+    lobes = remap(tree, paired.outputs["Value"], (0.63, 1.06), -1360, source=(0.40, 0.96))
+    return_color = tree.nodes.new("ShaderNodeVectorMath")
+    return_color.operation = "SCALE"
+    return_color.location = (135, 270)
+    tree.links.new(color, return_color.inputs["Vector"])
+    tree.links.new(lobes, return_color.inputs["Scale"])
+    return return_color.outputs["Vector"]
 
 
 def irregular_turning_marks(tree, coords):
@@ -214,17 +215,18 @@ def apply_knob_shaders(materials):
         local = coords.outputs["Object"]
 
         if name == THERMOSET:
-            wear = noise(tree, local, 610, "Handling wear", 260)
-            grain = noise(tree, local, 19800, "Compression-molded grain", -130)
-            color = color_variation(tree, wear, (11, 11, 12), (18, 18, 19), 260)
+            wear = noise(tree, local, 410, "Handling wear", 260)
+            grain = noise(tree, local, 11800, "Compression-molded grain", -130)
+            color = color_variation(tree, wear, (10, 10, 11), (19, 19, 20), 260)
             tree.links.new(color, bsdf.inputs["Base Color"])
-            finish = blend_factors(tree, wear, grain, 0.25, -40)
-            roughness_variation(tree, bsdf, finish, 0.27, 0.38, -30)
-            bump(tree, bsdf, grain, 0.17, 0.000030, -370)
+            finish = blend_factors(tree, wear, grain, 0.32, -40)
+            rough = remap(tree, finish, (0.22, 0.34), -30, source=(0.25, 0.76))
+            tree.links.new(rough, bsdf.inputs["Roughness"])
+            bump(tree, bsdf, grain, 0.25, 0.000035, -370)
             satin_reflection(tree, bsdf)
         elif name == INDICATOR:
             grain = noise(tree, local, 32000, "Pad-print ink grain", 260)
-            roughness_variation(tree, bsdf, grain, 0.45, 0.51, 260)
+            tree.links.new(remap(tree, grain, (0.45, 0.51), 260), bsdf.inputs["Roughness"])
             bump(tree, bsdf, grain, 0.12, 0.000006, -70)
         elif name == ALUMINUM:
             spun.add(material)
@@ -233,26 +235,26 @@ def apply_knob_shaders(materials):
             rings = blend_factors(tree, feed, brush, 0.80, 20)
             tool_marks = irregular_turning_marks(tree, local)
             rings = blend_factors(tree, rings, tool_marks, 0.59, -120)
-            roughness_variation(tree, bsdf, rings, 0.19, 0.27, 20)
-            bump(tree, bsdf, rings, 0.030, 0.000030, -270)
-            patina = noise(tree, local, 880, "Faint aluminum patina", -460)
-            finish = blend_factors(tree, rings, patina, 0.35, 260)
-            color = color_variation(tree, finish, (209, 209, 206), (232, 231, 226), 270)
-            contrast = tree.nodes.new("ShaderNodeMixRGB")
-            contrast.blend_type = "MULTIPLY"
-            contrast.location = (150, 240)
-            contrast.inputs["Fac"].default_value = 1.0
-            tree.links.new(color, contrast.inputs[1])
-            tree.links.new(angular_sheen(tree, local), contrast.inputs[2])
-            tree.links.new(contrast.outputs["Color"], bsdf.inputs["Base Color"])
+            patina = noise(tree, local, 2050, "Oxidized aluminum mottling", -460)
+            pits = noise(tree, local, 8600, "Fine oxide pits", -710)
+            oxide = blend_factors(tree, patina, pits, 0.41, -600)
+            scuffs = crossgrain_scuffs(tree, local)
+            finish = blend_factors(tree, oxide, scuffs, 0.24, -440)
+            polish = blend_factors(tree, rings, finish, 0.65, 20)
+            rough = remap(tree, polish, (0.18, 0.43), 20, source=(0.23, 0.78))
+            tree.links.new(rough, bsdf.inputs["Roughness"])
+            grain = blend_factors(tree, rings, pits, 0.28, -250)
+            bump(tree, bsdf, grain, 0.10, 0.000032, -270)
+            clean_metal = remap(tree, finish, (1.0, 0.0), 260, source=(0.36, 0.66))
+            color = color_variation(tree, clean_metal, (179, 177, 173), (237, 235, 230), 270)
+            tree.links.new(directional_return(tree, local, color), bsdf.inputs["Base Color"])
 
             tangent = tree.nodes.new("ShaderNodeTangent")
             tangent.location = (-50, -490)
             tangent.direction_type = "RADIAL"
             tangent.axis = "Z"
             tree.links.new(tangent.outputs["Tangent"], bsdf.inputs["Tangent"])
-            bsdf.inputs["Anisotropic"].default_value = 0.94
-            bsdf.inputs["Anisotropic Rotation"].default_value = 0.25
+            bsdf.inputs["Anisotropic"].default_value = 0.90
 
     # Radial Tangent uses Generated coordinates. Center the texture space on
     # the shaft, since the pointer fin moves the mesh's bounds off that axis.

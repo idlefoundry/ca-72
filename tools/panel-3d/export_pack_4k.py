@@ -155,10 +155,9 @@ class PackExporter:
             round(self.face_h * 0.5 - by * self.px_per_m, 2),
         ]
 
-    def render_static_face(self):
-        t0 = time.time()
+    def build_static_scene(self):
+        """Assemble the cabinet and hardware fixtures for the face or a detail render."""
         scene, backend = reset_scene(self.samples_face, transparent=False)
-        print(f"Rendering static face-3d.png ({self.face_w}x{self.face_h}, {self.samples_face} samples, {backend})...", flush=True)
         setup_studio_lights(scene, (0.0, 0.0, 0.0))
 
         pm = self.spec["panel_meters"]
@@ -215,7 +214,12 @@ class PackExporter:
         # Chassis screws along walnut top rail (seated at walnut top z = 0.0072)
         for idx, (sx, sy, _) in enumerate(fix["screws"]):
             instantiate(tpls["screw_phillips"], f"Screw_{idx}", self.panel_to_blender(sx, sy, 0.0072), (idx * 47) % 180)
+        return scene, backend
 
+    def render_static_face(self):
+        t0 = time.time()
+        scene, backend = self.build_static_scene()
+        print(f"Rendering static face-3d.png ({self.face_w}x{self.face_h}, {self.samples_face} samples, {backend})...", flush=True)
         make_ortho_cam(scene, 0.0, 0.0, self.face_w, self.face_h, self.px_per_m)
         scene.render.filepath = str(self.out_dir / "face-3d.png")
         bpy.ops.render.render(write_still=True)

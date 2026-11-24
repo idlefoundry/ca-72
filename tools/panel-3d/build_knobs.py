@@ -48,10 +48,10 @@ class KnobMesh:
         self.faces.append(vertices)
         self.slots.append(slot)
 
-    def bridge(self, lower, upper, slot=BODY):
+    def bridge(self, lower, upper, slot=BODY, *, ink_segments=()):
         for i in range(len(lower)):
             j = (i + 1) % len(lower)
-            self.face((lower[i], lower[j], upper[j], upper[i]), slot)
+            self.face((lower[i], lower[j], upper[j], upper[i]), INK if i in ink_segments else slot)
 
     def crease(self, ring):
         self.creases.update((min(a, b), max(a, b)) for a, b in zip(ring, ring[1:] + ring[:1]))
@@ -274,8 +274,9 @@ def build_pointer(name, dim, materials):
     body, tip, height = dim["body_radius"], dim["tip_radius"], dim["height"]
     cap = dim["cap_radius"]
     lip = cap_lip_radius(cap)
-    azimuths = angles(1, 384)
     mesh = KnobMesh()
+    scale = dim["scale"]
+    half_width = 0.00028 * scale
 
     # The selector is a club-shaped grip on a circular flange. The narrow end
     # carries the reading line, and the broad countergrip has a concave back.
@@ -283,6 +284,11 @@ def build_pointer(name, dim, materials):
     front = min(tip, body) * 0.976
     rear_center = body * 0.815
     rear_scoop = 0.43 / body
+    ink_angle = math.atan2(half_width, front)
+    azimuths = sorted([*angles(1, 384), ink_angle, math.tau - ink_angle])
+    ink_segments = {
+        i for i, a in enumerate(azimuths) if a < ink_angle or a >= math.tau - ink_angle
+    }
 
     def outline(a):
         sine = abs(math.sin(a))
@@ -320,25 +326,33 @@ def build_pointer(name, dim, materials):
             (*polar(min(body * 0.986, r + expansion * body), a), height * z_fraction)
             for a, r in zip(azimuths, deck_outline, strict=True)
         ))
-    outer.append(mesh.loop(
+    wall_top = mesh.loop(
         (*polar(min(body * 0.988, r + body * 0.023), a), deck_z(*point) - 0.00030 * dim["scale"])
         for a, r, point in zip(azimuths, deck_outline, deck_points, strict=True)
-    ))
-    outer.append(mesh.loop((*point, deck_z(*point)) for point in deck_points))
+    )
+    deck = mesh.loop((*point, deck_z(*point)) for point in deck_points)
+    # The indicator wraps over the chamfer and ends shortly down the nose.
+    # Insert a ring in the plane of the wall to terminate the mark.
+    runout = []
+    for lower, upper in zip(outer[-1], wall_top, strict=True):
+        a, b = mesh.vertices[lower], mesh.vertices[upper]
+        t = 1.0 - 0.00056 * scale / (b[2] - a[2])
+        runout.append(tuple(mix(x, y, t) for x, y in zip(a, b, strict=True)))
+    outer.append(mesh.loop(runout))
     mesh.fan(outer[0], 0.0)
     for a, b in pairwise(outer):
         mesh.bridge(a, b)
-    mesh.crease(outer[-2])
-    mesh.crease(outer[-1])
+    mesh.bridge(outer[-1], wall_top, ink_segments=ink_segments)
+    mesh.bridge(wall_top, deck, ink_segments=ink_segments)
+    mesh.crease(wall_top)
+    mesh.crease(deck)
 
     # Cut the stripe into the curved surface. The paint shares its groove floor
     # with the surrounding dark walls, so the GLB stays one watertight shell.
-    scale = dim["scale"]
-    half_width = 0.00028 * scale
     y0 = lip + 0.00045 * scale
-    y1 = deck_outline[0] - 0.00059 * scale
     groove_width = half_width + 0.00007 * scale
     groove_depth = 0.000065 * scale
+    y1 = deck_outline[0] - groove_width - 0.000055 * scale
     groove = mesh.loop((x, y, deck_z(x, y)) for x, y in capsule_loop(y0, y1, groove_width))
     inlay = mesh.loop(
         (x, y, deck_z(x, y) - groove_depth)
@@ -353,7 +367,7 @@ def build_pointer(name, dim, materials):
             dy = y - min(y1, max(y0, y))
             if math.hypot(x, dy) > groove_width + body * 0.006:
                 samples.append((x, y))
-    mesh.top_surface(outer[-1], cap_lip, groove, samples, deck_z, None)
+    mesh.top_surface(deck, cap_lip, groove, samples, deck_z, None)
     mesh.bridge(groove, inlay)
     mesh.crease(groove)
     mesh.crease(inlay)

@@ -9,12 +9,11 @@ Follows every lesson in `vst-3d-ui` Section 4:
 3. Removes flat Cycles Shadow Catcher ambient veil (~18/255) outside the hardware silhouette.
 4. Applies a single smooth directional shadow envelope aligned to key-light shadow vector
    `(0.60, 0.80)` (no two-tier step discontinuity!):
-     - Lit top-left arc stays ultra-clean (`lit_gain ~ 0.16`),
-     - Shadow bottom-right arc uses a single continuous smooth curve (`shadow_gain ~ 0.50`,
-       `smoothstep ** 1.55`),
+     - Preserve the narrow contact shadow where the leaning cast shadow starts.
+     - Clear the lit top-left arc and taper the bottom-right penumbra continuously.
      - Feathers strictly to 0 alpha well before all 4 cell borders (`border_max_alpha == 0` verified!).
 5. Calibrates wrinkle enamel luminance inside `faceplate_rect_px` (masking out
-   bright silkscreen, chrome hardware, and wood rails) to ~36 sRGB left -> ~30 sRGB right.
+   bright silkscreen, chrome hardware, and wood rails).
 """
 
 import argparse
@@ -56,15 +55,16 @@ def clean_knob_cell(cell: np.ndarray, ax: float, ay: float, body_r: float) -> np
 
     # Key-light shadow vector: light from upper-left (-0.60, -0.80), shadow cast toward (+0.60, +0.80)
     dir_cos = (dx * 0.60 + dy * 0.80) / np.maximum(1.0, r)
-    # Single continuous angular gain: lit top-left ~0.16, shadow bottom-right ~0.52
+    # The Cycles cast shadow is strongest near the base. Retain more of it on
+    # the dark side so the control reads as seated in the enamel.
     dir_t = np.clip((dir_cos + 0.35) / 1.35, 0.0, 1.0)
     dir_t = dir_t * dir_t * (3.0 - 2.0 * dir_t)
-    dir_gain = 0.14 + 0.38 * dir_t
+    dir_gain = 0.12 + 0.59 * dir_t
 
     # Radial reach: compact on lit top-left, smooth directional falloff toward bottom-right
-    max_reach = body_r + (0.28 + 0.42 * dir_t) * (min(w - ax, h - ay) - body_r)
+    max_reach = body_r + (0.26 + 0.53 * dir_t) * (min(w - ax, h - ay) - body_r)
     rad_env = 1.0 - smoothstep(body_r * 0.98, np.maximum(body_r + 8.0, max_reach), r)
-    rad_env = np.power(np.clip(rad_env, 0.0, 1.0), 1.55)
+    rad_env = np.power(np.clip(rad_env, 0.0, 1.0), 1.34)
 
     # Subtract flat Shadow Catcher ambient veil (~18/255) outside solid hardware
     veil = 18.0
@@ -114,7 +114,7 @@ def clean_rocker_cell(cell: np.ndarray, ax: float, ay: float, body_w: float, bod
     dir_cos = (dx * 0.60 + dy * 0.80) / r
     dir_t = np.clip((dir_cos + 0.35) / 1.35, 0.0, 1.0)
     dir_t = dir_t * dir_t * (3.0 - 2.0 * dir_t)
-    dir_gain = 0.16 + 0.38 * dir_t
+    dir_gain = 0.14 + 0.52 * dir_t
 
     reach = 8.0 + 20.0 * dir_t
     dist_env = np.power(1.0 - smoothstep(0.0, reach, dist), 1.55)
@@ -169,7 +169,9 @@ def calibrate_faceplate(raw_path: Path, dst_path: Path, manifest: dict) -> None:
     luma = luminance(sub)
     u = np.linspace(0.0, 1.0, sub.shape[1], dtype=np.float32)
     cur_grad = left_med * (1.0 - u) + right_med * u
-    tgt_grad = 36.0 * (1.0 - u) + 30.0 * u
+    # Leave enough sheen for the relief to read at editor size. The actual
+    # plate is black, but the lit ridges in the period photo are slate gray.
+    tgt_grad = 57.0 * (1.0 - u) + 45.0 * u
     ratio = np.clip(tgt_grad / np.maximum(12.0, cur_grad), 0.50, 1.25)
 
     # Mask smoothly so bright white silkscreen ink (> 110 sRGB) stays 100% crisp and untouched

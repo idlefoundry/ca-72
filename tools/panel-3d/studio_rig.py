@@ -66,7 +66,7 @@ def reset_scene(samples: int = 128, transparent: bool = False):
     scene.render.image_settings.compression = 85
     scene.view_settings.view_transform = "AgX"
     scene.view_settings.look = "AgX - Medium High Contrast"
-    scene.view_settings.exposure = -0.22
+    scene.view_settings.exposure = -0.30
     return scene, backend
 
 
@@ -140,11 +140,11 @@ def setup_studio_lights(scene, center=(0.0, 0.0, 0.0)):
     elems[1].position = 0.92
     elems[1].color = (1.15, 1.12, 1.06, 1.0)
     e1 = elems.new(0.28)
-    e1.color = (0.12, 0.13, 0.15, 1.0)
+    e1.color = (0.065, 0.072, 0.084, 1.0)
     e2 = elems.new(0.56)
-    e2.color = (0.52, 0.52, 0.50, 1.0)
+    e2.color = (0.29, 0.31, 0.34, 1.0)
     e3 = elems.new(0.76)
-    e3.color = (0.88, 0.86, 0.82, 1.0)
+    e3.color = (0.73, 0.75, 0.77, 1.0)
     nt.links.new(mr.outputs["Result"], ramp.inputs["Fac"])
 
     bg_gloss = nt.nodes.new("ShaderNodeBackground")
@@ -181,12 +181,12 @@ def setup_studio_lights(scene, center=(0.0, 0.0, 0.0)):
         lobj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
         return lobj
 
-    # Soft overhead-left main diffused scrim (matches shadow-catcher down-right shadow vector)
-    area("KeySoftbox",  (-0.26,  0.35, 0.68), 11.2, 0.88, 0.48, (1.00, 0.97, 0.93), spread_deg=120.0)
-    # Gentle cool lower-right bounce fill to keep shadows sculptural and readable
-    area("FillSoftbox", ( 0.44, -0.30, 0.52),  3.6, 0.86, 0.48, (0.88, 0.93, 1.00), spread_deg=130.0)
-    # Restrained top-back edge kicker (soft, never creates harsh plastic hot streaks)
-    area("RimStrip",    (-0.04,  0.54, 0.34),  3.2, 0.96, 0.18, (1.00, 0.95, 0.89), spread_deg=110.0)
+    # A tall, broad window above the left side. Its narrow dimension leaves a
+    # defined reflection on the curved grip shoulders and enamel crests.
+    area("KeySoftbox",  (-0.24,  0.32, 0.60), 9.0, 0.58, 0.30, (1.00, 0.985, 0.96), spread_deg=120.0)
+    # Wall bounce and a faint upper rim keep recesses readable.
+    area("FillSoftbox", ( 0.44, -0.30, 0.52), 2.2, 0.88, 0.49, (0.93, 0.96, 1.00), spread_deg=130.0)
+    area("RimStrip",    (-0.04,  0.54, 0.34), 1.5, 0.96, 0.20, (1.00, 0.97, 0.92), spread_deg=110.0)
 
 
 def make_ortho_cam(scene, cx, cy, w_px, h_px, px_per_m):

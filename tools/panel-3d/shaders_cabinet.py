@@ -7,9 +7,9 @@ import bpy
 
 # Linear RGB, roughness, metallic, and dielectric specular IOR level.
 SURFACES = {
-    "Faceplate_PBR": ((0.0065, 0.0065, 0.0065), 0.62, 0.0, 0.31),
-    "Walnut_Horiz": ((0.10, 0.062, 0.039), 0.60, 0.0, 0.25),
-    "Walnut_Vert": ((0.10, 0.062, 0.039), 0.60, 0.0, 0.25),
+    "Faceplate_PBR": ((0.0065, 0.0065, 0.007), 0.60, 0.0, 0.38),
+    "Walnut_Horiz": ((0.10, 0.062, 0.039), 0.54, 0.0, 0.23),
+    "Walnut_Vert": ((0.10, 0.062, 0.039), 0.54, 0.0, 0.23),
     "Aluminum_Trim": ((0.23, 0.225, 0.212), 0.37, 0.88, 0.50),
     "Steel_Backing": ((0.016, 0.016, 0.017), 0.61, 0.20, 0.35),
     "Plate_Face": ((0.005, 0.005, 0.0055), 0.45, 0.24, 0.085),
@@ -42,9 +42,9 @@ GLASS = {
 }
 
 TEXTURED = {
-    "Faceplate_PBR": ("panel", 0.00009, 0.72, 1.0),
-    "Walnut_Horiz": ("walnut", 0.000050, 0.48, 0.28),
-    "Walnut_Vert": ("walnut", 0.000050, 0.48, 0.28),
+    "Faceplate_PBR": ("panel", 0.000157, 0.76, 1.0),
+    "Walnut_Horiz": ("walnut", 0.000075, 0.58, 0.245),
+    "Walnut_Vert": ("walnut", 0.000075, 0.58, 0.245),
     "Plate_Face": ("plate", 0.000012, 0.30, 1.0),
 }
 
@@ -67,6 +67,7 @@ def surface(material, name):
     tree.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
     if name == "Faceplate_PBR":
         bsdf.inputs["IOR"].default_value = 1.46
+        bsdf.inputs["Specular Tint"].default_value = (0.83, 0.94, 1.0, 1.0)
     if name in GLASS:
         transmission, ior, tint, density = GLASS[name]
         bsdf.inputs["Transmission Weight"].default_value = transmission
@@ -206,6 +207,18 @@ def black_oxide(tree, bsdf, position):
     tool_marks(tree, bsdf, profile, (42000, 33500, 1), 0.07, relief=0.0000018)
 
 
+def aluminum_trim(tree, bsdf, uv):
+    oxidation = noise_field(tree, uv, (46, 9, 1))
+    color = tree.nodes.new("ShaderNodeValToRGB")
+    color.color_ramp.elements[0].position = 0.37
+    color.color_ramp.elements[0].color = (0.23, 0.22, 0.20, 1.0)
+    color.color_ramp.elements[1].position = 0.75
+    color.color_ramp.elements[1].color = (0.11, 0.10, 0.085, 1.0)
+    tree.links.new(oxidation, color.inputs["Fac"])
+    tree.links.new(color.outputs["Color"], bsdf.inputs["Base Color"])
+    tool_marks(tree, bsdf, uv, (24, 170, 1), 0.12, relief=0.000002)
+
+
 def apply_cabinet_shaders(materials, tex_dir):
     """Rebuild the Cycles graphs on imported/exporter-created cabinet materials in place."""
     tex_dir = Path(tex_dir).resolve()
@@ -227,7 +240,7 @@ def apply_cabinet_shaders(materials, tex_dir):
             bsdf.inputs["Anisotropic"].default_value = 0.42 if name == "Aluminum_Trim" else 0.29
         if name == "Aluminum_Trim":
             uv = tree.nodes.new("ShaderNodeTexCoord").outputs["UV"]
-            tool_marks(tree, bsdf, uv, (28, 185, 1), 0.04)
+            aluminum_trim(tree, bsdf, uv)
         if name in ("Chrome_Polished", "Jack_Contact"):
             position = tree.nodes.new("ShaderNodeTexCoord").outputs["Object"]
             tool_marks(tree, bsdf, position, (8900, 12000, 10600), 0.02)
