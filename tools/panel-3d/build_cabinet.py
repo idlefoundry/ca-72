@@ -369,10 +369,11 @@ def wire(name, path, radius, material, sides=10):
 def build_ultra_bulb(dome, seat, mats):
     # The bulb's axis lies upright on the panel, suspended beneath the amber cover.
     bulb_y = -dome * 0.48
-    bulb_z = seat - 0.00051
-    r = dome * 0.29
+    bulb_z = seat - 0.00008
+    r = dome * 0.31
     rise = dome * 0.72
     bulb = glass_dome("Ultra_ClearBulbEnvelope", r, rise, 0, 0.00016, mats["Ultra_Bulb_Glass"], segments=128)
+    bulb.scale.y = 0.75
     bulb.rotation_euler.x = -math.pi / 2
     bulb.location = (0, bulb_y, bulb_z)
 
@@ -382,6 +383,7 @@ def build_ultra_bulb(dome, seat, mats):
     ], mats["Ultra_Brass_Cup"], segments=96)
     base.location = bulb.location
     base.rotation_euler = bulb.rotation_euler
+    base.scale.y = bulb.scale.y
 
     tungsten = mats["Ultra_Filament"]
     end_x = 0.00071

@@ -65,10 +65,11 @@ def build_faceplate_pbr(tex_dir):
     h, w = ink.shape
     rng = np.random.default_rng(7201)
     pebble = enamel_pebbles(w, h, 4, rng)
+    crinkle = enamel_pebbles(w, h, 7, rng)
     scatter = enamel_pebbles(w, h, 2, rng)
     specks = rng.random((h, w), dtype=np.float32) - 0.5
     handling = value_noise(w, h, 45, 12, rng)
-    grain = 0.56 * pebble + 0.32 * scatter + 0.12 * specks
+    grain = 0.43 * pebble + 0.17 * crinkle + 0.29 * scatter + 0.11 * specks
     albedo = print_colors(
         ink, (30, 29, 28), (237, 233, 223), 7.0 * grain + 1.4 * handling, 4.0 * grain,
     )
