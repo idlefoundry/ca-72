@@ -1,449 +1,527 @@
 #!/usr/bin/env python3
-"""Build closed-manifold Y-up metric GLB models for CA-72's classic Minimoog knobs:
-  - knob_std.glb           (9-flute skirted knob, spun-aluminum cap, white skirt dot)
-  - knob_big.glb           (large OSC 2/3 Frequency knob, wider spun-aluminum cap)
-  - knob_pointer.glb       (classic Minimoog wedge-pointer rotary selector knob)
-  - knob_pointer_small.glb (0.75x wedge-pointer for FILTER POLES & FILTER MODE)
-"""
+"""Build metric knob GLBs from spec.json. Use --verify to render the comparison sheet."""
 
 import argparse
 import json
 import math
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 import bpy
 import bmesh
+from mathutils import Vector
+from mathutils.geometry import delaunay_2d_cdt
+
+from shaders_knobs import apply_knob_shaders, knob_materials, linear_rgb
 
 
-SEGMENTS_PER_FLUTE = 14
+BODY, BEVEL, CAP, INK = range(4)
 
 
-def srgb_to_lin(c: float) -> float:
-    return ((c + 0.055) / 1.055) ** 2.4 if c > 0.04045 else c / 12.92
+def mix(a, b, t):
+    return a + (b - a) * t
 
 
-def make_material(name, rgba, roughness, metallic=0.0, coat=0.0, coat_rough=0.14, spec=0.5, aniso=0.0):
-    mat = bpy.data.materials.new(name)
-    mat.use_nodes = True
-    mat.diffuse_color = rgba
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    bsdf.inputs["Base Color"].default_value = rgba
-    bsdf.inputs["Roughness"].default_value = roughness
-    bsdf.inputs["Metallic"].default_value = metallic
-    if "Specular IOR Level" in bsdf.inputs:
-        bsdf.inputs["Specular IOR Level"].default_value = spec
-    if coat > 0.0 and "Coat Weight" in bsdf.inputs:
-        bsdf.inputs["Coat Weight"].default_value = coat
-        bsdf.inputs["Coat Roughness"].default_value = coat_rough
-    if aniso > 0.0 and "Anisotropic" in bsdf.inputs:
-        bsdf.inputs["Anisotropic"].default_value = aniso
-    return mat
+def unit(t):
+    return min(1.0, max(0.0, t))
 
 
-def validate_and_create_obj(name, vertices, faces, materials, face_materials=None, smooth=True):
-    mesh = bpy.data.meshes.new(name)
-    mesh.from_pydata(vertices, [], faces)
-    if mesh.validate():
-        raise ValueError(f"{name}: invalid mesh")
-    for m in materials:
-        mesh.materials.append(m)
-    for poly in mesh.polygons:
-        poly.use_smooth = smooth
-        if face_materials is not None:
-            poly.material_index = face_materials[poly.index]
+def smoothstep(t):
+    t = unit(t)
+    return t * t * (3.0 - 2.0 * t)
 
+
+class KnobMesh:
+    def __init__(self):
+        self.vertices = []
+        self.faces = []
+        self.slots = []
+
+    def loop(self, points):
+        start = len(self.vertices)
+        self.vertices.extend(points)
+        return list(range(start, len(self.vertices)))
+
+    def face(self, vertices, slot):
+        self.faces.append(vertices)
+        self.slots.append(slot)
+
+    def bridge(self, lower, upper, slot=BODY):
+        for i in range(len(lower)):
+            j = (i + 1) % len(lower)
+            self.face((lower[i], lower[j], upper[j], upper[i]), slot)
+
+    def fan(self, ring, z, slot=BODY):
+        center, = self.loop([(0, 0, z)])
+        for i, a in enumerate(ring):
+            self.face((center, a, ring[(i + 1) % len(ring)]), slot)
+
+    def top_surface(self, outside, inside, mark, samples, height, marked_slot):
+        """Triangulate a top annulus around the in-mesh print or inlay boundary."""
+        vertices = outside + inside + mark + self.loop((x, y, height(x, y)) for x, y in samples)
+        contours = (
+            list(range(len(outside))),
+            list(range(len(outside), len(outside) + len(inside))),
+            list(range(len(outside) + len(inside), len(outside) + len(inside) + len(mark))),
+        )
+        _, _, faces, sources, _, regions = delaunay_2d_cdt(
+            [Vector(self.vertices[i][:2]) for i in vertices], [], contours, 1, 1e-9
+        )
+        if any(len(source) != 1 for source in sources):
+            raise ValueError("Knob contours intersect or contain duplicate points")
+        indices = [vertices[source[0]] for source in sources]
+        for face, region in zip(faces, regions, strict=True):
+            if 0 not in region or 1 in region:
+                continue
+            slot = marked_slot if 2 in region else BODY
+            if slot is not None:
+                self.face(tuple(indices[i] for i in face), slot)
+
+    def create(self, name, materials):
+        mesh = bpy.data.meshes.new(name)
+        mesh.from_pydata(self.vertices, [], self.faces)
+        if mesh.validate():
+            raise ValueError(f"{name}: invalid mesh")
+        for material in materials:
+            mesh.materials.append(material)
+        for poly, slot in zip(mesh.polygons, self.slots, strict=True):
+            poly.material_index = slot
+            poly.use_smooth = slot != CAP
+
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(mesh)
+            bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+            assert_solid(bm, name)
+            bm.to_mesh(mesh)
+        finally:
+            bm.free()
+
+        mesh.update()
+        obj = bpy.data.objects.new(name, mesh)
+        bpy.context.collection.objects.link(obj)
+        return obj
+
+
+def assert_solid(bm, name):
+    if any(not edge.is_manifold or not edge.is_contiguous for edge in bm.edges):
+        raise ValueError(f"{name}: open or inconsistently wound edges")
+    if bm.calc_volume(signed=True) <= 0:
+        raise ValueError(f"{name}: non-positive signed volume")
+
+    # A single connected shell also rules out buried pegs and intersecting wedge parts.
+    pending = [next(iter(bm.verts))]
+    visited = set(pending)
+    while pending:
+        vertex = pending.pop()
+        for edge in vertex.link_edges:
+            neighbor = edge.other_vert(vertex)
+            if neighbor not in visited:
+                visited.add(neighbor)
+                pending.append(neighbor)
+    if len(visited) != len(bm.verts):
+        raise ValueError(f"{name}: disconnected shells")
+
+
+def angles(flutes, segments_per_flute):
+    count = flutes * segments_per_flute
+    return [math.tau * i / count for i in range(count)]
+
+
+def ring(mesh, azimuths, radius, z, flutes=0, depth=0.0):
+    return mesh.loop(
+        (*polar(radius - depth * abs(math.sin(flutes * a / 2)) ** 2.8, a), z)
+        for a in azimuths
+    )
+
+
+def polar(radius, azimuth):
+    # Zero azimuth is +Y on the faceplate, or -Z in the Y-up GLB.
+    return -radius * math.sin(azimuth), radius * math.cos(azimuth)
+
+
+def cap_lip_radius(cap_radius):
+    return cap_radius * 1.055
+
+
+def add_cap(mesh, azimuths, lip, radius, height):
+    # The face sits below the thermoset lip, with a dark relief cut around the
+    # silver edge. The top face is flat from the machined bevel to its center.
+    profile = [
+        (radius * 1.025, height, BODY),
+        (radius * 1.012, height - 0.00012, BODY),
+        (radius, height - 0.00012, BODY),
+        (radius, height - 0.000075, BEVEL),
+        (radius * 0.985, height - 0.00004, BEVEL),
+    ]
+    for r, z, slot in profile:
+        next_ring = ring(mesh, azimuths, r, z)
+        mesh.bridge(lip, next_ring, slot)
+        lip = next_ring
+    mesh.fan(lip, height - 0.00004, CAP)
+
+
+def build_skirted(name, dim, materials):
+    base, height = dim["base_radius"], dim["height"]
+    large = name == "knob_big"
+    flutes = 14 if large else 10
+    azimuths = angles(flutes, 36)
+    grip = base * (0.855 if large else 0.785)
+    depth = base * (0.050 if large else 0.068)
+    # The drawing provides the mounted envelope. Match the exposed cap and
+    # pigment to the worn hardware artwork within that envelope.
+    cap = base * (0.715 if large else 0.605)
+    mesh = KnobMesh()
+
+    # Molded heel and rolled rim. The upper skirt is a smooth shallow cone.
+    skirt_inside, skirt_outside = grip + base * 0.012, base * 0.984
+    skirt_low, skirt_high = height * 0.104, height * 0.147
+
+    def skirt_z(x, y):
+        t = (skirt_outside - math.hypot(x, y)) / (skirt_outside - skirt_inside)
+        return mix(skirt_low, skirt_high, t)
+
+    outer = [
+        ring(mesh, azimuths, base * 0.969, 0.0),
+        ring(mesh, azimuths, base * 0.990, height * 0.008),
+        ring(mesh, azimuths, base, height * 0.027),
+        ring(mesh, azimuths, base, height * 0.067),
+        ring(mesh, azimuths, base * 0.995, height * 0.084),
+        ring(mesh, azimuths, skirt_outside, skirt_low),
+    ]
+    mesh.fan(outer[0], 0.0)
+    for a, b in pairwise(outer):
+        mesh.bridge(a, b)
+
+    inner = ring(mesh, azimuths, skirt_inside, skirt_high)
+    dot_radius = min(dim["dot_radius"], base * (0.040 if large else 0.052))
+    dot_y = max(dim["dot_radius_pos"], (skirt_inside + skirt_outside) * 0.5)
+    dot_outline = []
+    for a in angles(1, 64):
+        x, dy = polar(dot_radius, a)
+        y = dot_y + dy
+        dot_outline.append((x, y, skirt_z(x, y)))
+    dot = mesh.loop(dot_outline)
+
+    # Sample the cone around and through the print. Long triangles running
+    # across the cone would facet its normal around the dot.
+    samples = []
+    for band in range(1, 7):
+        radius = mix(skirt_inside, skirt_outside, band / 7)
+        for a in azimuths[::2]:
+            x, y = polar(radius, a)
+            if abs(math.hypot(x, y - dot_y) - dot_radius) > base * 0.003:
+                samples.append((x, y))
+    mesh.top_surface(outer[-1], inner, dot, samples, skirt_z, INK)
+
+    # Flutes begin above the circular skirt and soften into the cap surround.
+    profile = [
+        (grip, 0.165, 0.26),
+        (grip, 0.216, 0.76),
+        (grip, 0.270, 1.00),
+        (grip * 0.993, 0.420, 1.00),
+        (grip * 0.965, 0.840, 0.89),
+        (grip * 0.961, 0.935, 0.80),
+        (grip * 0.949, 0.978, 0.69),
+        (grip * 0.928, 0.998, 0.58),
+        (cap_lip_radius(cap), 1.0, 0.0),
+    ]
+    for r, z, d in profile:
+        next_ring = ring(mesh, azimuths, r, height * z, flutes, depth * d)
+        mesh.bridge(inner, next_ring)
+        inner = next_ring
+    add_cap(mesh, azimuths, inner, cap, height)
+    return mesh.create(name, materials)
+
+
+def capsule_loop(y0, y1, width):
+    """Footprint of a stripe with round printed ends; y0/y1 are arc centers."""
+    for center, start in ((y1, 0.0), (y0, math.pi)):
+        for i in range(17):
+            a = start + math.pi * i / 16
+            yield width * math.cos(a), center + width * math.sin(a)
+
+
+def build_pointer(name, dim, materials):
+    body, tip, height = dim["body_radius"], dim["tip_radius"], dim["height"]
+    cap = body * 0.47
+    lip = cap_lip_radius(cap)
+    flutes = dim["flute_count"]
+    azimuths = angles(flutes, 48)
+    mesh = KnobMesh()
+    depth = body * 0.064
+
+    # A tapered fin with straight flanks tangent to a circular nose. Blend its
+    # outline into the scalloped drum, at every height, as one molded shell.
+    nose_radius = body * 0.089
+    nose_center = tip - nose_radius
+    flank = 0.23
+    flank_offset = flank * nose_center + nose_radius * math.hypot(1, flank)
+    tangent_x = nose_radius / math.hypot(1, flank)
+    tangent_y = nose_center + flank * tangent_x
+    tangent_angle = math.atan2(tangent_x, tangent_y)
+
+    def outline(a):
+        scalloped = body - depth * abs(math.sin(flutes * a / 2)) ** 2.8
+        cosine = math.cos(a)
+        if cosine <= 0:
+            return scalloped
+        sine = abs(math.sin(a))
+        if math.atan2(sine, cosine) < tangent_angle:
+            fin = nose_center * cosine + math.sqrt(nose_radius ** 2 - (nose_center * sine) ** 2)
+        else:
+            fin = flank_offset / (sine + flank * cosine)
+        seam = body * 0.046
+        blend = max(seam - abs(fin - scalloped), 0.0) / seam
+        return max(fin, scalloped) + blend * blend * seam * 0.25
+
+    def deck_z(x, y):
+        r = math.hypot(x, y)
+        shoulder = smoothstep((r - lip) / (body - lip))
+        round_body = height * (1.0 - 0.405 * shoulder)
+        if y <= 0.0:
+            return round_body
+        ridge = height * (1.0 - 0.344 * unit((y - lip) / (tip - lip)))
+        # Round the ridgeline into its steep sides and into the crown at the cap.
+        width = flank_offset - flank * min(y, nose_center)
+        flank_blend = smoothstep((1.0 - abs(x) / width) / 0.48)
+        return mix(round_body, ridge, flank_blend * smoothstep((y - lip * 0.9) / (body * 0.17)))
+
+    perimeter = [outline(a) for a in azimuths]
+    outer = []
+    for inset, z_fraction in ((0.028, 0.0), (0.009, 0.011), (0.0, 0.030)):
+        outer.append(mesh.loop(
+            (*polar(r - inset * body, a), z_fraction * height)
+            for a, r in zip(azimuths, perimeter, strict=True)
+        ))
+    outer.append(mesh.loop(
+        (x, y, deck_z(x, y) - height * 0.07)
+        for x, y in (polar(r, a) for a, r in zip(azimuths, perimeter, strict=True))
+    ))
+    deck_outline = [r - body * 0.018 for r in perimeter]
+    outer.append(mesh.loop(
+        (x, y, deck_z(x, y))
+        for x, y in (polar(r, a) for a, r in zip(azimuths, deck_outline, strict=True))
+    ))
+    mesh.fan(outer[0], 0.0)
+    for a, b in pairwise(outer):
+        mesh.bridge(a, b)
+
+    # Cut the stripe into the curved surface. The paint shares its groove floor
+    # with the surrounding dark walls, so the GLB stays one watertight shell.
+    scale = dim["scale"]
+    half_width = 0.00038 * scale
+    y0 = lip + 0.00165 * scale
+    y1 = tip - 0.00085 * scale
+    groove_width = half_width + 0.000088 * scale
+    groove = mesh.loop((x, y, deck_z(x, y)) for x, y in capsule_loop(y0, y1, groove_width))
+    inlay = mesh.loop(
+        (x, y, deck_z(x, y) - 0.00009 * scale)
+        for x, y in capsule_loop(y0, y1, half_width)
+    )
+    cap_lip = ring(mesh, azimuths, lip, height)
+    samples = []
+    for row in range(1, 26):
+        t = row / 26
+        for a, r in zip(azimuths, deck_outline, strict=True):
+            x, y = polar(mix(lip, r, t), a)
+            dy = y - min(y1, max(y0, y))
+            if math.hypot(x, dy) > groove_width + body * 0.006:
+                samples.append((x, y))
+    mesh.top_surface(outer[-1], cap_lip, groove, samples, deck_z, None)
+    mesh.bridge(groove, inlay)
+    floor = mesh.loop(
+        (0.0, y, deck_z(0.0, y) - 0.00009 * scale)
+        for y in (y0, y1)
+    )
+    half = len(inlay) // 2
+    for center, arc in ((floor[1], inlay[:half]), (floor[0], inlay[half:])):
+        for a, b in pairwise(arc):
+            mesh.face((center, a, b), INK)
+    mesh.face((inlay[0], floor[1], floor[0], inlay[-1]), INK)
+    mesh.face((inlay[half - 1], inlay[half], floor[0], floor[1]), INK)
+    add_cap(mesh, azimuths, cap_lip, cap, height)
+    return mesh.create(name, materials)
+
+
+def export_glb(obj, path):
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    result = bpy.ops.export_scene.gltf(
+        filepath=str(path), export_format="GLB", export_yup=True,
+        export_normals=True, use_selection=True,
+    )
+    if result != {"FINISHED"}:
+        raise RuntimeError(f"Failed to export {path}")
+
+
+def add_faceplate():
+    """Plain pebbled black faceplate for the shadow and material comparison."""
+    bpy.ops.mesh.primitive_plane_add(size=0.5)
+    plate = bpy.context.object
+    plate.name = "Black enamel faceplate"
+    material = bpy.data.materials.new(plate.name)
+    plate.data.materials.append(material)
+    material.use_nodes = True
+    tree = material.node_tree
+    bsdf = tree.nodes.get("Principled BSDF")
+    bsdf.inputs["Base Color"].default_value = linear_rgb((23, 22, 20))
+    bsdf.inputs["Roughness"].default_value = 0.64
+    bsdf.inputs["Specular IOR Level"].default_value = 0.22
+    bsdf.inputs["IOR"].default_value = 1.44
+    coords = tree.nodes.new("ShaderNodeTexCoord")
+    pebble = tree.nodes.new("ShaderNodeTexNoise")
+    # The plane primitive has unit object scale, so these are cycles per meter.
+    pebble.inputs["Scale"].default_value = 4600
+    pebble.inputs["Detail"].default_value = 2.0
+    tree.links.new(coords.outputs["Object"], pebble.inputs["Vector"])
+    relief = tree.nodes.new("ShaderNodeBump")
+    relief.inputs["Strength"].default_value = 0.40
+    relief.inputs["Distance"].default_value = 0.000097
+    tree.links.new(pebble.outputs["Fac"], relief.inputs["Height"])
+    tree.links.new(relief.outputs["Normal"], bsdf.inputs["Normal"])
+
+
+def import_knob(path):
+    before = set(bpy.data.objects)
+    result = bpy.ops.import_scene.gltf(filepath=str(path))
+    imported = set(bpy.data.objects) - before
+    if result != {"FINISHED"} or len(imported) != 1:
+        raise ValueError(f"{path.name}: expected one mesh node")
+    obj = imported.pop()
+    if obj.type != "MESH" or obj.name != path.stem:
+        raise ValueError(f"{path.name}: unexpected mesh name or type")
+
+    # glTF primitives split vertices at material boundaries. Check their
+    # reassembled geometry on the actual exported and re-imported artifact.
     bm = bmesh.new()
     try:
-        bm.from_mesh(mesh)
-        bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
-        non_man = [e for e in bm.edges if not e.is_manifold or not e.is_contiguous]
-        if non_man:
-            raise ValueError(f"{name}: {len(non_man)} non-manifold edges")
-        vol = bm.calc_volume(signed=True)
-        if vol <= 0:
-            raise ValueError(f"{name}: non-positive volume {vol}")
-        bm.to_mesh(mesh)
+        bm.from_mesh(obj.data)
+        bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=1e-8)
+        assert_solid(bm, obj.name)
     finally:
         bm.free()
-
-    mesh.update()
-    obj = bpy.data.objects.new(name, mesh)
-    bpy.context.collection.objects.link(obj)
+    apply_knob_shaders(obj.data.materials)
     return obj
 
 
-def flute_xy(radius, flute_depth, count, segs_per_flute, index):
-    """Classic Minimoog broad concave 9-flute grip: crest at 12 o'clock (+Y)."""
-    angle = math.tau * index / count
-    phase = math.tau * index / segs_per_flute
-    # Broad smooth scallop trough between rounded crests (characteristic Moog profile)
-    trough = (0.5 - 0.5 * math.cos(phase)) ** 1.35
-    r = radius - flute_depth * trough
-    # index=0 at +Y (12 o'clock), going clockwise/CCW consistently
-    return -r * math.sin(angle), r * math.cos(angle)
+def verification_sheet(out, dims, tile=928, samples=128):
+    from tempfile import TemporaryDirectory
 
+    from PIL import Image, ImageDraw, ImageFont
 
-def build_skirted_knob(name, dim, mat_body, mat_cap_chamfer, mat_cap_face, mat_white):
-    """Build classic Minimoog Model D fluted skirted knob with spun-aluminum insert cap."""
-    r_base = dim["base_radius"]
-    r_cap = dim["cap_radius"]
-    h = dim["height"]
-    flutes = dim["flute_count"]
-    segs = flutes * SEGMENTS_PER_FLUTE
+    from studio_rig import make_ortho_cam, reset_scene, setup_studio_lights
 
-    # Fluted body crest radius tapers gently from flared skirt up to top crown
-    r_grip_bot = r_base * 0.925
-    r_grip_top = r_cap + max(0.00165, (r_base - r_cap) * 0.48)
-    depth = 0.118 * r_base
-
-    # Profile stations: (crest_radius, z, flute_depth, mat_idx_above)
-    # mat_idx: 0 = satin black thermoset, 1 = bright machined aluminum chamfer, 2 = spun aluminum face
-    profile = [
-        (r_base - 0.00025, 0.0000, 0.0, 0),            # 0: seated base chamfer
-        (r_base,           0.0003, 0.0, 0),            # 1: flared skirt outer rim bottom
-        (r_base,           0.0014, 0.0, 0),            # 2: flared skirt outer rim top
-        (r_base - 0.00042, 0.0022, 0.0, 0),            # 3: flared skirt bevel inward
-        (r_grip_bot,       0.0029, 0.10 * depth, 0),   # 4: start of flutes
-        (r_grip_bot,       0.0046, 0.88 * depth, 0),   # 5: full flute depth lower
-        (0.55 * r_grip_bot + 0.45 * r_grip_top, 0.56 * h, 1.00 * depth, 0),  # 6: mid barrel
-        (r_grip_top + 0.00022, h - 0.0026, 0.90 * depth, 0),  # 7: upper flute
-        (r_grip_top,           h - 0.0010, 0.30 * depth, 0),  # 8: flute fadeout shoulder
-        (r_grip_top - 0.00032, h - 0.00038, 0.0, 0),   # 9: black top crown rim
-        (r_cap + 0.00024,      h - 0.00038, 0.0, 0),   # 10: black recess lip
-        (r_cap + 0.00016,      h - 0.00072, 0.0, 0),   # 11: cap seat groove
-        # Spun aluminum insert cap: crisp bright 45-deg machined chamfer + flat top
-        (r_cap,                h - 0.00062, 0.0, 1),   # 12: cap outer wall
-        (r_cap - 0.00005,      h - 0.00026, 0.0, 1),   # 13: cap bevel outer
-        (r_cap - 0.00060,      h,           0.0, 2),   # 14: cap bevel inner (bright rim!)
-        (r_cap * 0.65,         h + 0.00003, 0.0, 2),   # 15: subtle lathe crown
-        (r_cap * 0.22,         h + 0.00005, 0.0, 2),   # 16: inner disc
-    ]
-
-    verts = [
-        (*flute_xy(r, d, segs, SEGMENTS_PER_FLUTE, i), z)
-        for (r, z, d, _) in profile
-        for i in range(segs)
-    ]
-    # Add bottom & top center vertices for clean triangle fans (no ngons!)
-    bot_c = len(verts)
-    verts.append((0.0, 0.0, 0.0))
-    top_c = len(verts)
-    verts.append((0.0, 0.0, h + 0.00007))
-
-    faces = []
-    fmats = []
-    # Bottom fan (outward = -Z)
-    for i in range(segs):
-        ni = (i + 1) % segs
-        faces.append((bot_c, ni, i))
-        fmats.append(0)
-    # Side rings
-    for ring in range(len(profile) - 1):
-        a0 = ring * segs
-        b0 = (ring + 1) * segs
-        m_idx = profile[ring][3]
-        for i in range(segs):
-            ni = (i + 1) % segs
-            faces.append((a0 + i, a0 + ni, b0 + ni, b0 + i))
-            fmats.append(m_idx)
-    # Top fan (outward = +Z)
-    last = (len(profile) - 1) * segs
-    for i in range(segs):
-        ni = (i + 1) % segs
-        faces.append((top_c, last + i, last + ni))
-        fmats.append(2)
-
-    body = validate_and_create_obj(
-        f"{name}_body",
-        verts,
-        faces,
-        [mat_body, mat_cap_chamfer, mat_cap_face],
-        fmats,
+    worn = Path(__file__).resolve().parents[2] / "crates/ca72-panel/assets/worn"
+    gap = round(tile * 24 / 928)
+    margin = round(tile * 28 / 928)
+    label_height = round(tile * 50 / 928)
+    header_height = round(tile * 140 / 928)
+    sheet = Image.new(
+        "RGB", (tile * 4 + gap * 3 + margin * 2, header_height + 3 * (tile + label_height + gap)),
+        "#171819",
+    )
+    text = ImageDraw.Draw(sheet)
+    title_font = ImageFont.load_default(size=round(tile * 46 / 928))
+    label_font = ImageFont.load_default(size=round(tile * 27 / 928))
+    text.text((margin, margin), "CA-72  /  Rotary controls", fill="#f0eee8", font=title_font)
+    text.text(
+        (margin, margin * 2 + round(tile * 34 / 928)),
+        "Worn artwork and Cycles renders on a pebbled faceplate",
+        fill="#b9b6af", font=label_font,
     )
 
-    # High-contrast crisp white pointer dot cleanly centered on the black shoulder/skirt
-    # outside the aluminum cap so it forms a complete crisp circle with zero clipping!
-    dot_r = min(dim["dot_radius"], (r_base - r_cap - 0.00065) * 0.42)
-    dot_y_final = r_cap + 0.00038 + dot_r + 0.35 * max(0.0, (r_base - r_cap - 0.00075 - 2.0 * dot_r))
-    # Sit just proud of the sloped shoulder crest at 12 o'clock (+Y)
-    dot_z_top = h - 0.00015
-    dot_segs = 32
-    dot_rings = [
-        (dot_r * 1.02, 0.0005),
-        (dot_r * 1.00, dot_z_top - 0.00012),
-        (dot_r * 0.88, dot_z_top),
-        (dot_r * 0.45, dot_z_top + 0.00008),
-    ]
-    dverts = [
-        (r * math.cos(math.tau * i / dot_segs), dot_y_final + r * math.sin(math.tau * i / dot_segs), z)
-        for (r, z) in dot_rings
-        for i in range(dot_segs)
-    ]
-    dbc = len(dverts)
-    dverts.append((0.0, dot_y_final, 0.0005))
-    dtc = len(dverts)
-    dverts.append((0.0, dot_y_final, dot_z_top + 0.00010))
-    dfaces = []
-    for i in range(dot_segs):
-        ni = (i + 1) % dot_segs
-        dfaces.append((dbc, ni, i))
-    for ring in range(len(dot_rings) - 1):
-        a0 = ring * dot_segs
-        b0 = (ring + 1) * dot_segs
-        for i in range(dot_segs):
-            ni = (i + 1) % dot_segs
-            dfaces.append((a0 + i, a0 + ni, b0 + ni, b0 + i))
-    last_d = (len(dot_rings) - 1) * dot_segs
-    for i in range(dot_segs):
-        ni = (i + 1) % dot_segs
-        dfaces.append((dtc, last_d + i, last_d + ni))
+    def place(row, col, image, label):
+        x = margin + col * (tile + gap)
+        y = header_height + row * (tile + label_height + gap)
+        sheet.paste(image, (x, y))
+        text.text((x, y + tile + gap / 2), label, fill="#e8e4dc", font=label_font)
 
-    dot_obj = validate_and_create_obj(f"{name}_dot", dverts, dfaces, [mat_white])
+    scene, backend = reset_scene(samples=samples)
+    scene.render.image_settings.compression = 35
+    setup_studio_lights(scene)
+    add_faceplate()
+    print(f"Rendering knob comparison on {backend}", flush=True)
 
-    # Join body + dot into single clean GLB node with identity transform
-    bpy.ops.object.select_all(action="DESELECT")
-    body.select_set(True)
-    dot_obj.select_set(True)
-    bpy.context.view_layer.objects.active = body
-    bpy.ops.object.join()
-    body.name = name
-    return body
+    with TemporaryDirectory(prefix="ca72-knobs-") as tmp:
+        path = Path(tmp) / "frame.png"
+        scene.render.filepath = str(path)
 
+        def frame(radius, tilt=0.0):
+            cam = make_ortho_cam(scene, 0.0, 0.0, tile, tile, tile / (2.64 * radius))
+            if tilt:
+                center = Vector((0.0, 0.0, 0.0055))
+                angle = math.radians(tilt)
+                cam.location = center + Vector((0.0, math.sin(angle), math.cos(angle))) * 0.40
+                cam.rotation_euler = (center - cam.location).to_track_quat("-Z", "Y").to_euler()
+            bpy.ops.render.render(write_still=True)
+            bpy.data.objects.remove(cam, do_unlink=True)
+            with Image.open(path) as rendered:
+                return rendered.convert("RGB")
 
-def build_pointer_knob(name, dim, mat_body, mat_cap_chamfer, mat_cap_face, mat_white):
-    """Build classic Minimoog Model D fluted wedge-pointer selector knob (RANGE / WAVEFORM / FILTER)."""
-    r_body = dim["body_radius"]
-    r_tip = dim["tip_radius"]
-    r_cap = dim["cap_radius"]
-    h = dim["height"]
-    flutes = dim["flute_count"]
-    segs = flutes * SEGMENTS_PER_FLUTE
+        for row, (name, reference, second_angle) in enumerate((
+            ("knob_std", "knob.png", -60),
+            ("knob_big", "knob-big.png", 45),
+            ("knob_pointer", "pointer.png", -50),
+        )):
+            dim = dims[name]
+            radius = dim.get("base_radius", dim.get("body_radius"))
+            plate = frame(radius)
+            with Image.open(worn / reference) as sprite:
+                full = round(tile * 2.0 / 2.64)
+                if name == "knob_pointer":
+                    # The sprite is centered on the shaft and padded horizontally.
+                    left, _, right, _ = sprite.getbbox()
+                    full = round(full * sprite.width / (right - left))
+                scaled = sprite.resize((full, full), Image.Resampling.LANCZOS)
+                offset = (tile - full) // 2
+                plate.paste(scaled, (offset, offset), scaled)
+            place(row, 0, plate, f"Worn 2D  ·  {reference}")
 
-    # 1. Fluted base + spun aluminum cap (same authentic Minimoog construction)
-    r_grip_top = r_cap + (r_body - r_cap) * 0.56
-    depth = 0.085 * r_body
-    profile = [
-        (r_body - 0.00022, 0.0000, 0.0, 0),
-        (r_body,           0.0003, 0.0, 0),
-        (r_body,           0.0012, 0.0, 0),
-        (r_body - 0.00040, 0.0020, 0.0, 0),
-        (r_body * 0.91,    0.0028, 0.12 * depth, 0),
-        (r_body * 0.90,    0.0044, 0.85 * depth, 0),
-        (0.55 * r_body * 0.90 + 0.45 * r_grip_top, 0.58 * h, 1.00 * depth, 0),
-        (r_grip_top + 0.00018, h - 0.0022, 0.82 * depth, 0),
-        (r_grip_top,           h - 0.0009, 0.18 * depth, 0),
-        (r_grip_top - 0.00030, h - 0.0004, 0.0, 0),
-        (r_cap + 0.00020,      h - 0.0004, 0.0, 0),
-        (r_cap + 0.00014,      h - 0.0007, 0.0, 0),
-        (r_cap,                h - 0.0006, 0.0, 1),
-        (r_cap - 0.00004,      h - 0.00024, 0.0, 1),
-        (r_cap - 0.00052,      h,          0.0, 2),
-        (r_cap * 0.62,         h + 0.00004, 0.0, 2),
-        (r_cap * 0.22,         h + 0.00006, 0.0, 2),
-    ]
+            obj = import_knob(out / "assets" / f"{name}.glb")
+            obj.rotation_mode = "XYZ"
+            for col, angle in enumerate((0, second_angle), 1):
+                obj.rotation_euler.z = math.radians(-angle)
+                label = f"{name}  ·  {angle:+d}°" if angle else f"{name}  ·  0°"
+                place(row, col, frame(radius), label)
 
-    verts = [
-        (*flute_xy(r, d, segs, SEGMENTS_PER_FLUTE, i), z)
-        for (r, z, d, _) in profile
-        for i in range(segs)
-    ]
-    bot_c = len(verts)
-    verts.append((0.0, 0.0, 0.0))
-    top_c = len(verts)
-    verts.append((0.0, 0.0, h + 0.00007))
+            if name == "knob_pointer":
+                bpy.data.objects.remove(obj, do_unlink=True)
+                small = import_knob(out / "assets/knob_pointer_small.glb")
+                place(row, 3, frame(radius), "knob_pointer_small  ·  0°")
+                bpy.data.objects.remove(small, do_unlink=True)
+            else:
+                obj.rotation_euler.z = 0.0
+                place(row, 3, frame(radius, tilt=43.0), f"{name}  ·  oblique")
+                bpy.data.objects.remove(obj, do_unlink=True)
 
-    faces, fmats = [], []
-    for i in range(segs):
-        ni = (i + 1) % segs
-        faces.append((bot_c, ni, i))
-        fmats.append(0)
-    for ring in range(len(profile) - 1):
-        a0 = ring * segs
-        b0 = (ring + 1) * segs
-        m_idx = profile[ring][3]
-        for i in range(segs):
-            ni = (i + 1) % segs
-            faces.append((a0 + i, a0 + ni, b0 + ni, b0 + i))
-            fmats.append(m_idx)
-    last = (len(profile) - 1) * segs
-    for i in range(segs):
-        ni = (i + 1) % segs
-        faces.append((top_c, last + i, last + ni))
-        fmats.append(2)
-
-    body = validate_and_create_obj(
-        f"{name}_body", verts, faces, [mat_body, mat_cap_chamfer, mat_cap_face], fmats
-    )
-
-    # 2. Sculpted black wedge-pointer fin extending along +Y to r_tip
-    #    Tapers cleanly from wide base flanking the cap down to a rounded pointed nose at +Y = r_tip
-    s = dim["scale"]
-    y_back = -r_body * 0.15
-    y_mid = r_cap * 0.85
-    y_nose = r_tip
-    w_back_b = 0.0044 * s
-    w_nose_b = 0.0017 * s
-    w_back_t = 0.0030 * s
-    w_nose_t = 0.00105 * s
-    z_top_back = h - 0.00042
-    z_top_nose = h * 0.62
-
-    def wedge_loop(scale_xy, z_back, z_nose):
-        # 10-point rounded wedge polygon in XY, interpolated Z by Y
-        pts_2d = [
-            (-w_back_b * scale_xy, y_back),
-            (-w_back_b * scale_xy * 0.96, y_mid),
-            (-w_nose_b * scale_xy, y_nose - 0.0009 * s),
-            (-w_nose_b * scale_xy * 0.55, y_nose - 0.0002 * s),
-            (0.0, y_nose),
-            (w_nose_b * scale_xy * 0.55, y_nose - 0.0002 * s),
-            (w_nose_b * scale_xy, y_nose - 0.0009 * s),
-            (w_back_b * scale_xy * 0.96, y_mid),
-            (w_back_b * scale_xy, y_back),
-            (0.0, y_back - 0.0004 * s),
-        ]
-        # Reverse for CCW winding when looking from +Z
-        pts_2d = list(reversed(pts_2d))
-        out = []
-        for x, y in pts_2d:
-            t = max(0.0, min(1.0, (y - y_mid) / max(1e-6, y_nose - y_mid)))
-            z = z_back * (1.0 - t) + z_nose * t
-            out.append((x, y, z))
-        return out
-
-    # Actually let's loft vertical cross-sections cleanly for a crisp chamfered wedge
-    w_rings = [
-        wedge_loop(1.00, 0.0000, 0.0000),
-        wedge_loop(1.00, 0.0012, 0.0012),
-        wedge_loop(0.84, z_top_back - 0.0012, z_top_nose - 0.0009),
-        wedge_loop(0.68, z_top_back - 0.0002, z_top_nose - 0.00015),
-        wedge_loop(0.55, z_top_back, z_top_nose),
-    ]
-    n_p = len(w_rings[0])
-    wverts = [p for ring in w_rings for p in ring]
-    wbc = len(wverts)
-    wverts.append((0.0, 0.5 * (y_back + y_nose), 0.0))
-    wtc = len(wverts)
-    wverts.append((0.0, 0.5 * (y_mid + y_nose), 0.5 * (z_top_back + z_top_nose)))
-    wfaces = []
-    for i in range(n_p):
-        ni = (i + 1) % n_p
-        wfaces.append((wbc, ni, i))
-    for r in range(len(w_rings) - 1):
-        a0 = r * n_p
-        b0 = (r + 1) * n_p
-        for i in range(n_p):
-            ni = (i + 1) % n_p
-            wfaces.append((a0 + i, a0 + ni, b0 + ni, b0 + i))
-    last_w = (len(w_rings) - 1) * n_p
-    for i in range(n_p):
-        ni = (i + 1) % n_p
-        wfaces.append((wtc, last_w + i, last_w + ni))
-    wedge = validate_and_create_obj(f"{name}_wedge", wverts, wfaces, [mat_body])
-
-    # 3. High-contrast crisp cream-white indicator line inlaid along top of the wedge fin
-    y0 = r_cap + 0.00055 * s
-    y1 = r_tip - 0.00055 * s
-    hw = 0.00062 * s
-    # Compute Z along wedge top ridge
-    def ridge_z(y):
-        t = max(0.0, min(1.0, (y - y_mid) / max(1e-6, y_nose - y_mid)))
-        return z_top_back * (1.0 - t) + z_top_nose * t
-
-    z0 = ridge_z(y0)
-    z1 = ridge_z(y1)
-    # Build closed beveled bar
-    bar_stations = [
-        (y0, z0, 0.82),
-        (y0 + 0.0005 * s, ridge_z(y0 + 0.0005 * s), 1.0),
-        (y1 - 0.0005 * s, ridge_z(y1 - 0.0005 * s), 1.0),
-        (y1, z1, 0.72),
-    ]
-    sec = [
-        (-1.0, -0.0008),
-        (1.0, -0.0008),
-        (1.0, 0.00018),
-        (0.75, 0.00032),
-        (-0.75, 0.00032),
-        (-1.0, 0.00018),
-    ]
-    n_s = len(sec)
-    bverts = []
-    for y, z, wf in bar_stations:
-        for sx, dz in sec:
-            bverts.append((sx * hw * wf, y, z + dz))
-    bfaces = [tuple(reversed(range(n_s)))]
-    for r in range(len(bar_stations) - 1):
-        a0 = r * n_s
-        b0 = (r + 1) * n_s
-        for i in range(n_s):
-            ni = (i + 1) % n_s
-            bfaces.append((a0 + i, a0 + ni, b0 + ni, b0 + i))
-    last_b = (len(bar_stations) - 1) * n_s
-    bfaces.append(tuple(range(last_b, last_b + n_s)))
-    bar = validate_and_create_obj(f"{name}_line", bverts, bfaces, [mat_white])
-
-    bpy.ops.object.select_all(action="DESELECT")
-    for o in (body, wedge, bar):
-        o.select_set(True)
-    bpy.context.view_layer.objects.active = body
-    bpy.ops.object.join()
-    body.name = name
-    return body
-
-
-def export_glb(obj, out_path: Path):
-    bpy.ops.object.select_all(action="DESELECT")
-    obj.select_set(True)
-    bpy.context.view_layer.objects.active = obj
-    res = bpy.ops.export_scene.gltf(
-        filepath=str(out_path),
-        export_format="GLB",
-        export_yup=True,
-        export_materials="EXPORT",
-        export_normals=True,
-        use_selection=True,
-    )
-    if res != {"FINISHED"}:
-        raise RuntimeError(f"Failed to export {out_path}")
-    print(f"Exported {out_path.name} ({out_path.stat().st_size:,} bytes)", flush=True)
+    sheet.save(out / "verify_knobs.png")
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=Path("target/panel-3d"))
-    argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else sys.argv[1:]
+    parser.add_argument("--verify", action="store_true", help="Render the comparison sheet (requires Pillow)")
+    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
     args = parser.parse_args(argv)
 
-    spec = json.loads((args.out / "spec.json").read_text())
-    dims = spec["part_dimensions_meters"]
-    assets_dir = args.out / "assets"
-    assets_dir.mkdir(parents=True, exist_ok=True)
-
+    dims = json.loads((args.out / "spec.json").read_text())["part_dimensions_meters"]
+    assets = args.out / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.context.scene.unit_settings.system = "METRIC"
-
-    # Authentic Minimoog Model D materials
-    black = (srgb_to_lin(20 / 255), srgb_to_lin(20 / 255), srgb_to_lin(21 / 255), 1.0)
-    alu_chamfer = (srgb_to_lin(222 / 255), srgb_to_lin(223 / 255), srgb_to_lin(220 / 255), 1.0)
-    alu_spun = (srgb_to_lin(196 / 255), srgb_to_lin(197 / 255), srgb_to_lin(192 / 255), 1.0)
-    white_inlay = (srgb_to_lin(246 / 255), srgb_to_lin(243 / 255), srgb_to_lin(234 / 255), 1.0)
-
-    mat_body = make_material("Moog_Black_Thermoset", black, roughness=0.23, metallic=0.02, coat=0.35, coat_rough=0.12)
-    mat_chamfer = make_material("Moog_Aluminum_Chamfer", alu_chamfer, roughness=0.14, metallic=0.96)
-    mat_spun = make_material("Moog_Spun_Aluminum", alu_spun, roughness=0.25, metallic=0.95, aniso=0.85)
-    mat_white = make_material("Moog_White_Indicator", white_inlay, roughness=0.22, metallic=0.0, coat=0.15)
-
-    for nm in ("knob_std", "knob_big"):
-        obj = build_skirted_knob(nm, dims[nm], mat_body, mat_chamfer, mat_spun, mat_white)
-        export_glb(obj, assets_dir / f"{nm}.glb")
-        bpy.data.objects.remove(obj, do_unlink=True)
-
-    for nm in ("knob_pointer", "knob_pointer_small"):
-        obj = build_pointer_knob(nm, dims[nm], mat_body, mat_chamfer, mat_spun, mat_white)
-        export_glb(obj, assets_dir / f"{nm}.glb")
-        bpy.data.objects.remove(obj, do_unlink=True)
+    materials = knob_materials()
+    for build, names in (
+        (build_skirted, ("knob_std", "knob_big")),
+        (build_pointer, ("knob_pointer", "knob_pointer_small")),
+    ):
+        for name in names:
+            obj = build(name, dims[name], materials)
+            export_glb(obj, assets / f"{name}.glb")
+            bpy.data.objects.remove(obj, do_unlink=True)
+    if args.verify:
+        verification_sheet(args.out, dims)
 
 
 if __name__ == "__main__":
