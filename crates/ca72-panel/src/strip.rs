@@ -521,9 +521,9 @@ pub struct StripScene {
 }
 
 impl StripScene {
-    /// Whether the extension controls show: neither the keyboard nor the LFO page over them.
+    /// Whether the GLOBAL extension controls show.
     pub fn extension(&self) -> bool {
-        self.keyboard.is_none() && !self.lfo
+        self.keyboard.is_none() && !self.lfo && self.bar.page != Some(BarTarget::Mpe)
     }
 }
 

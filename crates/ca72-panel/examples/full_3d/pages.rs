@@ -5,16 +5,17 @@ use ca72_panel::fonts::{FAMILY, Fonts};
 use ca72_panel::keyboard::{self, Target};
 use ca72_panel::panel3d::DragController;
 use ca72_panel::presets::BarTarget;
+use ca72_panel::strip::mpe;
 use resvg::tiny_skia::{FillRule, Paint, PathBuilder, Rect, Stroke};
 use resvg::usvg;
 
 const FIRST_NOTE: u8 = 41;
-const NAMES: [&str; 3] = ["keys", "lfo", "macros"];
+const NAMES: [&str; 4] = ["keys", "lfo", "expression", "macros"];
 
 pub(super) struct Pages {
-    panes: [Option<Pane>; 3],
-    shown: [bool; 3],
-    visible: [bool; 3],
+    panes: [Option<Pane>; NAMES.len()],
+    shown: [bool; NAMES.len()],
+    visible: [bool; NAMES.len()],
     pointer: Option<usize>,
 }
 
@@ -49,6 +50,7 @@ enum Content {
     Trace([f32; 7], usize),
     Macro(usize),
     Display(String),
+    Response(mpe::Response),
 }
 
 impl Pages {
@@ -60,36 +62,34 @@ impl Pages {
     ) -> Self {
         Self {
             panes: NAMES.map(|name| Pane::load(upper, build, name, lit_tab, falloff)),
-            shown: [false; 3],
-            visible: [false; 3],
+            shown: [false; NAMES.len()],
+            visible: [false; NAMES.len()],
             pointer: None,
         }
     }
 
     pub(super) fn select(&mut self, target: BarTarget, bar: &mut BarScene) {
-        match target {
-            BarTarget::Global => {
-                self.visible[0] = false;
-                self.visible[1] = false;
+        let page = match target {
+            BarTarget::Global => [false, false, false],
+            BarTarget::Keyboard if self.panes[0].is_some() => [!self.visible[0], false, false],
+            BarTarget::Lfo if self.panes[1].is_some() => [false, !self.visible[1], false],
+            BarTarget::Mpe if self.panes[2].is_some() => [false, false, true],
+            BarTarget::Macro if self.panes[3].is_some() => {
+                self.visible[3] = !self.visible[3];
+                bar.macros = self.visible[3];
+                return;
             }
-            BarTarget::Keyboard if self.panes[0].is_some() => {
-                self.visible[0] = !self.visible[0];
-                self.visible[1] = false;
-            }
-            BarTarget::Lfo if self.panes[1].is_some() => {
-                self.visible[1] = !self.visible[1];
-                self.visible[0] = false;
-            }
-            BarTarget::Macro if self.panes[2].is_some() => self.visible[2] = !self.visible[2],
             _ => return,
-        }
+        };
+        self.visible[..3].copy_from_slice(&page);
         bar.keyboard = self.visible[0];
         bar.lfo_page = self.visible[1];
-        bar.macros = self.visible[2];
         bar.page = Some(if self.visible[0] {
             BarTarget::Keyboard
         } else if self.visible[1] {
             BarTarget::Lfo
+        } else if self.visible[2] {
+            BarTarget::Mpe
         } else {
             BarTarget::Global
         });
@@ -267,6 +267,7 @@ impl Pane {
                     || f.param.starts_with("macro_name_")
                     || f.param.starts_with("lfo_scope_")
                     || f.param.starts_with("lfo_screen_")
+                    || f.param.starts_with("expression_")
             })
             .map(|fixture| {
                 let x = cheek + fixture.x * scale;
@@ -422,6 +423,28 @@ impl Pane {
                 i,
             );
         }
+        if let Some(i) = page_index(&fixture.param, "expression_readout_") {
+            let shift = f64::from(self.value(mpe::KNOB_PARAMS[i])) * 2.0 - 1.0;
+            let text = match i {
+                1 | 3 => format!("{:.1}", (shift * 40.0).round() / 10.0 + 0.0),
+                5 => format!("{:.0}", f64::from(self.value(mpe::KNOB_PARAMS[i])) * 100.0),
+                _ => format!("{:.0}", (shift * 100.0).round() + 0.0),
+            };
+            return Content::Display(text);
+        }
+        match fixture.param.as_str() {
+            "expression_input" => return Content::Display(mpe::Input::Mpe.text().into()),
+            "expression_last" => return Content::Display("97".into()),
+            "expression_modulates" => return Content::Display("3 KNOBS".into()),
+            "expression_response" => {
+                return Content::Response(mpe::Response {
+                    curve: f64::from(self.value("velocity_curve")) * 2.0 - 1.0,
+                    floor: f64::from(self.value("velocity_floor")),
+                    point: Some(97.0 / 127.0),
+                });
+            }
+            _ => {}
+        }
         Content::Display(if fixture.param.starts_with("octave_") {
             fixture.label.clone()
         } else {
@@ -499,10 +522,23 @@ impl Pane {
                 let (ink, size, center_ink) = match f.param.as_str() {
                     "octave" => ("#ffae55", 0.74, true),
                     "octave_down" | "octave_up" => ("#e4d8bf", 0.46, false),
+                    id if id.starts_with("expression_") => ("#ffab55", 0.54, true),
                     _ => ("#95643c", 0.46, true),
                 };
                 let body = text_svg(text, w, h, ink, size);
                 self.print(r, &body, center_ink);
+            }
+            Content::Response(response) => {
+                let body = format!(
+                    "<defs><clipPath id='glass'><rect width='{w}' height='{h}'/></clipPath></defs>\
+                     <g clip-path='url(#glass)'><g transform='scale({} {}) translate({} {})'>{}</g></g>",
+                    w / f.w,
+                    h / f.h,
+                    f.w / 2.0 - f.x,
+                    f.h / 2.0 - f.y,
+                    mpe::response_svg(response, PANEL_H),
+                );
+                self.print(r, &body, false);
             }
         }
     }

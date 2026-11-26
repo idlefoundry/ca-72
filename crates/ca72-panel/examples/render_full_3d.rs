@@ -266,6 +266,7 @@ fn main() {
     for (name, target) in [
         ("keys", BarTarget::Keyboard),
         ("lfo", BarTarget::Lfo),
+        ("expression", BarTarget::Mpe),
         ("macros", BarTarget::Macro),
     ] {
         if panel.pages.has(name) {
@@ -278,6 +279,34 @@ fn main() {
                 .frame
                 .save_png(output.join(format!("ca72-{name}-4k.png")))
                 .expect("save live page proof");
+            #[cfg(target_os = "linux")]
+            if target == BarTarget::Mpe {
+                let p = &panel.lower.manifest().face;
+                let i = ca72_panel::controls::index("velocity_curve").expect("curve control");
+                let (x, y) = ca72_panel::controls::CONTROLS[i].centre();
+                let scale = p.px_per_unit;
+                let left = p.faceplate_rect_px[0];
+                let x = left + x as f32 * scale;
+                let y = panel.top as f32 + (y - PANEL_H) as f32 * scale;
+                let before = panel.frame.clone();
+                panel.press(x, y);
+                panel.motion(Some((x, y - 40.0)), 0.0, -40.0, false);
+                panel.release();
+                let damage = panel.redraw();
+                assert!(!damage.is_empty() && damage.iter().all(|r| r.y0 >= panel.top));
+                for (x, y, w, h) in [strip::mpe::readout(4), strip::mpe::RESPONSE] {
+                    let glass = IntRect::from_xywh(
+                        (left + x as f32 * scale).round() as i32,
+                        panel.top + ((y - PANEL_H) as f32 * scale).round() as i32,
+                        (w as f32 * scale).round() as u32,
+                        (h as f32 * scale).round() as u32,
+                    )
+                    .expect("nonempty Expression glass");
+                    assert_ne!(panel.frame.clone_rect(glass), before.clone_rect(glass));
+                }
+                assert!(panel.redraw().is_empty());
+                println!("Verified an Expression drag updates the knob, readout and response.");
+            }
         }
     }
 }

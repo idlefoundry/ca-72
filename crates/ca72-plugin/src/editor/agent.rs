@@ -295,6 +295,7 @@ impl Editing {
             "lower_page": match self.lower_page() {
                 BarTarget::Global => "global",
                 BarTarget::Keyboard => "keyboard",
+                BarTarget::Mpe => "expression",
                 _ => "lfo",
             },
             "keyboard_range": [keyboard::label(root), keyboard::label(root.saturating_add(keyboard::KEYS as u8 - 1))],
@@ -970,9 +971,18 @@ impl Editing {
                 "global" => BarTarget::Global,
                 "keyboard" => BarTarget::Keyboard,
                 "lfo" => BarTarget::Lfo,
-                _ => return Err(ApiError::params("`lower_page` is global, keyboard or lfo")),
+                "expression" => BarTarget::Mpe,
+                _ => {
+                    return Err(ApiError::params(
+                        "`lower_page` is global, keyboard, lfo or expression",
+                    ));
+                }
             }),
-            Some(_) => return Err(ApiError::params("`lower_page` is global, keyboard or lfo")),
+            Some(_) => {
+                return Err(ApiError::params(
+                    "`lower_page` is global, keyboard, lfo or expression",
+                ));
+            }
         };
         if let (Some(page), Some(kb)) = (page, kb)
             && page
@@ -1410,11 +1420,11 @@ mod tests {
     use crate::params::Ca72Params;
 
     #[test]
-    fn view_selects_all_three_pages_and_keeps_the_old_keyboard_argument() {
+    fn view_selects_every_page_and_keeps_the_old_keyboard_argument() {
         let dir = tempfile::tempdir().unwrap();
         let (mut e, _) = editing(Library::at(dir.path()));
-        for from in ["global", "keyboard", "lfo"] {
-            for to in ["global", "keyboard", "lfo"] {
+        for from in ["global", "keyboard", "lfo", "expression"] {
+            for to in ["global", "keyboard", "lfo", "expression"] {
                 e.set_view(&json!({"lower_page": from})).unwrap();
                 e.set_view(&json!({"panel": false})).unwrap();
                 let view = e.set_view(&json!({"lower_page": to})).unwrap();

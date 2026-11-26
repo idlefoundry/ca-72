@@ -17,7 +17,7 @@
 //! given up on; `CA72_FX=safety` a slot turned off after a crash, one after a hang, one
 //! loading; `CA72_FX=off` a safe start's slots (decisions.md R-FX-SAFETY); `CA72_FX=rail` the
 //! rail alone.
-//! `CA72_MPE=1` drops the expression drawer over the lower page (decisions.md R-MPE): PRESSURE
+//! `CA72_MPE=1` shows the Expression page (decisions.md R-MPE): PRESSURE
 //! 50 % and 1.0 OCT, TIMBRE -30 % and 2.5 OCT (the mock-up's), INPUT reading MPE, the MPE key
 //! lit; `CA72_MPE_INPUT=channel` or `none` INPUT so.
 //! `CA72_LFO=1` the LFO page over the lower page (decisions.md R-LFO), the round-2 mock-ups'
@@ -261,7 +261,7 @@ fn main() {
         drop_arp(&mut all, &mut r, scale, skin, lettering);
     }
     if mpe {
-        drop_mpe(&mut all, &mut r, scale, skin, lettering);
+        expression_page(&mut all, &mut r, scale, skin, lettering);
     }
     if let Some(fx) = fx.filter(|v| v != "rail") {
         drop_fx(&mut all, scale, r.top_px(), skin, lettering, &fx);
@@ -574,8 +574,8 @@ fn drop_arp(
     }
 }
 
-/// The expression drawer over `all` (the editor's `compose`), as the arpeggiator's.
-fn drop_mpe(
+/// The Expression page, from the toolbar to the foot trim.
+fn expression_page(
     all: &mut ca72_panel::Pixmap,
     r: &mut Renderer,
     scale: f64,
@@ -584,14 +584,14 @@ fn drop_mpe(
 ) {
     use ca72_panel::strip::mpe::{self, Input, MpeRenderer, MpeScene};
     let t = std::time::Instant::now();
-    let mut drawer = MpeRenderer::new(scale, skin, lettering);
+    let mut page = MpeRenderer::new(scale, skin, lettering);
     let r2 = |s: &str| (s.to_owned(), true);
     let input = match std::env::var("CA72_MPE_INPUT").as_deref() {
         Ok("channel") => Input::Channel,
         Ok("none") => Input::None,
         _ => Input::Mpe,
     };
-    drawer.render(
+    page.render(
         &MpeScene {
             input,
             readouts: [
@@ -614,8 +614,8 @@ fn drop_mpe(
         },
         r,
     );
-    eprintln!("the expression drawer {:?}", t.elapsed());
-    let (w, f) = (all.width() as usize, drawer.frame());
+    eprintln!("the Expression page {:?}", t.elapsed());
+    let (w, f) = (all.width() as usize, page.frame());
     let top = (mpe::top_px(scale) - r.top_px()) as usize;
     let (x0, x1) = (
         (mpe::LEFT * scale).round() as usize,
@@ -626,16 +626,6 @@ fn drop_mpe(
         let (from, to) = ((y * f.width() as usize + x0) * 4, ((top + y) * w + x0) * 4);
         let n = (x1 - x0) * 4;
         all.data_mut()[to..to + n].copy_from_slice(&f.data()[from..from + n]);
-    }
-    if let Some(shadow) = drawer.shadow() {
-        all.draw_pixmap(
-            0,
-            (top + depth) as i32,
-            shadow.as_ref(),
-            &resvg::tiny_skia::PixmapPaint::default(),
-            resvg::tiny_skia::Transform::identity(),
-            None,
-        );
     }
 }
 

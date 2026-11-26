@@ -17,15 +17,17 @@ use resvg::{
 use serde_json::{Value, json};
 
 mod lower_pages {
+    mod expression;
     mod keyboard;
     mod lfo;
     mod macros;
 
-    pub(super) fn scenes() -> [(&'static str, (Vec<serde_json::Value>, String)); 3] {
+    pub(super) fn scenes() -> [(&'static str, (Vec<serde_json::Value>, String)); 4] {
         [
             ("keys", keyboard::page()),
             ("lfo", lfo::page()),
             ("macros", macros::page()),
+            ("expression", expression::page()),
         ]
     }
 }
@@ -205,6 +207,7 @@ fn main() {
         let (left, right) = match name {
             "macros" => (15.0, 368.0),
             "keys" => (ca72_panel::keyboard::AREA[0], ca72_panel::keyboard::AREA[2]),
+            "expression" => (strip::mpe::LEFT, strip::mpe::RIGHT),
             _ => (370.0, W - 28.0),
         };
         let mut scene = spec.clone();

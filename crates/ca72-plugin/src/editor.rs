@@ -809,14 +809,12 @@ const HEARD_FOR: Duration = Duration::from_secs(3);
 const TEMPO_DRAG: f64 = 2.0;
 const TEMPO_SCROLL: f64 = 8.0;
 
-/// The drawers dropped from the rail: the arpeggiator's (decisions.md R-ARP), the standalone's
-/// effects' (R-FX-DRAWER), and each note's own expression's (R-MPE).
+/// The drawers dropped from the rail: the arpeggiator and the standalone effects.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Lower {
     #[default]
     Arp,
     Fx,
-    Mpe,
 }
 
 impl Lower {
@@ -825,7 +823,6 @@ impl Lower {
         match self {
             Lower::Arp => arp_ui::DEPTH,
             Lower::Fx => fx_ui::DEPTH,
-            Lower::Mpe => mpe_ui::DEPTH,
         }
     }
 }
@@ -1539,6 +1536,7 @@ struct Editing {
     /// readouts' last press (for a double click), and what INPUT heard: the audio thread's counts
     /// as last seen, and when each last changed.
     mpe: MpeRenderer,
+    expression_open: bool,
     mpe_scene: MpeScene,
     last_mpe_press: Option<(Instant, MpeTarget)>,
     heard: ((u32, u32), Option<Instant>, Option<Instant>),
@@ -1976,6 +1974,7 @@ impl Editing {
                 settings.skin,
                 settings.lettering,
             ),
+            expression_open: false,
             mpe_scene: MpeScene::default(),
             last_mpe_press: None,
             heard: ((0, 0), None, None),
@@ -2686,9 +2685,12 @@ impl Editing {
         self.lower.which == Lower::Arp && self.in_lower(at)
     }
 
-    /// Whether the pointer is over the expression drawer.
+    /// Whether the pointer is over the Expression page.
     fn in_mpe(&self, at: (f64, f64)) -> bool {
-        self.lower.which == Lower::Mpe && self.in_lower(at)
+        self.expression_shows()
+            && mpe_ui::inside(at.0, at.1)
+            && self.in_drawer(at).is_none()
+            && !self.in_lower(at)
     }
 
     /// Whether the pointer is over the effects' drawer or its list.
@@ -3312,7 +3314,7 @@ impl Editing {
         }
     }
 
-    /// The rail's ARP or MPE key, or the standalone's FX key: its drawer dropped down over the lower
+    /// The rail's ARP or FX key: its drawer dropped down over the lower
     /// page (the other's put away for it), or put away (the presets' drawer, if open, shut for it;
     /// the lower panel shown if hidden).
     fn toggle_lower(&mut self, which: Lower) {
@@ -3329,6 +3331,7 @@ impl Editing {
         } else {
             self.lower.show(which, !self.lower.is_open(which));
         }
+        self.expression_open = false;
         self.typing = None;
         self.hover = None;
         self.strip_scene.hover = None;
@@ -3516,7 +3519,6 @@ impl Editing {
         match t {
             StripTarget::Bar(BarTarget::Panel) => self.toggle_panel(),
             StripTarget::Bar(BarTarget::Arp) => self.toggle_lower(Lower::Arp),
-            StripTarget::Bar(BarTarget::Mpe) => self.toggle_lower(Lower::Mpe),
             StripTarget::Bar(BarTarget::Fx) if self.fx_view.available() => {
                 self.toggle_lower(Lower::Fx);
             }
@@ -3558,9 +3560,9 @@ impl Editing {
                 let on = !self.params.auto_gain.value();
                 self.set_switch(&self.params.auto_gain, on);
             }
-            StripTarget::Bar(t @ (BarTarget::Global | BarTarget::Keyboard | BarTarget::Lfo)) => {
-                self.show_lower_page(t);
-            }
+            StripTarget::Bar(
+                t @ (BarTarget::Global | BarTarget::Keyboard | BarTarget::Lfo | BarTarget::Mpe),
+            ) => self.show_lower_page(t),
             StripTarget::Bar(BarTarget::Macro) => self.toggle_macros(),
             // The settings' key: its menu, dropping down from under it to its left.
             StripTarget::Bar(BarTarget::Settings) => {
@@ -3608,8 +3610,9 @@ impl Editing {
         if self.expanded()
             && !self.ultra_note
             && !self.learning.menu_open()
-            && let Some(key @ (BarTarget::Global | BarTarget::Keyboard | BarTarget::Lfo)) =
-                self.on_rail((x, y))
+            && let Some(
+                key @ (BarTarget::Global | BarTarget::Keyboard | BarTarget::Lfo | BarTarget::Mpe),
+            ) = self.on_rail((x, y))
             && key == self.lower_page()
         {
             return;
@@ -3869,11 +3872,8 @@ impl Editing {
             }
             return;
         }
-        // The expression drawer, as the arpeggiator's (decisions.md R-MPE).
+        // The Expression page's readouts and knobs.
         if self.in_mpe((x, y)) {
-            if !self.lower.settled() {
-                return;
-            }
             if let Some(t) = mpe_ui::hit(x, y) {
                 self.mpe_press(t);
             } else if let Some(target) = interact::hit_drawer(DrawerPlace::Mpe, x, y) {
@@ -4073,12 +4073,13 @@ impl Editing {
         // The arpeggiator's drawer: a knob's menu, as the panel's (its tabs are learned from the
         // presets' drawer's MIDI list).
         if self.in_arp((x, y)) || self.in_mpe((x, y)) {
-            let place = if self.in_mpe((x, y)) {
+            let expression = self.in_mpe((x, y));
+            let place = if expression {
                 DrawerPlace::Mpe
             } else {
                 DrawerPlace::Arp
             };
-            match interact::hit_drawer(place, x, y).filter(|_| self.lower.settled()) {
+            match interact::hit_drawer(place, x, y).filter(|_| expression || self.lower.settled()) {
                 Some(target @ Target::Control(i)) => self.learning.open_menu(
                     self.renderer.fonts(),
                     map,
@@ -4304,8 +4305,7 @@ impl Editing {
             }
             self.arp_scene.hover = None;
             if self.in_mpe(at) {
-                let settled = self.lower.settled();
-                self.hover = interact::hit_drawer(DrawerPlace::Mpe, x, y).filter(|_| settled);
+                self.hover = interact::hit_drawer(DrawerPlace::Mpe, x, y);
                 self.strip_scene.hover = None;
                 self.browser.bar.hover = None;
                 return;
@@ -4614,7 +4614,7 @@ impl Editing {
         let over = if self.in_arp((x, y)) {
             interact::hit_arp(x, y).filter(|_| self.lower.settled())
         } else if self.in_mpe((x, y)) {
-            interact::hit_drawer(DrawerPlace::Mpe, x, y).filter(|_| self.lower.settled())
+            interact::hit_drawer(DrawerPlace::Mpe, x, y)
         } else if self.page_shows() && lfo_ui::inside(x, y) {
             // The LFO page's (decisions.md R-LFO), its column's LFO the last touched.
             let t = interact::hit_lfo(self.renderer.layout(), x, y);
@@ -4840,10 +4840,10 @@ impl Editing {
             std::mem::take(&mut self.strip_scene),
         );
         // (The LFO page in the keyboard's place while it shows: decisions.md R-LFO.)
-        self.strip_scene.keyboard = if self.modulating.open {
-            None
-        } else {
+        self.strip_scene.keyboard = if self.keyboard_shown() {
             self.playing.scene(self.renderer.skin())
+        } else {
+            None
         };
         self.strip_scene.lfo = self.modulating.open;
         self.browser.bar.keyboard = self.keyboard_shown();
@@ -4872,12 +4872,12 @@ impl Editing {
         // wheels do and an assigned macro is above 0.
         self.browser.bar.macros = self.macros_show();
         self.browser.bar.macro_glow = self.macro_glow();
-        self.browser.bar.page =
-            (self.lower.open && self.expanded()).then_some(match self.lower.which {
+        self.browser.bar.page = (self.lower.open && self.expanded())
+            .then_some(match self.lower.which {
                 Lower::Arp => BarTarget::Arp,
-                Lower::Mpe => BarTarget::Mpe,
                 Lower::Fx => BarTarget::Fx,
-            });
+            })
+            .or_else(|| self.expression_shows().then_some(BarTarget::Mpe));
         // The LFO page's (its orbs at most 30 times a second) and the knobs' rings, cord and
         // pop-up.
         self.read_lfos(Instant::now());
@@ -5066,6 +5066,7 @@ impl Editing {
                 BarTarget::Global => Some("GLOBAL: VOICES, STEREO AND OUTPUT"),
                 BarTarget::Keyboard => Some("KEYS: PLAYABLE PIANO"),
                 BarTarget::Lfo => Some("LFO: FOUR LFOS \u{b7} DRAG OUT TO A KNOB"),
+                BarTarget::Mpe => Some("EXP: PRESSURE, TIMBRE AND VELOCITY"),
                 _ => None,
             };
             if let Some(text) = text {
@@ -5320,6 +5321,8 @@ impl Editing {
         // the panel.
         let page_shown = self.page_shows();
         let page = page_shown && self.lfo.render(&self.lfo_scene, &mut self.renderer);
+        let expression_shown = self.expression_shows();
+        let expression = expression_shown && self.mpe.render(&self.mpe_scene, &mut self.renderer);
         // The macros in the left area while they show (decisions.md R-MACROS), on the strip's
         // bare face there, their knobs and jacks drawn as the panel's renderer draws them.
         // (Their still made on a thread of their own as the editor opens or its look changes.)
@@ -5339,7 +5342,6 @@ impl Editing {
         let lower = lower_k > 0.0
             && (match (which, &mut self.fx) {
                 (Lower::Fx, Some(fx)) => fx.render(&self.fx_scene),
-                (Lower::Mpe, _) => self.mpe.render(&self.mpe_scene, &mut self.renderer),
                 _ => self.arp.render(&self.arp_scene, &mut self.renderer),
             } || self.lower.sliding()
                 || lower_moved);
@@ -5359,6 +5361,7 @@ impl Editing {
             || lower
             || lower_shut
             || page
+            || expression
             || macros
             || mods
             || self.composed.is_none())
@@ -5390,7 +5393,6 @@ impl Editing {
             }
             let lower_damage = match (which, &self.fx) {
                 (Lower::Fx, Some(fx)) => fx.damage(),
-                (Lower::Mpe, _) => self.mpe.damage(),
                 _ => self.arp.damage(),
             };
             if page {
@@ -5399,6 +5401,10 @@ impl Editing {
                 for &[x0, y0, x1, y1] in self.lfo.damages() {
                     places.push([x0, top + y0, x1, top + y1]);
                 }
+            }
+            if expression && let Some([x0, y0, x1, y1]) = self.mpe.damage() {
+                let top = mpe_ui::top_px(self.renderer.scale()) - self.renderer.top_px();
+                places.push([x0, top + y0, x1, top + y1]);
             }
             if macros {
                 // (Its pixels the frame's from the area's top left corner.)
@@ -5429,16 +5435,19 @@ impl Editing {
         let expanded = self.expanded();
         let lower_top = self.lower_top();
         let scale = self.renderer.scale();
+        let page_frame = if expression_shown {
+            Some(self.mpe.frame())
+        } else {
+            page_shown.then(|| self.lfo.frame())
+        };
         compose(
             &mut self.composed,
             &self.renderer,
             self.strip.frame(),
-            lower_top.map(|top| {
-                lower_frame(which, top, (&self.arp, &self.mpe), self.fx.as_ref(), scale)
-            }),
+            lower_top.map(|top| lower_frame(which, top, &self.arp, self.fx.as_ref(), scale)),
             (k > 0.0).then(|| (self.drawer.frame(), DRAWER_TOP - (1.0 - k) * DRAWER_H)),
             (
-                page_shown.then(|| self.lfo.frame()),
+                page_frame,
                 macros_shown.then(|| (self.macros.frame(), self.renderer.left_rect())),
                 &self.modulation,
             ),
@@ -5556,7 +5565,7 @@ fn compose(
                 [x0.max(r[0]), y0.max(r[1]), x1.min(r[2]), y1.min(r[3])],
             );
         }
-        // The LFO page in the lower page's place (decisions.md R-LFO), and the knobs' rings.
+        // LFO or Expression in the lower bay, followed by the knobs' rings.
         if let Some(p) = page {
             let at = lfo_ui::top_px(s) - origin;
             paste(c, p, at, [x0.max(left), y0.max(rail), x1.min(right), y1]);
@@ -5636,21 +5645,11 @@ struct LowerFrame<'a> {
 fn lower_frame<'a>(
     which: Lower,
     top: f64,
-    (arp, mpe): (&'a ArpRenderer, &'a MpeRenderer),
+    arp: &'a ArpRenderer,
     fx: Option<&'a FxRenderer>,
     scale: f64,
 ) -> LowerFrame<'a> {
     match (which, fx) {
-        (Lower::Mpe, _) => LowerFrame {
-            frame: mpe.frame(),
-            depth: mpe_ui::DEPTH,
-            top,
-            under: mpe
-                .shadow()
-                .map(|p| (p, 0, (mpe_ui::DEPTH * scale).round() as i32))
-                .into_iter()
-                .collect(),
-        },
         (Lower::Fx, Some(fx)) => LowerFrame {
             frame: fx.frame(),
             depth: fx.depth(),
@@ -11226,7 +11225,7 @@ mod tests {
             lower_frame(
                 e.lower.which,
                 top,
-                (&e.arp, &e.mpe),
+                &e.arp,
                 e.fx.as_ref(),
                 e.renderer.scale(),
             )
@@ -11631,34 +11630,25 @@ mod tests {
         release(&mut e);
     }
 
-    /// The expression drawer opened by the rail's MPE key and slid all the way down.
+    /// The Expression page selected by the rail's EXP key.
     fn mpe_open(e: &mut Editing) {
         e.draw();
         let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Mpe)));
         click(e, p);
-        assert!(e.lower.is_open(Lower::Mpe));
-        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        assert!(e.expression_shows());
         e.draw();
-        e.draw();
-        assert!(e.lower.settled());
     }
 
-    /// The rail's MPE key (the owner's A, 2026-10-20; decisions.md R-MPE) drops the expression
-    /// drawer over the lower page, inside the window (its size kept), one drawer at a time with
-    /// ARP's; the frame shown is its frame put together whole. The strip under it does nothing.
-    /// The key is lit while any of its four amounts is not 0.
     #[test]
-    fn the_mpe_key_drops_its_drawer_one_at_a_time() {
+    fn expression_fills_the_lower_page_and_keeps_the_window_size() {
         let (mut e, host, params) = editing();
         e.playing.visible = false;
         let size = (e.width, e.window_height());
         mpe_open(&mut e);
         assert_eq!((e.width, e.window_height()), size);
-        assert_eq!(Lower::Mpe.depth(), mpe_ui::DEPTH);
-        assert_eq!(e.lower_depth(), mpe_ui::DEPTH);
-        assert_eq!(lower_of(&e).expect("MPE's frame").depth, mpe_ui::DEPTH);
-        assert!(e.in_mpe((2000.0, mpe_ui::TOP + arp_ui::DEPTH + 20.0)));
-        assert!(!e.in_lower((2000.0, mpe_ui::TOP + mpe_ui::DEPTH + 1.0)));
+        assert!(lower_of(&e).is_none());
+        assert!(e.in_mpe((2000.0, art::H - 7.0)));
+        assert!(!e.in_mpe((2000.0, art::H - 5.0)));
         let mut whole = None;
         compose(
             &mut whole,
@@ -11667,7 +11657,7 @@ mod tests {
             lower_of(&e),
             None,
             (
-                e.page_shows().then(|| e.lfo.frame()),
+                Some(e.mpe.frame()),
                 e.macros_show()
                     .then(|| (e.macros.frame(), e.renderer.left_rect())),
                 &e.modulation,
@@ -11676,7 +11666,7 @@ mod tests {
             true,
             (e.physical_width, e.physical_height()),
         );
-        assert!(e.composed == whole, "the drawer as put together whole");
+        assert!(e.composed == whole, "the page as put together whole");
         let c = e.composed.as_ref().expect("a frame");
         let s = e.renderer.scale();
         let (x, y) = (
@@ -11703,15 +11693,16 @@ mod tests {
         press(&mut e);
         go(&mut e, below(p, -40.0));
         release(&mut e);
-        assert!(host.take().is_empty(), "nothing under the drawer");
-        // ARP puts it away for its own, MPE again the arpeggiator's for it, and again puts it
-        // away.
+        assert!(
+            host.take().is_empty(),
+            "only Expression controls respond in its bay"
+        );
         e.strip_press(StripTarget::Bar(BarTarget::Arp));
-        assert!(e.lower.is_open(Lower::Arp) && !e.lower.is_open(Lower::Mpe));
+        assert!(e.lower.is_open(Lower::Arp) && !e.expression_shows());
         e.strip_press(StripTarget::Bar(BarTarget::Mpe));
-        assert!(e.lower.is_open(Lower::Mpe) && !e.lower.is_open(Lower::Arp));
+        assert!(e.expression_shows() && !e.lower.is_open(Lower::Arp));
         e.strip_press(StripTarget::Bar(BarTarget::Mpe));
-        assert!(!e.lower.open);
+        assert!(e.expression_shows() && !e.lower.open);
         // Lit while an amount is not 0, each of the four.
         let p = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
             Arc::clone(&params) as Arc<dyn Params>,
@@ -17503,8 +17494,13 @@ mod tests {
     /// Every route through the three keys, PANEL off included, selects one page. The lit
     /// key is inert, and PANEL restores the selected page without changing its preference.
     #[test]
-    fn the_three_lower_page_keys_select_and_remember_one_page() {
-        let pages = [BarTarget::Global, BarTarget::Keyboard, BarTarget::Lfo];
+    fn the_lower_page_keys_select_and_remember_one_page() {
+        let pages = [
+            BarTarget::Global,
+            BarTarget::Keyboard,
+            BarTarget::Lfo,
+            BarTarget::Mpe,
+        ];
         for standalone in [false, true] {
             let (mut e, host, _) = if standalone {
                 editing_standalone()

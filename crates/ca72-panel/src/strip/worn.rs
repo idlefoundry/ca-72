@@ -698,8 +698,7 @@ impl StripRenderer {
                 }
             }
         }
-        // (The LFO page put away: the extension controls drawn again under where it was.)
-        if was.lfo != now.lfo {
+        if was.extension() != now.extension() {
             out.push(self.pixels((super::SECTIONS[1].0, PANEL_H + super::RAIL, art::W, art::H)));
         }
         if was.bar != now.bar {
@@ -1082,7 +1081,12 @@ pub(crate) fn key_light(bar: &BarScene, t: BarTarget) -> KeyLight {
     let lit = |on: bool| if on { KeyLight::Lit } else { KeyLight::Off };
     let affecting = match t {
         BarTarget::Panel => return lit(bar.panel),
-        BarTarget::Global => return lit(bar.panel && !bar.keyboard && !bar.lfo_page),
+        BarTarget::Global => {
+            return lit(bar.panel
+                && !bar.keyboard
+                && !bar.lfo_page
+                && bar.page != Some(BarTarget::Mpe));
+        }
         BarTarget::Keyboard => return lit(bar.panel && bar.keyboard),
         BarTarget::Arp => bar.arp,
         BarTarget::Fx => bar.fx,

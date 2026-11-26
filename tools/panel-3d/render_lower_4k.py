@@ -442,7 +442,7 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--face-w", type=int, default=3840)
     parser.add_argument("--samples", type=int, default=160)
-    parser.add_argument("--page", choices=("keys", "lfo", "macros"))
+    parser.add_argument("--page", choices=("keys", "lfo", "macros", "expression"))
     parser.add_argument("--oblique", action="store_true", help="also render an angled hardware view")
     parser.add_argument("--knob-glb", type=Path, help="include the standard knob in the angled view")
     parser.add_argument("--upper-manifest", type=Path, help="anchor the light rig to this upper render")
