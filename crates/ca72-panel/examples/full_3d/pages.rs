@@ -324,11 +324,27 @@ impl Pane {
     }
 
     fn key_at(&self, x: f32, y: f32) -> Option<Target> {
-        keyboard::hit(
+        for decoration in &self.decorations {
+            let target = match decoration.fixture.param.as_str() {
+                "octave_down" => Target::Down,
+                "octave_up" => Target::Up,
+                _ => continue,
+            };
+            let rect = decoration.rect;
+            if (rect.x0 as f32..rect.x1 as f32).contains(&x)
+                && (rect.y0 as f32..rect.y1 as f32).contains(&y)
+            {
+                return Some(target);
+            }
+        }
+        match keyboard::hit(
             FIRST_NOTE,
             f64::from((x - self.cheek) / self.scale),
             PANEL_H + f64::from(y / self.scale),
-        )
+        ) {
+            note @ Some(Target::Note(_)) => note,
+            _ => None,
+        }
     }
 
     fn value(&self, id: &str) -> f32 {
