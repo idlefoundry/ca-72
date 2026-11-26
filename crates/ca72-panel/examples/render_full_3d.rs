@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use ca72_panel::art::PANEL_H;
 use ca72_panel::panel3d::{FaceRect, FaceSpec, Panel3DAssets, Panel3DRenderer, Panel3DState};
-use ca72_panel::presets::BarScene;
+use ca72_panel::presets::{BarScene, BarTarget};
 use ca72_panel::strip::{self, Field, StripRenderer, StripScene};
 use resvg::tiny_skia::{IntRect, Pixmap, PixmapPaint, Transform};
 use serde::Deserialize;
@@ -19,6 +19,8 @@ use serde::Deserialize;
 struct LowerLayout {
     cheek_w: f32,
     controls: Vec<Fixture>,
+    #[serde(default)]
+    bounds: Option<[f32; 4]>,
 }
 
 #[derive(Deserialize)]
@@ -27,6 +29,10 @@ struct Fixture {
     x: f32,
     y: f32,
     #[serde(default)]
+    w: f32,
+    #[serde(default)]
+    h: f32,
+    #[serde(default)]
     param: String,
     #[serde(default)]
     label: String,
@@ -34,6 +40,14 @@ struct Fixture {
     sprite: String,
     #[serde(default)]
     value: f32,
+    #[serde(default)]
+    hit_r: Option<f32>,
+    #[serde(default)]
+    across: Option<bool>,
+    #[serde(default)]
+    steps: Option<usize>,
+    #[serde(default)]
+    shape: Vec<[f32; 2]>,
 }
 
 fn upper_state(assets: &Panel3DAssets) -> Panel3DState {
@@ -97,11 +111,15 @@ fn demo_strip() -> StripScene {
     }
 }
 
-fn lower_assets(upper: &Panel3DAssets, build: &Path, layout: LowerLayout) -> Panel3DAssets {
-    let face = Pixmap::load_png(build.join("lower-3d.png")).expect("load lower Cycles render");
+fn lower_assets(
+    upper: &Panel3DAssets,
+    face: Pixmap,
+    cheek_w: f32,
+    fixtures: &[Fixture],
+) -> Panel3DAssets {
     let mut manifest = upper.manifest.clone();
     let scale = manifest.face.px_per_unit;
-    let cheek = layout.cheek_w * scale;
+    let cheek = cheek_w * scale;
     manifest.face = FaceSpec {
         file: "lower-3d.png".into(),
         w: face.width(),
@@ -116,20 +134,40 @@ fn lower_assets(upper: &Panel3DAssets, build: &Path, layout: LowerLayout) -> Pan
     };
     manifest.lamps.clear();
     manifest.quality_opening = None;
-    manifest.controls = layout
-        .controls
-        .into_iter()
-        .filter(|fixture| fixture.kind == "knob")
+    manifest.controls = fixtures
+        .iter()
+        .filter(|fixture| {
+            matches!(fixture.kind.as_str(), "knob" | "selector" | "toggle")
+                && !fixture.sprite.is_empty()
+        })
         .map(|fixture| {
             let mut knob = upper
                 .manifest
                 .controls
                 .iter()
-                .find(|control| control.kind == "knob" && control.sprite == fixture.sprite)
-                .expect("lower knob uses an upper knob atlas")
+                .find(|control| control.sprite == fixture.sprite)
+                .or_else(|| {
+                    upper
+                        .manifest
+                        .controls
+                        .iter()
+                        .find(|control| control.kind == fixture.kind)
+                })
+                .expect("lower hardware uses an upper atlas")
                 .clone();
-            knob.param = fixture.param;
-            knob.label = fixture.label;
+            knob.param.clone_from(&fixture.param);
+            knob.label.clone_from(&fixture.label);
+            knob.kind.clone_from(&fixture.kind);
+            knob.sprite.clone_from(&fixture.sprite);
+            knob.steps = fixture.steps.or(knob.steps);
+            if knob.kind == "toggle" {
+                knob.across = fixture.across;
+                knob.hit_w = Some(fixture.w * scale);
+                knob.hit_h = Some(fixture.h * scale);
+            }
+            if let Some(r) = fixture.hit_r {
+                knob.hit_r = Some(r * scale);
+            }
             knob.pos = [cheek + fixture.x * scale, fixture.y * scale];
             knob.default = fixture.value;
             knob
@@ -166,6 +204,9 @@ fn put(frame: &mut Pixmap, part: &Pixmap, x: i32, y: i32) {
 
 #[path = "full_3d/preview.rs"]
 mod preview;
+
+#[path = "full_3d/pages.rs"]
+mod pages;
 
 #[cfg(target_os = "linux")]
 #[path = "full_3d/x11.rs"]
@@ -221,4 +262,22 @@ fn main() {
         panel.frame.width(),
         panel.frame.height()
     );
+
+    for (name, target) in [
+        ("keys", BarTarget::Keyboard),
+        ("lfo", BarTarget::Lfo),
+        ("macros", BarTarget::Macro),
+    ] {
+        if panel.pages.has(name) {
+            panel.pages.select(BarTarget::Global, &mut panel.scene.bar);
+            panel.pages.select(target, &mut panel.scene.bar);
+            let damage = panel.redraw();
+            assert!(!damage.is_empty() && damage.iter().all(|r| r.y0 >= panel.top));
+            assert!(panel.redraw().is_empty());
+            panel
+                .frame
+                .save_png(output.join(format!("ca72-{name}-4k.png")))
+                .expect("save live page proof");
+        }
+    }
 }

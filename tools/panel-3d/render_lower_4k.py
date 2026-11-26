@@ -11,6 +11,10 @@ Calibrate the opaque background with the same finishing pass as the upper panel:
 BUILD contains lower.json and the lower-print.png silkscreen mask. The body is
 written to lower-raw.png and calibrated to lower-3d.png. The unprinted lamp
 cap sprite is written to lower-tab-lit.png.
+
+Pass --page keys, --page lfo, or --page macros to each step for a
+replacement bay. The JSON, print mask, and renders then use page-<name>
+stems in the same build directory. The pages share the base's lit tab atlas.
 """
 
 import argparse
@@ -24,15 +28,15 @@ def export_size(spec, face_w):
     return pixels_per_unit, round(spec["height"] * pixels_per_unit)
 
 
-def prepare_textures(build_dir, spec):
+def prepare_textures(build_dir, spec, name="lower"):
     from PIL import Image
     from build_textures import build_faceplate_pbr, build_walnut_pbr
 
-    directory = build_dir / "lower-textures"
+    directory = build_dir / f"{name}-textures"
     directory.mkdir(parents=True, exist_ok=True)
     mask_width = 5760
     mask_height = round(mask_width * (spec["height"] - spec["rail_h"]) / spec["width"])
-    print_path = build_dir / "lower-print.png"
+    print_path = build_dir / f"{name}-print.png"
     with Image.open(print_path) as print_mask:
         top = spec["rail_h"] / spec["height"] * print_mask.height
         print_mask.convert("RGBA").resize(
@@ -43,22 +47,26 @@ def prepare_textures(build_dir, spec):
     build_walnut_pbr(directory)
 
 
-def calibrate(build_dir, spec, face_w):
+def calibrate(build_dir, spec, face_w, name="lower"):
     from PIL import Image, ImageDraw
     from calibrate_shadows import calibrate_faceplate
 
     density, height = export_size(spec, face_w)
     cheek = spec["cheek_w"] * density
+    base = build_dir / "lower-raw.png"
     calibrate_faceplate(
-        build_dir / "lower-raw.png",
-        build_dir / "lower-3d.png",
+        build_dir / f"{name}-raw.png",
+        build_dir / f"{name}-3d.png",
         {
             "face": {
                 "faceplate_rect_px": [cheek, spec["rail_h"] * density, face_w - cheek, height],
                 "px_per_unit": density,
             }
         },
+        reference_path=base if name != "lower" and base.is_file() else None,
     )
+    if name != "lower":
+        return
     # The reconstruction filter can leave a few alpha levels at the cell edge.
     # Clear those pixels before the lit cap is composited onto the dark one.
     cap_path = build_dir / "lower-tab-lit.png"
@@ -260,21 +268,29 @@ def build_fixtures(spec, scale, to_world):
                 gasket, 0.00045,
             )
         elif kind == "rail_key":
+            base = 0.0064 if y < spec["rail_h"] else 0.0
             beveled_box(
                 f"{label}_Key_Housing", (w + 0.00145, h + 0.00145, 0.0018),
-                to_world(x, y, 0.00665), gasket, 0.00056,
+                to_world(x, y, base + 0.00025), gasket, 0.00056,
             )
             beveled_box(
                 f"{label}_Key_Cap", (w - 0.00085, h - 0.00085, 0.0035),
-                to_world(x, y, 0.00825), rail_cap, 0.00081, segments=5,
+                to_world(x, y, base + 0.00185), rail_cap, 0.00081, segments=5,
             )
         else:
             # Each opening has a raised nickel-black lip, a dark inset
             # rebate, and a continuous pane sitting in the rebate.
             rail = y < spec["rail_h"]
             field = entry.get("role") == "field"
+            scope = entry.get("param", "").startswith("lfo_scope_")
             base = 0.0064 if rail else 0.0
             surround = (0.00135 if rail else 0.00092)
+            if scope:
+                surround = 0.0024
+                beveled_box(
+                    f"{label}_Scope_Gasket", (w + 0.0065, h + 0.0065, 0.0015),
+                    to_world(x, y, 0.00030), gasket, 0.00060, segments=6,
+                )
             beveled_box(
                 f"{label}_Display_Bezel", (w + 2 * surround, h + 2 * surround, 0.0020),
                 to_world(x, y, base + 0.00086), rim, 0.00080, segments=5,
@@ -294,6 +310,27 @@ def build_fixtures(spec, scale, to_world):
     return active_tabs
 
 
+def build_macro_collars(spec, scale, to_world):
+    from lower_left import lathe
+
+    material, _ = molded_finish("Dark_Bronze_Macro_Jack_Collars", (0.077, 0.039, 0.018), 0.42, 0.56)
+    for entry in spec["controls"]:
+        if entry["kind"] != "jack" or entry["x"] >= spec["bounds"][2]:
+            continue
+        r = entry["w"] * scale / 2
+        outer = 24.5 * scale
+        bezel = lathe(
+            "Macro_Jack_Collar",
+            [
+                (r * 0.83, 0.00010), (outer - 0.00035, 0.00010),
+                (outer, 0.00040), (outer - 0.00028, 0.00092),
+                (r * 0.83, 0.00092),
+            ],
+            material, segments=96, closed=True,
+        )
+        bezel.location = to_world(entry["x"], entry["y"])
+
+
 def model_proof_knobs(spec, to_world, knob_glb):
     import bpy
     from export_pack_4k import import_glb_collection, instantiate
@@ -310,7 +347,7 @@ def model_proof_knobs(spec, to_world, knob_glb):
             )
 
 
-def render(build_dir, spec, face_w, samples, oblique, knob_glb):
+def render(build_dir, spec, face_w, samples, oblique, knob_glb, name="lower"):
     import bpy
     from lower_left import build_lower_left
     from shaders_cabinet import apply_cabinet_shaders
@@ -319,7 +356,7 @@ def render(build_dir, spec, face_w, samples, oblique, knob_glb):
     scale = spec["scale_m_per_unit"]
     density, height = export_size(spec, face_w)
     pixels_per_meter = density / scale
-    texture_dir = build_dir / "lower-textures"
+    texture_dir = build_dir / f"{name}-textures"
     if not (texture_dir / "panel_albedo.png").is_file():
         raise FileNotFoundError(f"{texture_dir}: run --prepare-textures first")
 
@@ -332,11 +369,19 @@ def render(build_dir, spec, face_w, samples, oblique, knob_glb):
     build_body(spec, scale, to_world, texture_dir)
     active_tabs = build_fixtures(spec, scale, to_world)
     apply_cabinet_shaders(bpy.data.materials, texture_dir)
-    build_lower_left(spec, scale, to_world)
+    build_lower_left({
+        "controls": [entry for entry in spec["controls"] if not entry.get("sprite")]
+    }, scale, to_world)
+    if spec.get("page") == "keys":
+        from lower_keyboard import build_keyboard
+
+        build_keyboard(spec, scale, to_world, texture_dir)
+    elif spec.get("page") == "macros":
+        build_macro_collars(spec, scale, to_world)
     make_ortho_cam(scene, 0.0, 0.0, face_w, height, pixels_per_meter)
-    scene.render.filepath = str(build_dir / "lower-raw.png")
+    scene.render.filepath = str(build_dir / f"{name}-raw.png")
     bpy.ops.render.render(write_still=True)
-    print(f"Rendered lower-raw.png at {face_w}×{height} with {backend}", flush=True)
+    print(f"Rendered {name}-raw.png at {face_w}×{height} with {backend}", flush=True)
 
     if oblique:
         amber = tab_material(True)
@@ -348,9 +393,11 @@ def render(build_dir, spec, face_w, samples, oblique, knob_glb):
         x, y, z = (0.104, -0.152, 0.620)
         camera.location = (x, y, z)
         camera.rotation_euler = (math.atan2(-y, math.hypot(x, z)), math.atan2(x, z), 0)
-        scene.render.filepath = str(build_dir / "lower-oblique.png")
+        scene.render.filepath = str(build_dir / f"{name}-oblique.png")
         bpy.ops.render.render(write_still=True)
 
+    if name != "lower":
+        return
     tab = next(entry for entry in spec["controls"] if entry["kind"] == "tab")
     scene, _ = reset_scene(samples, transparent=True)
     setup_studio_lights(scene)
@@ -367,19 +414,21 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--face-w", type=int, default=3840)
     parser.add_argument("--samples", type=int, default=160)
+    parser.add_argument("--page", choices=("keys", "lfo", "macros"))
     parser.add_argument("--oblique", action="store_true", help="also render an angled hardware view")
     parser.add_argument("--knob-glb", type=Path, help="include the standard knob in the angled view")
     command = parser.add_mutually_exclusive_group()
     command.add_argument("--prepare-textures", action="store_true")
     command.add_argument("--calibrate", action="store_true")
     args = parser.parse_args()
-    spec = json.loads((args.out / "lower.json").read_text())
+    name = "lower" if args.page is None else f"page-{args.page}"
+    spec = json.loads((args.out / f"{name}.json").read_text())
     if args.prepare_textures:
-        prepare_textures(args.out, spec)
+        prepare_textures(args.out, spec, name)
     elif args.calibrate:
-        calibrate(args.out, spec, args.face_w)
+        calibrate(args.out, spec, args.face_w, name)
     else:
-        render(args.out.resolve(), spec, args.face_w, args.samples, args.oblique, args.knob_glb)
+        render(args.out.resolve(), spec, args.face_w, args.samples, args.oblique, args.knob_glb, name)
 
 
 if __name__ == "__main__":

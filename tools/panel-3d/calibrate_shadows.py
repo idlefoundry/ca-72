@@ -138,7 +138,9 @@ def clean_rocker_cell(cell: np.ndarray, ax: float, ay: float, body_w: float, bod
     return np.round(out).astype(np.uint8)
 
 
-def calibrate_faceplate(raw_path: Path, dst_path: Path, manifest: dict) -> None:
+def calibrate_faceplate(
+    raw_path: Path, dst_path: Path, manifest: dict, reference_path: Path | None = None
+) -> None:
     """Match the median of the wrinkle enamel to the vintage panel's charcoal finish."""
     img = Image.open(raw_path).convert("RGB")
     arr = np.asarray(img, dtype=np.float32)
@@ -155,7 +157,12 @@ def calibrate_faceplate(raw_path: Path, dst_path: Path, manifest: dict) -> None:
         return 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
 
     interior = arr[my0:my1, mx0:mx1, :]
-    luma = luminance(interior)
+    if reference_path is None:
+        luma = luminance(interior)
+    else:
+        with Image.open(reference_path) as ref:
+            ref_region = ref.crop((mx0, my0, mx1, my1)).convert("RGB")
+        luma = luminance(np.asarray(ref_region, dtype=np.float32))
     # Exclude chrome and silkscreen from the measurements.
     dark_mask = (luma >= 8.0) & (luma <= 88.0)
     sw = interior.shape[1]

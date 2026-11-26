@@ -16,6 +16,20 @@ use resvg::{
 };
 use serde_json::{Value, json};
 
+mod lower_pages {
+    mod keyboard;
+    mod lfo;
+    mod macros;
+
+    pub(super) fn scenes() -> [(&'static str, (Vec<serde_json::Value>, String)); 3] {
+        [
+            ("keys", keyboard::page()),
+            ("lfo", lfo::page()),
+            ("macros", macros::page()),
+        ]
+    }
+}
+
 fn part(kind: &str, (x, y): (f64, f64), (w, h): (f64, f64)) -> Value {
     json!({"kind": kind, "x": x, "y": y - PANEL_H, "w": w, "h": h})
 }
@@ -180,15 +194,44 @@ fn main() {
         "rail_h": strip::RAIL,
         "controls": controls(&arrangement),
     });
-    let json = serde_json::to_string_pretty(&spec).expect("serialize lower panel");
-    fs::write(out.join("lower.json"), json + "\n").expect("write lower.json");
-
     let fonts = Fonts::new();
     let layout = Layout::measure_in(&fonts, Lettering::Standard, &arrangement);
     let print = art::strip_printed(&layout, &arrangement);
+    write_scene(&out, "lower", &spec, &print, &fonts);
+
+    let bottom = PANEL_H + STRIP_H - 6.0;
+    let top = PANEL_H + strip::RAIL;
+    for (name, (fixtures, lettering)) in lower_pages::scenes() {
+        let (left, right) = match name {
+            "macros" => (15.0, 368.0),
+            _ => (370.0, W - 28.0),
+        };
+        let mut scene = spec.clone();
+        let parts = scene["controls"]
+            .as_array_mut()
+            .expect("lower layout components");
+        parts.retain(|p| {
+            let x = p["x"].as_f64().expect("fixture x");
+            let y = p["y"].as_f64().expect("fixture y");
+            !(left..right).contains(&x) || y < strip::RAIL
+        });
+        parts.extend(fixtures);
+        scene["page"] = json!(name);
+        scene["bounds"] = json!([left, top - PANEL_H, right, bottom - PANEL_H]);
+        let page_print = format!(
+            "<defs><clipPath id='existing-print'><path clip-rule='evenodd' d='M 0 {PANEL_H} H {W} V {} H 0 Z M {left} {top} V {bottom} H {right} V {top} Z'/></clipPath></defs><g clip-path='url(#existing-print)'>{print}</g>{lettering}",
+            PANEL_H + STRIP_H,
+        );
+        write_scene(&out, &format!("page-{name}"), &scene, &page_print, &fonts);
+    }
+}
+
+fn write_scene(out: &std::path::Path, name: &str, spec: &Value, print: &str, fonts: &Fonts) {
+    let json = serde_json::to_string_pretty(spec).expect("serialize lower panel");
+    fs::write(out.join(format!("{name}.json")), json + "\n").expect("write layout");
     let w = 5760;
     let h = (f64::from(w) * STRIP_H / W).round() as u32;
-    let document = art::document([0.0, PANEL_H, W, STRIP_H], w, h, &print);
+    let document = art::document([0.0, PANEL_H, W, STRIP_H], w, h, print);
     let options = usvg::Options {
         fontdb: fonts.database(),
         font_family: FAMILY.into(),
@@ -197,7 +240,7 @@ fn main() {
     let tree = usvg::Tree::from_str(&document, &options).expect("parse lower panel silkscreen");
     let mut px = Pixmap::new(w, h).expect("allocate lower panel silkscreen");
     resvg::render(&tree, Transform::identity(), &mut px.as_mut());
-    px.save_png(out.join("lower-print.png"))
-        .expect("write lower-print.png");
-    println!("Wrote lower.json and lower-print.png ({w}×{h})");
+    px.save_png(out.join(format!("{name}-print.png")))
+        .expect("write silkscreen mask");
+    println!("Wrote {name}.json and {name}-print.png ({w}×{h})");
 }

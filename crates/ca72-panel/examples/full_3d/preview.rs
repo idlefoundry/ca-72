@@ -10,6 +10,7 @@ pub(super) struct Preview {
     pub(super) lower: Panel3DRenderer,
     pub(super) lower_state: Panel3DState,
     strip: StripRenderer,
+    pub(super) pages: pages::Pages,
     under: Pixmap,
     pub(super) scene: StripScene,
     pub(super) frame: Pixmap,
@@ -19,25 +20,30 @@ pub(super) struct Preview {
     drag: DragController,
     #[cfg(target_os = "linux")]
     drag_lower: bool,
+    #[cfg(target_os = "linux")]
+    drag_page: bool,
 }
 
 impl Preview {
     pub(super) fn load(upper_dir: &Path, lower_dir: &Path) -> Self {
         let upper = Panel3DAssets::load_from_dir(upper_dir).expect("load upper Cycles pack");
-        let layout = serde_json::from_slice(
+        let layout: LowerLayout = serde_json::from_slice(
             &std::fs::read(lower_dir.join("lower.json")).expect("read lower layout"),
         )
         .expect("parse lower layout");
         let scale = f64::from(upper.manifest.face.px_per_unit);
         let top = upper.manifest.face.faceplate_rect_px[3].round() as i32;
-        let lower = lower_assets(&upper, lower_dir, layout);
+        let face =
+            Pixmap::load_png(lower_dir.join("lower-3d.png")).expect("load lower Cycles render");
+        let lower = lower_assets(&upper, face, layout.cheek_w, &layout.controls);
         let left = lower.manifest.face.faceplate_rect_px[0].round() as i32;
         let lower_state = Panel3DState::from_defaults(&lower.manifest);
         assert_eq!(lower_state.values.len(), strip::KNOBS.len());
         let lower = Panel3DRenderer::new(lower);
+        let tab = Pixmap::load_png(lower_dir.join("lower-tab-lit.png")).expect("load lit 3D tab");
+        let pages = pages::Pages::load(&upper, lower_dir, &tab);
         let upper_state = upper_state(&upper);
         let upper = Panel3DRenderer::new(upper);
-        let tab = Pixmap::load_png(lower_dir.join("lower-tab-lit.png")).expect("load lit 3D tab");
         let mut strip = StripRenderer::with_cycles_hardware(scale, tab);
         strip.set_under_top((PANEL_H * scale).round() as i32);
         let (w, h) = strip::strip_size(scale);
@@ -56,6 +62,7 @@ impl Preview {
             lower,
             lower_state,
             strip,
+            pages,
             under,
             scene: demo_strip(),
             frame,
@@ -65,6 +72,8 @@ impl Preview {
             drag: DragController::default(),
             #[cfg(target_os = "linux")]
             drag_lower: false,
+            #[cfg(target_os = "linux")]
+            drag_page: false,
         };
         panel.redraw();
         panel
@@ -123,6 +132,13 @@ impl Preview {
                 y1: y1 + self.top,
             });
         }
+        self.pages.paint(
+            &mut self.frame,
+            self.strip.frame(),
+            self.left,
+            self.top,
+            &mut damage,
+        );
         damage
     }
 
@@ -135,6 +151,7 @@ impl Preview {
     #[cfg(target_os = "linux")]
     pub(super) fn press(&mut self, x: f32, y: f32) {
         self.drag_lower = y >= self.top as f32;
+        self.drag_page = false;
         if self.drag_lower {
             let ly = y - self.top as f32;
             let scale = self.lower.manifest().face.px_per_unit;
@@ -143,6 +160,14 @@ impl Preview {
                 f64::from((x - self.left as f32) / scale),
                 PANEL_H + f64::from(ly / scale),
             );
+            if let Some(StripTarget::Bar(target)) = target {
+                self.pages.select(target, &mut self.scene.bar);
+                return;
+            }
+            if self.pages.press(x, ly) {
+                self.drag_page = true;
+                return;
+            }
             match target {
                 Some(StripTarget::Tab(Bank::Mode, i)) => self.scene.mode = Some(i),
                 Some(StripTarget::Tab(Bank::Stereo, i)) => {
@@ -169,8 +194,11 @@ impl Preview {
     }
 
     #[cfg(target_os = "linux")]
-    pub(super) fn motion(&mut self, dx: f32, dy: f32, shift: bool) {
-        if self.drag_lower {
+    pub(super) fn motion(&mut self, pos: Option<(f32, f32)>, dx: f32, dy: f32, shift: bool) {
+        if self.drag_page {
+            self.pages
+                .motion(pos.map(|(x, y)| (x, y - self.top as f32)), dx, dy, shift);
+        } else if self.drag_lower {
             self.drag
                 .update_drag(self.lower.manifest(), &mut self.lower_state, dx, dy, shift);
             if let Some(drag) = self.drag.active {
@@ -187,7 +215,10 @@ impl Preview {
 
     #[cfg(target_os = "linux")]
     pub(super) fn release(&mut self) {
-        if self.drag_lower {
+        if self.drag_page {
+            self.pages.release();
+            self.drag_page = false;
+        } else if self.drag_lower {
             self.drag
                 .end_drag(self.lower.manifest(), &mut self.lower_state);
         } else {
@@ -201,6 +232,9 @@ impl Preview {
         if y >= self.top as f32 {
             let manifest = self.lower.manifest();
             let y = y - self.top as f32;
+            if self.pages.scroll(x, y, direction, shift) {
+                return;
+            }
             if let Some(i) = DragController::hit_test(manifest, x, y) {
                 let id = manifest.controls[i].param.clone();
                 DragController::scroll(manifest, &mut self.lower_state, x, y, direction, shift);
@@ -254,7 +288,15 @@ impl Preview {
     }
 }
 
-fn copy(dst: &mut Pixmap, src: &Pixmap, r: FaceRect, sx: i32, sy: i32, dx: i32, dy: i32) {
+pub(super) fn copy(
+    dst: &mut Pixmap,
+    src: &Pixmap,
+    r: FaceRect,
+    sx: i32,
+    sy: i32,
+    dx: i32,
+    dy: i32,
+) {
     let dw = dst.width() as usize * 4;
     let sw = src.width() as usize * 4;
     let n = (r.x1 - r.x0) as usize * 4;

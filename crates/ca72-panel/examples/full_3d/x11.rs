@@ -2,15 +2,22 @@
 
 use super::preview::Preview;
 use ca72_panel::panel3d::{FaceRect, blit_dirty_to_u32};
+use std::os::unix::net::UnixStream;
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::*;
+use x11rb::rust_connection::{DefaultStream, RustConnection};
 use x11rb::wrapper::ConnectionExt as _;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 pub(super) fn open(mut panel: Preview) -> Result<()> {
-    let (conn, screen) = x11rb::connect(None)?;
+    let (conn, screen) = if let Some(socket) = std::env::var_os("CA72_PREVIEW_X11_SOCKET") {
+        let (stream, _) = DefaultStream::from_unix_stream(UnixStream::connect(socket)?)?;
+        (RustConnection::connect_to_stream(stream, 0)?, 0)
+    } else {
+        x11rb::connect(None)?
+    };
     let screen = &conn.setup().roots[screen];
     let depth = screen.root_depth;
     let width = (screen.width_in_pixels * 4 / 5).min(1520);
@@ -107,6 +114,7 @@ pub(super) fn open(mut panel: Preview) -> Result<()> {
                 Event::MotionNotify(e) => {
                     if let Some((x, y)) = previous.as_mut() {
                         panel.motion(
+                            viewport.point(e.event_x, e.event_y, &panel.frame),
                             f32::from(e.event_x) - f32::from(*x),
                             f32::from(e.event_y) - f32::from(*y),
                             e.state.contains(KeyButMask::SHIFT),
