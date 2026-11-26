@@ -496,13 +496,13 @@ impl Pane {
                 );
             }
             Content::Display(text) => {
-                let ink = match f.param.as_str() {
-                    "octave" => "#ffae55",
-                    "octave_down" | "octave_up" => "#e4d8bf",
-                    _ => "#95643c",
+                let (ink, size, center_ink) = match f.param.as_str() {
+                    "octave" => ("#ffae55", 0.74, true),
+                    "octave_down" | "octave_up" => ("#e4d8bf", 0.46, false),
+                    _ => ("#95643c", 0.46, true),
                 };
-                let body = text_svg(text, w, h, ink, 0.46);
-                self.print(r, &body, f.param.starts_with("lfo_screen_"));
+                let body = text_svg(text, w, h, ink, size);
+                self.print(r, &body, center_ink);
             }
         }
     }
