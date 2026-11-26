@@ -30,15 +30,18 @@ use clap_sys::ext::params::{
     CLAP_EXT_PARAMS, clap_host_params, clap_param_clear_flags, clap_param_info,
     clap_param_rescan_flags, clap_plugin_params,
 };
-use clap_sys::ext::render::{CLAP_EXT_RENDER, CLAP_RENDER_OFFLINE, clap_plugin_render};
+use clap_sys::ext::render::{
+    CLAP_EXT_RENDER, CLAP_RENDER_OFFLINE, clap_plugin_render, clap_plugin_render_mode,
+};
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_plugin_state};
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
 use clap_sys::host::clap_host;
 use clap_sys::id::clap_id;
 use clap_sys::plugin::clap_plugin;
-use clap_sys::process::clap_process;
+use clap_sys::process::{CLAP_PROCESS_ERROR, clap_process};
 use clap_sys::stream::{clap_istream, clap_ostream};
 use clap_sys::version::CLAP_VERSION;
+use std::sync::Once;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 unsafe extern "C" {
@@ -211,7 +214,10 @@ impl Instance {
         // SAFETY: the plug-in's own entry point and factory, used as CLAP has them.
         unsafe {
             let entry = &clap_entry;
-            assert!((entry.init.unwrap())(c"".as_ptr()));
+            // The entry stays linked for the test process's lifetime. Concurrent instances
+            // share its initialization, which CLAP requires to finish before any other calls.
+            static INIT: Once = Once::new();
+            INIT.call_once(|| assert!((entry.init.unwrap())(c"".as_ptr())));
             let factory = (entry.get_factory.unwrap())(CLAP_PLUGIN_FACTORY_ID.as_ptr())
                 .cast::<clap_plugin_factory>();
             let plugin = ((*factory).create_plugin.unwrap())(
@@ -239,6 +245,30 @@ impl Instance {
             assert!(!e.is_null(), "{name:?}");
             &*e.cast::<T>()
         }
+    }
+
+    fn set_render_mode(&self, mode: clap_plugin_render_mode) {
+        let render: &clap_plugin_render = self.extension(CLAP_EXT_RENDER);
+        // SAFETY: called on this host's control thread, between process calls.
+        assert!(unsafe { (render.set.unwrap())(self.plugin, mode) });
+    }
+
+    fn reactivate(&mut self, rate: f64, block: u32, mode: clap_plugin_render_mode) {
+        // SAFETY: this host has no process call in flight. The new limits take effect upon
+        // activation, before the next call.
+        unsafe {
+            ((*self.plugin).stop_processing.unwrap())(self.plugin);
+            ((*self.plugin).deactivate.unwrap())(self.plugin);
+            self.set_render_mode(mode);
+            assert!(((*self.plugin).activate.unwrap())(
+                self.plugin,
+                rate,
+                1,
+                block
+            ));
+            assert!(((*self.plugin).start_processing.unwrap())(self.plugin));
+        }
+        self.block = block;
     }
 
     /// One block with `events` in this order; what the plug-in told the host of parameters.
@@ -408,7 +438,10 @@ impl Instance {
         };
         // SAFETY: a process call as CLAP has it, everything it points to alive through it.
         unsafe {
-            ((*self.plugin).process.unwrap())(self.plugin, &process);
+            assert_ne!(
+                ((*self.plugin).process.unwrap())(self.plugin, &process),
+                CLAP_PROCESS_ERROR
+            );
         }
         assert!(out_l.iter().chain(&out_r).all(|x| x.is_finite()));
         (told, out_l, out_r)
@@ -479,8 +512,7 @@ fn envelope_instance(block: u32, mode: u8, priority: u8, retrigger: bool) -> Ins
     // SAFETY: the instance is stopped while the host changes its rendering mode.
     unsafe {
         ((*p.plugin).stop_processing.unwrap())(p.plugin);
-        let render: &clap_plugin_render = p.extension(CLAP_EXT_RENDER);
-        assert!((render.set.unwrap())(p.plugin, CLAP_RENDER_OFFLINE));
+        p.set_render_mode(CLAP_RENDER_OFFLINE);
         assert!(((*p.plugin).start_processing.unwrap())(p.plugin));
     }
     let mut state = json_of(&p.save());
@@ -1892,6 +1924,150 @@ fn an_automated_offline_bounce_makes_no_click_in_any_blocks() {
         let db = 20.0 * (rms(x) / rms(reference)).log10();
         assert!(db.abs() < 0.1, "{name}: the loudness {db:+.3} dB");
     });
+}
+
+/// A host may leave its floating-point controls either way. Restore them even on failure.
+struct HostFlush(u32);
+
+impl Drop for HostFlush {
+    fn drop(&mut self) {
+        ca72_rt::set_flush_mode(self.0);
+    }
+}
+
+#[test]
+fn a_96khz_offline_bounce_nulls_after_host_session_changes() {
+    const RATE: f64 = 96_000.0;
+    const LARGE: u32 = 16_384;
+    const LENGTH: u32 = 36_864;
+    let phrase: Vec<_> = bounce_phrase(RATE, false)
+        .into_iter()
+        .map(|(sample, event)| (sample / 3, event))
+        .collect();
+    let play = |p: &Instance, frames| bounce(p, &phrase, LENGTH, &mut || frames, &mut || {});
+    let mut failures = Vec::new();
+
+    for (quality, name) in [(0.0, "LO"), (1.0, "HI"), (2.0, "ULTRA")] {
+        let state = session(&[
+            ("quality", quality),
+            ("poly", 1.0),
+            ("voices", 4.0),
+            ("emphasis", 0.6),
+        ]);
+        let offline = |block| {
+            let p = bouncing(RATE, block);
+            assert!(p.load(&state));
+            p
+        };
+        let reference = play(&offline(512), 512);
+        let peak = |audio: &[f32]| audio.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!(peak(&reference) > 0.01);
+        let mut compare = |scenario: &str, render: Vec<f32>, must_null: bool| {
+            assert_eq!(render.len(), reference.len());
+            let first = render
+                .iter()
+                .zip(&reference)
+                .position(|(a, b)| a.to_bits() != b.to_bits())
+                .map(|sample| sample / 2);
+            let delta: Vec<_> = render.iter().zip(&reference).map(|(a, b)| a - b).collect();
+            eprintln!(
+                "{name}, {scenario}: peak {:.9}, RMS {:.9}, null peak {:.3e}, null RMS {:.3e}, first differing frame {first:?}",
+                peak(&render),
+                rms(&render),
+                peak(&delta),
+                rms(&delta)
+            );
+            if must_null && first.is_some() {
+                failures.push(format!("{name}, {scenario}"));
+            }
+        };
+
+        let mut sizes = [1, LARGE, 127, 4096, 513].into_iter().cycle();
+        compare(
+            "variable blocks up to 16384",
+            bounce(
+                &offline(LARGE),
+                &phrase,
+                LENGTH,
+                &mut || sizes.next().unwrap(),
+                &mut || {},
+            ),
+            true,
+        );
+
+        let realtime = Instance::with_rate_block(RATE, 512);
+        assert!(realtime.load(&state));
+        // A live playback pass can drop late voice runs under the real-time deadline. Measure
+        // that separately from the offline null cases.
+        compare("real-time mode (diagnostic)", play(&realtime, 512), false);
+        drop(realtime);
+        let switched = Instance::with_rate_block(RATE, 512);
+        assert!(switched.load(&state));
+        switched.set_render_mode(CLAP_RENDER_OFFLINE);
+        compare("set offline while active", play(&switched, 512), true);
+        drop(switched);
+
+        for (rate, block, scenario) in [
+            (48_000.0, 512, "reactivate 48 to 96 kHz"),
+            (96_000.0, LARGE, "grow maximum 512 to 16384"),
+            (48_000.0, LARGE, "change rate and maximum together"),
+        ] {
+            let mut p = Instance::with_rate_block(rate, 512);
+            assert!(p.load(&state));
+            if rate != RATE {
+                // Exercise the previous engine with a different note before rebuilding it.
+                p.audio(512, &[In::Midi(0, [0x90, 36, 112])]);
+                p.audio(512, &[In::Midi(0, [0x80, 36, 0])]);
+            }
+            p.reactivate(RATE, block, CLAP_RENDER_OFFLINE);
+            compare(scenario, play(&p, block), true);
+        }
+
+        for mode in [0, ca72_rt::FLUSH] {
+            let p = offline(512);
+            let _restore = HostFlush(ca72_rt::flush_mode());
+            ca72_rt::set_flush_mode(mode);
+            let render = play(&p, 512);
+            assert_eq!(ca72_rt::flush_mode(), mode);
+            compare(
+                if mode == 0 {
+                    "host FTZ off"
+                } else {
+                    "host FTZ on"
+                },
+                render,
+                true,
+            );
+        }
+
+        let ready = std::sync::Barrier::new(4);
+        std::thread::scope(|threads| {
+            let companions: Vec<_> = (0..3)
+                .map(|_| {
+                    let ready = &ready;
+                    let offline = &offline;
+                    threads.spawn(move || {
+                        ready.wait();
+                        play(&offline(512), 512)
+                    })
+                })
+                .collect();
+            ready.wait();
+            compare(
+                "four concurrent offline instances, primary",
+                play(&offline(512), 512),
+                true,
+            );
+            for companion in companions {
+                compare(
+                    "four concurrent offline instances, companion",
+                    companion.join().unwrap(),
+                    true,
+                );
+            }
+        });
+    }
+    assert!(failures.is_empty(), "failed null comparisons: {failures:?}");
 }
 
 /// A parameter's change that is the first event of the host's block, at a later sample, is set
