@@ -9,6 +9,7 @@
 //! strip and the face are compared, the plate's place there left out. The last column's head,
 //! above POWER's lamp, is left out: QUALITY, its toggle and ULTRA's lamp came after the mock-up
 //! and were approved in their own (decisions.md R47, R48).
+//! The mock-up's wider right trim is excluded now that both rails use the left rail's width.
 //!
 //! The large lettering (R-LETTERING, a setting) is compared with `approved-large.png`: the
 //! same mock-up, but where the large lettering changes the drawing, the renderer's pixels, as
@@ -18,7 +19,7 @@
 //! approved in their own; away from LO, as at 8' here, they are off the panel, so both pictures
 //! are the mock-up's own there again (as before 2026-10-20's keys).
 
-use ca72_panel::art::{COL, PANEL_H, PH, PLATE_H, PLATE_X, PLATE_Y, TOP, W};
+use ca72_panel::art::{COL, PANEL_H, PH, PLATE_H, PLATE_X, PLATE_Y, SIDE_TRIM_W, TOP, W};
 use ca72_panel::render::Timed;
 use ca72_panel::{CONTROLS, Lettering, Renderer, Scene, Skin};
 use resvg::tiny_skia::Pixmap;
@@ -70,12 +71,22 @@ fn drawn_as_approved(lettering: Lettering, file: &str) {
     assert_eq!(drawn.width(), approved.width() - COLUMN);
     assert_eq!(drawn.width(), W as u32);
 
+    let y = (TOP + PH / 2.0) as u32;
+    for right in [false, true] {
+        let rail_width = (0..drawn.width())
+            .map(|x| if right { drawn.width() - 1 - x } else { x })
+            .take_while(|&x| drawn.pixel(x, y).expect("in the frame").red() > 100)
+            .count();
+        assert_eq!(rail_width, SIDE_TRIM_W as usize);
+    }
+
     let mut differences: Vec<u8> = Vec::new();
     for y in 0..PANEL_H as u32 {
         for x in 0..drawn.width() {
             let a = drawn.pixel(x, y).expect("in the frame");
             let b = approved.pixel(x + COLUMN, y).expect("in the mock-up");
-            if !outside_the_plate(x, y) || !outside_quality(x, y) {
+            let old_right_trim = f64::from(y) >= TOP && f64::from(x) >= W - 28.0;
+            if !outside_the_plate(x, y) || !outside_quality(x, y) || old_right_trim {
                 continue;
             }
             let d = [
