@@ -66,6 +66,10 @@ def calibrate(build_dir, spec, face_w, name="lower"):
         reference_path=base if name != "lower" and base.is_file() else None,
     )
     if name != "lower":
+        if spec.get("page") == "keys":
+            from lower_keyboard import prepare_key_travel
+
+            prepare_key_travel(build_dir)
         return
     # The reconstruction filter can leave a few alpha levels at the cell edge.
     # Clear those pixels before the lit cap is composited onto the dark one.
@@ -368,16 +372,20 @@ def render(build_dir, spec, face_w, samples, oblique, knob_glb, name="lower"):
     build_lower_left({
         "controls": [entry for entry in spec["controls"] if not entry.get("sprite")]
     }, scale, to_world)
+    keyboard = None
     if spec.get("page") == "keys":
-        from lower_keyboard import build_keyboard
+        from lower_keyboard import build_keyboard, render_key_travel
 
-        build_keyboard(spec, scale, to_world, texture_dir)
+        keyboard = build_keyboard(spec, scale, to_world, texture_dir)
     elif spec.get("page") == "macros":
         build_macro_collars(spec, scale, to_world)
     make_ortho_cam(scene, 0.0, 0.0, face_w, height, pixels_per_meter)
     scene.render.filepath = str(build_dir / f"{name}-raw.png")
     bpy.ops.render.render(write_still=True)
     print(f"Rendered {name}-raw.png at {face_w}×{height} with {backend}", flush=True)
+
+    if keyboard is not None:
+        render_key_travel(scene, keyboard, spec, density, build_dir)
 
     if oblique:
         amber = tab_material(True)

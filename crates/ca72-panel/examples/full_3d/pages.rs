@@ -39,6 +39,7 @@ struct Decoration {
     fixture: Fixture,
     rect: FaceRect,
     content: Option<Content>,
+    pressed: Option<Pixmap>,
 }
 
 #[derive(PartialEq)]
@@ -237,6 +238,16 @@ impl Pane {
         let picture = face.clone();
         let assets = lower_assets(upper, face, layout.cheek_w, &fixtures);
         let state = Panel3DState::from_defaults(&assets.manifest);
+        let travel = dir.join("page-keys-travel");
+        let travel_manifest = travel.join("frames.json");
+        let travel_frames: HashMap<String, [i32; 4]> = if name == "keys"
+            && travel_manifest.is_file()
+        {
+            serde_json::from_slice(&std::fs::read(travel_manifest).expect("read key travel layout"))
+                .expect("parse key travel layout")
+        } else {
+            HashMap::new()
+        };
         let decorations = fixtures
             .into_iter()
             .filter(|f| {
@@ -251,16 +262,30 @@ impl Pane {
                 let y = fixture.y * scale;
                 let w = fixture.w * scale / 2.0;
                 let h = fixture.h * scale / 2.0;
-                let rect = FaceRect {
+                let mut rect = FaceRect {
                     x0: (x - w).floor() as i32,
                     x1: (x + w).ceil() as i32,
                     y0: (y - h).floor() as i32,
                     y1: (y + h).ceil() as i32,
                 };
+                let pressed = travel_frames.get(&fixture.param).map(|&[x0, y0, x1, y1]| {
+                    let image = Pixmap::load_png(travel.join(format!("{}.png", fixture.param)))
+                        .expect("load depressed key render");
+                    assert_eq!(
+                        (x1 - x0, y1 - y0),
+                        (image.width() as i32, image.height() as i32)
+                    );
+                    assert!(
+                        x0 >= bounds.x0 && x1 <= bounds.x1 && y0 >= bounds.y0 && y1 <= bounds.y1
+                    );
+                    rect = FaceRect { x0, y0, x1, y1 };
+                    image
+                });
                 Decoration {
                     fixture,
                     rect,
                     content: None,
+                    pressed,
                 }
             })
             .collect();
@@ -386,6 +411,10 @@ impl Pane {
         match content {
             Content::Key(false) => {}
             Content::Key(true) => {
+                if let Some(image) = &patch.pressed {
+                    put(&mut self.picture, image, r.x0, r.y0);
+                    return;
+                }
                 let mut path = PathBuilder::new();
                 if let Some(([x, y], rest)) = f.shape.split_first() {
                     path.move_to(self.cheek + x * self.scale, y * self.scale);

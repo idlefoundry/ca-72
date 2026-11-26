@@ -751,9 +751,94 @@ def build_keyboard(spec, scale, to_world, texture_dir):
     _build_walnut_surround(spec, scale, to_world, cut_bounds, mats["walnut"])
     _build_keybed_recess(spec, scale, to_world, bed_bounds, cut_bounds, mats)
 
+    keys = []
     for entry in spec.get("controls", []):
         kind = entry.get("kind")
         if kind == "white_key":
-            _build_white_key(entry, scale, to_world, mats["ivory"])
+            keys.append((entry, _build_white_key(entry, scale, to_world, mats["ivory"])))
         elif kind == "black_key":
-            _build_black_key(entry, scale, to_world, mats["ebony"])
+            keys.append((entry, _build_black_key(entry, scale, to_world, mats["ebony"])))
+    return keys
+
+
+def render_key_travel(scene, keys, spec, density, build_dir):
+    """Render each depressed key in place, with its neighbours at rest."""
+    import bpy
+    import json
+    from mathutils import Vector
+
+    out = build_dir / "page-keys-travel-raw"
+    out.mkdir(exist_ok=True)
+    frames = {}
+    render = scene.render
+    camera = scene.camera
+    face_w, face_h = render.resolution_x, render.resolution_y
+    scale = spec["scale_m_per_unit"]
+    ppm = density / scale
+    padding = math.ceil(0.0035 * ppm)
+    render.use_persistent_data = True
+    scene.cycles.samples = min(scene.cycles.samples, 64)
+
+    for entry, key in keys:
+        note = entry["param"]
+        x = (entry["x"] + spec["cheek_w"]) * density
+        y = entry["y"] * density
+        half_w, half_h = (entry[k] * density / 2 for k in ("w", "h"))
+        x0, x1 = math.floor(x - half_w) - padding, math.ceil(x + half_w) + padding
+        y0, y1 = math.floor(y - half_h) - padding, math.ceil(y + half_h) + padding
+        w, h = x1 - x0, y1 - y0
+
+        # The crop maintains the original ortho scale and pixel grid.
+        render.resolution_x, render.resolution_y = w, h
+        camera.data.ortho_scale = w / ppm
+        camera.location.x = ((x0 + x1) / 2 - face_w / 2) / ppm
+        camera.location.y = (face_h / 2 - (y0 + y1) / 2) / ppm
+
+        # The rear hinge stays fixed. Limit front travel to the well clearance.
+        length = entry["h"] * scale
+        pivot = Vector((0, length / 2, -0.005))
+        rest = key.location.copy()
+        key.rotation_euler.x = math.asin(0.003 / length)
+        key.location = rest + pivot - key.rotation_euler.to_matrix() @ pivot
+        render.filepath = str(out / f"{note}.png")
+        bpy.ops.render.render(write_still=True)
+        key.location = rest
+        key.rotation_euler.x = 0
+        frames[note] = [x0, y0, x1, y1]
+
+    render.resolution_x, render.resolution_y = face_w, face_h
+    camera.data.ortho_scale = face_w / ppm
+    camera.location.x = camera.location.y = 0
+    (out / "frames.json").write_text(json.dumps(frames, indent=2) + "\n")
+    print(f"Rendered {len(frames)} individual depressed keys", flush=True)
+
+
+def prepare_key_travel(build_dir):
+    """Match the panel grade and feather away small render differences at crop edges."""
+    import json
+    import numpy as np
+    from PIL import Image
+
+    source = build_dir / "page-keys-travel-raw"
+    manifest = source / "frames.json"
+    if not manifest.is_file():
+        return
+    destination = build_dir / "page-keys-travel"
+    destination.mkdir(exist_ok=True)
+    frames = json.loads(manifest.read_text())
+    with Image.open(build_dir / "page-keys-raw.png") as raw, Image.open(
+        build_dir / "page-keys-3d.png"
+    ) as graded:
+        for note, bounds in frames.items():
+            base = np.asarray(raw.crop(bounds), dtype=np.int16)
+            grade = np.asarray(graded.crop(bounds), dtype=np.int16)
+            with Image.open(source / f"{note}.png") as frame:
+                pressed = np.asarray(frame.convert("RGB"), dtype=np.int16)
+            color = np.clip(grade + pressed - base, 0, 255).astype(np.uint8)
+            h, w, _ = color.shape
+            y, x = np.ogrid[:h, :w]
+            edge = np.minimum(np.minimum(x, w - 1 - x), np.minimum(y, h - 1 - y))
+            t = np.clip(edge / 8, 0, 1)
+            alpha = np.round(255 * t * t * (3 - 2 * t)).astype(np.uint8)
+            Image.fromarray(np.dstack((color, alpha))).save(destination / f"{note}.png")
+    (destination / "frames.json").write_text(json.dumps(frames, indent=2) + "\n")
