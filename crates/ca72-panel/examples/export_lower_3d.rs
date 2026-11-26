@@ -191,6 +191,7 @@ fn main() {
         "height": STRIP_H,
         "cheek_w": 72.0,
         "rail_h": strip::RAIL,
+        "side_trim_w": art::SIDE_TRIM_W,
         "controls": controls(&arrangement),
     });
     let fonts = Fonts::new();
@@ -203,6 +204,7 @@ fn main() {
     for (name, (fixtures, lettering)) in lower_pages::scenes() {
         let (left, right) = match name {
             "macros" => (15.0, 368.0),
+            "keys" => (ca72_panel::keyboard::AREA[0], ca72_panel::keyboard::AREA[2]),
             _ => (370.0, W - 28.0),
         };
         let mut scene = spec.clone();

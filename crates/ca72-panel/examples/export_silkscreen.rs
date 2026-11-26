@@ -151,8 +151,8 @@ fn main() {
             "bottom_rail_h": bottom_rail_units,
             "total_w": total_w_units,
             "total_h": total_h_units,
-            "trim_left_w": 15.0,
-            "trim_right_w": 28.0,
+            "trim_left_w": art::SIDE_TRIM_W,
+            "trim_right_w": art::SIDE_TRIM_W,
             "trim_bottom_h": 6.0,
         },
         "panel_meters": {

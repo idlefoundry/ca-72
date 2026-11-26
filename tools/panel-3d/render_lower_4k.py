@@ -141,9 +141,10 @@ def build_body(spec, scale, to_world, texture_dir):
             band + (v[1 - axis] + (thickness / 2 - v.z) * 0.14) * across,
         ))
 
+    side = spec["side_trim_w"]
     for name, x, y, w, h, axis in (
-        ("Left", 7.5, (height + rail_h - 6) / 2, 15, height - rail_h - 6, 1),
-        ("Right", width - 14, (height + rail_h - 6) / 2, 28, height - rail_h - 6, 1),
+        ("Left", side / 2, (height + rail_h - 6) / 2, side, height - rail_h - 6, 1),
+        ("Right", width - side / 2, (height + rail_h - 6) / 2, side, height - rail_h - 6, 1),
         ("Foot", width / 2, height - 3, width, 6, 0),
     ):
         size = (w * scale, h * scale)
@@ -452,6 +453,7 @@ def main():
     args = parser.parse_args()
     name = "lower" if args.page is None else f"page-{args.page}"
     spec = json.loads((args.out / f"{name}.json").read_text())
+    spec.setdefault("side_trim_w", 15.0)
     if args.prepare_textures:
         prepare_textures(args.out, spec, name)
     elif args.calibrate:

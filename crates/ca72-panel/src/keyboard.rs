@@ -18,7 +18,7 @@ pub(crate) static BLACK_KEY: &[u8] = include_bytes!("../assets/keyboard/black-ke
 pub const AREA: [f64; 4] = [
     370.0,
     art::PANEL_H + crate::strip::RAIL,
-    art::W - 28.0,
+    art::W - art::SIDE_TRIM_W,
     art::H - 6.0,
 ];
 pub const BED: [f64; 4] = [414.0, 1122.0, 3038.0, 1728.0];
@@ -623,7 +623,11 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
     let text_y = |text: &str, size| fonts.baseline_for_centre(text, size, Weight::Regular, HEADER);
     let octave_y = text_y("OCTAVE", 28.0);
     out += &format!(
-        "<g font-family='{FAMILY}'><rect x='370' y='1041' width='2710' height='728' fill='{}'/><path d='M 371 1041 V 1769' stroke='#c2bdab' stroke-width='2'/><text x='{}' y='{octave_y}' font-size='28' text-anchor='middle' fill='#d9d2c0'>OCTAVE</text>",
+        "<g font-family='{FAMILY}'><rect x='{}' y='{}' width='{}' height='{}' fill='{}'/><path d='M 371 1041 V 1769' stroke='#c2bdab' stroke-width='2'/><text x='{}' y='{octave_y}' font-size='28' text-anchor='middle' fill='#d9d2c0'>OCTAVE</text>",
+        AREA[0],
+        AREA[1],
+        AREA[2] - AREA[0],
+        AREA[3] - AREA[1],
         if scene.skin == Skin::Worn {
             "none"
         } else {

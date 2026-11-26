@@ -12,7 +12,6 @@ from pathlib import Path
 
 # Official CA-72 lower-page boundaries in local lower-panel units (y = y_abs - PANEL_H).
 LEFT_HAND_RIGHT_X = 370.0
-TRIM_RIGHT_W = 28.0
 TRIM_BOTTOM_H = 6.0
 KEYBED_PAD_SIDE = 12.0
 KEYBED_PAD_TOP = 12.0
@@ -526,7 +525,7 @@ def _build_walnut_surround(spec, scale, to_world, cut_bounds, material):
     rail_h, cheek = spec["rail_h"], spec["cheek_w"]
 
     area_x0, area_y0 = LEFT_HAND_RIGHT_X, rail_h
-    area_x1, area_y1 = width - TRIM_RIGHT_W, height - TRIM_BOTTOM_H
+    area_x1, area_y1 = width - spec["side_trim_w"], height - TRIM_BOTTOM_H
     cut_x0, cut_y0, cut_x1, cut_y1 = cut_bounds
 
     # Convert local lower-panel rects to Blender XY (remember Y flips: top y0 -> wy1, bottom y1 -> wy0).
