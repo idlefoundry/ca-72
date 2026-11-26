@@ -19,6 +19,10 @@ pub(super) fn open(mut panel: Preview) -> Result<()> {
         x11rb::connect(None)?
     };
     let screen = &conn.setup().roots[screen];
+    let first_key = conn.setup().min_keycode;
+    let key_count = conn.setup().max_keycode - first_key + 1;
+    let keymap = conn.get_keyboard_mapping(first_key, key_count)?.reply()?;
+    let symbols_per_key = usize::from(keymap.keysyms_per_keycode);
     let depth = screen.root_depth;
     let width = (screen.width_in_pixels * 4 / 5).min(1520);
     let height = (width as u32 * panel.frame.height() / panel.frame.width()) as u16;
@@ -45,6 +49,7 @@ pub(super) fn open(mut panel: Preview) -> Result<()> {
                     | EventMask::BUTTON_PRESS
                     | EventMask::BUTTON_RELEASE
                     | EventMask::POINTER_MOTION
+                    | EventMask::LEAVE_WINDOW
                     | EventMask::KEY_PRESS,
             ),
     )?
@@ -88,7 +93,25 @@ pub(super) fn open(mut panel: Preview) -> Result<()> {
             match event {
                 Event::ClientMessage(e) if e.data.as_data32()[0] == delete => return Ok(()),
                 Event::DestroyNotify(_) => return Ok(()),
-                Event::KeyPress(e) if e.detail == 9 => return Ok(()), // Xorg Escape
+                Event::KeyPress(e) => {
+                    if e.detail == 9 {
+                        if !panel.set_presets_open(false) {
+                            return Ok(());
+                        }
+                    } else if let Some(code) = e.detail.checked_sub(first_key) {
+                        let base = usize::from(code) * symbols_per_key;
+                        let shift = e.state.contains(KeyButMask::SHIFT) && symbols_per_key > 1;
+                        let symbol = keymap
+                            .keysyms
+                            .get(base + usize::from(shift))
+                            .filter(|&&s| s != 0)
+                            .or_else(|| keymap.keysyms.get(base))
+                            .copied();
+                        if let Some(symbol) = symbol {
+                            panel.preset_key(symbol);
+                        }
+                    }
+                }
                 Event::Expose(_) => repaint = true,
                 Event::ConfigureNotify(e) => {
                     viewport = Viewport::fit(e.width, e.height, aspect);
@@ -112,9 +135,11 @@ pub(super) fn open(mut panel: Preview) -> Result<()> {
                     }
                 }
                 Event::MotionNotify(e) => {
+                    let point = viewport.point(e.event_x, e.event_y, &panel.frame);
+                    panel.hover(point);
                     if let Some((x, y)) = previous.as_mut() {
                         panel.motion(
-                            viewport.point(e.event_x, e.event_y, &panel.frame),
+                            point,
                             f32::from(e.event_x) - f32::from(*x),
                             f32::from(e.event_y) - f32::from(*y),
                             e.state.contains(KeyButMask::SHIFT),
@@ -122,6 +147,7 @@ pub(super) fn open(mut panel: Preview) -> Result<()> {
                         (*x, *y) = (e.event_x, e.event_y);
                     }
                 }
+                Event::LeaveNotify(_) => panel.hover(None),
                 Event::ButtonRelease(e) if e.detail == 1 => {
                     panel.release();
                     previous = None;

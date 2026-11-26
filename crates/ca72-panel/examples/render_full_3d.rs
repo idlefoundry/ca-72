@@ -208,6 +208,9 @@ mod preview;
 #[path = "full_3d/pages.rs"]
 mod pages;
 
+#[path = "full_3d/presets.rs"]
+mod presets;
+
 #[cfg(target_os = "linux")]
 #[path = "full_3d/x11.rs"]
 mod x11;
@@ -308,5 +311,25 @@ fn main() {
                 println!("Verified an Expression drag updates the knob, readout and response.");
             }
         }
+    }
+
+    panel.pages.select(BarTarget::Global, &mut panel.scene.bar);
+    if panel.scene.bar.macros {
+        panel.pages.select(BarTarget::Macro, &mut panel.scene.bar);
+    }
+    panel.redraw();
+    let closed = panel.frame.clone();
+    if panel.set_presets_open(true) {
+        assert!(!panel.redraw().is_empty());
+        assert!(panel.redraw().is_empty());
+        panel
+            .frame
+            .save_png(output.join("ca72-presets-4k.png"))
+            .expect("save live preset browser proof");
+        panel.set_presets_open(false);
+        assert!(!panel.redraw().is_empty());
+        assert_eq!(panel.frame.data(), closed.data());
+        assert!(panel.redraw().is_empty());
+        println!("Verified opening and closing the modeled preset browser.");
     }
 }

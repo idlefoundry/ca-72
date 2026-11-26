@@ -12,7 +12,7 @@ BUILD contains lower.json and the lower-print.png silkscreen mask. The body is
 written to lower-raw.png and calibrated to lower-3d.png. The unprinted lamp
 cap sprite is written to lower-tab-lit.png.
 
-Pass --page keys, --page lfo, or --page macros to each step for a
+Pass --page keys, lfo, macros, expression or presets to each step for a
 replacement bay. The JSON, print mask, and renders then use page-<name>
 stems in the same build directory. The pages share the base's lit tab atlas.
 
@@ -292,7 +292,7 @@ def build_fixtures(spec, scale, to_world):
             scope = entry.get("param", "").startswith("lfo_scope_")
             octave = entry.get("role") == "octave"
             base = 0.0064 if rail else 0.00025 if octave else 0.0
-            low_profile = rail or octave
+            low_profile = rail or octave or entry.get("role") == "preset"
             surround = 0.00043 if low_profile else 0.00092
             if scope:
                 surround = 0.0024
@@ -442,7 +442,7 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--face-w", type=int, default=3840)
     parser.add_argument("--samples", type=int, default=160)
-    parser.add_argument("--page", choices=("keys", "lfo", "macros", "expression"))
+    parser.add_argument("--page", choices=("keys", "lfo", "macros", "expression", "presets"))
     parser.add_argument("--oblique", action="store_true", help="also render an angled hardware view")
     parser.add_argument("--knob-glb", type=Path, help="include the standard knob in the angled view")
     parser.add_argument("--upper-manifest", type=Path, help="anchor the light rig to this upper render")

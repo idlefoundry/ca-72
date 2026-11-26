@@ -24,9 +24,9 @@ use crate::svg::{N, Svg, colour, escape, put};
 mod drawer;
 pub use drawer::{
     DrawerRenderer, PresetKey, ROW_H, ROWS_SHOWN, TAG_LINES, Tab, caret_at, chip_centre,
-    drawer_hit, field_centre, in_tags, key_centre, midi_action_centre, midi_centre,
-    midi_row_centre, row_centre, search_centre, star_centre, tab_centre, tab_of, update_centre,
-    update_fits,
+    drawer_hit, drawer_silkscreen, drawer_windows, field_centre, in_tags, key_centre,
+    midi_action_centre, midi_centre, midi_row_centre, row_centre, search_centre, star_centre,
+    tab_centre, tab_of, update_centre, update_fits,
 };
 pub(crate) use drawer::{display_glass, smooth_glass};
 

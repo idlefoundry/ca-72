@@ -21,13 +21,15 @@ mod lower_pages {
     mod keyboard;
     mod lfo;
     mod macros;
+    mod presets;
 
-    pub(super) fn scenes() -> [(&'static str, (Vec<serde_json::Value>, String)); 4] {
+    pub(super) fn scenes() -> [(&'static str, (Vec<serde_json::Value>, String)); 5] {
         [
             ("keys", keyboard::page()),
             ("lfo", lfo::page()),
             ("macros", macros::page()),
             ("expression", expression::page()),
+            ("presets", presets::page()),
         ]
     }
 }
@@ -208,6 +210,7 @@ fn main() {
             "macros" => (15.0, 368.0),
             "keys" => (ca72_panel::keyboard::AREA[0], ca72_panel::keyboard::AREA[2]),
             "expression" => (strip::mpe::LEFT, strip::mpe::RIGHT),
+            "presets" => (art::SIDE_TRIM_W, W - art::SIDE_TRIM_W),
             _ => (370.0, W - 28.0),
         };
         let mut scene = spec.clone();

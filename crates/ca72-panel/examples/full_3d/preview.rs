@@ -11,6 +11,7 @@ pub(super) struct Preview {
     pub(super) lower_state: Panel3DState,
     strip: StripRenderer,
     pub(super) pages: pages::Pages,
+    presets: Option<presets::Presets>,
     under: Pixmap,
     pub(super) scene: StripScene,
     pub(super) frame: Pixmap,
@@ -67,6 +68,7 @@ impl Preview {
             .expect("strip inside the cheeks");
         let mut frame = Pixmap::new(upper.frame().width(), top as u32 + h).expect("full panel");
         put(&mut frame, lower.frame(), 0, top);
+        let presets = presets::Presets::load(lower_dir, scale, left, top);
 
         let mut panel = Self {
             upper,
@@ -75,6 +77,7 @@ impl Preview {
             lower_state,
             strip,
             pages,
+            presets,
             under,
             scene: demo_strip(),
             frame,
@@ -144,6 +147,22 @@ impl Preview {
                 y1: y1 + self.top,
             });
         }
+        if let Some(presets) = &mut self.presets
+            && presets.shown
+            && !self.scene.bar.open
+        {
+            copy(
+                &mut self.frame,
+                self.strip.frame(),
+                presets.bounds,
+                -self.left,
+                -self.top,
+                0,
+                0,
+            );
+            damage.push(presets.bounds);
+            presets.shown = false;
+        }
         self.pages.paint(
             &mut self.frame,
             self.strip.frame(),
@@ -151,7 +170,43 @@ impl Preview {
             self.top,
             &mut damage,
         );
+        if self.scene.bar.open
+            && let Some(presets) = &mut self.presets
+        {
+            presets.paint(&mut self.frame, &mut damage);
+        }
         damage
+    }
+
+    pub(super) fn set_presets_open(&mut self, open: bool) -> bool {
+        let Some(presets) = &mut self.presets else {
+            return false;
+        };
+        if self.scene.bar.open == open {
+            return false;
+        }
+        presets.clear_pointer();
+        self.scene.bar.open = open;
+        self.scene.bar.below = open;
+        true
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn hover(&mut self, point: Option<(f32, f32)>) {
+        if self.scene.bar.open
+            && let Some(presets) = &mut self.presets
+        {
+            presets.hover(point);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn preset_key(&mut self, symbol: u32) {
+        if self.scene.bar.open
+            && let Some(presets) = &mut self.presets
+        {
+            presets.key(symbol);
+        }
     }
 
     fn clock(&self) -> Instant {
@@ -165,6 +220,12 @@ impl Preview {
         self.drag_lower = y >= self.top as f32;
         self.drag_page = false;
         if self.drag_lower {
+            if self.scene.bar.open
+                && let Some(presets) = &mut self.presets
+                && presets.press(x, y, &mut self.scene.bar)
+            {
+                return;
+            }
             let ly = y - self.top as f32;
             let scale = self.lower.manifest().face.px_per_unit;
             let target = self.strip.hit(
@@ -172,6 +233,16 @@ impl Preview {
                 PANEL_H + f64::from(ly / scale),
             );
             if let Some(StripTarget::Bar(target)) = target {
+                if target == BarTarget::Name {
+                    self.set_presets_open(!self.scene.bar.open);
+                    return;
+                }
+                if matches!(
+                    target,
+                    BarTarget::Global | BarTarget::Keyboard | BarTarget::Lfo | BarTarget::Mpe
+                ) {
+                    self.set_presets_open(false);
+                }
                 self.pages.select(target, &mut self.scene.bar);
                 return;
             }
@@ -241,6 +312,12 @@ impl Preview {
     #[cfg(target_os = "linux")]
     pub(super) fn scroll(&mut self, x: f32, y: f32, direction: f32, shift: bool) {
         if y >= self.top as f32 {
+            if self.scene.bar.open
+                && let Some(presets) = &mut self.presets
+                && presets.scroll(x, y, direction)
+            {
+                return;
+            }
             let manifest = self.lower.manifest();
             let y = y - self.top as f32;
             if self.pages.scroll(x, y, direction, shift) {
