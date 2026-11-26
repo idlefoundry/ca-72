@@ -467,7 +467,7 @@ impl Pane {
                 }
                 let ink = if *lit { "#251205" } else { "#d6b18b" };
                 let body = text_svg(&f.label, w, h, ink, 0.39);
-                self.print(r, &body);
+                self.print(r, &body, false);
             }
             Content::Trace(values, index) => {
                 let inks = [
@@ -502,21 +502,27 @@ impl Pane {
                     _ => "#95643c",
                 };
                 let body = text_svg(text, w, h, ink, 0.46);
-                self.print(r, &body);
+                self.print(r, &body, f.param.starts_with("lfo_screen_"));
             }
         }
     }
 
-    fn print(&mut self, r: FaceRect, body: &str) {
+    fn print(&mut self, r: FaceRect, body: &str, center_ink: bool) {
         let w = r.x1 - r.x0;
         let h = r.y1 - r.y0;
         let doc = format!(
             "<svg xmlns='http://www.w3.org/2000/svg' width='{w}' height='{h}'>{body}</svg>"
         );
         let tree = usvg::Tree::from_str(&doc, &self.options).expect("live display text");
+        let (mut x, mut y) = (r.x0 as f32, r.y0 as f32);
+        if center_ink && let Some(usvg::Node::Text(text)) = tree.root().children().first() {
+            let ink = text.flattened().abs_bounding_box();
+            x += (w as f32 - ink.left() - ink.right()) / 2.0;
+            y += (h as f32 - ink.top() - ink.bottom()) / 2.0;
+        }
         resvg::render(
             &tree,
-            Transform::from_translate(r.x0 as f32, r.y0 as f32),
+            Transform::from_translate(x, y),
             &mut self.picture.as_mut(),
         );
     }

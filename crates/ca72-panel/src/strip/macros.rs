@@ -572,21 +572,62 @@ pub fn name_dots(
         shown -= 1;
     }
     let start = (shown - n) / 2;
-    let left = x + (w - (6 * shown - 1) as f64 * DOT) / 2.0;
-    let top = y + h / 2.0 - 0.4 * DOT - 3.0 * DOT;
+    let bits_at = |i: usize, row: usize| {
+        let k = i.wrapping_sub(start);
+        if caret && k == glyphs.len() && row == 7 {
+            0b11111
+        } else {
+            glyphs.get(k).map_or(0, |g| g[row])
+        }
+    };
+    let mut ink = [usize::MAX, usize::MAX, 0, 0];
+    for i in 0..shown {
+        for row in 0..9 {
+            let bits = bits_at(i, row);
+            for col in 0..5 {
+                if bits >> (4 - col) & 1 == 1 {
+                    let dot = 6 * i + col;
+                    ink = [
+                        ink[0].min(dot),
+                        ink[1].min(row),
+                        ink[2].max(dot),
+                        ink[3].max(row),
+                    ];
+                }
+            }
+        }
+    }
+    let (cx, cy) = if ink[0] <= ink[2] {
+        (
+            (ink[0] + ink[2]) as f64 / 2.0,
+            (ink[1] + ink[3]) as f64 / 2.0,
+        )
+    } else {
+        ((6 * shown - 2) as f64 / 2.0, 4.0)
+    };
+    let left = x + w / 2.0 - cx * DOT;
+    let ink_rows = ink[3].saturating_sub(ink[1]).max(1) as f64;
+    let pitch_y = DOT.min((h - 2.0 * DOT * 0.36 * 2.1) / ink_rows);
+    let top = y + h / 2.0 - cy * pitch_y;
     let r = (DOT * 0.36 * s) as f32;
     let (mut unlit, mut halo, mut core) =
         (PathBuilder::new(), PathBuilder::new(), PathBuilder::new());
     for i in 0..shown {
         for j in 0..9 {
+            let bits = bits_at(i, j);
+            let dot_y = top + j as f64 * pitch_y;
             for col in 0..5 {
-                let px = ((left + (6 * i + col) as f64 * DOT) * s) as f32;
-                let py = ((top + j as f64 * DOT) * s) as f32;
+                let dot_x = left + (6 * i + col) as f64 * DOT;
+                let margin = DOT * 0.36;
+                if !(x + margin..=x + w - margin).contains(&dot_x)
+                    || !(y + margin..=y + h - margin).contains(&dot_y)
+                {
+                    continue;
+                }
+                let px = (dot_x * s) as f32;
+                let py = (dot_y * s) as f32;
                 unlit.push_circle(px, py, r);
-                let k = i.wrapping_sub(start);
-                let lit = glyphs.get(k).is_some_and(|g| g[j] >> (4 - col) & 1 == 1)
-                    || (caret && k == glyphs.len() && j == 7);
-                if lit {
+                if bits >> (4 - col) & 1 == 1 {
                     halo.push_circle(px, py, r * 2.1);
                     core.push_circle(px, py, r);
                 }
