@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use plugin_kit_materials::glass;
-use resvg::tiny_skia::Pixmap;
+use resvg::tiny_skia::{IntRect, Pixmap};
 use resvg::usvg;
 
 use super::lower::{self, Look};
@@ -163,6 +163,42 @@ pub fn readout(i: usize) -> (f64, f64, f64, f64) {
         super::readout_width(CELLS),
         READOUT.1,
     )
+}
+
+/// The four-cell segmented lettering and its glow, clipped to the modeled glass.
+pub fn readout_overlay(
+    options: &usvg::Options<'_>,
+    scale: f64,
+    (width, height): (u32, u32),
+    text: &str,
+) -> Option<Pixmap> {
+    let window = (
+        0.0,
+        0.0,
+        f64::from(width) / scale,
+        f64::from(height) / scale,
+    );
+    let reading = readout_cells(options, scale, window, CELLS, text, true, &Lamp::ORANGE)?;
+    let glass = IntRect::from_xywh(-reading.left, -reading.top, width, height)?;
+    reading.patch.clone_rect(glass)
+}
+
+/// The Expression text screens use the rail's amber dot matrix.
+pub fn screen_overlay(scale: f64, (width, height): (u32, u32), text: &str) -> Option<Pixmap> {
+    let mut glass = Pixmap::new(width, height)?;
+    screen_text(
+        &mut glass,
+        scale,
+        (
+            0.0,
+            super::worn::CAP_LIFT,
+            f64::from(width) / scale,
+            f64::from(height) / scale,
+        ),
+        text,
+        &Lamp::ORANGE,
+    );
+    Some(glass)
 }
 
 /// What a pointer finds on the drawer (its knobs are the panel's controls:

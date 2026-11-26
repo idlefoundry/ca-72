@@ -50,6 +50,8 @@ enum Content {
     Trace([f32; 7], usize),
     Macro(usize),
     Display(String),
+    ExpressionReadout(String),
+    ExpressionScreen(&'static str),
     Response(mpe::Response),
 }
 
@@ -430,12 +432,12 @@ impl Pane {
                 5 => format!("{:.0}", f64::from(self.value(mpe::KNOB_PARAMS[i])) * 100.0),
                 _ => format!("{:.0}", (shift * 100.0).round() + 0.0),
             };
-            return Content::Display(text);
+            return Content::ExpressionReadout(text);
         }
         match fixture.param.as_str() {
-            "expression_input" => return Content::Display(mpe::Input::Mpe.text().into()),
-            "expression_last" => return Content::Display("97".into()),
-            "expression_modulates" => return Content::Display("3 KNOBS".into()),
+            "expression_input" => return Content::ExpressionScreen(mpe::Input::Mpe.text()),
+            "expression_last" => return Content::ExpressionScreen("97"),
+            "expression_modulates" => return Content::ExpressionScreen("3 KNOBS"),
             "expression_response" => {
                 return Content::Response(mpe::Response {
                     curve: f64::from(self.value("velocity_curve")) * 2.0 - 1.0,
@@ -522,11 +524,29 @@ impl Pane {
                 let (ink, size, center_ink) = match f.param.as_str() {
                     "octave" => ("#ffae55", 0.74, true),
                     "octave_down" | "octave_up" => ("#e4d8bf", 0.46, false),
-                    id if id.starts_with("expression_") => ("#ffab55", 0.54, true),
                     _ => ("#95643c", 0.46, true),
                 };
                 let body = text_svg(text, w, h, ink, size);
                 self.print(r, &body, center_ink);
+            }
+            Content::ExpressionReadout(text) => {
+                if let Some(ink) = mpe::readout_overlay(
+                    &self.options,
+                    f64::from(self.scale),
+                    ((r.x1 - r.x0) as u32, (r.y1 - r.y0) as u32),
+                    text,
+                ) {
+                    put(&mut self.picture, &ink, r.x0, r.y0);
+                }
+            }
+            Content::ExpressionScreen(text) => {
+                if let Some(ink) = mpe::screen_overlay(
+                    f64::from(self.scale),
+                    ((r.x1 - r.x0) as u32, (r.y1 - r.y0) as u32),
+                    text,
+                ) {
+                    put(&mut self.picture, &ink, r.x0, r.y0);
+                }
             }
             Content::Response(response) => {
                 let body = format!(
