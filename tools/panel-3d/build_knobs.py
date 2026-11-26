@@ -1,0 +1,570 @@
+#!/usr/bin/env python3
+"""Build metric knob GLBs from spec.json. Use --verify to render the comparison sheet."""
+
+import argparse
+import json
+import math
+import sys
+from itertools import pairwise
+from pathlib import Path
+
+import bpy
+import bmesh
+from mathutils import Vector
+from mathutils.geometry import delaunay_2d_cdt
+
+from artifacts import output_dir
+from shaders_knobs import apply_knob_shaders, knob_materials, linear_rgb
+
+
+BODY, BEVEL, CAP, INK = range(4)
+
+
+def mix(a, b, t):
+    return a + (b - a) * t
+
+
+def unit(t):
+    return min(1.0, max(0.0, t))
+
+
+def smoothstep(t):
+    t = unit(t)
+    return t * t * (3.0 - 2.0 * t)
+
+
+class KnobMesh:
+    def __init__(self):
+        self.vertices = []
+        self.faces = []
+        self.slots = []
+        self.creases = set()
+
+    def loop(self, points):
+        start = len(self.vertices)
+        self.vertices.extend(points)
+        return list(range(start, len(self.vertices)))
+
+    def face(self, vertices, slot):
+        self.faces.append(vertices)
+        self.slots.append(slot)
+
+    def bridge(self, lower, upper, slot=BODY, *, ink_segments=()):
+        for i in range(len(lower)):
+            j = (i + 1) % len(lower)
+            self.face((lower[i], lower[j], upper[j], upper[i]), INK if i in ink_segments else slot)
+
+    def crease(self, ring):
+        self.creases.update((min(a, b), max(a, b)) for a, b in zip(ring, ring[1:] + ring[:1]))
+
+    def fan(self, ring, z, slot=BODY):
+        center, = self.loop([(0, 0, z)])
+        for i, a in enumerate(ring):
+            self.face((center, a, ring[(i + 1) % len(ring)]), slot)
+
+    def top_surface(self, outside, inside, mark, samples, height, marked_slot):
+        """Triangulate a top annulus around the in-mesh print or inlay boundary."""
+        vertices = outside + inside + mark + self.loop((x, y, height(x, y)) for x, y in samples)
+        contours = (
+            list(range(len(outside))),
+            list(range(len(outside), len(outside) + len(inside))),
+            list(range(len(outside) + len(inside), len(outside) + len(inside) + len(mark))),
+        )
+        _, _, faces, sources, _, regions = delaunay_2d_cdt(
+            [Vector(self.vertices[i][:2]) for i in vertices], [], contours, 1, 1e-9
+        )
+        if any(len(source) != 1 for source in sources):
+            raise ValueError("Knob contours intersect or contain duplicate points")
+        indices = [vertices[source[0]] for source in sources]
+        for face, region in zip(faces, regions, strict=True):
+            if 0 not in region or 1 in region:
+                continue
+            slot = marked_slot if 2 in region else BODY
+            if slot is not None:
+                self.face(tuple(indices[i] for i in face), slot)
+
+    def create(self, name, materials):
+        mesh = bpy.data.meshes.new(name)
+        mesh.from_pydata(self.vertices, [], self.faces)
+        if mesh.validate():
+            raise ValueError(f"{name}: invalid mesh")
+        for material in materials:
+            mesh.materials.append(material)
+        for poly, slot in zip(mesh.polygons, self.slots, strict=True):
+            poly.material_index = slot
+            poly.use_smooth = True
+
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(mesh)
+            bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+            for edge in bm.edges:
+                a, b = (vert.index for vert in edge.verts)
+                if (min(a, b), max(a, b)) in self.creases:
+                    edge.smooth = False
+            assert_solid(bm, name)
+            bm.to_mesh(mesh)
+        finally:
+            bm.free()
+
+        mesh.update()
+        obj = bpy.data.objects.new(name, mesh)
+        bpy.context.collection.objects.link(obj)
+        return obj
+
+
+def assert_solid(bm, name):
+    if any(not edge.is_manifold or not edge.is_contiguous for edge in bm.edges):
+        raise ValueError(f"{name}: open or inconsistently wound edges")
+    if bm.calc_volume(signed=True) <= 0:
+        raise ValueError(f"{name}: non-positive signed volume")
+
+    # A single connected shell also rules out buried pegs and intersecting wedge parts.
+    pending = [next(iter(bm.verts))]
+    visited = set(pending)
+    while pending:
+        vertex = pending.pop()
+        for edge in vertex.link_edges:
+            neighbor = edge.other_vert(vertex)
+            if neighbor not in visited:
+                visited.add(neighbor)
+                pending.append(neighbor)
+    if len(visited) != len(bm.verts):
+        raise ValueError(f"{name}: disconnected shells")
+
+
+def angles(flutes, segments_per_flute):
+    count = flutes * segments_per_flute
+    return [math.tau * i / count for i in range(count)]
+
+
+def ring(mesh, azimuths, radius, z, flutes=0, depth=0.0):
+    return mesh.loop(
+        (*polar(radius - depth * abs(math.sin(flutes * a / 2)) ** 1.35, a), z)
+        for a in azimuths
+    )
+
+
+def polar(radius, azimuth):
+    # Zero azimuth is +Y on the faceplate, or -Z in the Y-up GLB.
+    return -radius * math.sin(azimuth), radius * math.cos(azimuth)
+
+
+def cap_lip_radius(cap_radius):
+    return cap_radius * 1.063
+
+
+def add_cap(mesh, azimuths, lip, radius, height):
+    # An exposed 45-degree chamfer sits inside a narrow molding relief. The
+    # cap face has a 0.125 mm dish, measured from the chamfer to its center.
+    edge_z = height - 0.00004
+    groove_z = height - radius * 0.048
+    chamfer = radius * 0.018
+    arris = radius * 0.005
+    face_radius = radius - chamfer - arris
+    profile = [
+        (radius * 1.049, height - radius * 0.004, BODY),
+        (radius * 1.025, groove_z, BODY),
+        (radius, groove_z, BODY),
+        (radius, edge_z - chamfer - arris * 0.42, BEVEL),
+        (radius - chamfer, edge_z - arris * 0.42, BEVEL),
+        (face_radius, edge_z, BEVEL),
+    ]
+    for r, z, slot in profile:
+        next_ring = ring(mesh, azimuths, r, z)
+        mesh.bridge(lip, next_ring, slot)
+        mesh.crease(next_ring)
+        lip = next_ring
+    dish = 0.000125
+    for step in range(15, 0, -1):
+        t = step / 16
+        next_ring = ring(mesh, azimuths, face_radius * t, edge_z - dish * (1.0 - t * t))
+        mesh.bridge(lip, next_ring, CAP)
+        lip = next_ring
+    mesh.fan(lip, edge_z - dish, CAP)
+
+
+def printed_dot(mesh, azimuths, outer, inner, center, radius, height, inside, outside):
+    mark = mesh.loop(
+        (x, center + dy, height(x, center + dy))
+        for x, dy in (polar(radius, a) for a in angles(1, 48))
+    )
+    samples = []
+    for band in range(1, 7):
+        for a, limit in zip(azimuths, outside, strict=True):
+            x, y = polar(mix(inside, limit, band / 7), a)
+            if abs(math.hypot(x, y - center) - radius) > radius * 0.08:
+                samples.append((x, y))
+    mesh.top_surface(outer, inner, mark, samples, height, INK)
+
+
+def build_skirted(name, dim, materials):
+    base, height = dim["base_radius"], dim["height"]
+    cap = dim["cap_radius"]
+    flutes = dim["flute_count"]
+    azimuths = angles(flutes, 40)
+    grip = max(base * 0.817, cap * 1.28)
+    depth = min(base * 0.098, (grip * 0.933 - cap * 1.085) / 0.78)
+    dot_radius, dot_y = dim["dot_radius"], dim["dot_radius_pos"]
+    mesh = KnobMesh()
+
+    # The second witness dot sits on the widely flared flange below the grip.
+    skirt_inside = grip * 1.015
+    skirt_outside = base * 0.981
+    skirt_low, skirt_high = height * 0.082, height * 0.232
+
+    def skirt_z(x, y):
+        t = (skirt_outside - math.hypot(x, y)) / (skirt_outside - skirt_inside)
+        return mix(skirt_low, skirt_high, t * (0.70 + 0.30 * t))
+
+    outer = [
+        ring(mesh, azimuths, base * 0.969, 0.0),
+        ring(mesh, azimuths, base * 0.993, height * 0.009),
+        ring(mesh, azimuths, base, height * 0.027),
+        ring(mesh, azimuths, base * 0.998, height * 0.058),
+        ring(mesh, azimuths, skirt_outside, skirt_low),
+    ]
+    mesh.fan(outer[0], 0.0)
+    for a, b in pairwise(outer):
+        mesh.bridge(a, b)
+    mesh.crease(outer[-1])
+
+    inner = ring(mesh, azimuths, skirt_inside, skirt_high)
+    printed_dot(mesh, azimuths, outer[-1], inner, dot_y, dot_radius,
+                skirt_z, skirt_inside, [skirt_outside] * len(azimuths))
+
+    # Deep, broad scallops cut into the nearly vertical sides. The narrow crests
+    # continue to the top web and make each lobe legible from straight above.
+    mesh.crease(inner)
+    profile = [
+        (grip * 0.990, 0.235, 0.75, True),
+        (grip * 0.980, 0.273, 1.00, False),
+        (grip * 0.967, 0.930, 1.00, False),
+        (grip * 0.959, 0.969, 1.00, False),
+    ]
+    for r, z, d, sharp in profile:
+        next_ring = ring(mesh, azimuths, r, height * z, flutes, depth * d)
+        mesh.bridge(inner, next_ring)
+        if sharp:
+            mesh.crease(next_ring)
+        inner = next_ring
+
+    lip = cap_lip_radius(cap)
+    web = ring(mesh, azimuths, grip * 0.945, height, flutes, depth * 0.78)
+    mesh.bridge(inner, web)
+    mesh.crease(web)
+    cap_lip = ring(mesh, azimuths, lip, height)
+    radius_at = [math.hypot(*mesh.vertices[index][:2]) for index in web]
+    top_dot_y = (lip + radius_at[0]) * 0.5
+    top_dot_r = min(dot_radius, (radius_at[0] - lip) * 0.33)
+    printed_dot(mesh, azimuths, web, cap_lip, top_dot_y, top_dot_r,
+                lambda x, y: height, lip, radius_at)
+    add_cap(mesh, azimuths, cap_lip, cap, height)
+    return mesh.create(name, materials)
+
+
+def capsule_loop(y0, y1, width):
+    """Footprint of a stripe with round printed ends; y0/y1 are arc centers."""
+    for center, start in ((y1, 0.0), (y0, math.pi)):
+        for i in range(17):
+            a = start + math.pi * i / 16
+            yield width * math.cos(a), center + width * math.sin(a)
+
+
+def build_pointer(name, dim, materials):
+    body, tip, height = dim["body_radius"], dim["tip_radius"], dim["height"]
+    cap = dim["cap_radius"]
+    lip = cap_lip_radius(cap)
+    mesh = KnobMesh()
+    scale = dim["scale"]
+    half_width = 0.00028 * scale
+
+    # The selector is a club-shaped grip on a circular flange. The narrow end
+    # carries the reading line, and the broad countergrip has a concave back.
+    hub = cap * 1.275
+    front = min(tip, body) * 0.976
+    rear_center = body * 0.815
+    rear_scoop = 0.43 / body
+    ink_angle = math.atan2(half_width, front)
+    azimuths = sorted([*angles(1, 384), ink_angle, math.tau - ink_angle])
+    ink_segments = {
+        i for i, a in enumerate(azimuths) if a < ink_angle or a >= math.tau - ink_angle
+    }
+
+    def outline(a):
+        sine = abs(math.sin(a))
+        cosine = math.cos(a)
+        if cosine > 0.0:
+            grip = min(front, body * 0.39 / (sine + 0.29 * cosine))
+        else:
+            grip = min(body * 0.976, body * 0.421 / (sine - 0.028 * cosine))
+            discriminant = cosine ** 2 - 4 * rear_scoop * sine ** 2 * rear_center
+            if discriminant > 0.0:
+                grip = min(grip, 2 * rear_center / (-cosine + math.sqrt(discriminant)))
+        seam = body * 0.10
+        blend = max(seam - abs(grip - hub), 0.0) / seam
+        return max(grip, hub) + blend * blend * seam * 0.25
+
+    def deck_z(x, y):
+        front_slope = 0.10 * smoothstep((y - lip) / (front - lip))
+        rear_slope = 0.16 * smoothstep((-y - lip) / (body - lip))
+        neck = smoothstep((math.hypot(x, y) - lip) / (body * 0.18))
+        shoulder = 0.085 * neck * smoothstep((abs(x) - lip * 0.52) / (body * 0.19))
+        return height * (1.0 - front_slope - rear_slope - shoulder)
+
+    deck_outline = [outline(a) - body * 0.018 for a in azimuths]
+    deck_points = [polar(r, a) for a, r in zip(azimuths, deck_outline, strict=True)]
+    outer = [
+        ring(mesh, azimuths, body * 0.970, 0.0),
+        ring(mesh, azimuths, body * 0.995, height * 0.011),
+        ring(mesh, azimuths, body, height * 0.048),
+        ring(mesh, azimuths, body * 0.995, height * 0.072),
+    ]
+    # Draft the skirt in toward the grip. Two upper rings form a short bevel
+    # above the steep walls of the moulding.
+    for expansion, z_fraction in ((0.042, 0.18), (0.031, 0.21)):
+        outer.append(mesh.loop(
+            (*polar(min(body * 0.986, r + expansion * body), a), height * z_fraction)
+            for a, r in zip(azimuths, deck_outline, strict=True)
+        ))
+    wall_top = mesh.loop(
+        (*polar(min(body * 0.988, r + body * 0.023), a), deck_z(*point) - 0.00030 * dim["scale"])
+        for a, r, point in zip(azimuths, deck_outline, deck_points, strict=True)
+    )
+    deck = mesh.loop((*point, deck_z(*point)) for point in deck_points)
+    # The indicator wraps over the chamfer and ends shortly down the nose.
+    # Insert a ring in the plane of the wall to terminate the mark.
+    runout = []
+    for lower, upper in zip(outer[-1], wall_top, strict=True):
+        a, b = mesh.vertices[lower], mesh.vertices[upper]
+        t = 1.0 - 0.00056 * scale / (b[2] - a[2])
+        runout.append(tuple(mix(x, y, t) for x, y in zip(a, b, strict=True)))
+    outer.append(mesh.loop(runout))
+    mesh.fan(outer[0], 0.0)
+    for a, b in pairwise(outer):
+        mesh.bridge(a, b)
+    mesh.bridge(outer[-1], wall_top, ink_segments=ink_segments)
+    mesh.bridge(wall_top, deck, ink_segments=ink_segments)
+    mesh.crease(wall_top)
+    mesh.crease(deck)
+
+    # Cut the stripe into the curved surface. The paint shares its groove floor
+    # with the surrounding dark walls, so the GLB stays one watertight shell.
+    y0 = lip + 0.00045 * scale
+    groove_width = half_width + 0.00007 * scale
+    groove_depth = 0.000065 * scale
+    y1 = deck_outline[0] - groove_width - 0.000055 * scale
+    groove = mesh.loop((x, y, deck_z(x, y)) for x, y in capsule_loop(y0, y1, groove_width))
+    inlay = mesh.loop(
+        (x, y, deck_z(x, y) - groove_depth)
+        for x, y in capsule_loop(y0, y1, half_width)
+    )
+    cap_lip = ring(mesh, azimuths, lip, height)
+    samples = []
+    for row in range(1, 26):
+        t = row / 26
+        for a, r in zip(azimuths, deck_outline, strict=True):
+            x, y = polar(mix(lip, r, t), a)
+            dy = y - min(y1, max(y0, y))
+            if math.hypot(x, dy) > groove_width + body * 0.006:
+                samples.append((x, y))
+    mesh.top_surface(deck, cap_lip, groove, samples, deck_z, None)
+    mesh.bridge(groove, inlay)
+    mesh.crease(groove)
+    mesh.crease(inlay)
+    floor = mesh.loop(
+        (0.0, y, deck_z(0.0, y) - groove_depth)
+        for y in (y0, y1)
+    )
+    half = len(inlay) // 2
+    for center, arc in ((floor[1], inlay[:half]), (floor[0], inlay[half:])):
+        for a, b in pairwise(arc):
+            mesh.face((center, a, b), INK)
+    mesh.face((inlay[0], floor[1], floor[0], inlay[-1]), INK)
+    mesh.face((inlay[half - 1], inlay[half], floor[0], floor[1]), INK)
+    add_cap(mesh, azimuths, cap_lip, cap, height)
+    return mesh.create(name, materials)
+
+
+def export_glb(obj, path):
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    result = bpy.ops.export_scene.gltf(
+        filepath=str(path), export_format="GLB", export_yup=True,
+        export_normals=True, use_selection=True,
+    )
+    if result != {"FINISHED"}:
+        raise RuntimeError(f"Failed to export {path}")
+
+
+def add_faceplate():
+    """Plain pebbled black faceplate for the shadow and material comparison."""
+    bpy.ops.mesh.primitive_plane_add(size=0.5)
+    plate = bpy.context.object
+    plate.name = "Black enamel faceplate"
+    material = bpy.data.materials.new(plate.name)
+    plate.data.materials.append(material)
+    material.use_nodes = True
+    tree = material.node_tree
+    bsdf = tree.nodes.get("Principled BSDF")
+    bsdf.inputs["Base Color"].default_value = linear_rgb((23, 22, 20))
+    bsdf.inputs["Roughness"].default_value = 0.64
+    bsdf.inputs["Specular IOR Level"].default_value = 0.22
+    bsdf.inputs["IOR"].default_value = 1.44
+    coords = tree.nodes.new("ShaderNodeTexCoord")
+    pebble = tree.nodes.new("ShaderNodeTexNoise")
+    # The plane primitive has unit object scale, so these are cycles per meter.
+    pebble.inputs["Scale"].default_value = 4600
+    pebble.inputs["Detail"].default_value = 2.0
+    tree.links.new(coords.outputs["Object"], pebble.inputs["Vector"])
+    relief = tree.nodes.new("ShaderNodeBump")
+    relief.inputs["Strength"].default_value = 0.40
+    relief.inputs["Distance"].default_value = 0.000097
+    tree.links.new(pebble.outputs["Fac"], relief.inputs["Height"])
+    tree.links.new(relief.outputs["Normal"], bsdf.inputs["Normal"])
+
+
+def import_knob(path):
+    before = set(bpy.data.objects)
+    result = bpy.ops.import_scene.gltf(filepath=str(path))
+    imported = set(bpy.data.objects) - before
+    if result != {"FINISHED"} or len(imported) != 1:
+        raise ValueError(f"{path.name}: expected one mesh node")
+    obj = imported.pop()
+    if obj.type != "MESH" or obj.name != path.stem:
+        raise ValueError(f"{path.name}: unexpected mesh name or type")
+
+    # glTF primitives split vertices at material boundaries. Check their
+    # reassembled geometry on the actual exported and re-imported artifact.
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(obj.data)
+        bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=1e-8)
+        assert_solid(bm, obj.name)
+    finally:
+        bm.free()
+    apply_knob_shaders(obj.data.materials)
+    return obj
+
+
+def verification_sheet(out, dims, tile=928, samples=128):
+    from tempfile import TemporaryDirectory
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    from studio_rig import make_ortho_cam, reset_scene, setup_studio_lights
+
+    worn = Path(__file__).resolve().parents[2] / "crates/ca72-panel/assets/worn"
+    gap = round(tile * 24 / 928)
+    margin = round(tile * 28 / 928)
+    label_height = round(tile * 50 / 928)
+    header_height = round(tile * 140 / 928)
+    sheet = Image.new(
+        "RGB", (tile * 4 + gap * 3 + margin * 2, header_height + 3 * (tile + label_height + gap)),
+        "#171819",
+    )
+    text = ImageDraw.Draw(sheet)
+    title_font = ImageFont.load_default(size=round(tile * 46 / 928))
+    label_font = ImageFont.load_default(size=round(tile * 27 / 928))
+    text.text((margin, margin), "CA-72  /  Rotary controls", fill="#f0eee8", font=title_font)
+    text.text(
+        (margin, margin * 2 + round(tile * 34 / 928)),
+        "Worn artwork and Cycles renders on a pebbled faceplate",
+        fill="#b9b6af", font=label_font,
+    )
+
+    def place(row, col, image, label):
+        x = margin + col * (tile + gap)
+        y = header_height + row * (tile + label_height + gap)
+        sheet.paste(image, (x, y))
+        text.text((x, y + tile + gap / 2), label, fill="#e8e4dc", font=label_font)
+
+    scene, backend = reset_scene(samples=samples)
+    scene.render.image_settings.compression = 35
+    setup_studio_lights(scene)
+    add_faceplate()
+    print(f"Rendering knob comparison on {backend}", flush=True)
+
+    with TemporaryDirectory(prefix="ca72-knobs-") as tmp:
+        path = Path(tmp) / "frame.png"
+        scene.render.filepath = str(path)
+
+        def frame(radius, tilt=0.0):
+            cam = make_ortho_cam(scene, 0.0, 0.0, tile, tile, tile / (2.64 * radius))
+            if tilt:
+                center = Vector((0.0, 0.0, 0.0055))
+                angle = math.radians(tilt)
+                cam.location = center + Vector((0.0, math.sin(angle), math.cos(angle))) * 0.40
+                cam.rotation_euler = (center - cam.location).to_track_quat("-Z", "Y").to_euler()
+            bpy.ops.render.render(write_still=True)
+            bpy.data.objects.remove(cam, do_unlink=True)
+            with Image.open(path) as rendered:
+                return rendered.convert("RGB")
+
+        for row, (name, reference, second_angle) in enumerate((
+            ("knob_std", "knob.png", -60),
+            ("knob_big", "knob-big.png", 45),
+            ("knob_pointer", "pointer.png", -50),
+        )):
+            dim = dims[name]
+            radius = dim.get("base_radius", dim.get("body_radius"))
+            plate = frame(radius)
+            with Image.open(worn / reference) as sprite:
+                full = round(tile * 2.0 / 2.64)
+                if name == "knob_pointer":
+                    # The sprite is centered on the shaft and padded horizontally.
+                    left, _, right, _ = sprite.getbbox()
+                    full = round(full * sprite.width / (right - left))
+                scaled = sprite.resize((full, full), Image.Resampling.LANCZOS)
+                offset = (tile - full) // 2
+                plate.paste(scaled, (offset, offset), scaled)
+            place(row, 0, plate, f"Worn 2D  ·  {reference}")
+
+            obj = import_knob(out / "assets" / f"{name}.glb")
+            obj.rotation_mode = "XYZ"
+            for col, angle in enumerate((0, second_angle), 1):
+                obj.rotation_euler.z = math.radians(-angle)
+                label = f"{name}  ·  {angle:+d}°" if angle else f"{name}  ·  0°"
+                place(row, col, frame(radius), label)
+
+            if name == "knob_pointer":
+                bpy.data.objects.remove(obj, do_unlink=True)
+                small = import_knob(out / "assets/knob_pointer_small.glb")
+                place(row, 3, frame(radius), "knob_pointer_small  ·  0°")
+                bpy.data.objects.remove(small, do_unlink=True)
+            else:
+                obj.rotation_euler.z = 0.0
+                place(row, 3, frame(radius, tilt=43.0), f"{name}  ·  oblique")
+                bpy.data.objects.remove(obj, do_unlink=True)
+
+    sheet.save(out / "verify_knobs.png")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--verify", action="store_true", help="Render the comparison sheet (requires Pillow)")
+    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
+    args = parser.parse_args(argv)
+    args.out = output_dir(args.out)
+
+    dims = json.loads((args.out / "spec.json").read_text())["part_dimensions_meters"]
+    assets = args.out / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.context.scene.unit_settings.system = "METRIC"
+    materials = knob_materials()
+    for build, names in (
+        (build_skirted, ("knob_std", "knob_big")),
+        (build_pointer, ("knob_pointer", "knob_pointer_small")),
+    ):
+        for name in names:
+            obj = build(name, dims[name], materials)
+            export_glb(obj, assets / f"{name}.glb")
+            bpy.data.objects.remove(obj, do_unlink=True)
+    if args.verify:
+        verification_sheet(args.out, dims)
+
+
+if __name__ == "__main__":
+    main()

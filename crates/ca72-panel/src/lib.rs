@@ -14,6 +14,7 @@ pub mod learn;
 pub mod look;
 pub mod modulation;
 pub mod notes;
+pub mod panel3d;
 pub mod presets;
 pub mod render;
 pub mod skin;

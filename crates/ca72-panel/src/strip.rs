@@ -128,6 +128,8 @@ const KEYS_FX: [(f64, f64, BarTarget); 13] = [
     (3012.0, 86.0, BarTarget::Settings),
 ];
 pub const KEY_H: f64 = 62.0;
+/// Height of the Cycles rail's low-profile button caps.
+pub const CYCLES_KEY_H: f64 = 43.0;
 /// The settings' key's width (and the star's and the arrows').
 pub const KEY_W: f64 = 86.0;
 /// The name's display: its window (left, top, width, height), as tall with its surround as
@@ -383,20 +385,25 @@ impl StripTarget {
 
 /// What a pointer at (`x`, `y`) (the drawing's units) finds on the strip, its rail `rail`.
 pub fn hit(rail: Rail, x: f64, y: f64) -> Option<StripTarget> {
+    hit_with_key_height(rail, x, y, KEY_H)
+}
+
+/// Hit-test a rail whose button height comes from its render layout.
+pub fn hit_with_key_height(rail: Rail, x: f64, y: f64, key_h: f64) -> Option<StripTarget> {
     if y < PANEL_H {
         return None;
     }
-    if (y - RAIL_Y).abs() <= KEY_H / 2.0 + 6.0 {
+    let key_y = (y - RAIL_Y).abs();
+    if key_y <= key_h / 2.0 + 6.0 {
         for &(kx, w, t) in rail.keys() {
             if (x - kx).abs() <= w / 2.0 + 4.0 {
                 return Some(StripTarget::Bar(t));
             }
         }
-        let (nx, _, nw, _) = rail.name();
-        if (nx..nx + nw).contains(&x) {
-            return Some(StripTarget::Bar(BarTarget::Name));
-        }
-        return None;
+    }
+    let (nx, _, nw, nh) = rail.name();
+    if key_y <= (nh.max(key_h)) / 2.0 + 6.0 && (nx..nx + nw).contains(&x) {
+        return Some(StripTarget::Bar(BarTarget::Name));
     }
     for b in Bank::ALL {
         for i in 0..b.words().len() {
@@ -514,9 +521,9 @@ pub struct StripScene {
 }
 
 impl StripScene {
-    /// Whether the extension controls show: neither the keyboard nor the LFO page over them.
+    /// Whether the GLOBAL extension controls show.
     pub fn extension(&self) -> bool {
-        self.keyboard.is_none() && !self.lfo
+        self.keyboard.is_none() && !self.lfo && self.bar.page != Some(BarTarget::Mpe)
     }
 }
 

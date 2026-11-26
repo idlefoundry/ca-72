@@ -112,6 +112,11 @@ const STATUS: Display = Display {
 };
 const DISPLAYS: [Display; 4] = [SEARCH, TAGS, LIST, STATUS];
 
+/// Glass aperture rectangles in drawer coordinates.
+pub fn drawer_windows() -> [(f64, f64, f64, f64); 4] {
+    DISPLAYS.map(|d| (d.x, d.y, d.w, d.h))
+}
+
 /// The sections' titles, printed over their displays: their middles' height and size.
 const LABEL_Y: f64 = 31.0;
 const LABEL: f64 = 26.0;
@@ -207,7 +212,7 @@ impl PresetKey {
         PresetKey::Init,
     ];
 
-    fn legend(self) -> &'static str {
+    pub fn legend(self) -> &'static str {
         match self {
             PresetKey::Rename => "RENAME",
             PresetKey::Tags => "TAGS",
@@ -221,7 +226,7 @@ impl PresetKey {
         }
     }
 
-    fn centre(self) -> (f64, f64) {
+    pub fn centre(self) -> (f64, f64) {
         if self == PresetKey::Init {
             // A dedicated action beside PRESET, above the existing two rows of keys.
             return (KEY_X[3], LABEL_Y);
@@ -230,7 +235,7 @@ impl PresetKey {
         (KEY_X[i % 4], KEY_Y[i / 4])
     }
 
-    fn size(self) -> (f64, f64) {
+    pub fn size(self) -> (f64, f64) {
         if self == PresetKey::Init {
             (136.0, 45.0)
         } else {
@@ -1145,6 +1150,7 @@ pub fn midi_action_centre(m: &MidiList, i: usize, a: MidiAction) -> Option<(f64,
 /// The drawer's renderer at the panel's scale.
 pub struct DrawerRenderer {
     scale: f64,
+    cycles_plate: Option<Pixmap>,
     /// For the keys' marks (no lettering).
     options: usvg::Options<'static>,
     /// What its look gives it, and its typeface for its displays (where they are lettered in
@@ -1775,6 +1781,11 @@ fn print_svg(dress: &Dress) -> String {
     s.0
 }
 
+/// The drawer's printed section names, in drawer coordinates.
+pub fn drawer_silkscreen() -> String {
+    print_svg(&Dress::default())
+}
+
 /// Action names on their caps, in clear print rather than tiny worn captions above them (in
 /// every look: `drawer_legends` no longer changes where they are), in the look's `key_print`
 /// and typeface. Keep the longest one, MIDI LEARN, inside the cap with the same margin as the
@@ -1818,11 +1829,26 @@ impl DrawerRenderer {
     /// their own, begun now (as the editor opens, so the drawer's first opening waits for
     /// neither: a tenth of a second at a Retina screen's scale).
     pub fn new(scale: f64) -> Self {
+        Self::with_plate(scale, None)
+    }
+
+    /// Keep the live lettering and key states over a Cycles-rendered plate with empty glass.
+    /// The supplied pixels start at the drawer's top left, without the cabinet cheeks.
+    pub fn with_cycles_plate(scale: f64, plate: Pixmap) -> Self {
+        Self::with_plate(scale, Some(plate))
+    }
+
+    fn with_plate(scale: f64, cycles_plate: Option<Pixmap>) -> Self {
         let dress = Arc::new(Dress::default());
         DrawerRenderer {
             scale,
             options: usvg::Options::default(),
-            warming: warm(scale, dress.clone()),
+            warming: if cycles_plate.is_none() {
+                warm(scale, dress.clone())
+            } else {
+                None
+            },
+            cycles_plate,
             typed: usvg::Options::default(),
             typeface: Arc::new(Fonts::new()),
             dress,
@@ -1846,7 +1872,9 @@ impl DrawerRenderer {
         self.typeface = Arc::new(self.dress_fonts(&dress));
         self.dress = Arc::new(dress);
         self.typed = typed_options(&self.dress, &self.typeface);
-        self.warming = warm(self.scale, self.dress.clone());
+        if self.cycles_plate.is_none() {
+            self.warming = warm(self.scale, self.dress.clone());
+        }
         self.pictures = None;
         self.still = None;
         self.shown = None;
@@ -2023,6 +2051,32 @@ impl DrawerRenderer {
     /// What does not change at this scale: the thread's, made as the editor opened (waited for
     /// if it is not done), if it is still the scale; else made now.
     fn still_now(&mut self) -> Arc<Pixmap> {
+        if let Some(plate) = &self.cycles_plate {
+            let (w, h) = size_at(self.scale);
+            let mut still = if (plate.width(), plate.height()) == (w, h) {
+                plate.clone()
+            } else {
+                resample(plate, w, h)
+            };
+            if !self.dress.typed {
+                for display in &DISPLAYS {
+                    grid(&mut still, self.scale, display, UNLIT, self.dress.dot);
+                }
+            }
+            let fonts = &self.typeface;
+            let options = usvg::Options {
+                fontdb: fonts.database(),
+                font_family: FAMILY.into(),
+                ..usvg::Options::default()
+            };
+            svg_over(
+                &options,
+                &mut still,
+                self.scale,
+                &key_print_svg(fonts, &self.dress),
+            );
+            return Arc::new(still);
+        }
         if let Some(Ok((pictures, scale, key, still))) = self.warming.take().map(JoinHandle::join)
             && key == self.dress.key
         {

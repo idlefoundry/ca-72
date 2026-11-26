@@ -424,14 +424,20 @@ impl Editing {
         self.modulating.open && self.expanded()
     }
 
-    /// Whether the keyboard shows (the LFO page is in its place while it shows).
+    pub(super) fn expression_shows(&self) -> bool {
+        self.expression_open && self.expanded()
+    }
+
+    /// Whether the keyboard is the selected lower page.
     pub(super) fn keyboard_shown(&self) -> bool {
-        self.playing.visible && !self.modulating.open
+        self.lower_page() == BarTarget::Keyboard
     }
 
     /// The remembered lower page, also while PANEL hides it (R-GLOBAL-KEY).
     pub(super) fn lower_page(&self) -> BarTarget {
-        if self.modulating.open {
+        if self.expression_open {
+            BarTarget::Mpe
+        } else if self.modulating.open {
             BarTarget::Lfo
         } else if self.playing.visible {
             BarTarget::Keyboard
@@ -440,14 +446,14 @@ impl Editing {
         }
     }
 
-    /// The three lower page keys select one page; the lit key leaves it alone. PANEL off:
+    /// The lower page keys select one page; the lit key leaves it alone. PANEL off:
     /// show the lower part first. Keep the keyboard's saved preference and the LFO page's
     /// editor-local memory, the pointer's release and the drawers over the page as before.
     pub(super) fn show_lower_page(&mut self, page: BarTarget) {
         if self.expanded() && self.lower_page() == page {
             return;
         }
-        if page == BarTarget::Lfo && self.browser.open {
+        if matches!(page, BarTarget::Lfo | BarTarget::Mpe) && self.browser.open {
             self.browser.show(false, &self.params);
             self.follow_drawer();
         }
@@ -458,14 +464,22 @@ impl Editing {
                 return;
             }
         }
-        if page == BarTarget::Lfo {
-            self.modulating.open = true;
+        if self.expression_open {
+            self.typing = None;
+        }
+        self.expression_open = page == BarTarget::Mpe;
+        self.modulating.open = page == BarTarget::Lfo;
+        if self.expression_open {
+            self.lower.shut();
+            self.fx_view.cancel_press();
+            self.fx_view.close_list();
+        }
+        if matches!(page, BarTarget::Lfo | BarTarget::Mpe) {
             self.typing = None;
             self.modulating.hover = None;
             self.modulating.popup = None;
         } else {
             self.playing.visible = page == BarTarget::Keyboard;
-            self.modulating.open = false;
             self.keep_settings(Change::Keyboard(self.playing.visible));
         }
         self.playing.release_pointer();
@@ -503,9 +517,7 @@ impl Editing {
         }
         match CONTROLS.get(i).map(|c| c.place) {
             Some(ControlPlace::Panel) => true,
-            Some(ControlPlace::Strip) => {
-                self.expanded() && !self.modulating.open && !self.playing.visible
-            }
+            Some(ControlPlace::Strip) => self.expanded() && self.lower_page() == BarTarget::Global,
             Some(ControlPlace::Lfo) => self.page_shows(),
             _ => false,
         }
@@ -521,6 +533,9 @@ impl Editing {
         }
         if self.tempo_hovered((x, y)) {
             return Some(Target::Control(TEMPO_CONTROL));
+        }
+        if self.in_mpe((x, y)) {
+            return None;
         }
         if self.page_shows() && lfo_ui::inside(x, y) {
             interact::hit_lfo(self.renderer.layout(), x, y)

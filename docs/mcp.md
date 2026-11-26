@@ -380,7 +380,7 @@ area shows, the wheels or the macros, is the computer's (the rail's MACRO key), 
 | The name: opens or shuts the drawer | `ca72_view {presets}` |
 | SAVE key, SAVE AS | `ca72_preset_save` |
 | PANEL key | `ca72_view {panel}` |
-| GLOBAL / KEYS / LFO keys | `ca72_view {lower_page: "global" / "keyboard" / "lfo"}` selects and shows the page; a selected key does nothing. `keyboard: true / false` remains readable as keyboard / global. The returned `lower_page` names the selected page even with PANEL off. |
+| GLOBAL / KEYS / LFO / EXP keys | `ca72_view {lower_page: "global" / "keyboard" / "lfo" / "expression"}` selects and shows the page. Pressing a selected key leaves it showing. `keyboard: true / false` still selects KEYS or GLOBAL. The returned `lower_page` names the selected page even with PANEL off. |
 | SETTINGS key: see Settings | |
 | FIND: SEARCH, tag chips | `ca72_presets {search, tags}` |
 | ALL / FAVORITES / MINE tabs | `ca72_presets {favorites, mine}` |

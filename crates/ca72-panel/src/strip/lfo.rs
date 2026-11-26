@@ -1570,6 +1570,11 @@ fn print_svg(oy: f64, lettering: Lettering, layout: &Layout, times: &str) -> Str
     t.0
 }
 
+/// The stepped LFO page's silkscreen, in the original panel coordinates.
+pub fn silkscreen(lettering: Lettering, layout: &Layout) -> String {
+    print_svg(0.0, lettering, layout, "×")
+}
+
 /// Column `n`'s RATE dial's print alone (the frame's units): in Hz, or `timed` in note values.
 fn rate_print(n: usize, timed: bool, lettering: Lettering, oy: f64, times: &str) -> String {
     let mut t = Svg(String::new(), lettering);

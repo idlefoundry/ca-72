@@ -18,7 +18,7 @@ pub(crate) static BLACK_KEY: &[u8] = include_bytes!("../assets/keyboard/black-ke
 pub const AREA: [f64; 4] = [
     370.0,
     art::PANEL_H + crate::strip::RAIL,
-    art::W - 28.0,
+    art::W - art::SIDE_TRIM_W,
     art::H - 6.0,
 ];
 pub const BED: [f64; 4] = [414.0, 1122.0, 3038.0, 1728.0];
@@ -29,19 +29,21 @@ pub const MAPPING: &str = "awsedftgyhujkolp;";
 /// A starts on C3, independently of the visible F-to-C keyboard and the sound controls.
 pub const TYPE_ROOT: u8 = 48;
 const WHITE_W: f64 = (BED[2] - BED[0]) / 26.0;
+const WHITE_GAP: f64 = 2.0;
 const CLEARANCE: f64 = 3.0;
 const NOTCH_Y: f64 = BED[1] + BLACK_H + 5.0;
 const KEYBED_TOP: f64 = BED[1] - 12.0;
 /// The visible wood ends at the key bed's outer border, three units above its frame.
 pub const HEADER: f64 = (AREA[1] + KEYBED_TOP - 3.0) / 2.0;
-pub const BUTTON_H: f64 = crate::strip::KEY_H;
-const ARROW_W: f64 = crate::strip::KEY_W;
-const HEADER_GAP: f64 = 14.0;
+pub const BUTTON_H: f64 = 38.0;
+const ARROW_W: f64 = 54.0;
+const HEADER_GAP: f64 = 12.0;
 const RANGE_W: f64 = 348.0;
-const RANGE_H: f64 = 50.0;
+const RANGE_H: f64 = 33.0;
 const RANGE_X: f64 = crate::strip::CW - RANGE_W / 2.0;
 const RANGE_SURROUND: f64 = (BUTTON_H - RANGE_H) / 2.0;
 pub const UP_X: f64 = RANGE_X + RANGE_W + RANGE_SURROUND + HEADER_GAP + ARROW_W / 2.0;
+pub const RANGE_WINDOW: (f64, f64, f64, f64) = (RANGE_X, HEADER - RANGE_H / 2.0, RANGE_W, RANGE_H);
 /// A held key keeps its material and shading, with a darker surface over the key bed.
 const PRESSED_LEVEL: f32 = 0.65;
 
@@ -55,7 +57,7 @@ pub enum Target {
 
 /// The OCTAVE keys. (TYPING and PANIC moved up beside the TEMPO screen, to work from every
 /// page: decisions.md R-TEMPO-CORNER.)
-const BUTTONS: [(f64, f64, &str, Target); 2] = [
+pub const OCTAVE_BUTTONS: [(f64, f64, &str, Target); 2] = [
     (
         RANGE_X - RANGE_SURROUND - HEADER_GAP - ARROW_W / 2.0,
         ARROW_W,
@@ -134,16 +136,26 @@ pub fn rect(root: u8, note: u8) -> Option<[f64; 4]> {
     }
     let whites = (0..relative).filter(|i| !black(root + i)).count() as f64;
     let x = BED[0] + whites * WHITE_W;
-    Some(if black(note) {
-        [
-            x - WHITE_W * 0.25,
-            BED[1],
-            x + WHITE_W * 0.25,
-            BED[1] + BLACK_H,
-        ]
-    } else {
-        [x, BED[1], x + WHITE_W - 2.0, BED[3]]
-    })
+    if !black(note) {
+        return Some([x, BED[1], x + WHITE_W - WHITE_GAP, BED[3]]);
+    }
+    // Approximate the Pratt-Read spacing from the overhead photo of the 1974
+    // Model D at Found Sound. Offsets are fractions of one white-key pitch,
+    // measured outwards from the middles of the two- and three-sharp groups.
+    let offset = match note % 12 {
+        1 => -0.12, // C♯
+        3 => 0.12,  // D♯
+        6 => -0.15, // F♯
+        10 => 0.15, // A♯
+        _ => 0.0,   // G♯
+    };
+    let centre = x - WHITE_GAP / 2.0 + offset * WHITE_W;
+    Some([
+        centre - WHITE_W * 0.25,
+        BED[1],
+        centre + WHITE_W * 0.25,
+        BED[1] + BLACK_H,
+    ])
 }
 
 /// The rear of each natural key is a stem, with real spaces for its neighbouring
@@ -153,19 +165,9 @@ pub fn white_shape(root: u8, note: u8) -> Option<[[f64; 2]; 8]> {
         return None;
     }
     let [x0, y0, x1, y1] = rect(root, note)?;
-    let left = note > root && black(note - 1);
-    let right = usize::from(note - root) + 1 < KEYS && note < 127 && black(note + 1);
-    let stem_left = x0
-        + if left {
-            WHITE_W * 0.25 + CLEARANCE
-        } else {
-            0.0
-        };
-    let stem_right = if right {
-        x0 + WHITE_W * 0.75 - CLEARANCE
-    } else {
-        x1
-    };
+    let sharp = |neighbour: Option<u8>| neighbour.filter(|&n| black(n)).and_then(|n| rect(root, n));
+    let stem_left = sharp(note.checked_sub(1)).map_or(x0, |r| r[2] + CLEARANCE);
+    let stem_right = sharp(note.checked_add(1)).map_or(x1, |r| r[0] - CLEARANCE);
     Some([
         [stem_left, y0],
         [stem_right, y0],
@@ -202,7 +204,7 @@ pub fn hit(root: u8, x: f64, y: f64) -> Option<Target> {
     if !inside(x, y) {
         return None;
     }
-    for (cx, w, _, target) in BUTTONS {
+    for (cx, w, _, target) in OCTAVE_BUTTONS {
         if (x - cx).abs() <= w / 2.0 && (y - HEADER).abs() <= BUTTON_H / 2.0 {
             return Some(target);
         }
@@ -512,10 +514,10 @@ impl Renderer {
             &self.glass,
             self.scale,
             (
-                RANGE_X,
-                HEADER - art::PANEL_H - RANGE_H / 2.0,
-                RANGE_W,
-                RANGE_H,
+                RANGE_WINDOW.0,
+                RANGE_WINDOW.1 - art::PANEL_H,
+                RANGE_WINDOW.2,
+                RANGE_WINDOW.3,
             ),
             &format!(
                 "{} - {}",
@@ -621,7 +623,11 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
     let text_y = |text: &str, size| fonts.baseline_for_centre(text, size, Weight::Regular, HEADER);
     let octave_y = text_y("OCTAVE", 28.0);
     out += &format!(
-        "<g font-family='{FAMILY}'><rect x='370' y='1041' width='2710' height='728' fill='{}'/><path d='M 371 1041 V 1769' stroke='#c2bdab' stroke-width='2'/><text x='{}' y='{octave_y}' font-size='28' text-anchor='middle' fill='#d9d2c0'>OCTAVE</text>",
+        "<g font-family='{FAMILY}'><rect x='{}' y='{}' width='{}' height='{}' fill='{}'/><path d='M 371 1041 V 1769' stroke='#c2bdab' stroke-width='2'/><text x='{}' y='{octave_y}' font-size='28' text-anchor='middle' fill='#d9d2c0'>OCTAVE</text>",
+        AREA[0],
+        AREA[1],
+        AREA[2] - AREA[0],
+        AREA[3] - AREA[1],
         if scene.skin == Skin::Worn {
             "none"
         } else {
@@ -629,7 +635,7 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
         },
         crate::strip::CV,
     );
-    for (x, w, label, target) in BUTTONS {
+    for (x, w, label, target) in OCTAVE_BUTTONS {
         let fill = if scene.skin == Skin::Worn {
             "none"
         } else {
@@ -776,7 +782,7 @@ impl Materials {
                 Transform::from_row(along, 0.0, 0.0, across, 0.0, -260.0 * across),
             ),
         }
-        for (x, w, _, _) in BUTTONS {
+        for (x, w, _, _) in OCTAVE_BUTTONS {
             let cap = plugin_kit_materials::widened(&self.button, w / BUTTON_H);
             plugin_kit_materials::sprite(frame, &cap, s, (x, HEADER - art::PANEL_H), (w, BUTTON_H));
         }
@@ -867,6 +873,36 @@ mod tests {
         assert_eq!(first[0][0], first[5][0]);
         assert_eq!(last[1][0], last[4][0]);
         assert!(white_shape(41, 42).is_none());
+    }
+
+    #[test]
+    fn sharps_fan_out_from_their_groups_and_the_notches_follow() {
+        let root = Scene::default().root;
+        let mut offsets = [0.0; 12];
+        for note in (root..root + KEYS as u8).filter(|&n| black(n)) {
+            let left = rect(root, note - 1).expect("natural before sharp");
+            let right = rect(root, note + 1).expect("natural after sharp");
+            let sharp = rect(root, note).expect("sharp");
+            let left_shape = white_shape(root, note - 1).expect("left notch");
+            let right_shape = white_shape(root, note + 1).expect("right notch");
+            assert!((sharp[0] - left_shape[1][0] - CLEARANCE).abs() < 1e-9);
+            assert!((right_shape[0][0] - sharp[2] - CLEARANCE).abs() < 1e-9);
+            assert_eq!(rect(root + 12, note + 12), Some(sharp));
+
+            let seam = (left[2] + right[0]) / 2.0;
+            let centre = (sharp[0] + sharp[2]) / 2.0;
+            offsets[usize::from(note % 12)] = (centre - seam) / WHITE_W;
+        }
+        assert!(offsets[1] < -0.08 && offsets[3] > 0.08);
+        assert!(offsets[6] < offsets[1] && offsets[10] > offsets[3]);
+        assert!(offsets[8].abs() < 1e-9);
+
+        // This point on the F♯ flank was outside the old centered hit area.
+        let [left, top, _, _] = rect(root, root + 1).expect("first F sharp");
+        assert_eq!(
+            hit(root, left + 1.0, top + 20.0),
+            Some(Target::Note(root + 1))
+        );
     }
 
     #[test]

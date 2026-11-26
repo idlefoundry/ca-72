@@ -21,7 +21,7 @@ use super::{
     blank, span,
 };
 use crate::art::{self, PANEL_H};
-use crate::fonts::{FAMILY, Fonts};
+use crate::fonts::{FAMILY, Fonts, Weight};
 use crate::presets::{BarScene, BarTarget, DOWN, STAR, UP};
 use crate::skin::{BUTTON, GLASS};
 use crate::svg::{N, Svg, put};
@@ -221,12 +221,16 @@ pub(super) const CAP_LIFT: f64 = 2.0;
 pub struct StripRenderer {
     scale: f64,
     options: usvg::Options<'static>,
+    fonts: Fonts,
     frame: Pixmap,
     still: Option<Sparse>,
     print: Option<Sparse>,
     /// The drawing's strip with the still parts over it.
     base: Option<Pixmap>,
     lighting: Lighting,
+    /// A Cycles cap for the live lit state, with the unlit hardware already in the base.
+    cycles_tab: Option<Pixmap>,
+    rail_key_h: f64,
     glass: Pixmap,
     button: Pixmap,
     lit_tab: Option<Pixmap>,
@@ -285,6 +289,7 @@ impl StripRenderer {
                 font_family: FAMILY.into(),
                 ..usvg::Options::default()
             },
+            fonts,
             frame: blank(scale).expect("a frame"),
             keyboard: crate::keyboard::Renderer::new(scale),
             still: None,
@@ -295,6 +300,8 @@ impl StripRenderer {
                 TAB.0 / TAB.1,
                 AMBER,
             )),
+            cycles_tab: None,
+            rail_key_h: KEY_HEIGHT,
             glass: png(GLASS),
             button,
             lit_tab: None,
@@ -313,6 +320,20 @@ impl StripRenderer {
             own_lit: false,
             rail: Rail::Plugin,
         }
+    }
+
+    /// The live strip artwork over an underlay containing the modeled caps, bezels and glass.
+    /// The lit tab uses the same geometry as the underlay's unlit tabs.
+    pub fn with_cycles_hardware(scale: f64, lit_tab: Pixmap, rail_key_h: f64) -> Self {
+        let mut strip = Self::new(scale);
+        strip.cycles_tab = Some(lit_tab);
+        strip.rail_key_h = rail_key_h;
+        strip
+    }
+
+    /// Resolve a pointer with the same dimensions used to draw the rail's illumination.
+    pub fn hit(&self, x: f64, y: f64) -> Option<StripTarget> {
+        super::hit_with_key_height(self.rail, x, y, self.rail_key_h)
     }
 
     /// Drawn in `look`'s pictures, colours and typeface for the strip, where it has them
@@ -355,6 +376,7 @@ impl StripRenderer {
             font_family: FAMILY.into(),
             ..usvg::Options::default()
         };
+        self.fonts = fonts;
         (self.still, self.print, self.lit_tab) = (None, None, None);
         self.base = None;
         self.glows.clear();
@@ -627,9 +649,9 @@ impl StripRenderer {
         let y = super::RAIL_Y;
         self.pixels((
             x - w / 2.0 - 2.0,
-            y - KEY_HEIGHT / 2.0 - 2.0,
+            y - self.rail_key_h / 2.0 - 2.0,
             x + w / 2.0 + 2.0,
-            y + KEY_HEIGHT / 2.0 + 2.0,
+            y + self.rail_key_h / 2.0 + 2.0,
         ))
     }
 
@@ -679,8 +701,7 @@ impl StripRenderer {
                 }
             }
         }
-        // (The LFO page put away: the extension controls drawn again under where it was.)
-        if was.lfo != now.lfo {
+        if was.extension() != now.extension() {
             out.push(self.pixels((super::SECTIONS[1].0, PANEL_H + super::RAIL, art::W, art::H)));
         }
         if was.bar != now.bar {
@@ -744,7 +765,7 @@ impl StripRenderer {
         if self.lit_tab.is_none() {
             let px = |v: f64| (v * s).round().max(1.0) as u32;
             self.lit_tab = Some(plugin_kit_materials::resample(
-                &self.lighting.lit,
+                self.cycles_tab.as_ref().unwrap_or(&self.lighting.lit),
                 px(TAB.0),
                 px(TAB.1),
             ));
@@ -820,13 +841,16 @@ impl StripRenderer {
             };
             if light > 0.0 && meets(self.key_part(target), r) {
                 let mut o = Svg::default();
+                let compact = self.cycles_tab.is_some() && self.rail_key_h < KEY_HEIGHT;
+                let (inset, radius) = if compact { (1.35, 1.9) } else { (0.0, 7.0) };
                 put!(
                     o,
-                    "<rect x='{}' y='{}' width='{}' height='{}' rx='7' fill='#b0702b' opacity='{}'/>",
-                    N(x - width / 2.0),
-                    N(super::RAIL_Y - PANEL_H - super::KEY_H / 2.0),
-                    N(width),
-                    N(super::KEY_H),
+                    "<rect x='{}' y='{}' width='{}' height='{}' rx='{}' fill='#b0702b' opacity='{}'/>",
+                    N(x - width / 2.0 + inset),
+                    N(super::RAIL_Y - PANEL_H - self.rail_key_h / 2.0 + inset),
+                    N(width - 2.0 * inset),
+                    N(self.rail_key_h - 2.0 * inset),
+                    N(radius),
                     N(light)
                 );
                 svg_over(&self.options, &mut self.frame, s, &o.0);
@@ -860,30 +884,30 @@ impl StripRenderer {
             return;
         };
         let at = |(x, y): (f64, f64)| (x, y - PANEL_H);
-        // The tabs, unlit.
-        for b in Bank::ALL {
-            for i in 0..b.words().len() {
-                sprite(&mut still, &self.lighting.unlit, s, at(b.tab(i)), TAB);
-            }
-        }
-        // The keys: the charcoal cap, drawn out wider for SAVE and GLOBAL.
-        for (x, w, _) in self.keys() {
-            let cap = widened(&self.button, w / KEY_HEIGHT);
-            sprite(&mut still, &cap, s, at((x, super::RAIL_Y)), (w, KEY_HEIGHT));
-        }
-        // The glass.
-        for r in Readout::ALL {
-            let (x, y, w, h) = r.window();
-            glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 5.0);
-        }
-        let (x, y, w, h) = DISPLAY;
-        glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 5.0);
-        // The name's: its bezel on the rail's wood, then its glass.
-        let mut bezel = Svg::default();
-        super::name_bezel(&mut bezel, self.rail, -PANEL_H);
-        svg_over(&self.options, &mut still, s, &bezel.0);
         let (x, y, w, h) = self.rail.name();
-        glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 3.0);
+        if self.cycles_tab.is_none() {
+            // The tabs, unlit, and the charcoal keys.
+            for b in Bank::ALL {
+                for i in 0..b.words().len() {
+                    sprite(&mut still, &self.lighting.unlit, s, at(b.tab(i)), TAB);
+                }
+            }
+            for (x, w, _) in self.keys() {
+                let cap = widened(&self.button, w / KEY_HEIGHT);
+                sprite(&mut still, &cap, s, at((x, super::RAIL_Y)), (w, KEY_HEIGHT));
+            }
+            // The glass and the name's bezel.
+            for r in Readout::ALL {
+                let (x, y, w, h) = r.window();
+                glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 5.0);
+            }
+            let (dx, dy, dw, dh) = DISPLAY;
+            glass(&mut still, &self.glass, s, (dx, dy - PANEL_H, dw, dh), 5.0);
+            let mut bezel = Svg::default();
+            super::name_bezel(&mut bezel, self.rail, -PANEL_H);
+            svg_over(&self.options, &mut still, s, &bezel.0);
+            glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 3.0);
+        }
         // The name's dots, every one faintly there.
         let r = DOT * 0.36 * s;
         let mut unlit = PathBuilder::new();
@@ -907,7 +931,7 @@ impl StripRenderer {
                     );
                 }
             }
-            key_marks(&mut o, self.rail, &self.key_print);
+            key_marks(&mut o, self.rail, &self.fonts, &self.key_print);
             svg_over(&self.options, &mut print, s, &o.0);
             self.print = Some(Sparse::new(print));
         }
@@ -1060,7 +1084,12 @@ pub(crate) fn key_light(bar: &BarScene, t: BarTarget) -> KeyLight {
     let lit = |on: bool| if on { KeyLight::Lit } else { KeyLight::Off };
     let affecting = match t {
         BarTarget::Panel => return lit(bar.panel),
-        BarTarget::Global => return lit(bar.panel && !bar.keyboard && !bar.lfo_page),
+        BarTarget::Global => {
+            return lit(bar.panel
+                && !bar.keyboard
+                && !bar.lfo_page
+                && bar.page != Some(BarTarget::Mpe));
+        }
         BarTarget::Keyboard => return lit(bar.panel && bar.keyboard),
         BarTarget::Arp => bar.arp,
         BarTarget::Fx => bar.fx,
@@ -1095,7 +1124,7 @@ pub(super) fn svg_over(options: &usvg::Options<'_>, frame: &mut Pixmap, scale: f
 const KEY_TEXT: f64 = 20.0;
 
 /// The keys' marks (the star is drawn as the preset is).
-fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
+fn key_marks(o: &mut Svg, rail: Rail, fonts: &Fonts, print: &str) {
     let y = super::RAIL_Y - PANEL_H;
     for &(x, _, t) in rail.keys() {
         match t {
@@ -1120,12 +1149,8 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
             | BarTarget::Fx
             | BarTarget::Mpe
             | BarTarget::Lfo
-            | BarTarget::Macro => put!(
-                o,
-                "<text x='{}' y='{}' font-size='{KEY_TEXT}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{print}'>{}</text>",
-                N(x),
-                N(y),
-                match t {
+            | BarTarget::Macro => {
+                let label = match t {
                     BarTarget::Panel => "PANEL",
                     BarTarget::Global => "GLOBAL",
                     BarTarget::Keyboard => "KEYS",
@@ -1136,8 +1161,15 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
                     BarTarget::Lfo => "LFO",
                     BarTarget::Macro => "MACRO",
                     _ => "SAVE",
-                }
-            ),
+                };
+                let baseline = fonts.baseline_for_centre(label, KEY_TEXT, Weight::Bold, y);
+                put!(
+                    o,
+                    "<text x='{}' y='{}' font-size='{KEY_TEXT}' font-weight='700' text-anchor='middle' fill='{print}'>{label}</text>",
+                    N(x),
+                    N(baseline)
+                );
+            }
             BarTarget::Settings => put!(
                 o,
                 "<path d='{}' fill='{print}' fill-rule='evenodd'/>",
@@ -1184,7 +1216,9 @@ fn star_key(o: &mut Svg, rail: Rail, favorite: bool, print: &str) {
     let Some(&(x, _, _)) = rail.keys().iter().find(|k| k.2 == BarTarget::Star) else {
         return;
     };
-    let d = plugin_kit_materials::star_path(x, y, 14.0);
+    let radius = 14.0;
+    let offset = radius * (1.0 - (std::f64::consts::PI / 5.0).cos()) / 2.0;
+    let d = plugin_kit_materials::star_path(x, y + offset, radius);
     if favorite {
         put!(o, "<path d='{d}' fill='{print}'/>");
     } else {
@@ -2005,7 +2039,7 @@ mod tests {
     }
 
     #[test]
-    fn every_worded_rail_key_is_twenty_and_keys_has_no_icon() {
+    fn every_worded_rail_key_is_twenty_and_vertically_centred() {
         fn texts<'a>(group: &'a usvg::Group, out: &mut Vec<&'a usvg::Text>) {
             for node in group.children() {
                 match node {
@@ -2018,13 +2052,14 @@ mod tests {
         let fonts = Fonts::new();
         let options = usvg::Options {
             fontdb: fonts.database(),
+            font_family: FAMILY.into(),
             ..Default::default()
         };
         for rail in [Rail::Plugin, Rail::Effects] {
             for lettering in [art::Lettering::Standard, art::Lettering::Large] {
                 let mut marks = Svg(String::new(), lettering);
                 // Both skins share these marks over their caps.
-                key_marks(&mut marks, rail, KEY_PRINT);
+                key_marks(&mut marks, rail, &fonts, KEY_PRINT);
                 let doc =
                     art::document([0.0, 0.0, art::W, super::super::RAIL], 3108, 116, &marks.0);
                 let tree = usvg::Tree::from_str(&doc, &options).unwrap();
@@ -2050,6 +2085,13 @@ mod tests {
                     assert_eq!(text.chunks().len(), 1);
                     let chunk = &text.chunks()[0];
                     assert_eq!(chunk.text(), word);
+                    let outline = text.flattened().abs_bounding_box();
+                    let ink_centre = (outline.top() + outline.bottom()) / 2.0;
+                    let cap_centre = (super::super::RAIL_Y - PANEL_H) as f32;
+                    assert!(
+                        (ink_centre - cap_centre).abs() < 0.05,
+                        "{rail:?}: {word} centred at {ink_centre}, cap at {cap_centre}"
+                    );
                     assert!(!chunk.spans().is_empty());
                     for span in chunk.spans() {
                         assert_eq!(span.font_size().get(), 20.0, "{rail:?}: {word}");

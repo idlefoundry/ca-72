@@ -21,6 +21,8 @@ pub const TOP: f64 = 130.0;
 pub const COL: f64 = 0.0;
 /// The drawing's width.
 pub const W: f64 = COL + PW;
+/// Width of either aluminum side rail, in panel units.
+pub const SIDE_TRIM_W: f64 = 15.0;
 /// The panel's height: the top strip and the face. (The name board under the face, 132 units,
 /// went when the name plate moved up into the top strip: the owner, 2026-10-10, "If we moved
 /// the CA-72 badge to the top, we could save a lot of space in that center wooden area.")
@@ -1207,13 +1209,15 @@ pub(crate) fn strip_trims(s: &mut Svg) {
     let h = H - PANEL_H - crate::strip::RAIL;
     put!(
         s,
-        "<rect x='0' y='0' width='15' height='{}' fill='url(#trim)'/>",
+        "<rect x='0' y='0' width='{}' height='{}' fill='url(#trim)'/>",
+        N(SIDE_TRIM_W),
         N(h)
     );
     put!(
         s,
-        "<rect x='{}' y='0' width='28' height='{}' fill='url(#trim)'/>",
-        N(W - 28.0),
+        "<rect x='{}' y='0' width='{}' height='{}' fill='url(#trim)'/>",
+        N(W - SIDE_TRIM_W),
+        N(SIDE_TRIM_W),
         N(h)
     );
     put!(
@@ -1475,13 +1479,15 @@ fn print(s: &mut Svg, layout: &Layout, arrangement: &Arrangement) {
 pub(crate) fn trims(s: &mut Svg, face: f64) {
     put!(
         s,
-        "<rect x='0' y='0' width='15' height='{}' fill='url(#trim)'/>",
+        "<rect x='0' y='0' width='{}' height='{}' fill='url(#trim)'/>",
+        N(SIDE_TRIM_W),
         N(face)
     );
     put!(
         s,
-        "<rect x='{}' y='0' width='28' height='{}' fill='url(#trim)'/>",
-        N(PW - 28.0),
+        "<rect x='{}' y='0' width='{}' height='{}' fill='url(#trim)'/>",
+        N(PW - SIDE_TRIM_W),
+        N(SIDE_TRIM_W),
         N(face)
     );
     put!(

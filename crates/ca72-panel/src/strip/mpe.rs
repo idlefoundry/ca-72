@@ -1,6 +1,4 @@
-//! The drawer of each note's own expression (decisions.md R-MPE; the owner's A, 2026-10-20): one
-//! row dropped down from under the rail by the rail's MPE key, inside the window, over the top of
-//! whichever lower page shows, as the arpeggiator's is (`arp`, `lower`). Left to right: INPUT, a
+//! The Expression (EXP) page fills the lower bay under the rail. Left to right: INPUT, a
 //! pixel screen of the rail's kind reading what expression comes in; a rule; PRESSURE's
 //! MODULATION and CUTOFF; a rule; TIMBRE's MODULATION and CUTOFF, each a knob and its readout,
 //! the strip's own parts. The two groups' titles are centred below them, as GLOBAL's are.
@@ -11,7 +9,7 @@
 //! MODULATES, a pixel screen of what it moves, as an LFO's; and CURVE and FLOOR, each a knob and
 //! its readout, under TIMBRE's. Its title, VELOCITY, centred below it all.
 //!
-//! The drawer is a plate of its own, as the arpeggiator's is. What does not change is drawn once
+//! The page has its own plate. What does not change is drawn once
 //! a scale on a thread of its own, begun as the editor opens; then only what changed.
 
 use std::fmt;
@@ -19,11 +17,11 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use plugin_kit_materials::glass;
-use resvg::tiny_skia::Pixmap;
+use resvg::tiny_skia::{IntRect, Pixmap};
 use resvg::usvg;
 
 use super::lower::{self, Look};
-pub use super::lower::{LEFT, RIGHT, SHADOW, TOP, top_px};
+pub use super::lower::{LEFT, RIGHT, TOP, top_px};
 use super::worn::{
     Lamp, Reading, copy, meets, readout_cells, screen_still, screen_text, svg_over, union, within,
 };
@@ -35,12 +33,11 @@ use crate::svg::{N, Svg, colour, put};
 
 // ---- The layout (the drawing's units, the drawer open; the mock-up's).
 
-/// A row's depth: room below its controls for GLOBAL's title gaps (R-DRAWER-LETTERING).
-pub const ROW_DEPTH: f64 = 340.0;
-/// The drawer's: two rows, the expression's and the velocity's (decisions.md R-VELOCITY).
-pub const DEPTH: f64 = 2.0 * ROW_DEPTH;
-/// The controls keep the arpeggiator's row; the velocity's a row's depth below.
-pub const ROW: f64 = super::arp::ROW;
+/// The full lower bay, down to the foot trim, like LFO.
+pub const DEPTH: f64 = super::lfo::DEPTH;
+/// The expression and velocity rows each occupy half the bay.
+pub const ROW_DEPTH: f64 = DEPTH / 2.0;
+pub const ROW: f64 = TOP + 154.0;
 pub const ROW2: f64 = ROW + ROW_DEPTH;
 const LEGEND_UP: f64 = 109.0;
 /// INPUT's screen: left, top, width, height.
@@ -168,6 +165,42 @@ pub fn readout(i: usize) -> (f64, f64, f64, f64) {
     )
 }
 
+/// The four-cell segmented lettering and its glow, clipped to the modeled glass.
+pub fn readout_overlay(
+    options: &usvg::Options<'_>,
+    scale: f64,
+    (width, height): (u32, u32),
+    text: &str,
+) -> Option<Pixmap> {
+    let window = (
+        0.0,
+        0.0,
+        f64::from(width) / scale,
+        f64::from(height) / scale,
+    );
+    let reading = readout_cells(options, scale, window, CELLS, text, true, &Lamp::ORANGE)?;
+    let glass = IntRect::from_xywh(-reading.left, -reading.top, width, height)?;
+    reading.patch.clone_rect(glass)
+}
+
+/// The Expression text screens use the rail's amber dot matrix.
+pub fn screen_overlay(scale: f64, (width, height): (u32, u32), text: &str) -> Option<Pixmap> {
+    let mut glass = Pixmap::new(width, height)?;
+    screen_text(
+        &mut glass,
+        scale,
+        (
+            0.0,
+            super::worn::CAP_LIFT,
+            f64::from(width) / scale,
+            f64::from(height) / scale,
+        ),
+        text,
+        &Lamp::ORANGE,
+    );
+    Some(glass)
+}
+
 /// What a pointer finds on the drawer (its knobs are the panel's controls:
 /// `interact::hit_drawer`): a readout, which takes a value typed into it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -229,12 +262,10 @@ impl Default for MpeScene {
 
 // ---- Drawing.
 
-/// What does not change at a scale: the plate, and over it the print, the bezels and the glass;
-/// the shadow it casts.
+/// What does not change at a scale: the plate, print, bezels and glass.
 struct Still {
     look: Look,
     plate: Pixmap,
-    shadow: Pixmap,
 }
 
 /// The drawer's renderer at the panel's scale.
@@ -324,12 +355,6 @@ impl MpeRenderer {
     /// `LEFT` to `RIGHT`, is shown).
     pub fn frame(&self) -> &Pixmap {
         &self.frame
-    }
-
-    /// The shadow it casts below its foot: `SHADOW` deep, from `LEFT` across, premultiplied, laid
-    /// over what is under it.
-    pub fn shadow(&self) -> Option<&Pixmap> {
-        self.still.as_ref().map(|s| &s.shadow)
     }
 
     /// The pixels the last render changed in the frame: left, top, right, bottom.
@@ -569,11 +594,9 @@ fn make_still((scale, skin, lettering): Look) -> Still {
     let (x, y, w, h) = RESPONSE;
     glass(&mut plate, &glass_picture, s, (x, y - oy, w, h), 12.0);
     lower::lamp(&mut plate, s, skin, (0, top_px(s)));
-    let shadow = lower::cast(s, &options);
     Still {
         look: (scale, skin, lettering),
         plate,
-        shadow,
     }
 }
 
@@ -640,6 +663,10 @@ fn surfaces(oy: f64, skin: Skin) -> String {
 
 /// The plate's print (the frame's units): the rules, INPUT's legend, the groups' titles, the
 /// knobs' legends and dials, the readouts' units.
+pub fn silkscreen(lettering: Lettering) -> String {
+    print_svg(0.0, lettering)
+}
+
 fn print_svg(oy: f64, lettering: Lettering) -> String {
     let mut s = Svg(String::new(), lettering);
     let (legend, small) = (lettering.strip_legend(), lettering.strip_small());
@@ -733,7 +760,7 @@ fn print_svg(oy: f64, lettering: Lettering) -> String {
 /// The RESPONSE screen's curve (the frame's units, `oy` its top in the drawing's): a faint
 /// graticule, FLOOR's line, the curve glowing in the velocity's colour, and the latest note's
 /// place on it.
-fn response_svg(r: &Response, oy: f64) -> String {
+pub fn response_svg(r: &Response, oy: f64) -> String {
     let (x, y, w, h) = RESPONSE;
     let (pad, y) = (18.0, y - oy);
     let (x0, x1, y0, y1) = (x + pad, x + w - pad, y + h - pad, y + pad);
@@ -813,7 +840,7 @@ mod tests {
     /// units clear of each other, of the rules and of the titles; INPUT before the first rule.
     #[test]
     fn the_drawer_finds_each_part_where_it_is_drawn() {
-        for i in 0..4 {
+        for i in 0..UNIT_COUNT {
             let at = centre(MpeTarget::Readout(i));
             assert_eq!(hit(at.0, at.1), Some(MpeTarget::Readout(i)));
             assert!(inside(at.0, at.1));
@@ -821,7 +848,7 @@ mod tests {
         assert_eq!(hit(INPUT.0 + 10.0, ROW), None);
         const {
             assert!(INPUT.0 > LEFT && INPUT.0 + INPUT.2 < RULES[0]);
-            assert!(TOP + DEPTH + SHADOW < art::H);
+            assert!(TOP + DEPTH == art::H - 6.0);
         }
         assert!(inside(1000.0, TOP + DEPTH - 1.0));
         assert!(!inside(LEFT - 1.0, ROW) && !inside(RIGHT + 1.0, ROW));
@@ -1084,10 +1111,10 @@ mod tests {
             assert!(r.render(&scene, &mut panel));
             assert_eq!(r.frame().height(), (DEPTH * scale).ceil() as u32);
             assert!(
-                top_px(scale)
-                    + r.frame().height() as i32
-                    + (r.shadow().expect("the drawer's shadow").height() as i32)
-                    < (art::H * scale).round() as i32
+                (top_px(scale) + r.frame().height() as i32
+                    - ((art::H - 6.0) * scale).round() as i32)
+                    .abs()
+                    <= 1
             );
             let steps: [&dyn Fn(&mut MpeScene); 10] = [
                 &|s| s.input = Input::Mpe,

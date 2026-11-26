@@ -103,7 +103,7 @@ impl Editing {
 
     /// Whether the GLOBAL page shows (neither the keyboard nor the LFO page in its place).
     fn global_shows(&self) -> bool {
-        self.expanded() && !self.modulating.open && !self.playing.visible
+        self.expanded() && self.lower_page() == BarTarget::Global
     }
 
     /// Every learnable control in view: its learnable parameter and where its mark goes (left,
@@ -119,7 +119,7 @@ impl Editing {
             let shown = match c.place {
                 DrawerPlace::Strip => self.global_shows(),
                 DrawerPlace::Arp => self.lower.which == Lower::Arp && self.lower.open,
-                DrawerPlace::Mpe => self.lower.which == Lower::Mpe && self.lower.open,
+                DrawerPlace::Mpe => self.expression_shows(),
                 _ => true,
             };
             if !shown || self.off_panel(i) {
@@ -146,7 +146,6 @@ impl Editing {
             ];
             let own = match c.place {
                 DrawerPlace::Arp => Some(Lower::Arp),
-                DrawerPlace::Mpe => Some(Lower::Mpe),
                 _ => None,
             };
             if self.below_rail_shows(rect, own) {
