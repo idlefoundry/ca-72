@@ -21,7 +21,7 @@ use super::{
     blank, span,
 };
 use crate::art::{self, PANEL_H};
-use crate::fonts::{FAMILY, Fonts};
+use crate::fonts::{FAMILY, Fonts, Weight};
 use crate::presets::{BarScene, BarTarget, DOWN, STAR, UP};
 use crate::skin::{BUTTON, GLASS};
 use crate::svg::{N, Svg, put};
@@ -221,6 +221,7 @@ pub(super) const CAP_LIFT: f64 = 2.0;
 pub struct StripRenderer {
     scale: f64,
     options: usvg::Options<'static>,
+    fonts: Fonts,
     frame: Pixmap,
     still: Option<Sparse>,
     print: Option<Sparse>,
@@ -288,6 +289,7 @@ impl StripRenderer {
                 font_family: FAMILY.into(),
                 ..usvg::Options::default()
             },
+            fonts,
             frame: blank(scale).expect("a frame"),
             keyboard: crate::keyboard::Renderer::new(scale),
             still: None,
@@ -374,6 +376,7 @@ impl StripRenderer {
             font_family: FAMILY.into(),
             ..usvg::Options::default()
         };
+        self.fonts = fonts;
         (self.still, self.print, self.lit_tab) = (None, None, None);
         self.base = None;
         self.glows.clear();
@@ -928,7 +931,7 @@ impl StripRenderer {
                     );
                 }
             }
-            key_marks(&mut o, self.rail, &self.key_print);
+            key_marks(&mut o, self.rail, &self.fonts, &self.key_print);
             svg_over(&self.options, &mut print, s, &o.0);
             self.print = Some(Sparse::new(print));
         }
@@ -1121,7 +1124,7 @@ pub(super) fn svg_over(options: &usvg::Options<'_>, frame: &mut Pixmap, scale: f
 const KEY_TEXT: f64 = 20.0;
 
 /// The keys' marks (the star is drawn as the preset is).
-fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
+fn key_marks(o: &mut Svg, rail: Rail, fonts: &Fonts, print: &str) {
     let y = super::RAIL_Y - PANEL_H;
     for &(x, _, t) in rail.keys() {
         match t {
@@ -1146,12 +1149,8 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
             | BarTarget::Fx
             | BarTarget::Mpe
             | BarTarget::Lfo
-            | BarTarget::Macro => put!(
-                o,
-                "<text x='{}' y='{}' font-size='{KEY_TEXT}' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{print}'>{}</text>",
-                N(x),
-                N(y),
-                match t {
+            | BarTarget::Macro => {
+                let label = match t {
                     BarTarget::Panel => "PANEL",
                     BarTarget::Global => "GLOBAL",
                     BarTarget::Keyboard => "KEYS",
@@ -1162,8 +1161,15 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
                     BarTarget::Lfo => "LFO",
                     BarTarget::Macro => "MACRO",
                     _ => "SAVE",
-                }
-            ),
+                };
+                let baseline = fonts.baseline_for_centre(label, KEY_TEXT, Weight::Bold, y);
+                put!(
+                    o,
+                    "<text x='{}' y='{}' font-size='{KEY_TEXT}' font-weight='700' text-anchor='middle' fill='{print}'>{label}</text>",
+                    N(x),
+                    N(baseline)
+                );
+            }
             BarTarget::Settings => put!(
                 o,
                 "<path d='{}' fill='{print}' fill-rule='evenodd'/>",
@@ -1210,7 +1216,9 @@ fn star_key(o: &mut Svg, rail: Rail, favorite: bool, print: &str) {
     let Some(&(x, _, _)) = rail.keys().iter().find(|k| k.2 == BarTarget::Star) else {
         return;
     };
-    let d = plugin_kit_materials::star_path(x, y, 14.0);
+    let radius = 14.0;
+    let offset = radius * (1.0 - (std::f64::consts::PI / 5.0).cos()) / 2.0;
+    let d = plugin_kit_materials::star_path(x, y + offset, radius);
     if favorite {
         put!(o, "<path d='{d}' fill='{print}'/>");
     } else {
@@ -2031,7 +2039,7 @@ mod tests {
     }
 
     #[test]
-    fn every_worded_rail_key_is_twenty_and_keys_has_no_icon() {
+    fn every_worded_rail_key_is_twenty_and_vertically_centred() {
         fn texts<'a>(group: &'a usvg::Group, out: &mut Vec<&'a usvg::Text>) {
             for node in group.children() {
                 match node {
@@ -2044,13 +2052,14 @@ mod tests {
         let fonts = Fonts::new();
         let options = usvg::Options {
             fontdb: fonts.database(),
+            font_family: FAMILY.into(),
             ..Default::default()
         };
         for rail in [Rail::Plugin, Rail::Effects] {
             for lettering in [art::Lettering::Standard, art::Lettering::Large] {
                 let mut marks = Svg(String::new(), lettering);
                 // Both skins share these marks over their caps.
-                key_marks(&mut marks, rail, KEY_PRINT);
+                key_marks(&mut marks, rail, &fonts, KEY_PRINT);
                 let doc =
                     art::document([0.0, 0.0, art::W, super::super::RAIL], 3108, 116, &marks.0);
                 let tree = usvg::Tree::from_str(&doc, &options).unwrap();
@@ -2076,6 +2085,13 @@ mod tests {
                     assert_eq!(text.chunks().len(), 1);
                     let chunk = &text.chunks()[0];
                     assert_eq!(chunk.text(), word);
+                    let outline = text.flattened().abs_bounding_box();
+                    let ink_centre = (outline.top() + outline.bottom()) / 2.0;
+                    let cap_centre = (super::super::RAIL_Y - PANEL_H) as f32;
+                    assert!(
+                        (ink_centre - cap_centre).abs() < 0.05,
+                        "{rail:?}: {word} centred at {ink_centre}, cap at {cap_centre}"
+                    );
                     assert!(!chunk.spans().is_empty());
                     for span in chunk.spans() {
                         assert_eq!(span.font_size().get(), 20.0, "{rail:?}: {word}");
