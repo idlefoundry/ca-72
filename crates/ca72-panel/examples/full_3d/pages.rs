@@ -2,7 +2,10 @@
 
 use super::*;
 use ca72_panel::fonts::{FAMILY, Fonts};
-use ca72_panel::keyboard::{self, Target};
+use ca72_panel::keyboard;
+#[cfg(target_os = "linux")]
+use ca72_panel::keyboard::Target;
+#[cfg(target_os = "linux")]
 use ca72_panel::panel3d::DragController;
 use ca72_panel::presets::BarTarget;
 use ca72_panel::strip::mpe;
@@ -16,6 +19,7 @@ pub(super) struct Pages {
     panes: [Option<Pane>; NAMES.len()],
     shown: [bool; NAMES.len()],
     visible: [bool; NAMES.len()],
+    #[cfg(target_os = "linux")]
     pointer: Option<usize>,
 }
 
@@ -30,8 +34,10 @@ struct Pane {
     lit_tab: Pixmap,
     options: usvg::Options<'static>,
     started: bool,
+    #[cfg(target_os = "linux")]
     drag: DragController,
     held: Option<u8>,
+    #[cfg(target_os = "linux")]
     key_drag: bool,
     octave: i8,
 }
@@ -66,6 +72,7 @@ impl Pages {
             panes: NAMES.map(|name| Pane::load(upper, build, name, lit_tab, falloff)),
             shown: [false; NAMES.len()],
             visible: [false; NAMES.len()],
+            #[cfg(target_os = "linux")]
             pointer: None,
         }
     }
@@ -141,6 +148,7 @@ impl Pages {
         self.shown = self.visible;
     }
 
+    #[cfg(target_os = "linux")]
     fn at(&self, x: f32, y: f32) -> Option<usize> {
         (0..self.panes.len()).find(|&i| {
             self.visible[i]
@@ -151,6 +159,7 @@ impl Pages {
         })
     }
 
+    #[cfg(target_os = "linux")]
     pub(super) fn press(&mut self, x: f32, y: f32) -> bool {
         let Some(i) = self.at(x, y) else { return false };
         let Some(pane) = &mut self.panes[i] else {
@@ -182,6 +191,7 @@ impl Pages {
         true
     }
 
+    #[cfg(target_os = "linux")]
     pub(super) fn motion(&mut self, point: Option<(f32, f32)>, dx: f32, dy: f32, fine: bool) {
         let Some(i) = self.pointer else { return };
         let Some(pane) = &mut self.panes[i] else {
@@ -198,6 +208,7 @@ impl Pages {
         }
     }
 
+    #[cfg(target_os = "linux")]
     pub(super) fn release(&mut self) {
         if let Some(i) = self.pointer.take()
             && let Some(pane) = &mut self.panes[i]
@@ -208,6 +219,7 @@ impl Pages {
         }
     }
 
+    #[cfg(target_os = "linux")]
     pub(super) fn scroll(&mut self, x: f32, y: f32, delta: f32, fine: bool) -> bool {
         let Some(i) = self.at(x, y) else { return false };
         let Some(pane) = &mut self.panes[i] else {
@@ -314,8 +326,10 @@ impl Pane {
             decorations,
             lit_tab: lit_tab.clone(),
             started: false,
+            #[cfg(target_os = "linux")]
             drag: DragController::default(),
             held: None,
+            #[cfg(target_os = "linux")]
             key_drag: false,
             octave: 0,
             options: usvg::Options {
@@ -326,6 +340,7 @@ impl Pane {
         })
     }
 
+    #[cfg(target_os = "linux")]
     fn key_at(&self, x: f32, y: f32) -> Option<Target> {
         for decoration in &self.decorations {
             let target = match decoration.fixture.param.as_str() {

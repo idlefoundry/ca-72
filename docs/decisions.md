@@ -3166,6 +3166,10 @@ layout. The walnut rail, wheels, switches, jacks, caps and glass are modeled. Th
 share the upper knob atlas. The strip compositor draws the preset name, keys' print, selected
 tabs, readouts and voice display over that hardware using the existing strip scene.
 
+The open preset browser in the study uses the same lighting and enamel grade. Its clear
+glass and keycaps are rendered from the browser's layout. The existing drawer renderer draws
+the amber dots and captions over the plate. The preview uses a sample preset library.
+
 ## R45. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
 **The owner, 2026-10-09:** "we need to add all the same stereo controls that we added to the
@@ -14940,6 +14944,11 @@ other page keys keep it over them. The MIDI learning list still names the sound 
 with no new learnable view action or saved control ID. The page keys' tips name the pages;
 `ca72_view` adds `lower_page: "global" / "keyboard" / "lfo"`, keeps the legacy `keyboard`
 argument and reports the remembered page even while PANEL hides it.
+
+**EXP (2026-11-26).** Expression selects a full lower page alongside GLOBAL, KEYS and LFO.
+PANEL remembers EXP while the lower section is hidden. The Expression page keeps its
+Pressure, Timbre and Velocity controls and leaves the wheels or Macros on the left.
+`ca72_view` accepts `lower_page: "expression"`.
 
 **Evidence (Linux):** the production-feature plug-in/panel suite passes (590 plug-in
 library tests, 110 panel library tests and their integration suites; manual/picture tests

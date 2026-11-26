@@ -180,10 +180,9 @@ impl Panel3DAssets {
             .map_err(|e| format!("decode {}: {e}", manifest.face.file))?;
         let mut atlases = HashMap::with_capacity(manifest.sprites.len());
         for (key, sp) in &manifest.sprites {
-            let bytes = std::fs::read(dir.join(&sp.file))
-                .map_err(|e| format!("read {}: {e}", sp.file))?;
-            let px = Pixmap::decode_png(&bytes)
-                .map_err(|e| format!("decode {}: {e}", sp.file))?;
+            let bytes =
+                std::fs::read(dir.join(&sp.file)).map_err(|e| format!("read {}: {e}", sp.file))?;
+            let px = Pixmap::decode_png(&bytes).map_err(|e| format!("decode {}: {e}", sp.file))?;
             atlases.insert(key.clone(), px);
         }
         Ok(Self {
@@ -426,7 +425,12 @@ pub fn render_knob_smooth(
 }
 
 /// Extract one exact discrete cell from an atlas with spatial studio lighting gain applied.
-fn extract_cell_lit(atlas: &Pixmap, spec: &SpriteSpec, frame_idx: u32, light_gain: f32) -> Option<Pixmap> {
+fn extract_cell_lit(
+    atlas: &Pixmap,
+    spec: &SpriteSpec,
+    frame_idx: u32,
+    light_gain: f32,
+) -> Option<Pixmap> {
     let cw = spec.cell_w as i32;
     let ch = spec.cell_h as i32;
     let cols = spec.cols.max(1);
@@ -614,7 +618,8 @@ pub fn render_lamp_linear(frame: &mut Pixmap, lamp: &LampSpec, drive: f32, clip:
                 let outer_fade = 1.0 - smoothstep_f32(max_r * 0.72, max_r, r);
                 let bez_out = smoothstep_f32(bez_r - 0.8, bez_r + 1.0, r);
                 // Modulate gently by steel luminance, clamping bright silkscreen spill
-                let steel_mod = (0.35 + 1.15 * base_luma.min(0.18)) * (1.0 - 0.55 * smoothstep_f32(0.25, 0.70, base_luma));
+                let steel_mod = (0.35 + 1.15 * base_luma.min(0.18))
+                    * (1.0 - 0.55 * smoothstep_f32(0.25, 0.70, base_luma));
                 let spill = inv_sq * outer_fade * bez_out * 0.28 * spill_drive * steel_mod;
                 for c in 0..3 {
                     add[c] += col[c] * spill;
@@ -715,7 +720,10 @@ struct QualityOpening {
 impl QualityOpening {
     fn new(manifest: &Manifest) -> Option<Self> {
         let [x, y] = manifest.quality_opening?;
-        let control = manifest.controls.iter().position(|c| c.param == "quality")?;
+        let control = manifest
+            .controls
+            .iter()
+            .position(|c| c.param == "quality")?;
         let switch = *Arrangement::official()
             .controls
             .iter()
@@ -734,7 +742,10 @@ impl QualityOpening {
 
     fn paint_switch(&mut self, pos: [f32; 2], value: f32) -> Option<(i32, i32, Pixmap)> {
         let mut layer = art::control_worn(&self.switch, f64::from(value), 0.0);
-        layer.origin = (f64::from(pos[0]) / self.scale, f64::from(pos[1]) / self.scale);
+        layer.origin = (
+            f64::from(pos[0]) / self.scale,
+            f64::from(pos[1]) / self.scale,
+        );
         self.painter.paint_layer(&layer)
     }
 
@@ -774,12 +785,16 @@ impl QualityOpening {
         self.shown = Some(opening);
         self.layers.clear();
         if !opening.hidden {
-            self.layers.extend(ultra_worn(&opening).into_iter().filter_map(|mut layer| {
-                layer.origin = self.origin;
-                self.painter.paint_layer(&layer)
-            }));
+            self.layers
+                .extend(ultra_worn(&opening).into_iter().filter_map(|mut layer| {
+                    layer.origin = self.origin;
+                    self.painter.paint_layer(&layer)
+                }));
         }
-        previous.into_iter().chain(self.rect()).reduce(FaceRect::union)
+        previous
+            .into_iter()
+            .chain(self.rect())
+            .reduce(FaceRect::union)
     }
 }
 
@@ -838,7 +853,12 @@ impl Panel3DRenderer {
 
     fn control_rect(manifest: &Manifest, c: &ControlSpec) -> FaceRect {
         let Some(sp) = manifest.sprites.get(&c.sprite) else {
-            return FaceRect { x0: 0, y0: 0, x1: 0, y1: 0 };
+            return FaceRect {
+                x0: 0,
+                y0: 0,
+                x1: 0,
+                y1: 0,
+            };
         };
         let x0 = (c.pos[0] - sp.anchor[0]).round() as i32;
         let y0 = (c.pos[1] - sp.anchor[1]).round() as i32;
@@ -851,7 +871,9 @@ impl Panel3DRenderer {
     }
 
     fn update_control_cache(&mut self, idx: usize, val: f32) {
-        if self.caches[idx].last_val.is_some_and(|v| (v - val).abs() < 1e-6)
+        if self.caches[idx]
+            .last_val
+            .is_some_and(|v| (v - val).abs() < 1e-6)
             && self.caches[idx].pixmap.is_some()
         {
             return;
@@ -882,11 +904,8 @@ impl Panel3DRenderer {
         let face_h = self.assets.manifest.face.h as f32;
         let v = (c.pos[1] / face_h).clamp(0.0, 1.0);
         let [top, bottom] = self.sprite_falloff;
-        let gain = studio_light_gain(
-            c.pos,
-            self.assets.manifest.face.w as f32,
-            face_h,
-        ) * (top + (bottom - top) * v);
+        let gain = studio_light_gain(c.pos, self.assets.manifest.face.w as f32, face_h)
+            * (top + (bottom - top) * v);
         let px = match c.kind.as_str() {
             "knob" => render_knob_smooth(atlas, sp, val, gain),
             "selector" => {
@@ -913,7 +932,12 @@ impl Panel3DRenderer {
     pub fn render_dirty(&mut self, state: &Panel3DState) -> Vec<FaceRect> {
         let fw = self.frame.width() as i32;
         let fh = self.frame.height() as i32;
-        let full = FaceRect { x0: 0, y0: 0, x1: fw, y1: fh };
+        let full = FaceRect {
+            x0: 0,
+            y0: 0,
+            x1: fw,
+            y1: fh,
+        };
 
         if self.prev_state.as_ref() == Some(state) {
             return Vec::new();
@@ -951,7 +975,10 @@ impl Panel3DRenderer {
             }
         }
 
-        if let Some(rect) = self.quality.as_mut().and_then(|quality| quality.update(state))
+        if let Some(rect) = self
+            .quality
+            .as_mut()
+            .and_then(|quality| quality.update(state))
             && let Some(rect) = rect.clamp(fw, fh)
         {
             dirty.push(rect);
@@ -997,7 +1024,8 @@ fn merge_rects(mut rects: Vec<FaceRect>, pad: i32) -> Vec<FaceRect> {
             for j in (i + 1)..rects.len() {
                 let a = rects[i];
                 let b = rects[j];
-                if a.x0 - pad < b.x1 && b.x0 - pad < a.x1 && a.y0 - pad < b.y1 && b.y0 - pad < a.y1 {
+                if a.x0 - pad < b.x1 && b.x0 - pad < a.x1 && a.y0 - pad < b.y1 && b.y0 - pad < a.y1
+                {
                     rects[i] = a.union(b);
                     rects.swap_remove(j);
                     continue 'outer;
@@ -1154,7 +1182,13 @@ impl DragController {
         None
     }
 
-    pub fn begin_drag(&mut self, manifest: &Manifest, state: &mut Panel3DState, fx: f32, fy: f32) -> Option<usize> {
+    pub fn begin_drag(
+        &mut self,
+        manifest: &Manifest,
+        state: &mut Panel3DState,
+        fx: f32,
+        fy: f32,
+    ) -> Option<usize> {
         let idx = Self::hit_test(manifest, fx, fy)?;
         let c = &manifest.controls[idx];
         match c.kind.as_str() {
@@ -1168,7 +1202,13 @@ impl DragController {
                 let across = c.across.unwrap_or(false);
                 let nut = 16.0 * manifest.face.px_per_unit;
                 state.values[idx] = if across {
-                    if dx < -nut { 0.0 } else if dx > nut { 1.0 } else { 0.5 }
+                    if dx < -nut {
+                        0.0
+                    } else if dx > nut {
+                        1.0
+                    } else {
+                        0.5
+                    }
                 } else if dy < -nut {
                     1.0
                 } else if dy > nut {
@@ -1190,7 +1230,14 @@ impl DragController {
     }
 
     /// Apply incremental mouse movement `(dx, dy)` in logical pixels without re-reading quantized values.
-    pub fn update_drag(&mut self, manifest: &Manifest, state: &mut Panel3DState, dx: f32, dy: f32, shift: bool) {
+    pub fn update_drag(
+        &mut self,
+        manifest: &Manifest,
+        state: &mut Panel3DState,
+        dx: f32,
+        dy: f32,
+        shift: bool,
+    ) {
         let Some(drag) = &mut self.active else {
             return;
         };
@@ -1216,7 +1263,8 @@ impl DragController {
     pub fn end_drag(&mut self, manifest: &Manifest, state: &mut Panel3DState) {
         if let Some(drag) = self.active.take() {
             let c = &manifest.controls[drag.control_idx];
-            if c.kind == "selector" && drag.moved_px < 4.0
+            if c.kind == "selector"
+                && drag.moved_px < 4.0
                 && let Some(steps) = c.steps.filter(|&s| s >= 2)
             {
                 let cur = (state.values[drag.control_idx] * (steps - 1) as f32).round() as usize;
@@ -1227,7 +1275,14 @@ impl DragController {
     }
 
     /// Scroll wheel step: exact `±1 / (steps - 1)` on discrete selectors/toggles, smooth on knobs.
-    pub fn scroll(manifest: &Manifest, state: &mut Panel3DState, fx: f32, fy: f32, delta_steps: f32, shift: bool) -> bool {
+    pub fn scroll(
+        manifest: &Manifest,
+        state: &mut Panel3DState,
+        fx: f32,
+        fy: f32,
+        delta_steps: f32,
+        shift: bool,
+    ) -> bool {
         let Some(idx) = Self::hit_test(manifest, fx, fy) else {
             return false;
         };
@@ -1329,7 +1384,12 @@ mod tests {
         for p in [&mut dark, &mut mid, &mut full] {
             p.fill(resvg::tiny_skia::Color::from_rgba8(24, 24, 24, 255));
         }
-        let clip = FaceRect { x0: 0, y0: 0, x1: 200, y1: 200 };
+        let clip = FaceRect {
+            x0: 0,
+            y0: 0,
+            x1: 200,
+            y1: 200,
+        };
         render_lamp_linear(&mut dark, lamp, 0.0, clip);
         render_lamp_linear(&mut mid, lamp, 0.35, clip);
         render_lamp_linear(&mut full, lamp, 1.0, clip);
@@ -1348,7 +1408,12 @@ mod tests {
         let mut dst = vec![0u32; 32 * 16];
         let dmg = blit_dirty_to_u32(
             &src,
-            &[FaceRect { x0: 8, y0: 4, x1: 40, y1: 20 }],
+            &[FaceRect {
+                x0: 8,
+                y0: 4,
+                x1: 40,
+                y1: 20,
+            }],
             &mut dst,
             32,
             16,

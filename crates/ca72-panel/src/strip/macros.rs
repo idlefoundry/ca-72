@@ -694,7 +694,12 @@ fn make_still(of: &StillOf, options: &usvg::Options<'_>) -> Option<Pixmap> {
     }
     // The dials' print, worn into the face as the panel's is.
     if let Some(mut print) = Pixmap::new(plate.width(), plate.height()) {
-        svg_on(options, &mut print, s, &g(&silkscreen(of.lettering, &of.times)));
+        svg_on(
+            options,
+            &mut print,
+            s,
+            &g(&silkscreen(of.lettering, &of.times)),
+        );
         if worn {
             crate::render::worn_into(&mut print, &plate);
         }
