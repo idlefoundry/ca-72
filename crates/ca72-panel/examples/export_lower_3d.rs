@@ -78,7 +78,6 @@ fn controls(arrangement: &Arrangement) -> Vec<Value> {
     controls.push(screen("preset_name", "preset", rail.name()));
 
     for (bank, active) in Bank::ALL.into_iter().zip([1, 0, 0, 0]) {
-        controls.push(window("bank", bank.recess()));
         for (i, label) in bank.words().iter().enumerate() {
             let mut p = part("tab", bank.tab(i), strip::TAB);
             p["label"] = json!(label);

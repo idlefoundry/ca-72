@@ -231,8 +231,9 @@ def place_tab(entry, scale, to_world, material):
     from build_cabinet import beveled_box
 
     w, h = ((entry[key] - 2.6) * scale for key in ("w", "h"))
+    depth = 0.0039
     return beveled_box(
-        "Translucent_Tab", (w, h, 0.0039), to_world(entry["x"], entry["y"], 0.00218),
+        "Translucent_Tab", (w, h, depth), to_world(entry["x"], entry["y"], depth / 2),
         material, 0.00105, segments=5,
     )
 
@@ -253,7 +254,7 @@ def build_fixtures(spec, scale, to_world):
     active_tabs = []
     for entry in spec["controls"]:
         kind = entry["kind"]
-        if kind not in ("tab", "bank", "rail_key", "screen"):
+        if kind not in ("tab", "rail_key", "screen"):
             continue
         x, y = entry["x"], entry["y"]
         w, h = entry["w"] * scale, entry["h"] * scale
@@ -262,11 +263,6 @@ def build_fixtures(spec, scale, to_world):
             tab = place_tab(entry, scale, to_world, amber)
             if entry.get("lit", False):
                 active_tabs.append(tab)
-        elif kind == "bank":
-            beveled_box(
-                f"{label}_Bank_Gasket", (w, h, 0.00101), to_world(x, y, 0.00021),
-                gasket, 0.00045,
-            )
         elif kind == "rail_key":
             base = 0.0064 if y < spec["rail_h"] else 0.0
             beveled_box(
