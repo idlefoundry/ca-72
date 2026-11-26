@@ -1,6 +1,6 @@
 //! Export the official lower panel's geometry and its transparent silkscreen.
 //!
-//! cargo run --release -p ca72-panel --example export_lower_3d -- <out_dir>
+//! cargo run --release -p ca72-panel --example export_lower_3d -- [out_dir]
 
 use std::{fs, path::PathBuf};
 
@@ -15,6 +15,9 @@ use resvg::{
     usvg,
 };
 use serde_json::{Value, json};
+
+#[path = "panel_3d/artifacts.rs"]
+mod artifacts;
 
 mod lower_pages {
     mod expression;
@@ -184,9 +187,8 @@ fn controls(arrangement: &Arrangement) -> Vec<Value> {
 }
 
 fn main() {
-    let out = std::env::args_os()
-        .nth(1)
-        .map_or_else(|| PathBuf::from("target/panel-3d/lower"), PathBuf::from);
+    let out = artifacts::output(std::env::args_os().nth(1).map(PathBuf::from), "lower")
+        .unwrap_or_else(|error| panic!("{error}"));
     fs::create_dir_all(&out).expect("create lower panel output directory");
     let arrangement = Arrangement::official();
     let spec = json!({

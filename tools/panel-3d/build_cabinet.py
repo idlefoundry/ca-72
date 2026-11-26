@@ -11,6 +11,7 @@ import bpy
 import bmesh
 from mathutils import Vector
 
+from artifacts import output_dir
 from shaders_cabinet import SURFACES, make_material
 
 
@@ -527,9 +528,9 @@ def export_glb(objects, path):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", type=Path, default=Path("target/panel-3d"))
+    parser.add_argument("--out", type=Path)
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
-    out = parser.parse_args(argv).out
+    out = output_dir(parser.parse_args(argv).out)
     spec = json.loads((out / "spec.json").read_text())
     dims = spec["part_dimensions_meters"]
     assets = out / "assets"

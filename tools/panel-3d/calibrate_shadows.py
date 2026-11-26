@@ -24,6 +24,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from artifacts import output_dir
 
 def smoothstep(edge0: np.ndarray, edge1: np.ndarray, x: np.ndarray) -> np.ndarray:
     t = np.clip((x - edge0) / np.maximum(1e-6, edge1 - edge0), 0.0, 1.0)
@@ -226,9 +227,11 @@ def measure_sprite_falloff(lit_path: Path, reference_path: Path, cheek: float) -
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--raw", type=Path, default=Path("target/panel-3d/vst-pack-raw"))
-    parser.add_argument("--dst", type=Path, default=Path("crates/ca72-panel/assets/cycles3d"))
+    parser.add_argument("--raw", type=Path, help="raw inputs, defaulting to the lab's vst-pack-raw")
+    parser.add_argument("--dst", type=Path, help="calibrated output, defaulting to the lab's pack")
     args = parser.parse_args()
+    args.raw = output_dir(args.raw, "vst-pack-raw")
+    args.dst = output_dir(args.dst, "pack")
 
     args.dst.mkdir(parents=True, exist_ok=True)
     manifest = json.loads((args.raw / "manifest.json").read_text())

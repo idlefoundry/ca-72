@@ -39,6 +39,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+from artifacts import output_dir
 from studio_rig import (
     srgb_to_lin,
     hex_to_lin,
@@ -606,14 +607,14 @@ class PackExporter:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", type=Path, default=Path("target/panel-3d"))
+    parser.add_argument("--out", type=Path)
     parser.add_argument("--face-w", type=int, default=int(os.environ.get("CA72_FACE_W", "3840")))
     parser.add_argument("--samples-face", type=int, default=int(os.environ.get("CA72_SAMPLES_FACE", "256")))
     parser.add_argument("--samples-sprite", type=int, default=int(os.environ.get("CA72_SAMPLES_SPRITE", "48")))
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else sys.argv[1:]
     args = parser.parse_args(argv)
 
-    exp = PackExporter(args.out, args.face_w, args.samples_face, args.samples_sprite)
+    exp = PackExporter(output_dir(args.out), args.face_w, args.samples_face, args.samples_sprite)
     exp.export_all(face_only=(os.environ.get("CA72_FACE_ONLY") == "1"))
 
 

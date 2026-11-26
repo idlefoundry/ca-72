@@ -26,6 +26,7 @@ import json
 import math
 from pathlib import Path
 
+from artifacts import output_dir
 
 def export_size(spec, face_w):
     pixels_per_unit = face_w / (spec["width"] + 2 * spec["cheek_w"])
@@ -451,6 +452,7 @@ def main():
     command.add_argument("--prepare-textures", action="store_true")
     command.add_argument("--calibrate", action="store_true")
     args = parser.parse_args()
+    args.out = output_dir(args.out)
     name = "lower" if args.page is None else f"page-{args.page}"
     spec = json.loads((args.out / f"{name}.json").read_text())
     spec.setdefault("side_trim_w", 15.0)

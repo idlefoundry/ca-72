@@ -13,6 +13,7 @@
 //!
 //! Usage:
 //!   cargo run --release -p ca72-panel --example render_3d -- [pack_dir] [out_dir]
+//! The default output is `artifacts/ca-72/panel-3d/renders` on the mounted lab share.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -23,6 +24,9 @@ use ca72_panel::panel3d::{
 };
 use ca72_panel::ultra::Opening;
 use resvg::tiny_skia::{Color, Pixmap};
+
+#[path = "panel_3d/artifacts.rs"]
+mod artifacts;
 
 fn crop_pixmap(src: &Pixmap, x0: u32, y0: u32, w: u32, h: u32) -> Pixmap {
     let x1 = (x0 + w).min(src.width());
@@ -82,10 +86,8 @@ fn main() {
         .nth(1)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("crates/ca72-panel/assets/cycles3d"));
-    let out_dir = std::env::args()
-        .nth(2)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("target/panel-3d/renders"));
+    let out_dir = artifacts::output(std::env::args_os().nth(2).map(PathBuf::from), "renders")
+        .unwrap_or_else(|error| panic!("{error}"));
     std::fs::create_dir_all(&out_dir).expect("create render output dir");
 
     let t0 = Instant::now();

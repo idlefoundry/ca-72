@@ -13,6 +13,7 @@ import bmesh
 from mathutils import Vector
 from mathutils.geometry import delaunay_2d_cdt
 
+from artifacts import output_dir
 from shaders_knobs import apply_knob_shaders, knob_materials, linear_rgb
 
 
@@ -541,10 +542,11 @@ def verification_sheet(out, dims, tile=928, samples=128):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=Path("target/panel-3d"))
+    parser.add_argument("--out", type=Path)
     parser.add_argument("--verify", action="store_true", help="Render the comparison sheet (requires Pillow)")
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
     args = parser.parse_args(argv)
+    args.out = output_dir(args.out)
 
     dims = json.loads((args.out / "spec.json").read_text())["part_dimensions_meters"]
     assets = args.out / "assets"

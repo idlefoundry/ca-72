@@ -15,6 +15,9 @@ use ca72_panel::strip::{self, Field, StripRenderer, StripScene};
 use resvg::tiny_skia::{IntRect, Pixmap, PixmapPaint, Transform};
 use serde::Deserialize;
 
+#[path = "panel_3d/artifacts.rs"]
+mod artifacts;
+
 #[derive(Deserialize)]
 struct LowerLayout {
     cheek_w: f32,
@@ -230,7 +233,9 @@ fn main() {
         #[cfg(not(target_os = "linux"))]
         panic!("the native review window is available on Linux");
     }
-    std::fs::create_dir_all(output).expect("create output directory");
+    let output =
+        artifacts::output(Some(output.clone()), "review").unwrap_or_else(|error| panic!("{error}"));
+    std::fs::create_dir_all(&output).expect("create output directory");
     panel
         .frame
         .save_png(output.join("ca72-full-3d-4k.png"))

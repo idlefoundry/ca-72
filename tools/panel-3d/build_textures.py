@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
 
+from artifacts import output_dir
+
 WORN = Path(__file__).resolve().parents[2] / "crates/ca72-panel/assets/worn"
 
 
@@ -161,8 +163,8 @@ def build_walnut_pbr(tex_dir):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", type=Path, default=Path("target/panel-3d"))
-    tex_dir = parser.parse_args().out / "textures"
+    parser.add_argument("--out", type=Path)
+    tex_dir = output_dir(parser.parse_args().out) / "textures"
     build_faceplate_pbr(tex_dir)
     build_nameplate_pbr(tex_dir)
     build_walnut_pbr(tex_dir)

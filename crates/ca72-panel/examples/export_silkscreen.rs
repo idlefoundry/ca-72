@@ -2,7 +2,7 @@
 //! (>1.5x 4K) vector silkscreen & nameplate alpha masks using CA-72's exact layout and typeface.
 //!
 //! Usage:
-//!   cargo run --release -p ca72-panel --example export_silkscreen -- <out_dir>
+//!   cargo run --release -p ca72-panel --example export_silkscreen -- [out_dir]
 
 use std::path::PathBuf;
 
@@ -14,11 +14,12 @@ use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
 use serde_json::json;
 
+#[path = "panel_3d/artifacts.rs"]
+mod artifacts;
+
 fn main() {
-    let out_dir = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("target/panel-3d"));
+    let out_dir = artifacts::output(std::env::args_os().nth(1).map(PathBuf::from), "")
+        .unwrap_or_else(|error| panic!("{error}"));
     let tex_dir = out_dir.join("textures");
     std::fs::create_dir_all(&tex_dir).expect("create texture output directory");
 
