@@ -699,6 +699,7 @@ pub struct Panel3DRenderer {
     caches: Vec<ControlCache>,
     prev_state: Option<Panel3DState>,
     quality: Option<QualityOpening>,
+    sprite_falloff: [f32; 2],
 }
 
 struct QualityOpening {
@@ -793,6 +794,11 @@ impl std::fmt::Debug for Panel3DRenderer {
 
 impl Panel3DRenderer {
     pub fn new(assets: Panel3DAssets) -> Self {
+        Self::with_sprite_falloff(assets, [1.0, 1.0])
+    }
+
+    /// Match reusable sprites to the measured falloff from the top to the bottom of this face.
+    pub fn with_sprite_falloff(assets: Panel3DAssets, sprite_falloff: [f32; 2]) -> Self {
         let frame = assets.face.clone();
         let quality = QualityOpening::new(&assets.manifest);
         let caches = assets
@@ -814,6 +820,7 @@ impl Panel3DRenderer {
             caches,
             prev_state: None,
             quality,
+            sprite_falloff,
         }
     }
 
@@ -872,11 +879,14 @@ impl Panel3DRenderer {
         let Some(atlas) = self.assets.atlases.get(&c.sprite) else {
             return;
         };
+        let face_h = self.assets.manifest.face.h as f32;
+        let v = (c.pos[1] / face_h).clamp(0.0, 1.0);
+        let [top, bottom] = self.sprite_falloff;
         let gain = studio_light_gain(
             c.pos,
             self.assets.manifest.face.w as f32,
-            self.assets.manifest.face.h as f32,
-        );
+            face_h,
+        ) * (top + (bottom - top) * v);
         let px = match c.kind.as_str() {
             "knob" => render_knob_smooth(atlas, sp, val, gain),
             "selector" => {

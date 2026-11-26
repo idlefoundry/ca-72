@@ -15,6 +15,10 @@ cap sprite is written to lower-tab-lit.png.
 Pass --page keys, --page lfo, or --page macros to each step for a
 replacement bay. The JSON, print mask, and renders then use page-<name>
 stems in the same build directory. The pages share the base's lit tab atlas.
+
+For the assembled preview, pass --upper-manifest to anchor the rig in
+the upper panel's scene, and --grade-reference at calibration time to
+carry over the original enamel grade without canceling the new falloff.
 """
 
 import argparse
@@ -47,9 +51,9 @@ def prepare_textures(build_dir, spec, name="lower"):
     build_walnut_pbr(directory)
 
 
-def calibrate(build_dir, spec, face_w, name="lower"):
+def calibrate(build_dir, spec, face_w, name="lower", grade_reference=None):
     from PIL import Image, ImageDraw
-    from calibrate_shadows import calibrate_faceplate
+    from calibrate_shadows import calibrate_faceplate, measure_sprite_falloff
 
     density, height = export_size(spec, face_w)
     cheek = spec["cheek_w"] * density
@@ -63,7 +67,7 @@ def calibrate(build_dir, spec, face_w, name="lower"):
                 "px_per_unit": density,
             }
         },
-        reference_path=base if name != "lower" and base.is_file() else None,
+        reference_path=grade_reference or (base if name != "lower" and base.is_file() else None),
     )
     if name != "lower":
         if spec.get("page") == "keys":
@@ -71,6 +75,11 @@ def calibrate(build_dir, spec, face_w, name="lower"):
 
             prepare_key_travel(build_dir)
         return
+    falloff_file = build_dir / "sprite-falloff.json"
+    if grade_reference is not None:
+        falloff_file.write_text(json.dumps(measure_sprite_falloff(base, grade_reference, cheek)) + "\n")
+    else:
+        falloff_file.unlink(missing_ok=True)
     # The reconstruction filter can leave a few alpha levels at the cell edge.
     # Clear those pixels before the lit cap is composited onto the dark one.
     cap_path = build_dir / "lower-tab-lit.png"
@@ -347,7 +356,19 @@ def model_proof_knobs(spec, to_world, knob_glb):
             )
 
 
-def render(build_dir, spec, face_w, samples, oblique, knob_glb, name="lower"):
+def studio_anchor(upper_manifest, density, height, pixels_per_meter):
+    if upper_manifest is None:
+        return (0, 0, 0)
+    upper = json.loads(upper_manifest.read_text())["face"]
+    if not math.isclose(upper["px_per_unit"], density, rel_tol=1e-5):
+        raise ValueError("The upper and lower renders must use the same pixel density")
+    join = round(upper["faceplate_rect_px"][3])
+    # Lower meshes are centered in their own camera. The original light rig
+    # is that far up in their local coordinates, with its original aim.
+    return (0, (join + (height - upper["h"]) / 2) / pixels_per_meter, 0)
+
+
+def render(build_dir, spec, face_w, samples, oblique, knob_glb, name="lower", upper_manifest=None):
     import bpy
     from lower_left import build_lower_left
     from shaders_cabinet import apply_cabinet_shaders
@@ -365,7 +386,7 @@ def render(build_dir, spec, face_w, samples, oblique, knob_glb, name="lower"):
 
     scene, backend = reset_scene(samples, transparent=False)
     scene.unit_settings.system = "METRIC"
-    setup_studio_lights(scene)
+    setup_studio_lights(scene, studio_anchor(upper_manifest, density, height, pixels_per_meter))
     build_body(spec, scale, to_world, texture_dir)
     active_tabs = build_fixtures(spec, scale, to_world)
     apply_cabinet_shaders(bpy.data.materials, texture_dir)
@@ -421,6 +442,8 @@ def main():
     parser.add_argument("--page", choices=("keys", "lfo", "macros"))
     parser.add_argument("--oblique", action="store_true", help="also render an angled hardware view")
     parser.add_argument("--knob-glb", type=Path, help="include the standard knob in the angled view")
+    parser.add_argument("--upper-manifest", type=Path, help="anchor the light rig to this upper render")
+    parser.add_argument("--grade-reference", type=Path, help="use the enamel grade measured from this raw lower render")
     command = parser.add_mutually_exclusive_group()
     command.add_argument("--prepare-textures", action="store_true")
     command.add_argument("--calibrate", action="store_true")
@@ -430,9 +453,9 @@ def main():
     if args.prepare_textures:
         prepare_textures(args.out, spec, name)
     elif args.calibrate:
-        calibrate(args.out, spec, args.face_w, name)
+        calibrate(args.out, spec, args.face_w, name, args.grade_reference)
     else:
-        render(args.out.resolve(), spec, args.face_w, args.samples, args.oblique, args.knob_glb, name)
+        render(args.out.resolve(), spec, args.face_w, args.samples, args.oblique, args.knob_glb, name, args.upper_manifest)
 
 
 if __name__ == "__main__":

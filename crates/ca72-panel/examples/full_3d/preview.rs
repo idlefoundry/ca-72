@@ -39,9 +39,16 @@ impl Preview {
         let left = lower.manifest.face.faceplate_rect_px[0].round() as i32;
         let lower_state = Panel3DState::from_defaults(&lower.manifest);
         assert_eq!(lower_state.values.len(), strip::KNOBS.len());
-        let lower = Panel3DRenderer::new(lower);
+        let falloff_path = lower_dir.join("sprite-falloff.json");
+        let falloff = if falloff_path.is_file() {
+            serde_json::from_slice(&std::fs::read(falloff_path).expect("read studio falloff"))
+                .expect("parse studio falloff")
+        } else {
+            [1.0, 1.0]
+        };
+        let lower = Panel3DRenderer::with_sprite_falloff(lower, falloff);
         let tab = Pixmap::load_png(lower_dir.join("lower-tab-lit.png")).expect("load lit 3D tab");
-        let pages = pages::Pages::load(&upper, lower_dir, &tab);
+        let pages = pages::Pages::load(&upper, lower_dir, &tab, falloff);
         let upper_state = upper_state(&upper);
         let upper = Panel3DRenderer::new(upper);
         let mut strip = StripRenderer::with_cycles_hardware(scale, tab);

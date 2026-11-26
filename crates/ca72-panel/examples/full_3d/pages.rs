@@ -52,9 +52,14 @@ enum Content {
 }
 
 impl Pages {
-    pub(super) fn load(upper: &Panel3DAssets, build: &Path, lit_tab: &Pixmap) -> Self {
+    pub(super) fn load(
+        upper: &Panel3DAssets,
+        build: &Path,
+        lit_tab: &Pixmap,
+        falloff: [f32; 2],
+    ) -> Self {
         Self {
-            panes: NAMES.map(|name| Pane::load(upper, build, name, lit_tab)),
+            panes: NAMES.map(|name| Pane::load(upper, build, name, lit_tab, falloff)),
             shown: [false; 3],
             visible: [false; 3],
             pointer: None,
@@ -214,7 +219,13 @@ impl Pages {
 }
 
 impl Pane {
-    fn load(upper: &Panel3DAssets, dir: &Path, name: &str, lit_tab: &Pixmap) -> Option<Self> {
+    fn load(
+        upper: &Panel3DAssets,
+        dir: &Path,
+        name: &str,
+        lit_tab: &Pixmap,
+        falloff: [f32; 2],
+    ) -> Option<Self> {
         let path = dir.join(format!("page-{name}.json"));
         let image = dir.join(format!("page-{name}-3d.png"));
         if !path.is_file() || !image.is_file() {
@@ -291,7 +302,7 @@ impl Pane {
             .collect();
         let fonts = Fonts::new();
         Some(Self {
-            model: Panel3DRenderer::new(assets),
+            model: Panel3DRenderer::with_sprite_falloff(assets, falloff),
             state,
             picture,
             bounds,

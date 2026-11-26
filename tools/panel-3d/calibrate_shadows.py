@@ -199,6 +199,31 @@ def calibrate_faceplate(
     Image.fromarray(np.round(arr).astype(np.uint8), mode="RGB").save(dst_path, optimize=True)
 
 
+def measure_sprite_falloff(lit_path: Path, reference_path: Path, cheek: float) -> list[float]:
+    """Estimate the relative sRGB exposure of reused sprites from the enamel."""
+    with Image.open(reference_path) as reference, Image.open(lit_path) as lit:
+        if reference.size != lit.size:
+            raise ValueError("Sprite falloff requires renders of the same face")
+        w, h = lit.size
+        edge = round(cheek + 0.0125 * w)
+        rows = (0.25, 0.80)
+        ratios = []
+        weights = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+        for row in rows:
+            region = (edge, int((row - 0.055) * h), w - edge, int((row + 0.055) * h))
+            old = np.asarray(reference.crop(region).convert("RGB"), dtype=np.float32)
+            new = np.asarray(lit.crop(region).convert("RGB"), dtype=np.float32)
+            old_y = old @ weights
+            new_y = new @ weights
+            enamel = (old_y >= 32) & (old_y <= 105) & (np.ptp(old, axis=2) <= 13)
+            if not enamel.any():
+                raise ValueError(f"No enamel samples for sprite falloff at {row:.0%} of the face")
+            ratios.append(float(np.median(new_y[enamel] / old_y[enamel])))
+    slope = (ratios[1] - ratios[0]) / (rows[1] - rows[0])
+    top = ratios[0] - slope * rows[0]
+    return [round(top, 4), round(top + slope, 4)]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--raw", type=Path, default=Path("target/panel-3d/vst-pack-raw"))
