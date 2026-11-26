@@ -2,7 +2,7 @@ use super::*;
 #[cfg(target_os = "linux")]
 use ca72_panel::panel3d::DragController;
 #[cfg(target_os = "linux")]
-use ca72_panel::strip::{Bank, Rail, StripTarget};
+use ca72_panel::strip::{Bank, StripTarget};
 
 pub(super) struct Preview {
     upper: Panel3DRenderer,
@@ -51,7 +51,12 @@ impl Preview {
         let pages = pages::Pages::load(&upper, lower_dir, &tab, falloff);
         let upper_state = upper_state(&upper);
         let upper = Panel3DRenderer::new(upper);
-        let mut strip = StripRenderer::with_cycles_hardware(scale, tab);
+        let rail_key_h = layout
+            .controls
+            .iter()
+            .find(|part| part.kind == "rail_key" && part.param == "panel")
+            .map_or(strip::KEY_H, |part| f64::from(part.h));
+        let mut strip = StripRenderer::with_cycles_hardware(scale, tab, rail_key_h);
         strip.set_under_top((PANEL_H * scale).round() as i32);
         let (w, h) = strip::strip_size(scale);
         assert_eq!(h, lower.frame().height());
@@ -162,8 +167,7 @@ impl Preview {
         if self.drag_lower {
             let ly = y - self.top as f32;
             let scale = self.lower.manifest().face.px_per_unit;
-            let target = strip::hit(
-                Rail::Plugin,
+            let target = self.strip.hit(
                 f64::from((x - self.left as f32) / scale),
                 PANEL_H + f64::from(ly / scale),
             );

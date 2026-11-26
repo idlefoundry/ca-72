@@ -2,33 +2,29 @@
 
 use ca72_panel::art::PANEL_H;
 use ca72_panel::fonts::FAMILY;
-use ca72_panel::keyboard::{self, BUTTON_H, HEADER, KEYS, Scene, UP_X};
-use ca72_panel::strip::{CV, CW, KEY_W};
+use ca72_panel::keyboard::{
+    self, BUTTON_H, HEADER, KEYS, OCTAVE_BUTTONS, RANGE_WINDOW, Scene, Target,
+};
+use ca72_panel::strip::CV;
 use serde_json::{Value, json};
 
-// Matches the private octave display dimensions in `ca72_panel::keyboard`.
-const RANGE_W: f64 = 348.0;
-const RANGE_H: f64 = 50.0;
-
 pub(super) fn page() -> (Vec<Value>, String) {
-    let range_x = CW - RANGE_W / 2.0;
-    let down_x = 2.0 * CW - UP_X;
-
     let mut controls = Vec::with_capacity(KEYS + 3);
 
-    for (x, param, label) in [(down_x, "octave_down", "−"), (UP_X, "octave_up", "+")] {
-        let mut button = super::super::part("rail_key", (x, HEADER), (KEY_W, BUTTON_H));
+    for (x, width, label, target) in OCTAVE_BUTTONS {
+        let param = if target == Target::Up {
+            "octave_up"
+        } else {
+            "octave_down"
+        };
+        let mut button = super::super::part("rail_key", (x, HEADER), (width, BUTTON_H));
         button["param"] = json!(param);
         button["label"] = json!(label);
         button["lit"] = json!(false);
         controls.push(button);
     }
 
-    controls.push(super::super::screen(
-        "octave",
-        "octave",
-        (range_x, HEADER - RANGE_H / 2.0, RANGE_W, RANGE_H),
-    ));
+    controls.push(super::super::screen("octave", "octave", RANGE_WINDOW));
 
     let root = Scene::default().root;
     for dark in [false, true] {

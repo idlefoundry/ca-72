@@ -35,14 +35,15 @@ const NOTCH_Y: f64 = BED[1] + BLACK_H + 5.0;
 const KEYBED_TOP: f64 = BED[1] - 12.0;
 /// The visible wood ends at the key bed's outer border, three units above its frame.
 pub const HEADER: f64 = (AREA[1] + KEYBED_TOP - 3.0) / 2.0;
-pub const BUTTON_H: f64 = crate::strip::KEY_H;
-const ARROW_W: f64 = crate::strip::KEY_W;
-const HEADER_GAP: f64 = 14.0;
+pub const BUTTON_H: f64 = 38.0;
+const ARROW_W: f64 = 54.0;
+const HEADER_GAP: f64 = 12.0;
 const RANGE_W: f64 = 348.0;
-const RANGE_H: f64 = 50.0;
+const RANGE_H: f64 = 33.0;
 const RANGE_X: f64 = crate::strip::CW - RANGE_W / 2.0;
 const RANGE_SURROUND: f64 = (BUTTON_H - RANGE_H) / 2.0;
 pub const UP_X: f64 = RANGE_X + RANGE_W + RANGE_SURROUND + HEADER_GAP + ARROW_W / 2.0;
+pub const RANGE_WINDOW: (f64, f64, f64, f64) = (RANGE_X, HEADER - RANGE_H / 2.0, RANGE_W, RANGE_H);
 /// A held key keeps its material and shading, with a darker surface over the key bed.
 const PRESSED_LEVEL: f32 = 0.65;
 
@@ -56,7 +57,7 @@ pub enum Target {
 
 /// The OCTAVE keys. (TYPING and PANIC moved up beside the TEMPO screen, to work from every
 /// page: decisions.md R-TEMPO-CORNER.)
-const BUTTONS: [(f64, f64, &str, Target); 2] = [
+pub const OCTAVE_BUTTONS: [(f64, f64, &str, Target); 2] = [
     (
         RANGE_X - RANGE_SURROUND - HEADER_GAP - ARROW_W / 2.0,
         ARROW_W,
@@ -203,7 +204,7 @@ pub fn hit(root: u8, x: f64, y: f64) -> Option<Target> {
     if !inside(x, y) {
         return None;
     }
-    for (cx, w, _, target) in BUTTONS {
+    for (cx, w, _, target) in OCTAVE_BUTTONS {
         if (x - cx).abs() <= w / 2.0 && (y - HEADER).abs() <= BUTTON_H / 2.0 {
             return Some(target);
         }
@@ -513,10 +514,10 @@ impl Renderer {
             &self.glass,
             self.scale,
             (
-                RANGE_X,
-                HEADER - art::PANEL_H - RANGE_H / 2.0,
-                RANGE_W,
-                RANGE_H,
+                RANGE_WINDOW.0,
+                RANGE_WINDOW.1 - art::PANEL_H,
+                RANGE_WINDOW.2,
+                RANGE_WINDOW.3,
             ),
             &format!(
                 "{} - {}",
@@ -630,7 +631,7 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
         },
         crate::strip::CV,
     );
-    for (x, w, label, target) in BUTTONS {
+    for (x, w, label, target) in OCTAVE_BUTTONS {
         let fill = if scene.skin == Skin::Worn {
             "none"
         } else {
@@ -777,7 +778,7 @@ impl Materials {
                 Transform::from_row(along, 0.0, 0.0, across, 0.0, -260.0 * across),
             ),
         }
-        for (x, w, _, _) in BUTTONS {
+        for (x, w, _, _) in OCTAVE_BUTTONS {
             let cap = plugin_kit_materials::widened(&self.button, w / BUTTON_H);
             plugin_kit_materials::sprite(frame, &cap, s, (x, HEADER - art::PANEL_H), (w, BUTTON_H));
         }

@@ -70,7 +70,7 @@ fn controls(arrangement: &Arrangement) -> Vec<Value> {
     };
     let mut controls = Vec::new();
     for &(x, w, target) in rail.keys() {
-        let mut p = part("rail_key", (x, strip::RAIL_Y), (w, strip::KEY_H));
+        let mut p = part("rail_key", (x, strip::RAIL_Y), (w, strip::CYCLES_KEY_H));
         p["param"] = json!(format!("{target:?}").to_ascii_lowercase());
         p["lit"] = json!(strip::key_light_of(&bar, target) != 0);
         controls.push(p);

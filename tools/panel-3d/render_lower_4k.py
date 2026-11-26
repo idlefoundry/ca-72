@@ -277,14 +277,11 @@ def build_fixtures(spec, scale, to_world):
             if entry.get("lit", False):
                 active_tabs.append(tab)
         elif kind == "rail_key":
-            base = 0.0064 if y < spec["rail_h"] else 0.0
+            base = 0.0064 if y < spec["rail_h"] else 0.00025
+            depth = 0.00165
             beveled_box(
-                f"{label}_Key_Housing", (w + 0.00145, h + 0.00145, 0.0018),
-                to_world(x, y, base + 0.00025), gasket, 0.00056,
-            )
-            beveled_box(
-                f"{label}_Key_Cap", (w - 0.00085, h - 0.00085, 0.0035),
-                to_world(x, y, base + 0.00185), rail_cap, 0.00081, segments=5,
+                f"{label}_Key_Cap", (w, h, depth),
+                to_world(x, y, base + depth / 2), rail_cap, 0.00028, segments=5,
             )
         else:
             # Each opening has a raised nickel-black lip, a dark inset
@@ -292,30 +289,35 @@ def build_fixtures(spec, scale, to_world):
             rail = y < spec["rail_h"]
             field = entry.get("role") == "field"
             scope = entry.get("param", "").startswith("lfo_scope_")
-            base = 0.0064 if rail else 0.0
-            surround = (0.00135 if rail else 0.00092)
+            octave = entry.get("role") == "octave"
+            base = 0.0064 if rail else 0.00025 if octave else 0.0
+            low_profile = rail or octave
+            surround = 0.00043 if low_profile else 0.00092
             if scope:
                 surround = 0.0024
                 beveled_box(
                     f"{label}_Scope_Gasket", (w + 0.0065, h + 0.0065, 0.0015),
                     to_world(x, y, 0.00030), gasket, 0.00060, segments=6,
                 )
-            beveled_box(
-                f"{label}_Display_Bezel", (w + 2 * surround, h + 2 * surround, 0.0020),
-                to_world(x, y, base + 0.00086), rim, 0.00080, segments=5,
-            )
-            beveled_box(
-                f"{label}_Display_Rebate", (w + 0.00035, h + 0.00035, 0.00062),
-                to_world(x, y, base + 0.00160), collar, 0.00028,
-            )
-            beveled_box(
-                f"{label}_Display_Matrix", (w - 0.00014, h - 0.00014, 0.00032),
-                to_world(x, y, base + 0.00186), field_matrix if field else matrix, 0.00010,
-            )
-            beveled_box(
-                f"{label}_Display_Filter", (w, h, 0.00075),
-                to_world(x, y, base + 0.00253), field_glass if field else glass, 0.00029, segments=5,
-            )
+            if low_profile:
+                layers = (
+                    ("Bezel", 2 * surround, 0.00082, 0.00034, rim, 0.00016),
+                    ("Rebate", 0.00018, 0.00023, 0.00068, collar, 0.00009),
+                    ("Matrix", -0.00014, 0.00015, 0.00083, matrix, 0.00005),
+                    ("Filter", 0.0, 0.00026, 0.00105, glass, 0.00009),
+                )
+            else:
+                layers = (
+                    ("Bezel", 2 * surround, 0.0020, 0.00086, rim, 0.00080),
+                    ("Rebate", 0.00035, 0.00062, 0.00160, collar, 0.00028),
+                    ("Matrix", -0.00014, 0.00032, 0.00186, field_matrix if field else matrix, 0.00010),
+                    ("Filter", 0.0, 0.00075, 0.00253, field_glass if field else glass, 0.00029),
+                )
+            for name, edge, depth, centre, material, bevel in layers:
+                beveled_box(
+                    f"{label}_Display_{name}", (w + edge, h + edge, depth),
+                    to_world(x, y, base + centre), material, bevel, segments=5,
+                )
     return active_tabs
 
 

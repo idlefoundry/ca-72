@@ -229,6 +229,7 @@ pub struct StripRenderer {
     lighting: Lighting,
     /// A Cycles cap for the live lit state, with the unlit hardware already in the base.
     cycles_tab: Option<Pixmap>,
+    rail_key_h: f64,
     glass: Pixmap,
     button: Pixmap,
     lit_tab: Option<Pixmap>,
@@ -298,6 +299,7 @@ impl StripRenderer {
                 AMBER,
             )),
             cycles_tab: None,
+            rail_key_h: KEY_HEIGHT,
             glass: png(GLASS),
             button,
             lit_tab: None,
@@ -320,10 +322,16 @@ impl StripRenderer {
 
     /// The live strip artwork over an underlay containing the modeled caps, bezels and glass.
     /// The lit tab uses the same geometry as the underlay's unlit tabs.
-    pub fn with_cycles_hardware(scale: f64, lit_tab: Pixmap) -> Self {
+    pub fn with_cycles_hardware(scale: f64, lit_tab: Pixmap, rail_key_h: f64) -> Self {
         let mut strip = Self::new(scale);
         strip.cycles_tab = Some(lit_tab);
+        strip.rail_key_h = rail_key_h;
         strip
+    }
+
+    /// Resolve a pointer with the same dimensions used to draw the rail's illumination.
+    pub fn hit(&self, x: f64, y: f64) -> Option<StripTarget> {
+        super::hit_with_key_height(self.rail, x, y, self.rail_key_h)
     }
 
     /// Drawn in `look`'s pictures, colours and typeface for the strip, where it has them
@@ -638,9 +646,9 @@ impl StripRenderer {
         let y = super::RAIL_Y;
         self.pixels((
             x - w / 2.0 - 2.0,
-            y - KEY_HEIGHT / 2.0 - 2.0,
+            y - self.rail_key_h / 2.0 - 2.0,
             x + w / 2.0 + 2.0,
-            y + KEY_HEIGHT / 2.0 + 2.0,
+            y + self.rail_key_h / 2.0 + 2.0,
         ))
     }
 
@@ -831,13 +839,16 @@ impl StripRenderer {
             };
             if light > 0.0 && meets(self.key_part(target), r) {
                 let mut o = Svg::default();
+                let compact = self.cycles_tab.is_some() && self.rail_key_h < KEY_HEIGHT;
+                let (inset, radius) = if compact { (1.35, 1.9) } else { (0.0, 7.0) };
                 put!(
                     o,
-                    "<rect x='{}' y='{}' width='{}' height='{}' rx='7' fill='#b0702b' opacity='{}'/>",
-                    N(x - width / 2.0),
-                    N(super::RAIL_Y - PANEL_H - super::KEY_H / 2.0),
-                    N(width),
-                    N(super::KEY_H),
+                    "<rect x='{}' y='{}' width='{}' height='{}' rx='{}' fill='#b0702b' opacity='{}'/>",
+                    N(x - width / 2.0 + inset),
+                    N(super::RAIL_Y - PANEL_H - self.rail_key_h / 2.0 + inset),
+                    N(width - 2.0 * inset),
+                    N(self.rail_key_h - 2.0 * inset),
+                    N(radius),
                     N(light)
                 );
                 svg_over(&self.options, &mut self.frame, s, &o.0);
