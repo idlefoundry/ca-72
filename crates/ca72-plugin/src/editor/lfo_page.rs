@@ -464,6 +464,9 @@ impl Editing {
                 return;
             }
         }
+        if self.expression_open {
+            self.typing = None;
+        }
         self.expression_open = page == BarTarget::Mpe;
         self.modulating.open = page == BarTarget::Lfo;
         if self.expression_open {

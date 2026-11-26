@@ -11762,7 +11762,7 @@ mod tests {
     /// point); the readouts read the amounts (no "-0"); the frame shown with a knob turned is
     /// the frame put together whole.
     #[test]
-    fn the_mpe_drawer_operates_its_parameters() {
+    fn the_expression_page_operates_its_parameters() {
         let (mut e, host, params) = editing();
         mpe_open(&mut e);
         host.take();
@@ -11843,10 +11843,10 @@ mod tests {
             &mut whole,
             &e.renderer,
             e.strip.frame(),
-            lower_of(&e),
+            None,
             None,
             (
-                e.page_shows().then(|| e.lfo.frame()),
+                Some(e.mpe.frame()),
                 e.macros_show()
                     .then(|| (e.macros.frame(), e.renderer.left_rect())),
                 &e.modulation,
@@ -11855,7 +11855,7 @@ mod tests {
             true,
             (e.physical_width, e.physical_height()),
         );
-        assert!(e.composed == whole, "a knob turned in the drawer");
+        assert!(e.composed == whole, "a knob turned on the Expression page");
         e.update_scene();
         assert!(
             e.scene
