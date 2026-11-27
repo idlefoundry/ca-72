@@ -18547,3 +18547,30 @@ light_triangle_source`: 1 passed. `cargo fmt --check` clean;
 plug-in's (untouched) has one warning, `audio_refused`, already on `main` (R-KIT-SKIN-PACK).
 Not run: HI and ULTRA renders (their code is untouched; `voice.rs` calls `rect_law`, unchanged),
 the Mac, Windows.
+
+## R-RT-VOICE-COMPLETION. Collect POLY voice runs even when their workers finish late
+
+Issue #179 showed that a Windows callback could return within its period while its audio
+was missing POLY voices. Work offered before the 75% deadline was collected only up to
+that deadline. Work offered after it could use the rest of the period. A missed voice
+also fell out of step with the other voices, so the difference could last beyond the
+affected block.
+
+The pool uses the callback-period limit to decide whether to offer new work. It collects
+every offered voice once it is claimed, including when the period expires. After expiry,
+the caller backs off while it waits and plays any remaining runs locally. There is no
+timed mute or replay of stale samples. If the machine cannot supply the compute in time,
+the host may underrun. The plug-in returns the computed audio and advances all voices for
+the same interval. A worker publishes completion after releasing its voice lock. A busy
+or poisoned voice lock or an unwind is reported as a failed run, so the caller never
+waits for another lock holder or a worker that unwinds in the claimed work.
+
+Windows MSVC, Horn Bloom at HI, 48 kHz, 4 workers with thread promotion requested:
+the 64-frame run went from 123 unheard runs to zero, and the 1,024-frame run from
+2 to zero. Both corrected renders matched the same-block offline references to the bit.
+The 64-frame run returned 26 of 2,437 callbacks late, compared with 5 before. The
+1,024-frame run returned all 152 on time in both measurements. A shorter Windows
+ULTRA probe at 1,024 frames also matched its offline reference with zero unheard runs,
+but 45 of 46 callbacks exceeded their period. macOS timing and AU remain unverified.
+The regression `a_claimed_voice_can_finish_in_the_blocks_remaining_time` holds a
+claimed voice past the old cutoff and checks that the pool returns its result.
