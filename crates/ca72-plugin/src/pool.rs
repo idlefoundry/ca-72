@@ -9,10 +9,9 @@
 //! to take, so whoever takes a voice takes it by a compare-and-swap on the word, and a
 //! worker late from an earlier run can take nothing from a later one. The audio thread takes
 //! voices too, until none is left: any voice no worker has started, it plays itself. It then
-//! waits for the workers' voices until the block's deadline, spinning, then yielding, then
-//! sleeping a little at a time ([`Backoff`]; on Windows it goes on yielding); a voice not
-//! done by then is silent for that run and sits out until its worker lets it go. Once the
-//! deadline has passed, the block's further runs are not offered: the audio thread plays them.
+//! collects every claimed voice, including work that crosses the callback period. A late
+//! callback exposes overload to the host without dropping samples or shifting voice state.
+//! Once the period is over, the audio thread completes further runs locally.
 //! Nothing here allocates once the workers are started.
 //!
 //! A run is over when its player returns, and the word says so: a worker held up between
@@ -818,8 +817,7 @@ impl<V: Play> Pool<V> {
     /// thread's one; LO's light voices fewer, decisions.md R-LO-WORKERS), and of those only as
     /// many as share the voices out in as few turns ([`fewest`]) on macOS, unless `threads` is
     /// [`EVERY`].
-    /// Returns which list places played by `deadline` (None: every one waited for, as long as it
-    /// takes).
+    /// Returns which list places played successfully.
     #[allow(clippy::too_many_arguments)]
     pub fn play(
         &mut self,
@@ -834,16 +832,12 @@ impl<V: Play> Pool<V> {
     ) -> [bool; MAX] {
         let count = list.len().min(MAX);
         let mut played = [false; MAX];
-        // Past the deadline the run is still shared, and waited for until the block's grace
-        // (its period's end, [`Pool::block`]): played here alone, a block cut into many short
-        // runs (an LFO's or a macro's steps) took several periods once its deadline had passed
-        // (decisions.md R-DROPOUTS). Past the grace, or with none, the run is not offered: the
-        // workers would take voices only for this thread to give them up at once, silent for
-        // the run. Late, rather than silent (R18).
-        let now = Instant::now();
-        let past = deadline.is_some_and(|d| now >= d);
-        let until = if past { self.grace } else { deadline };
-        if self.threads.is_empty() || (past && until.is_none_or(|g| now >= g)) {
+        // Keep sharing until the full callback period ends (R-DROPOUTS). The deadline
+        // controls admission only: discarding a claimed voice early introduces a gap
+        // and can shift its state relative to other voices. Finish outstanding work
+        // even when this means that the host receives a late callback.
+        let until = deadline.map(|d| self.grace.unwrap_or(d));
+        if self.threads.is_empty() || until.is_some_and(|end| Instant::now() >= end) {
             for (ok, &slot) in played.iter_mut().zip(&list[..count]) {
                 if let Ok(mut p) = self.board.voices[slot].try_lock() {
                     p.play(n, ext, rate, mix);
@@ -904,27 +898,26 @@ impl<V: Play> Pool<V> {
             if here[i] {
                 continue;
             }
-            // In real time (a deadline) the audio thread spins, its clock read every few looks:
-            // it never yields or sleeps, which on a busy computer gave its processor away for
-            // longer than the block had left (decisions.md R-DROPOUTS). Offline, with every
-            // voice waited for, it backs off as before.
+            // Keep polling within the period. Once late, back off so the worker can
+            // finish even if the host and worker share a CPU.
             let mut wait = Backoff::new();
             let mut looks = 0u32;
+            let mut spin = until.is_some();
             loop {
                 let d = b.done[slot].load(Ordering::Acquire);
                 if d & !FAILED == u64::from(run) {
                     played[i] = d & FAILED == 0;
                     break;
                 }
-                let Some(until) = until else {
+                if spin {
+                    looks = looks.wrapping_add(1);
+                    if looks.is_multiple_of(16) {
+                        spin = until.is_some_and(|end| Instant::now() < end);
+                    }
+                    std::hint::spin_loop();
+                } else {
                     wait.snooze();
-                    continue;
-                };
-                looks = looks.wrapping_add(1);
-                if looks.is_multiple_of(16) && Instant::now() >= until {
-                    break;
                 }
-                std::hint::spin_loop();
             }
         }
         self.close();
@@ -1298,6 +1291,30 @@ impl<V: Play> Crew<V> {
     }
 }
 
+// Publish only after the voice guard is released, so the next run can take it.
+struct Completion<'a> {
+    done: &'a AtomicU64,
+    run: u32,
+    played: bool,
+}
+
+impl<'a> Completion<'a> {
+    fn new(done: &'a AtomicU64, run: u32) -> Self {
+        Self {
+            done,
+            run,
+            played: false,
+        }
+    }
+}
+
+impl Drop for Completion<'_> {
+    fn drop(&mut self) {
+        let mark = u64::from(self.run) | if self.played { 0 } else { FAILED };
+        self.done.store(mark, Ordering::Release);
+    }
+}
+
 /// A worker: made an audio thread, it waits for a run (spinning a moment, then parked) and
 /// plays the voices it takes.
 fn work<V: Play>(b: &Board<V>, period: Option<Duration>, driver: bool) {
@@ -1401,75 +1418,37 @@ fn work<V: Play>(b: &Board<V>, period: Option<Duration>, driver: bool) {
             flush = want;
         }
         let two = b.pair.load(Ordering::Relaxed);
-        let lock = |slot: usize| match b.voices[slot].lock() {
-            Ok(p) => (p, false),
-            Err(e) => (e.into_inner(), true),
-        };
-        let failed = u64::from(run) | FAILED;
         while let Some(((_, slot), other)) = take_some(b, run, two) {
-            let Some((_, other)) = other else {
-                let (mut p, poisoned) = lock(slot);
-                // Held up between taking the voice and locking it, past the run's end: the
-                // voice is left as it is, neither played nor marked (decisions.md R18).
-                if !current(b, run) {
-                    break;
-                }
-                let mark = if poisoned {
-                    failed
-                } else {
-                    p.play(n, &ext, rate, &mix);
-                    u64::from(run)
-                };
-                // The voice let go before it is marked: once marked, the caller's thread may
-                // close the run and take the voice in the next, and a lock still held here would
-                // fail its `try_lock` there, the voice silent for that run (seen in CI as samples
-                // that differed from one thread's).
-                drop(p);
-                b.done[slot].store(mark, Ordering::Release);
-                continue;
-            };
-            // Two voices taken: their filters solved together where both are free now
-            // (decisions.md R-HI-PAIRS); else each alone, a free one first, so that a voice
-            // another thread still holds keeps its partner waiting no longer than alone.
-            let free = |slot: usize| match b.voices[slot].try_lock() {
-                Ok(p) => Some((p, false)),
-                Err(std::sync::TryLockError::Poisoned(e)) => Some((e.into_inner(), true)),
-                Err(std::sync::TryLockError::WouldBlock) => None,
-            };
-            match (free(slot), free(other)) {
-                (Some((mut p, false)), Some((mut q, false))) => {
-                    if !current(b, run) {
-                        break;
+            if !current(b, run) {
+                break;
+            }
+            // Publish failure on unwind too. A busy or poisoned lock is reported
+            // immediately, so a caller never waits on an unrelated lock holder.
+            let mut first = Completion::new(&b.done[slot], run);
+            if let Some((_, second)) = other {
+                let mut next = Completion::new(&b.done[second], run);
+                let p = b.voices[slot].try_lock().ok();
+                let q = b.voices[second].try_lock().ok();
+                match (p, q) {
+                    (Some(mut p), Some(mut q)) => {
+                        V::play_pair(&mut p, &mut q, n, &ext, rate, &mix);
+                        first.played = true;
+                        next.played = true;
                     }
-                    V::play_pair(&mut p, &mut q, n, &ext, rate, &mix);
-                    drop(p);
-                    drop(q);
-                    b.done[slot].store(u64::from(run), Ordering::Release);
-                    b.done[other].store(u64::from(run), Ordering::Release);
-                }
-                (gp, gq) => {
-                    let mut each = [(slot, gp), (other, gq)];
-                    each.sort_by_key(|(_, g)| g.is_none());
-                    let mut over = false;
-                    for (s, g) in each {
-                        let (mut p, poisoned) = g.unwrap_or_else(|| lock(s));
-                        if !current(b, run) {
-                            over = true;
-                            break;
-                        }
-                        let mark = if poisoned {
-                            failed
-                        } else {
+                    (p, q) => {
+                        if let Some(mut p) = p {
                             p.play(n, &ext, rate, &mix);
-                            u64::from(run)
-                        };
-                        drop(p);
-                        b.done[s].store(mark, Ordering::Release);
-                    }
-                    if over {
-                        break;
+                            first.played = true;
+                        }
+                        if let Some(mut q) = q {
+                            q.play(n, &ext, rate, &mix);
+                            next.played = true;
+                        }
                     }
                 }
+            } else if let Ok(mut p) = b.voices[slot].try_lock() {
+                p.play(n, &ext, rate, &mix);
+                first.played = true;
             }
         }
     }
@@ -1506,6 +1485,7 @@ mod tests {
         /// it is set (5 s at most) rather than 2 ms, so a loaded system's late worker still
         /// takes a voice.
         elsewhere: Option<Arc<AtomicBool>>,
+        worker_delay: Duration,
     }
 
     impl Play for Fake {
@@ -1538,6 +1518,9 @@ mod tests {
                 }
             } else if let Some(e) = &self.elsewhere {
                 e.store(true, Ordering::Release);
+                if !self.worker_delay.is_zero() {
+                    std::thread::sleep(self.worker_delay);
+                }
             }
         }
 
@@ -1715,6 +1698,33 @@ mod tests {
         // A run offered is no longer at rest.
         pool.play(&[0], 64, &EXT, 48_000.0, &mix(), false, MAX, None);
         assert!(!pool.board.rest.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn a_claimed_voice_can_finish_in_the_blocks_remaining_time() {
+        let voices = fakes(2);
+        let claimed = Arc::new(AtomicBool::new(false));
+        for voice in &voices {
+            let mut v = voice.lock().unwrap();
+            v.slow_on = Some(std::thread::current().id());
+            v.elsewhere = Some(claimed.clone());
+            v.worker_delay = Duration::from_millis(200);
+        }
+        let mut pool = Pool::start(1, &voices, None).unwrap();
+        let start = Instant::now();
+        pool.block(64, Some(start + Duration::from_secs(2)));
+        let played = pool.play(
+            &[0, 1],
+            64,
+            &EXT,
+            48_000.0,
+            &mix(),
+            false,
+            MAX,
+            Some(start + Duration::from_millis(50)),
+        );
+        assert!(claimed.load(Ordering::Acquire));
+        assert_eq!(&played[..2], &[true; 2]);
     }
 
     /// A worker held up between taking a voice and locking it, which locks it only after
